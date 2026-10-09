@@ -353,6 +353,9 @@ def tyckOra(): Bool =
 def resultBindings(): Bool =
   rejects("def drop(): Unit = for { _ = Str.parseInt(\"7\") } yield ()", "Result value is discarded") && rejects("def drop(): Unit = for { ignored = Str.parseInt(\"7\") } yield ()", "Result value is discarded") && rejects("def drop(): IO[Unit] = for { _ <- IO.attempt(IO.pure(7)) } yield ()", "Result value is discarded") && rejects("def drop(): Int = for { Result.Ok(n) = Str.parseInt(\"7\") } yield n", "Result binding must cover success and failure") && rejects("def drop(): Unit = for { result = Str.parseInt(\"7\")\n f = (result: Int) => result } yield ()", "Result value is discarded") && Check.check("def keep(): Result[String, Int] = for { result = Str.parseInt(\"7\") } yield result") == "[]" && Check.check("def keep(): IO[Result[String, Int]] = for { result <- IO.attempt(IO.pure(7)) } yield result") == "[]" && Check.check("def handle(): Int = for { result = Str.parseInt(\"7\") } yield result match { case Result.Ok(n) => n\ncase Result.Err(_) => 0 }") == "[]"
 
+def resultFieldBindings(): Bool =
+  rejects("def drop(): Result[String, Int] = for { (result, result) = (Str.parseInt(\"7\"), Str.parseInt(\"bad\")) } yield result", "binding pattern repeats name") && rejects("def drop(): Int = for { (_, n) = (Str.parseInt(\"bad\"), 7) } yield n", "Result value is discarded") && rejects("def drop(): Unit = for { (a, b) = (Str.parseInt(\"7\"), Str.parseInt(\"bad\"))\n _ = a match { case Result.Ok(_) => ()\ncase Result.Err(_) => () } } yield ()", "Result value is discarded") && rejects("def drop(): Int = for { (Result.Ok(n), _) = (Str.parseInt(\"bad\"), 7) } yield n", "Result binding must cover success and failure") && rejects("record Read(result: Result[String, Int], count: Int)\ndef drop(): Int = for { Read(count = n) = Read(Str.parseInt(\"bad\"), 7) } yield n", "Result value is discarded") && rejects("def drop(): IO[Int] = for { (_, n) <- IO.pure((Str.parseInt(\"bad\"), 7)) } yield n", "Result value is discarded") && rejects("def drop(): Int = for { Result.Ok(n) :: _ = [Str.parseInt(\"bad\")] } yield n", "Result binding must cover success and failure") && Check.check("def keep(): Result[String, Int] = for { (result, _) = (Str.parseInt(\"7\"), 7) } yield result") == "[]" && Check.check("record Read[A](result: Result[String, A], count: Int)\ndef keep(): Result[String, Int] = for { Read(result = result) = Read(Str.parseInt(\"7\"), 7) } yield result") == "[]"
+
 def ioTypeArgs(): Bool =
   genericTypeArgs() && ioTypeCompatibility() && namedIoTypes() && signalTypes() && attemptTypes() && kitLookup() && resultTypes() && ioCombinators()
 
@@ -1741,7 +1744,7 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  resultBindings() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
+  resultBindings() && resultFieldBindings() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
 
 def closedMatchCoverage(): Bool =
   List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()

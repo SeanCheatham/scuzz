@@ -67,7 +67,7 @@ There is no explicit claim suggestion or installation path from a preference. A 
 ### Verification scope and application correctness
 
 - **Input boundaries.** Strict integers and required JSON fields return explicit errors. The kernel checks field types and domain ranges in live code. General typed JSON decoding and nested field error paths remain open. Extend the kit when an application needs them. Verification assumptions do not validate live input.
-- **Failure handling.** Direct Result bindings reject discard and partial patterns. Results inside lists, tuples, and record fields need further checks when an application demonstrates loss. Passing a result to a function does not prove that the receiver handles its error. Keep expected errors explicit through input and effect boundaries.
+- **Failure handling.** Result bindings and Result fields in tuple, list-cons, and constructor binding patterns reject discard and partial patterns. Whole containers can still hide unused results. A whole-container alias does not replace explicit use of a selected Result field. Extend these checks only for a demonstrated application need. Passing a result to a function does not prove that the receiver handles its error. Keep expected errors explicit through input and effect boundaries.
 - **Behavior rules.** Make rules about state, effects, cancellation, duplicate requests, and recovery easy to express and diagnose. Check relationships between executions without a second app implementation.
 - **Reference models.** Deferred. A model is optional. It is not the default verification path.
 

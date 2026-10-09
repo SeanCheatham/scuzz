@@ -1270,10 +1270,43 @@ def forFreeBind(b: Bind, rest: List[Bind], body: Expr, s: String): Bool =
   }
 
 def resultBindErr(name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
-  if (Type.appName(Type.parse(ty)) != "Result") "" else if (!coverComplete([[name]], [ty], ens)) "Result binding must cover success and failure; use match" else resultBindUse(bindPat(name, ty, [], ens), rest, body)
+  resultBindNames(bindingNamesErr(bindPat(name, ty, [], ens)), name, ty, rest, body, ens)
+
+def resultBindNames(err: String, name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (err != "") err else resultBindAlternatives(altPatErr(coverClean(name), ty, ens), name, ty, rest, body, ens)
+
+def resultBindAlternatives(err: String, name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (err != "") err else resultBindChecked(name, ty, rest, body, ens)
+
+def resultBindChecked(name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (Type.appName(Type.parse(ty)) != "Result") resultPatternErr(coverClean(name), ty, rest, body, ens) else if (!coverComplete([[name]], [ty], ens)) "Result binding must cover success and failure; use match" else resultBindUse(bindPat(name, ty, [], ens), rest, body)
+
+def resultPatternErr(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) resultAlternativeErr(pat, ty, rest, body, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (coverWild(pat, ty, ens)) "" else resultPatternCasesErr(coverCases(ty, ens), pat, ty, rest, body, ens)
+
+def resultAlternativeErr(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En], i: Int): String =
+  resultAlternativeNext(resultBindErr(Str.take(pat, i), ty, rest, body, ens), Str.drop(pat, i + 3), ty, rest, body, ens)
+
+def resultAlternativeNext(err: String, pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (err != "") err else resultBindErr(pat, ty, rest, body, ens)
+
+def resultPatternCasesErr(cases: List[EnCase], pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (List.isEmpty(cases)) "" else resultPatternCaseErr(coverSpecializeHead(pat, [], ty, List.at(cases, 0), ens), List.at(cases, 0).fields, List.tail(cases), pat, ty, rest, body, ens)
+
+def resultPatternCaseErr(rows: List[List[String]], fields: List[Param], cases: List[EnCase], pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (List.isEmpty(rows)) resultPatternCasesErr(cases, pat, ty, rest, body, ens) else resultPatternFieldsErr(List.at(rows, 0), fields, rest, body, ens)
+
+def resultPatternFieldsErr(pats: List[String], fields: List[Param], rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (List.isEmpty(fields)) "" else resultPatternFieldNext(resultBindErr(List.at(pats, 0), List.at(fields, 0).ty, rest, body, ens), List.tail(pats), List.tail(fields), rest, body, ens)
+
+def resultPatternFieldNext(err: String, pats: List[String], fields: List[Param], rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (err != "") err else resultPatternFieldsErr(pats, fields, rest, body, ens)
 
 def resultBindUse(bindings: List[(String, Ty)], rest: List[Bind], body: Expr): String =
   if (List.exists(bindings, binding => Type.appName(binding._2) == "Result" && forFreeVar(rest, body, binding._1))) "" else "Result value is discarded; match it, return it, or pass it to a function"
+
+def bindingNamesErr(bindings: List[(String, Ty)]): String =
+  if (List.isEmpty(bindings)) "" else if (List.exists(List.tail(bindings), binding => binding._1 == List.at(bindings, 0)._1)) Str.concat("binding pattern repeats name ", List.at(bindings, 0)._1) else bindingNamesErr(List.tail(bindings))
 
 def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   if (hasErr(vo)) vo else inferForBindOwner(ownerPatErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
