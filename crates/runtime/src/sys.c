@@ -890,8 +890,14 @@ static void *sys_kill_result(void *env) {
       r->as.err = sz_error_new(3, "Sys.kill: kill failed");
       return r;
     }
-    if (c)
+    if (c) {
       exec_close_fd(&c->in_fd);
+      exec_close_fd(&c->out_fd);
+      sz_free(c->buf);
+      c->buf = NULL;
+      c->len = 0;
+      c->cap = 0;
+    }
     if (sys_pid_ok(pid)) {
       do {
         w = waitpid((pid_t)pid, &status, WNOHANG);
