@@ -172,3 +172,9 @@ line four
     blocked = Json.set(request, "feedback", Json.Arr([Json.Obj([("decision", Json.Str("candidate-failed")), ("source", Proposal.pairsJson([("src/Unsafe.scuzz", "outside")]))])]))
   } yield List.contains(Generate.workingSources(request), List.at(failed, 0)) && List.contains(Generate.workingSources(request), ("src/Other.scuzz", "keep")) && Generate.workingSources(blocked) == baseline && List.contains(Generate.anchors(request, "src/Main.scuzz"), List.at(failed, 0)._2)
 
+oracle numericFlags(): Bool =
+  Main.flagNumbersOk()
+
+oracle numericFlagRoundTrip(n: Int): Bool =
+  Cli.showFlagInt(Str.fromInt(n)) == Str.fromInt(n) && Cli.showFlagNat(Str.fromInt(n)) == (if (n >= 0) Str.fromInt(n) else "fail")
+

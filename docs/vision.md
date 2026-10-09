@@ -6,13 +6,13 @@ Edit this file when the order changes. Remove completed work. Keep only the next
 
 ## First: language and verification guarantees
 
-Improve the ability to write correct applications before local choice feedback. Give app authors explicit success and failure values for external input parsing and validation. Keep this validation active in live applications. Verification assumptions do not validate live input. Then use small reference models to check application state and effects.
+Improve the ability to write correct applications before local choice feedback. Keep external input errors explicit with `Result`. Strict integer parsing and required JSON fields supply the first boundary operations. Extend this path only for a demonstrated input need. Keep domain validation active in live applications. Verification assumptions do not validate live input. Next, use small reference models to check application state and effects.
 
 Keep one compiler, one verification command, and the existing simulation runtime. Preserve exact evaluator and native replay. Keep probe deadlines, claims, corpus entries, and search scope. General compiler speed work follows only from a demonstrated application or proof blocker.
 
-After these guarantees, resume the decision loop gates below. Keep useful generation and human review results unproven until a real application session measures them.
+Keep current work on language, standard kits, and verification tooling. Select each next slice from a demonstrated application correctness gap. The decision loop gates below remain later work. Keep useful generation and human review results unproven until a real application session measures them.
 
-## Primary arc: development through decisions
+## Later arc: development through decisions
 
 A developer sets one objective and reviews a stream of small changes. Each card compares one proposal with the current working tree. Scuzz finds a recorded execution that shows the difference. The developer chooses a blind lane. Accepted changes become the baseline for the next request. Claims constrain the choices. Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
@@ -46,9 +46,9 @@ Run the required checks in `plans.md` for each slice. Update `scuzz docs ide` wh
 
 ## Execution boundary
 
-Use `plans.md` for the first remaining gate. Complete its software proofs before advancing. Keep unavailable external and human checks explicit. They do not prevent independent later implementation work. Remove the completed slice from this file and from `gaps.md`. Delete its `plans.md`. If arc work remains, create the next slice from this order and continue. Do not wait for a new instruction between authorized slices.
+Use `plans.md` for the next language or tooling slice. Complete its software proofs before advancing. The decision loop gates remain later work. Keep unavailable external and human checks explicit. They do not prevent independent later implementation work. Remove the completed slice from this file and from `gaps.md`. Delete its `plans.md`. If arc work remains, create the next slice from this order and continue. Do not wait for a new instruction between authorized slices.
 
-Change compiler or runtime code only for a demonstrated blocker or a required shared review operation. Keep one clear implementation. Do not rewrite the compiler or editor for architecture alone. Preserve the newest-release bootstrap constraints. Do not reduce probe limits, skip claims, remove corpus entries, or bypass replay failures to finish.
+Change compiler or runtime code for a language guarantee, a demonstrated application blocker, or a required shared review operation. Keep one clear implementation. Do not rewrite the compiler or editor for architecture alone. Preserve the newest-release bootstrap constraints. Do not reduce probe limits, skip claims, remove corpus entries, or bypass replay failures to finish.
 
 Unavailable local model resources or human availability do not prevent deterministic, loopback HTTP, and directory import proofs. They remain explicit completion limits. On a hard blocker, preserve a working subset and leave `plans.md` with remaining criteria and a reproducer. Do not start unrelated work or mark an incomplete gate complete. Stop implementation at the complete-session endpoint. Human usefulness remains an unknown until a developer session measures it.
 

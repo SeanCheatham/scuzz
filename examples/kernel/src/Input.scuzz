@@ -1,0 +1,36 @@
+record Quantity(value: Int)
+
+def quantity(n: Int): Result[String, Quantity] =
+  if (n >= 1 && n <= 100) Result.Ok(Quantity(n)) else Result.Err("quantity must be 1 through 100")
+
+def parseQuantity(text: String): Result[String, Quantity] =
+  Str.parseInt(text) match {
+    case Result.Ok(n) => quantity(n)
+    case Result.Err(error) => Result.Err(error)
+  }
+
+def decodeQuantity(text: String): Result[String, Quantity] =
+  Json.parse(text) match {
+    case Result.Ok(json) => Json.field(json, "quantity") match {
+  case Result.Ok(Json.Int(n)) => quantity(n)
+  case Result.Ok(_) => Result.Err("quantity must be an integer")
+  case Result.Err(error) => Result.Err(error)
+}
+    case Result.Err(error) => Result.Err(error)
+  }
+
+def parsed(text: String): String =
+  Str.parseInt(text) match {
+    case Result.Ok(n) => s"ok:$n"
+    case Result.Err(error) => s"error:$error"
+  }
+
+def accepted(result: Result[String, Quantity]): Bool =
+  result match {
+    case Result.Ok(_) => true
+    case Result.Err(_) => false
+  }
+
+def proof(): Bool =
+  parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100"))
+

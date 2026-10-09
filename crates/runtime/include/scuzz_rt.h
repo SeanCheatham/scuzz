@@ -184,6 +184,8 @@ int64_t sz_string_contains(const SzString *s, const SzString *needle);
 int64_t sz_string_matches(const SzString *s, const SzString *pat);
 /* Whole-string base-10 parse. Leading space is allowed. Junk or overflow uses `dflt`. */
 int64_t sz_string_to_int(const SzString *s, int64_t dflt);
+/* Strict decimal input returns Result[String, Int]. */
+struct SzAdt *sz_string_parse_int(const SzString *s);
 /* Replace every non-overlapping `oldv`. Empty `oldv` copies `s`. */
 SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzString *newv);
 SzString *sz_string_trim(const SzString *s);
@@ -937,6 +939,8 @@ SzString *sz_fs_basename(SzString *path);
  * Write kits copy Obj / Arr cells. A miss keeps the default or retains `j`. */
 SzAdt *sz_json_parse(SzString *s);
 SzAdt *sz_json_stringify(SzAdt *j);
+/* A required object field returns Result[String, Json]. */
+SzAdt *sz_json_field(SzAdt *j, SzString *key);
 SzList *sz_json_get(SzAdt *j, SzString *key); /* List[Json]; empty miss */
 SzList *sz_json_keys(SzAdt *j);               /* List[String]; empty if not Obj */
 SzList *sz_json_arr(SzAdt *j);                /* List[Json]; empty if not Arr */

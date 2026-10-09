@@ -4,6 +4,128 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 SCUZZ="${SCUZZ:-$ROOT/examples/cli/build/cli}"
 
+# Input errors and domain checks stay active on both engines.
+python3 - <<'PY_INPUT'
+import json
+import os
+from pathlib import Path
+import random
+import re
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+
+def command(*args, env=None, ok=True):
+    result = subprocess.run([str(cli), *map(str, args)], env=env,
+                            capture_output=True, text=True, timeout=180)
+    assert (result.returncode == 0) == ok, (args, result.stdout[-4000:], result.stderr[-4000:])
+    return result.stdout.strip().splitlines()
+
+rng = random.Random(42)
+integers = ['', '+', '-', ' 1', '1 ', '1\n', '1x', '1.0', '1e2', '１２', 'é',
+            '7\0', '7\0x', '0', '-0', '+0007', '0' * 80,
+            '9223372036854775807', '-9223372036854775808',
+            '9223372036854775808', '-9223372036854775809', '9' * 80, '9' * 80 + 'x']
+for _ in range(128):
+    value = rng.randrange(-(1 << 65), 1 << 65)
+    integers.extend([str(value), str(value) + rng.choice(['x', '\0', ' ', '.0'])])
+for _ in range(64):
+    integers.append(''.join(rng.choice('0123456789+- x\0é') for _ in range(rng.randrange(40))))
+
+def parsed(text):
+    if not re.fullmatch(r'[+-]?[0-9]+', text):
+        return 'error:Str.parseInt: invalid integer'
+    value = int(text)
+    if not -(1 << 63) <= value < (1 << 63):
+        return 'error:Str.parseInt: out of range'
+    return f'ok:{value}'
+
+fields = [('{}', 'error:Json.field: missing field'),
+          ('[]', 'error:Json.field: expected object'),
+          ('null', 'error:Json.field: expected object'),
+          ('{"quantity":null}', 'ok:null'),
+          ('{"quantity":true}', 'ok:true'),
+          ('{"quantity":"7"}', 'ok:"7"'),
+          ('{"quantity":7}', 'ok:7')]
+quantities = ['{}', '[]', 'null', '{', '{"quantity":null}', '{"quantity":"7"}',
+              '{"quantity":true}', '{"quantity":1.0}', '{"quantity":-1}',
+              '{"quantity":0}', '{"quantity":1}', '{"quantity":100}', '{"quantity":101}']
+
+def array(texts):
+    return '[' + ', '.join(f'Hex.decode("{text.encode().hex()}")' for text in texts) + ']'
+
+with tempfile.TemporaryDirectory(prefix='scuzz-input-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="input"\nversion="0.1.0"\n[fuzz]\nscore_floor=0\n')
+    shutil.copy('examples/kernel/src/Input.scuzz', root / 'src/Input.scuzz')
+    source = '''def field(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => Json.field(json, "quantity") match {
+      case Result.Ok(value) => Json.stringify(value) match {
+        case Result.Ok(encoded) => s"ok:$encoded"
+        case Result.Err(error) => s"error:$error"
+      }
+      case Result.Err(error) => s"error:$error"
+    }
+    case Result.Err(error) => s"error:$error"
+  }
+
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.foreachDiscard(INTEGERS, text => IO.println(Input.parsed(text)))
+    _ <- IO.foreachDiscard(FIELDS, text => IO.println(field(text)))
+    _ <- IO.foreachDiscard(QUANTITIES, text => IO.println(Str.fromBool(Input.accepted(Input.decodeQuantity(text)))))
+  } yield ()
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('QUANTITIES', array(quantities))
+    (root / 'src/Main.scuzz').write_text(source)
+    expected = [parsed(text) for text in integers] + [value for _, value in fields]
+    expected += ['false'] * 10 + ['true', 'true', 'false']
+    command('fmt', root)
+    for engine in ['run', 'eval']:
+        output = command(engine, root)
+        if engine == 'run' and output and output[0] == 'ok':
+            output = output[1:]
+        assert output == expected, (engine, [(i, a, b) for i, (a, b) in enumerate(zip(output, expected)) if a != b][:10], len(output), len(expected))
+    (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = IO.println(Str.fromBool(Input.proof()))\n')
+    (root / 'input.scuzz_verify').write_text('''oracle roundTrip(n: Int): Bool =
+  Input.parsed(Str.fromInt(n)) == s"ok:$n"
+
+oracle invalidSuffix(n: Int): Bool =
+  Input.parsed(s"${n}x") == "error:Str.parseInt: invalid integer"
+
+oracle validQuantity(n: Int): Bool =
+  Input.accepted(Input.parseQuantity(Str.fromInt(n))) == (n >= 1 && n <= 100) && Input.accepted(Input.decodeQuantity(s"{\\"quantity\\":$n}")) == (n >= 1 && n <= 100)
+
+oracle boundaries(): Bool =
+  Input.proof()
+''')
+    command('fmt', root)
+    for compiled in [False, True]:
+        env = dict(os.environ)
+        if compiled:
+            env['SCUZZ_FUZZ_ENGINE'] = 'compiled'
+        else:
+            env.pop('SCUZZ_FUZZ_ENGINE', None)
+        command('fuzz', '--iterations', '64', '--seed', '42', root, env=env)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert report['fuzz']['ok']
+        assert report['scope']['search']['failed'] == 0
+        engines = {row['engine'] for row in report['scope']['workloads'] if not row['required']}
+        assert engines == {'compiled' if compiled else 'evaluator'}, engines
+    for body in ['Str.parseInt("7") match { case Result.Ok(n) => n }',
+                 'Json.field(Json.Null, "quantity") match { case Result.Ok(Json.Int(n)) => n\n    case Result.Err(_) => 0 }',
+                 'Str.parseInt("7") + 1']:
+        (root / 'src/Bad.scuzz').write_text('def invalid(): Int =\n  ' + body + '\n')
+        command('fmt', root)
+        diagnostic = '\n'.join(command('check', root, ok=False))
+        assert 'non-exhaustive match' in diagnostic if 'match' in body else 'type error' in diagnostic, diagnostic
+        (root / 'src/Bad.scuzz').unlink()
+print('input validation and native parity ok')
+PY_INPUT
+
 "$SCUZZ" run examples/kernel | tee /tmp/kernel.out
 # Runner segvs here are flaky. On failure, rerun the exe under gdb so the log keeps a backtrace.
 if [ "${PIPESTATUS[0]}" -ne 0 ]; then
@@ -11,6 +133,7 @@ if [ "${PIPESTATUS[0]}" -ne 0 ]; then
   gdb -batch -ex run -ex bt ./examples/kernel/build/kernel 2>&1 | tail -30 || true
   exit 1
 fi
+grep -Fxq 'input:y' /tmp/kernel.out
 grep -Fxq 'triple:a"}b' /tmp/kernel.out
 grep -Fxq 'nested:a}b' /tmp/kernel.out
 grep -Fxq 'iget:y' /tmp/kernel.out

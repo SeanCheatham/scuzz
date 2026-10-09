@@ -55,3 +55,15 @@ oracle mapEmptyGet(): Bool =
 oracle jsonPairLifetime(n: Int): Bool =
   Main.jsonPairRoundTrip(n)
 
+oracle strictInput(): Bool =
+  Input.proof()
+
+oracle integerRoundTrip(n: Int): Bool =
+  Input.parsed(Str.fromInt(n)) == s"ok:$n"
+
+oracle integerRejectsSuffix(n: Int): Bool =
+  Input.parsed(s"${n}x") == "error:Str.parseInt: invalid integer"
+
+oracle quantityRange(n: Int): Bool =
+  Input.accepted(Input.parseQuantity(Str.fromInt(n))) == (n >= 1 && n <= 100) && Input.accepted(Input.decodeQuantity(s"{\"quantity\":$n}")) == (n >= 1 && n <= 100)
+
