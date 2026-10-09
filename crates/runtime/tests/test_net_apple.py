@@ -138,10 +138,16 @@ def prove_ios(cli, project, temp, env):
         (app / "Info.plist").write_bytes(plistlib.dumps(info))
         subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none", str(app)], check=True)
         subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True)
-        child_env = dict(os.environ, **{"SIMCTL_CHILD_" + key: value for key, value in env.items() if key.startswith(("SCUZZ_NET_", "SSL_CERT_"))}, SIMCTL_CHILD_SCUZZ_NET_TRUSTED="1")
+        proof_log = temp / "net-proof.log"
+        child_env = dict(os.environ, **{"SIMCTL_CHILD_" + key: value for key, value in env.items() if key.startswith(("SCUZZ_NET_", "SSL_CERT_"))}, SIMCTL_CHILD_SCUZZ_NET_TRUSTED="1", SIMCTL_CHILD_SCUZZ_NET_PROOF_LOG=str(proof_log))
+        deadline = time.monotonic() + 90
         result = subprocess.run(["xcrun", "simctl", "launch", "--console", device, "dev.scuzz.netproof"], env=child_env, capture_output=True, text=True, timeout=90)
-        print(result.stdout + result.stderr, end="", flush=True)
-        assert result.returncode == 0 and "Apple Net proof ok" in result.stdout, "iOS Net contract fails"
+        proof = proof_log.read_text() if proof_log.exists() else ""
+        while not any(line.startswith("Apple Net proof exit ") for line in proof.splitlines()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+            proof = proof_log.read_text() if proof_log.exists() else ""
+        print(result.stdout + result.stderr + proof, end="", flush=True)
+        assert result.returncode == 0 and "Apple Net proof ok" in proof and "Apple Net proof exit 0" in proof.splitlines(), f"iOS Net contract fails: launcher exit {result.returncode}\n{proof or 'missing proof output'}"
         subprocess.run(["xcrun", "simctl", "install", device, str(ios / "network-ui.app")], check=True)
         ui_env = dict(os.environ, SIMCTL_CHILD_SCUZZ_NETWORK_URL=env["SCUZZ_NET_TLS"] + "/message", SIMCTL_CHILD_SCUZZ_UI_DEBUG_DUMP=str(temp / "debug.json"), SIMCTL_CHILD_SCUZZ_UI_INJECT=str(temp / "inject.json"))
         identifier = plistlib.loads((ios / "network-ui.app/Info.plist").read_bytes())["CFBundleIdentifier"]

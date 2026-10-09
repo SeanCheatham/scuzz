@@ -1,10 +1,21 @@
 #import <UIKit/UIKit.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
 extern int scuzz_net_apple_proof(void);
 static void *run_proof(void *unused) {
   (void)unused;
-  @autoreleasepool { exit(scuzz_net_apple_proof()); }
+  @autoreleasepool {
+    const char *path = getenv("SCUZZ_NET_PROOF_LOG");
+    if (!path || !freopen(path, "w", stdout) ||
+        dup2(fileno(stdout), STDERR_FILENO) < 0)
+      exit(1);
+    int result = scuzz_net_apple_proof();
+    printf("Apple Net proof exit %d\n", result);
+    fflush(stdout);
+    exit(result);
+  }
 }
 @interface NetProofDelegate : UIResponder <UIApplicationDelegate>
 @property(nonatomic, strong) UIWindow *window;
