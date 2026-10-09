@@ -12,7 +12,7 @@ record FuzzMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, inv
 
 record MutBase(idle: String, tls: List[String], pass: List[FuzzRun])
 
-record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)], oracles: Bool, uiEnv: String, diff: Bool, ens: List[En], ev: Bool, scuzz: String, srv: Ref[(String, Int)], faults: List[(Int, Int)], live: Bool, asan: Bool, session: Bool)
+record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)], oracles: Bool, uiEnv: String, diff: Bool, ens: List[En], ev: Bool, scuzz: String, srv: Ref[(String, Int, Bool)], faults: List[(Int, Int)], live: Bool, asan: Bool, session: Bool)
 
 import Manifest.Man
 import Manifest.UiMan
@@ -1383,7 +1383,7 @@ def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, rep
   manNeed(m).flatMap(_ => fuzzManGate(m, dir, outDir, iterations, seed, replay, files, ens, noFailFast, oracles, differential, live, asan, session))
 
 def fuzzManGate(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], ens: List[En], noFailFast: Bool, oracles: Bool, differential: Bool, live: Bool, asan: Bool, session: Bool): IO[Unit] =
-  if (live && m.hasUi) failMsg("--live does not run a [ui] package", "scuzz fuzz") else if (session && m.hasUi) failMsg("--session does not run a [ui] package", "scuzz fuzz") else if (asan && m.hasUi) failMsg("--asan does not run a [ui] package", "scuzz fuzz") else fuzzEngine(m.hasUi).flatMap(eng => Ref.of(("", 0)).flatMap(srv => fuzzReadScenario(dir).flatMap(scn => fuzzMan2(FuzzJob(dir, outDir, if (asan) asanExeName(outDir, m.name) else exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, fuzzUseEv(live || asan || session, eng._1), if (live || asan || session) "" else eng._2, srv, Verify.scenarioFaults(scn), live, asan, session), replay))))
+  if (live && m.hasUi) failMsg("--live does not run a [ui] package", "scuzz fuzz") else if (session && m.hasUi) failMsg("--session does not run a [ui] package", "scuzz fuzz") else if (asan && m.hasUi) failMsg("--asan does not run a [ui] package", "scuzz fuzz") else fuzzEngine(m.hasUi).flatMap(eng => Ref.of(("", 0, false)).flatMap(srv => fuzzReadScenario(dir).flatMap(scn => fuzzMan2(FuzzJob(dir, outDir, if (asan) asanExeName(outDir, m.name) else exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, fuzzUseEv(live || asan || session, eng._1), if (live || asan || session) "" else eng._2, srv, Verify.scenarioFaults(scn), live, asan, session), replay))))
 
 def fuzzEngine(hasUi: Bool): IO[(Bool, String)] =
   Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (e == "compiled") IO.pure((false, "")) else if (!hasUi) Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))) else Sys.getenv("SCUZZ_EXECUTABLE").flatMap(scuzz => uiHostExe(scuzz)).flatMap(exe => if (exe == "") IO.pure((false, "")) else IO.pure((true, exe))))
@@ -1486,13 +1486,13 @@ def evServer(job: FuzzJob, dir: String): IO[(Int, Int)] =
   Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure((s._2, 0)) else evStop(job).flatMap(_ => evSpawn(job, dir))) else evStop(job).flatMap(_ => evSpawn(job, dir)))
 
 def evSpawn(job: FuzzJob, dir: String): IO[(Int, Int)] =
-  Sys.spawn(evProbeCmd(job, dir)).flatMap(pid => Ref.set(job.srv, (dir, pid)).flatMap(_ => evReady(job, pid)))
+  Sys.spawn(evProbeCmd(job, dir)).flatMap(pid => Ref.set(job.srv, (dir, pid, false)).flatMap(_ => evReady(job, pid)))
 
 def evReady(job: FuzzJob, pid: Int): IO[(Int, Int)] =
   IO.timeout(30000, evReadLine(pid, "")).handleErrorWith(e => if (e == "timeout" || e == "Sys.childRead: unknown pid") IO.pure("") else IO.fail(e)).flatMap(line => if (Str.trim(line) == "ready") IO.pure((pid, 0)) else evStop(job).flatMap(_ => IO.pure((0, if (Str.trim(line) == "3") 3 else 1))))
 
 def evStop(job: FuzzJob): IO[Unit] =
-  Ref.get(job.srv).flatMap(s => if (s._2 == 0) IO.pure(()) else Sys.kill(s._2).handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(s._2).handleErrorWith(_ => IO.pure(()))).flatMap(_ => Ref.set(job.srv, ("", 0))))
+  Ref.get(job.srv).flatMap(s => if (s._2 == 0) IO.pure(()) else Sys.kill(s._2).handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(s._2).handleErrorWith(_ => IO.pure(()))).flatMap(_ => Ref.set(job.srv, ("", 0, s._3))))
 
 def evReadCode(job: FuzzJob, pid: Int): IO[Int] =
   IO.timeout(30000, evReadLine(pid, "")).handleErrorWith(e => if (e == "timeout" || e == "Sys.childRead: unknown pid") IO.pure("") else IO.fail(e)).flatMap(line => if (Str.trim(line) == "") evStop(job).flatMap(_ => IO.pure(1)) else IO.pure(Str.toInt(Str.trim(line), 1)))
@@ -1566,7 +1566,7 @@ def fuzzLivePaintViews(dump: String): IO[Unit] =
   if (dumpHasView(dump)) IO.pure(()) else failMsg("fuzz live graph produced no view tree", "scuzz fuzz")
 
 def fuzzAfterReplay(job: FuzzJob, script: String, runs: List[FuzzRun], acc: FuzzAcc): IO[Unit] =
-  if (Verify.requiredBlocked(acc.workloads) && !job.noFailFast) fuzzDone(job, List.len(runs), acc, emptyMut(mutSites(job))) else fuzzVerSrcs(job.dir).flatMap(vers => fuzzWarn(vers).flatMap(_ => fuzzWorkloadSrcs(job.dir).flatMap(srcs => fuzzSearch(job, script, runs, Verify.workloadDefs(Verify.sortStrs(srcs), job.ens), acc)))).flatMap(done => fuzzMutate(job, runs, done))
+  if (Verify.requiredBlocked(acc.workloads) && !job.noFailFast) fuzzDone(job, List.len(runs), acc, emptyMut(mutSites(job))) else fuzzVerSrcs(job.dir).flatMap(vers => fuzzWarn(vers).flatMap(_ => fuzzWorkloadSrcs(job.dir).flatMap(srcs => fuzzSearch(job, script, runs, Verify.workloadDefs(Verify.sortStrs(srcs), job.ens), acc)))).flatMap(done => fuzzJobEngine(job).flatMap(current => fuzzMutate(current, runs, done)))
 
 def fuzzWarn(srcs: List[String]): IO[Unit] =
   if (List.isEmpty(Verify.oracleNames(srcs)) && List.isEmpty(Verify.claimNames(srcs))) IO.println("scuzz fuzz: no author oracles; only universal oracles ran") else IO.pure(())
@@ -1733,6 +1733,12 @@ def fuzzFaultAt(job: FuzzJob, i: Int): String =
   Verify.faultSeedPhase(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1, (i - 1) / (List.len(job.faults) * 16) % 4)
 
 def fuzzSearch(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc): IO[FuzzAcc] =
+  fuzzJobEngine(job).flatMap(current => fuzzSearchCurrent(current, script, runs, defs, acc))
+
+def fuzzJobEngine(job: FuzzJob): IO[FuzzJob] =
+  if (!job.ev) IO.pure(job) else Ref.get(job.srv).map(s => if (s._3) fuzzJobCompiled(job) else job)
+
+def fuzzSearchCurrent(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc): IO[FuzzAcc] =
   if (acc.search >= Verify.searchN(job.iterations) || acc.searchFail > 0 && !job.noFailFast) IO.pure(acc) else fuzzSearchRun(job, script, runs, defs, acc, fuzzWorkload(job, script, runs, defs, acc.search, acc.climb))
 
 def fuzzWorkload(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, c: FuzzClimb): FuzzRun =
@@ -1946,7 +1952,13 @@ def fuzzCorpusScript(job: FuzzJob, script: String, runs: List[FuzzRun], i: Int):
   if (List.isEmpty(runs)) fuzzBaseScript(job, script) else fuzzRunScript(List.at(runs, (Verify.workloadSeed(job.seed) + i) % List.len(runs)))
 
 def fuzzSearchRun(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun): IO[FuzzAcc] =
-  fuzzWriteDrive(job.outDir, run.script).flatMap(_ => fuzzProbeJob(job, run).flatMap(bad => fuzzRecord(job.outDir, acc, run, Str.concat("search ", Str.fromInt(acc.search)), false, if (job.ev) "evaluator" else "compiled", bad).flatMap(seen => fuzzDistRead(job).flatMap(ds => fuzzConfirmExclusion(job, run, bad, List.at(seen.workloads, 0).reason).flatMap(_ => fuzzSearchResult(job, script, runs, defs, FuzzAcc(seen.search, seen.searchFail, seen.corpFail, seen.repro, fuzzClimbNext(seen.climb, run, seen.search, ds), seen.workloads), run, fuzzFailure(bad)))))))
+  fuzzWriteDrive(job.outDir, run.script).flatMap(_ => fuzzProbeJob(job, run).flatMap(code => fuzzSearchProbe(job, script, runs, defs, acc, run, code)))
+
+def fuzzSearchProbe(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun, code: Int): IO[FuzzAcc] =
+  if (job.ev && code == 124) evStop(job).flatMap(_ => Ref.set(job.srv, ("", 0, true)).flatMap(_ => IO.println("evaluator probe reaches its deadline; probes run compiled").flatMap(_ => fuzzSearchRun(fuzzJobCompiled(job), script, runs, defs, acc, run)))) else fuzzSearchRecord(job, script, runs, defs, acc, run, code)
+
+def fuzzSearchRecord(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun, bad: Int): IO[FuzzAcc] =
+  fuzzRecord(job.outDir, acc, run, Str.concat("search ", Str.fromInt(acc.search)), false, if (job.ev) "evaluator" else "compiled", bad).flatMap(seen => fuzzDistRead(job).flatMap(ds => fuzzConfirmExclusion(job, run, bad, List.at(seen.workloads, 0).reason).flatMap(_ => fuzzSearchResult(job, script, runs, defs, FuzzAcc(seen.search, seen.searchFail, seen.corpFail, seen.repro, fuzzClimbNext(seen.climb, run, seen.search, ds), seen.workloads), run, fuzzFailure(bad)))))
 
 def fuzzSearchResult(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun, bad: Int): IO[FuzzAcc] =
   if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, defs, run).flatMap(small => fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeJob(job, small).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path, acc.climb, acc.workloads)))))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro, acc.climb, acc.workloads))
