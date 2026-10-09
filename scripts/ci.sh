@@ -2357,7 +2357,7 @@ slice_tyck_replay() {
 
 prove_probe_startup() {
   python3 - "$ROOT" "$SCUZZ" <<'PY_STARTUP'
-import os, pathlib, subprocess, sys, tempfile, time
+import os, pathlib, shutil, signal, subprocess, sys, tempfile, time
 
 repo, cli = map(pathlib.Path, sys.argv[1:])
 env = {k: v for k, v in os.environ.items() if not k.startswith('SCUZZ_')}
@@ -2365,6 +2365,10 @@ with tempfile.TemporaryDirectory(prefix='scuzz-probe-startup-') as directory:
     target = pathlib.Path(directory)
     (target / 'src').mkdir()
     (target / 'probe').mkdir()
+    shutil.copyfile(repo / 'examples/cli/src/Ios.scuzz', target / 'src/Ios.scuzz')
+    console = target / 'crates/embedder-mobile/shells/ios/run_sim.sh'
+    console.parent.mkdir(parents=True)
+    console.write_text("trap 'printf stopped > \"$2/stopped\"; exit 0' TERM\nprintf '%s' \"$$\" > \"$2/owner\"\nwhile :; do sleep .01; done\n")
     (target / 'scuzz.toml').write_text(
         '[package]\nname="probe-startup"\n[dependencies]\ncompiler={path="' +
         os.path.relpath(repo / 'examples/compiler', target) + '"}\n')
@@ -2374,7 +2378,27 @@ import Parse.En
 def waitStopped(pid: Int): IO[Int] =
   Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(0) else IO.sleep(10).flatMap(_ => waitStopped(pid)))
 
+def waitFile(path: String): IO[Unit] =
+  Fs.exists(path).flatMap(hit => if (hit != 0) IO.pure(()) else IO.sleep(10).flatMap(_ => waitFile(path)))
+
+def consoleProof(): IO[Unit] =
+  for {
+    home <- Sys.getenv("CONSOLE_HOME")
+    dir <- Sys.getenv("PROBE_DIR")
+    pid <- Sys.spawn(Ios.consoleCommand(home, Ios.Sim("device", "simulator", "", false), dir, true))
+    _ <- IO.ensure(for {
+  _ <- IO.timeout(1000, waitFile(Fs.join(dir, "owner")))
+  owner <- Fs.read(Fs.join(dir, "owner"))
+  _ <- if (Str.toInt(owner, 0) == pid) Ios.stop(pid) else IO.fail("console owner differs")
+  _ <- IO.timeout(1000, waitFile(Fs.join(dir, "stopped")))
+} yield (), Sys.kill(pid).handleErrorWith(_ => IO.pure(())))
+    _ <- IO.println("console-startup-ok")
+  } yield ()
+
 @main def main: IO[Unit] =
+  Sys.getenv("PROBE_MODE").flatMap(mode => if (mode == "console") consoleProof() else probeMain())
+
+def probeMain(): IO[Unit] =
   for {
     server <- Sys.getenv("PROBE_SERVER")
     dir <- Sys.getenv("PROBE_DIR")
@@ -2433,21 +2457,32 @@ for number, line in enumerate(sys.stdin):
     server.chmod(0o755)
     subprocess.run([str(cli), 'fmt', str(target)], env=env, check=True,
                    capture_output=True, text=True, timeout=30)
-    native_env = dict(env, PROBE_SERVER=str(server), PROBE_DIR=str(target / 'probe'), PROBE_MODE='closed')
+    native_env = dict(env, PROBE_SERVER=str(server), PROBE_DIR=str(target / 'probe'), PROBE_MODE='closed', CONSOLE_HOME=str(target))
     result = subprocess.run([str(cli), 'run', str(target)], env=native_env,
                             capture_output=True, text=True, timeout=180)
     assert result.returncode == 0 and 'probe-startup-ok' in result.stdout, result.stdout + result.stderr
-    for mode in ['bad', 'reject', 'slow', 'fallback']:
+    for mode in ['bad', 'reject', 'slow', 'fallback', 'console']:
         started = time.monotonic()
         native_env['PROBE_MODE'] = mode
-        result = subprocess.run([str(target / 'build/probe-startup')], env=native_env,
-                                capture_output=True, text=True, timeout=45)
+        try:
+            result = subprocess.run([str(target / 'build/probe-startup')], env=native_env,
+                                    capture_output=True, text=True, timeout=45)
+        finally:
+            owner = target / 'probe/owner'
+            if mode == 'console' and owner.exists():
+                try:
+                    os.kill(int(owner.read_text()), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         seconds = time.monotonic() - started
-        expected = ('evaluator probe reaches its deadline; probes run compiled\n' if mode == 'fallback' else '') + 'probe-startup-ok\n'
+        expected = 'console-startup-ok\n' if mode == 'console' else ('evaluator probe reaches its deadline; probes run compiled\n' if mode == 'fallback' else '') + 'probe-startup-ok\n'
         assert result.returncode == 0 and result.stdout == expected, result.stdout + result.stderr
-        if mode == 'slow':
-            assert seconds >= 30, seconds
-        print(f'Probe startup {mode}: {seconds:.2f} s; separate waits, server reuse, and shutdown pass', flush=True)
+        if mode in ['slow', 'console']:
+            assert seconds >= (30 if mode == 'slow' else 20), seconds
+        if mode == 'console':
+            print(f'iOS console fallback: {seconds:.2f} s; owned shell and cleanup trap pass', flush=True)
+        else:
+            print(f'Probe startup {mode}: {seconds:.2f} s; separate waits, server reuse, and shutdown pass', flush=True)
     native_env.update(PROBE_SERVER=str(cli), PROBE_DIR=str(rejected), PROBE_MODE='reject')
     result = subprocess.run([str(target / 'build/probe-startup')], env=native_env,
                             capture_output=True, text=True, timeout=10)
