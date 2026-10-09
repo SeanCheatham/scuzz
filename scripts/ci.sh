@@ -620,7 +620,23 @@ root, target = map(pathlib.Path, sys.argv[1:])
 compiler = os.path.relpath(root / 'examples/compiler', target)
 (target / 'scuzz.toml').write_text('[package]\nname="compiler-cases"\n[dependencies]\ncompiler={path="' + compiler + '"}\n')
 PY_GENERATOR
-  "$SCUZZ" fuzz --iterations 16 --seed 41 "$cases_dir/generator" > "$cases_dir/generator-campaign.log" 2>&1
+  mkdir -p "$cases_dir/selector/src"
+  cp "$cases_dir/generator/scuzz.toml" "$cases_dir/selector/scuzz.toml"
+  cat > "$cases_dir/selector/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  for {
+    dir <- Sys.getenv("GENERATOR_DIR")
+    files <- Drive.fuzzCollect(dir)
+    sites = Mutate.defSites(Mutate.parseLive(files), false)
+    selected = List.filter(sites, site => site.stem == "Cases" && site.name == "evaluated" && site.span > 0)
+    _ <- if (List.len(selected) == 1) IO.println(Str.fromInt(List.at(selected, 0).base + List.at(selected, 0).span - 2)) else IO.fail("generator mutation site is missing")
+  } yield ()
+SOURCE
+  GENERATOR_DIR="$cases_dir/generator" "$SCUZZ" run "$cases_dir/selector" > "$cases_dir/selector.log"
+  local generator_seed
+  generator_seed="$(awk '/^[0-9]+$/ { print }' "$cases_dir/selector.log")"
+  test -n "$generator_seed"
+  "$SCUZZ" fuzz --iterations 16 --seed "$generator_seed" "$cases_dir/generator" > "$cases_dir/generator-campaign.log" 2>&1
   python3 - "$cases_dir/generator/build/fuzz/summary.json" <<'PY_SUMMARY'
 import json
 import pathlib
