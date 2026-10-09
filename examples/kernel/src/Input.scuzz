@@ -34,3 +34,30 @@ def accepted(result: Result[String, Quantity]): Bool =
 def proof(): Bool =
   parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100"))
 
+def forward(text: String): Result[String, Int] =
+  for {
+    result = Str.parseInt(text)
+  } yield result
+
+def resolved(text: String): Int =
+  for {
+    result = forward(text)
+    copied = result
+  } yield copied match {
+  case Result.Ok(n) => n
+  case Result.Err(_) => -1
+}
+
+def attempt(flag: Bool): IO[Int] =
+  for {
+    result <- IO.attempt(if (flag) IO.pure(7) else IO.fail("input failure"))
+  } yield result match {
+  case Result.Ok(n) => n
+  case Result.Err(_) => -1
+}
+
+def unitBind(flag: Bool): IO[Int] =
+  for {
+    () <- if (flag) IO.pure(()) else IO.fail("unit failure")
+  } yield 7
+
