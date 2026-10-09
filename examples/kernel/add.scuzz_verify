@@ -73,3 +73,6 @@ oracle handledResults(n: Int): Bool =
 oracle unitResultBinding(flag: Bool): Bool =
   Property.force(Input.unitBind(flag).handleErrorWith(_ => IO.pure(-1))) == (if (flag) 7 else -1)
 
+oracle resultFields(n: Int): Bool =
+  Input.fields(Str.fromInt(n)) == Result.Ok(n) && Input.fields("bad") == Result.Err("Str.parseInt: invalid integer") && Property.force(Input.effectFields(Str.fromInt(n))) == Result.Ok(n) && Property.force(Input.effectFields("bad")) == Result.Err("Str.parseInt: invalid integer")
+

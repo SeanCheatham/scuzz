@@ -1,5 +1,22 @@
 record Quantity(value: Int)
 
+record Read[A](result: Result[String, A], count: Int)
+
+def fields(text: String): Result[String, Int] =
+  for {
+    ((first, _), second) = ((Str.parseInt(text), true), Str.parseInt("7"))
+    Read(result = result) = Read(first, 1)
+  } yield second match {
+  case Result.Ok(_) => result
+  case Result.Err(error) => Result.Err(error)
+}
+
+def effectFields(text: String): IO[Result[String, Int]] =
+  for {
+    (result, _) <- IO.pure((fields(text), 1))
+    head :: _ = [result]
+  } yield head
+
 def quantity(n: Int): Result[String, Quantity] =
   if (n >= 1 && n <= 100) Result.Ok(Quantity(n)) else Result.Err("quantity must be 1 through 100")
 

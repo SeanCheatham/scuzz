@@ -110,8 +110,16 @@ def spanOffset(e: Expr): Int =
     case Expr.EFor(_, _, off) => off
     case Expr.EAscribe(_, _, off) => off
     case Expr.EInterp(_, _, off) => off
+    case Expr.EList(items) => spanItemsOffset(items)
+    case Expr.ETuple(items) => spanItemsOffset(items)
     case _ => 0 - 1
   }
+
+def spanItemsOffset(items: List[Expr]): Int =
+  if (List.isEmpty(items)) 0 - 1 else spanItemsNext(spanOffset(List.at(items, 0)), List.tail(items))
+
+def spanItemsNext(off: Int, rest: List[Expr]): Int =
+  if (off < 0) spanItemsOffset(rest) else off
 
 def spanOff(e: Expr, alt: Int): Int =
   spanOr(spanOffset(e), alt)

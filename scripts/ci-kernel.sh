@@ -205,7 +205,25 @@ def guarded(text: String): Bool =
            ('result = Str.parseInt("7")', 'for { copy = result } yield ()', 'discarded'),
            ('result = (Str.parseInt("7"): Read)', '()', 'discarded'),
            ('result = Str.parseInt("7")', '"result" match { case _ => () }', 'discarded'),
-           ('() <- IO.pure(7)', '()', 'unit pattern needs Unit')]
+           ('() <- IO.pure(7)', '()', 'unit pattern needs Unit'),
+           ('(_, n) = (Str.parseInt("bad"), 7)', '()', 'discarded'),
+           ('((), _) = ((), Str.parseInt("bad"))', '()', 'discarded'),
+           ('(result, result) = (Str.parseInt("7"), Str.parseInt("bad"))', '()', 'binding pattern repeats name'),
+           ('(n, n) = (1, 2)', '()', 'binding pattern repeats name'),
+           ('(first, second) | (first, first) = (Str.parseInt("7"), Str.parseInt("bad"))', '()', 'pattern alternatives must bind the same names'),
+           ('Input.Read(result = result, count = result) = Input.Read(Str.parseInt("bad"), 7)', '()', 'binding pattern repeats name'),
+           ('(result, n) = (Str.parseInt("bad"), 7)', '()', 'discarded'),
+           ('(first, second) = (Str.parseInt("7"), Str.parseInt("bad"))\n    _ = consume(first)', '()', 'discarded'),
+           ('((_, n), flag) = ((Str.parseInt("bad"), 7), true)', '()', 'discarded'),
+           ('(Result.Ok(n), _) = (Str.parseInt("bad"), 7)', '()', 'must cover success and failure'),
+           ('Input.Read(count = n) = Input.Read(Str.parseInt("bad"), 7)', '()', 'discarded'),
+           ('Input.Read(_, n) = Input.Read(Str.parseInt("bad"), 7)', '()', 'discarded'),
+           ('Input.Read(result = Result.Ok(n)) = Input.Read(Str.parseInt("bad"), 7)', '()', 'must cover success and failure'),
+           ('(_, n) <- IO.pure((Str.parseInt("bad"), 7))', '()', 'discarded'),
+           ('Input.Read(count = n) <- IO.pure(Input.Read(Str.parseInt("bad"), 7))', '()', 'discarded'),
+           ('Result.Ok(n) :: tail = [Str.parseInt("bad")]', '()', 'must cover success and failure'),
+           ('_ :: tail = [Str.parseInt("bad")]', '()', 'discarded'),
+           ('(result, n) = (Str.parseInt("bad"), 7)\n    use = (result: Int) => result', '()', 'discarded')]
     for bindings, body, message in bad:
         effect = '<-' in bindings
         declaration = 'IO[Unit]' if effect else 'Unit'
@@ -216,13 +234,16 @@ def guarded(text: String): Bool =
         diagnostics = json.loads(result.stdout)
         error = next(row for row in diagnostics if row['severity'] == 'error')
         assert message in error['message'], error
-        assert error['file'].endswith('Bad.scuzz') and error['line'] >= 4 and error['column'] > 0, error
+        assert error['file'].endswith('Bad.scuzz') and error['line'] >= 4 and error['column'] > 0, (bindings, error)
         for entry in ['build', 'eval']:
             result = command([entry, root], ok=False)
             assert message in result.stdout + result.stderr, (entry, result.stdout, result.stderr)
         (root / 'src/Bad.scuzz').unlink()
     (root / 'result.scuzz_verify').write_text('''oracle handled(n: Int): Bool =
   Input.resolved(Str.fromInt(n)) == n && Input.resolved("bad") == -1
+
+oracle fields(n: Int): Bool =
+  Input.fields(Str.fromInt(n)) == Result.Ok(n) && Input.fields("bad") == Result.Err("Str.parseInt: invalid integer") && Property.force(Input.effectFields(Str.fromInt(n))) == Result.Ok(n) && Property.force(Input.effectFields("bad")) == Result.Err("Str.parseInt: invalid integer")
 
 oracle attempts(flag: Bool): Bool =
   Property.force(Input.attempt(flag)) == (if (flag) 7 else -1)
