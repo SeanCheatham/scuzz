@@ -1959,6 +1959,50 @@ int64_t sz_string_to_int(const SzString *s, int64_t dflt) {
   return (int64_t)v;
 }
 
+static SzAdt *parse_int_error(const char *message) {
+  SzString *error = sz_string_from_cstr(message);
+  SzAdt *result = sz_adt_new(0, error);
+  sz_release(error);
+  return result;
+}
+
+SzAdt *sz_string_parse_int(const SzString *s) {
+  size_t i = 0;
+  int negative = 0;
+  int overflow = 0;
+  uint64_t value = 0;
+  uint64_t limit;
+  void *payload;
+  SzAdt *result;
+  if (!s || !s->len)
+    return parse_int_error("Str.parseInt: invalid integer");
+  if (s->data[0] == '-' || s->data[0] == '+') {
+    negative = s->data[0] == '-';
+    i++;
+  }
+  if (i == s->len)
+    return parse_int_error("Str.parseInt: invalid integer");
+  limit = negative ? (uint64_t)INT64_MAX + 1 : (uint64_t)INT64_MAX;
+  for (; i < s->len; i++) {
+    unsigned char c = (unsigned char)s->data[i];
+    unsigned digit;
+    if (c < '0' || c > '9')
+      return parse_int_error("Str.parseInt: invalid integer");
+    digit = c - '0';
+    if (value > (limit - digit) / 10)
+      overflow = 1;
+    if (!overflow)
+      value = value * 10 + digit;
+  }
+  if (overflow)
+    return parse_int_error("Str.parseInt: out of range");
+  payload = sz_box_i64(negative ? (value == limit ? INT64_MIN : -(int64_t)value)
+                              : (int64_t)value);
+  result = sz_adt_new(1, payload);
+  sz_release(payload);
+  return result;
+}
+
 SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzString *newv) {
   const char *src;
   const char *oldp;

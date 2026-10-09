@@ -162,22 +162,16 @@ def isDigits(s: String): Bool =
   s != "" && Manifest.allDigits(s, 0)
 
 def parseFlagNat(s: String): (Bool, Int) =
-  if (!isDigits(s)) (false, 0) else parseFlagNatGot(s, Str.toInt(s, 0))
-
-def parseFlagNatGot(s: String, n: Int): (Bool, Int) =
-  if (Str.fromInt(n) != s) (false, 0) else (true, n)
+  parseFlagNumber(s, true)
 
 def parseFlagInt(s: String): (Bool, Int) =
-  if (s == "") (false, 0) else if (Str.charAt(s, 0) == 45) parseFlagNeg(s) else parseFlagNat(s)
+  parseFlagNumber(s, false)
 
-def parseFlagNeg(s: String): (Bool, Int) =
-  if (Str.len(s) < 2) (false, 0) else parseFlagNegRest(s, Str.slice(s, 1, Str.len(s)))
-
-def parseFlagNegRest(s: String, rest: String): (Bool, Int) =
-  if (!isDigits(rest)) (false, 0) else parseFlagNegGot(s, Str.toInt(s, 0))
-
-def parseFlagNegGot(s: String, n: Int): (Bool, Int) =
-  if (Str.fromInt(n) != s) (false, 0) else (true, n)
+def parseFlagNumber(s: String, natural: Bool): (Bool, Int) =
+  Str.parseInt(s) match {
+    case Result.Ok(n) => if (Str.fromInt(n) != s || natural && n < 0) (false, 0) else (true, n)
+    case Result.Err(_) => (false, 0)
+  }
 
 def showFlagNat(s: String): String =
   showFlagGot(parseFlagNat(s))

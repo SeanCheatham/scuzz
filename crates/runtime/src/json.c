@@ -759,6 +759,20 @@ SzList *sz_json_get(SzAdt *j, SzString *key) {
   return sz_list_nil();
 }
 
+SzAdt *sz_json_field(SzAdt *j, SzString *key) {
+  SzList *xs;
+  if (!j || sz_adt_tag(j) != JSON_OBJ)
+    return result_err("Json.field: expected object");
+  xs = json_obj_list(j);
+  while (xs && !sz_list_is_empty(xs)) {
+    SzPair *entry = (SzPair *)sz_list_head(xs);
+    if (json_key_eq(entry, key))
+      return sz_adt_new(RESULT_OK, sz_pair_right(entry));
+    xs = sz_list_tail(xs);
+  }
+  return result_err("Json.field: missing field");
+}
+
 SzList *sz_json_keys(SzAdt *j) {
   SzList *xs = json_obj_list(j);
   SzList *acc = NULL;

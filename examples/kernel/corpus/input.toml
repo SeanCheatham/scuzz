@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive strictInput", "drive integerRoundTrip -9223372036854775808", "drive integerRoundTrip 9223372036854775807", "drive integerRejectsSuffix 0", "drive quantityRange 0", "drive quantityRange 1", "drive quantityRange 100", "drive quantityRange 101"]

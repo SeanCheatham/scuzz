@@ -7145,6 +7145,61 @@ int main(void) {
     assert(sz_string_to_int(sz_string_from_cstr("x"), 9) == 9);
     assert(sz_string_to_int(sz_string_from_cstr("42x"), 9) == 9);
     assert(sz_string_to_int(sz_string_from_cstr(""), 9) == 9);
+
+    {
+      const char *valid[] = {"0", "-0", "+42", "0007", "9223372036854775807",
+                             "-9223372036854775808"};
+      const int64_t expected[] = {0, 0, 42, 7, INT64_MAX, INT64_MIN};
+      const char *invalid[] = {"", "+", "-", " 1", "1 ", "1x", "1.0", "1e2",
+                               "9223372036854775808", "-9223372036854775809"};
+      for (size_t i = 0; i < sizeof valid / sizeof valid[0]; i++) {
+        SzString *input = sz_string_from_cstr(valid[i]);
+        SzAdt *result = sz_string_parse_int(input);
+        sz_release(input);
+        assert(sz_adt_tag(result) == 1);
+        assert(sz_unbox_i64(sz_adt_payload(result)) == expected[i]);
+        sz_release(result);
+      }
+      for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++) {
+        SzString *input = sz_string_from_cstr(invalid[i]);
+        SzAdt *result = sz_string_parse_int(input);
+        sz_release(input);
+        assert(sz_adt_tag(result) == 0);
+        sz_release(result);
+      }
+      SzString *input = sz_string_from_bytes("7\0x", 3);
+      SzAdt *result = sz_string_parse_int(input);
+      sz_release(input);
+      assert(sz_adt_tag(result) == 0);
+      sz_release(result);
+      input = sz_string_from_cstr("{\"quantity\":null}");
+      SzAdt *parsed = sz_json_parse(input);
+      SzAdt *json = (SzAdt *)sz_adt_payload(parsed);
+      SzString *key = sz_string_from_cstr("quantity");
+      result = sz_json_field(json, key);
+      sz_release(key);
+      sz_release(parsed);
+      sz_release(input);
+      assert(sz_adt_tag(result) == 1);
+      assert(sz_json_is_null((SzAdt *)sz_adt_payload(result)));
+      key = sz_string_from_cstr("missing");
+      SzAdt *missing = sz_json_field((SzAdt *)sz_adt_payload(result), key);
+      assert(sz_adt_tag(missing) == 0);
+      assert(strcmp(sz_string_cstr((SzString *)sz_adt_payload(missing)),
+                    "Json.field: expected object") == 0);
+      sz_release(result);
+      sz_release(missing);
+      input = sz_string_from_cstr("{}");
+      parsed = sz_json_parse(input);
+      missing = sz_json_field((SzAdt *)sz_adt_payload(parsed), key);
+      sz_release(parsed);
+      sz_release(input);
+      sz_release(key);
+      assert(sz_adt_tag(missing) == 0);
+      assert(strcmp(sz_string_cstr((SzString *)sz_adt_payload(missing)),
+                    "Json.field: missing field") == 0);
+      sz_release(missing);
+    }
     {
       SzString *rep = sz_string_replace(c, a, b);
       assert(strcmp(sz_string_cstr(rep), "barbar") == 0);

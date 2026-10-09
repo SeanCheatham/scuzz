@@ -12,7 +12,7 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Proof.** Complete the session gates in `vision.md`. Run a human session on one small app and one objective. Measure retained acceptances per review minute, abstention reasons, Undo, and readiness latency. Record workload scope and the generator used. Controlled generator output proves the transport, not usefulness. Automated choices do not count as human evidence.
 
-**Priority.** Complete the language and verification guarantees in `vision.md` first. Then resume local choice feedback, rule review, and the complete session proof. General compiler idle cost work does not block these steps.
+**Priority.** Keep current work on the language and verification guarantees in `vision.md`. Local choice feedback, rule review, and the complete session proof remain later work. General compiler idle cost work needs a demonstrated application or proof blocker.
 
 ### 2. Review latency and evaluator parity
 
@@ -66,7 +66,7 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Verification scope and application correctness
 
-- **Production validation.** Verification assumptions do not validate live input. Give app authors a clear path to parse and validate external data with explicit success and failure values. Keep live validation in the app.
+- **Input boundaries.** Strict integers and required JSON fields return explicit errors. The kernel checks field types and domain ranges in live code. General typed JSON decoding and nested field error paths remain open. Extend the kit when an application needs them. Verification assumptions do not validate live input.
 - **Application models.** Use a small reference model to check state changes and effect results. Add examples that check failure paths and recovery. Finite model checks do not prove every input correct.
 
 ### Supporting compiler and editor work

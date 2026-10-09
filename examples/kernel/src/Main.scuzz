@@ -1670,4 +1670,5 @@ b"""
     _ <- IO.println(s"diff:${if (sumTo(10, 0) == Oracle.sumTo(10)) "y" else "n"}")
     _ <- builderProof()
     _ <- utf8Proof()
+    _ <- IO.println(s"input:${if (Input.proof()) "y" else "n"}")
   } yield ()
