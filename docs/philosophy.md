@@ -125,7 +125,7 @@ The product CLI is Scuzz (`examples/cli`). `scripts/bootstrap.sh` fetches the ne
 - **One kit table.** `Kits.scuzz` is the one list of builtins. The evaluator dispatches by kit name. A kit without an evaluator case fails the compiler's own verification. Kits are native runtime calls in both engines.
 - **Checked input only.** The evaluator runs after `check` passes. Values carry runtime tags. Generics need no instantiation. Traits dispatch on the receiver tag.
 - **Erasure matches live builds.** `.require`, `where`, and `Property.sometimes` erase in `eval` and `run`. They stay active under `fuzz`.
-- **Tail calls.** A self tail call runs in constant evaluator stack, as emit does.
+- **Tail calls.** A self tail call runs in constant evaluator stack, as emit does. The lexer and the reserved-name scan use direct self tail calls.
 - **Fail loud.** An unsupported construct or kit stops evaluation with a Scuzz file and line. The evaluator does not guess.
 
 ### GC (v0)
