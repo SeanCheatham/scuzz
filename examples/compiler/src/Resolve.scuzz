@@ -296,12 +296,12 @@ def duplicateNames(names: List[String], seen: Set[String]): String =
   if (List.isEmpty(names)) "" else if (Set.contains(seen, List.at(names, 0))) Str.concat("duplicate type ", List.at(names, 0)) else duplicateNames(List.tail(names), Set.add(seen, List.at(names, 0)))
 
 def reservedError(tokens: List[SpTok]): String =
-  if (List.isEmpty(tokens)) "" else reservedToken(List.at(tokens, 0).tok, List.tail(tokens))
+  if (List.isEmpty(tokens)) "" else if (reservedToken(List.at(tokens, 0).tok) != "") reservedToken(List.at(tokens, 0).tok) else reservedError(List.tail(tokens))
 
-def reservedToken(token: Tok, rest: List[SpTok]): String =
+def reservedToken(token: Tok): String =
   token match {
-    case Tok.Ident(name) => if (Str.startsWith(name, "__Scuzz")) Str.concat("reserved name ", name) else reservedError(rest)
-    case _ => reservedError(rest)
+    case Tok.Ident(name) => if (Str.startsWith(name, "__Scuzz")) Str.concat("reserved name ", name) else ""
+    case _ => ""
   }
 
 def sortEnums(ens: List[En]): List[En] =

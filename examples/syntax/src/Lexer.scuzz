@@ -342,16 +342,14 @@ def _lexUnder(src: String, i: Int, stem: String, acc: List[SpTok]): (Int, List[S
 def _lexOne(src: String, i: Int, stem: String, acc: List[SpTok]): (Int, List[SpTok]) =
   if (i >= Str.len(src)) (i, acc) else if (_isSpace(_ch(src, i))) (i + 1, acc) else if (_ch(src, i) == 64) if (_atMain(src, i)) (i + 5, _put(Tok.AtMain, i, stem, acc)) else (i + 1, _put(Tok.At, i, stem, acc)) else if (_ch(src, i) == 34) _lexStr(src, i, stem, acc) else if (_isDigit(_ch(src, i))) _lexInt(src, i, stem, acc) else if (_ch(src, i) == 95 && _isAlnum(_ch(src, i + 1))) _lexUnder(src, i, stem, acc) else if (_isAlpha(_ch(src, i))) _lexName(src, i, stem, acc) else if (_two(src, i, 58, 58)) (i + 2, _put(Tok.ColonColon, i, stem, acc)) else if (_two(src, i, 61, 62)) (i + 2, _put(Tok.Arrow, i, stem, acc)) else if (_two(src, i, 61, 61)) (i + 2, _put(Tok.EqEq, i, stem, acc)) else if (_two(src, i, 33, 61)) (i + 2, _put(Tok.BangEq, i, stem, acc)) else if (_two(src, i, 60, 45)) (i + 2, _put(Tok.LeftArrow, i, stem, acc)) else if (_two(src, i, 60, 61)) (i + 2, _put(Tok.LtEq, i, stem, acc)) else if (_two(src, i, 60, 60)) (i + 2, _put(Tok.Shl, i, stem, acc)) else if (_two(src, i, 62, 61)) (i + 2, _put(Tok.GtEq, i, stem, acc)) else if (_two(src, i, 62, 62)) (i + 2, _put(Tok.Shr, i, stem, acc)) else if (_two(src, i, 38, 38)) (i + 2, _put(Tok.AmpAmp, i, stem, acc)) else if (_two(src, i, 124, 124)) (i + 2, _put(Tok.PipePipe, i, stem, acc)) else (i + 1, _put(_punct(_ch(src, i)), i, stem, acc))
 
-def lexAt(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
-  if (i >= Str.len(src)) acc else _lexOne(src, i, stem, acc) match {
-  case (next, tokens) => lexAt(src, next, stem, tokens)
-}
+def lexAt(src: String, stem: String, step: (Int, List[SpTok])): List[SpTok] =
+  if (step._1 >= Str.len(src)) step._2 else lexAt(src, stem, _lexOne(src, step._1, stem, step._2))
 
 def lex(src: String): List[SpTok] =
   lexStem(src, "")
 
 def lexStem(src: String, stem: String): List[SpTok] =
-  List.reverse(SpTok(Tok.Eof, Str.len(src), stem, 0) :: lexAt(src, 0, stem, []))
+  List.reverse(SpTok(Tok.Eof, Str.len(src), stem, 0) :: lexAt(src, stem, (0, [])))
 
 def columnAt(src: String, i: Int, column: Int): Int =
   if (i < 0 || Str.charAt(src, i) == 10) column else columnAt(src, i - 1, column + 1)

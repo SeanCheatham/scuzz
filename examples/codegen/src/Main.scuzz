@@ -1073,6 +1073,13 @@ def temporaryTupleFields(): IO[Unit] =
 def stringArguments(curB: String, curO: String): String =
   Str.concat(curB, curO)
 
+def lexerLarge(): Bool =
+  for {
+    src = Str.concat(Str.repeat(" ", 500000), "def end")
+    tokens = Lexer.lex(src)
+    names = Lexer.lex(Str.concat(Str.repeat("x ", 100000), "__ScuzzEnd"))
+  } yield List.len(tokens) == 3 && List.at(tokens, 0).tok == Lexer.Tok.Def && List.at(tokens, 1).tok == Lexer.Tok.Ident("end") && List.at(tokens, 2).tok == Lexer.Tok.Eof && Resolve.reservedError(names) == "reserved name __ScuzzEnd" && Resolve.reservedError(Lexer.lex("x y")) == ""
+
 def pointerArguments(raw: String): String =
   for {
     curB = Str.concat(raw, "b")
@@ -1089,4 +1096,4 @@ def httpTuplePayload(): IO[Unit] =
   } yield ()
 
 @main def main: IO[Unit] =
-  IO.pure(pointerArguments("x").require(value => value == "xbxo")).flatMap(_ => temporaryTupleFields()).flatMap(_ => httpTuplePayload()).flatMap(_ => IO.println(if (allOk()) "ir-ok" else dumpAll())).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => evTraceMain()).flatMap(_ => probeMain())
+  IO.pure(lexerLarge().require(value => value)).flatMap(_ => IO.pure(pointerArguments("x").require(value => value == "xbxo"))).flatMap(_ => temporaryTupleFields()).flatMap(_ => httpTuplePayload()).flatMap(_ => IO.println(if (allOk()) "ir-ok" else dumpAll())).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => evTraceMain()).flatMap(_ => probeMain())
