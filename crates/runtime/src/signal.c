@@ -184,16 +184,13 @@ static void fputs_json_value(FILE *f, const void *value) {
 /* Value case tags from examples/compiler/src/Eval.scuzz. Keep this list
  * in source order. SCUZZ_EVAL_MIRROR rewrites a stored Value into the
  * compiled ADT shape. SCUZZ_EVAL_TAGS is `En.Case=tag` lines. */
-/* The compiler exports the tag of Eval.Value.VUnit.
+/* The runtime uses -1 when the evaluator is absent.
+ * The compiler sets the tag of Eval.Value.VUnit when it is present.
  * Other Value tags follow the source order. */
-#ifdef __APPLE__
-extern const int32_t sz_eval_value_tag_base __attribute__((weak_import));
-#else
-extern const int32_t sz_eval_value_tag_base __attribute__((weak));
-#endif
+__attribute__((weak)) const int32_t sz_eval_value_tag_base = -1;
 
 static int eval_value_base(void) {
-  return &sz_eval_value_tag_base ? sz_eval_value_tag_base : -1;
+  return sz_eval_value_tag_base;
 }
 
 static char *g_eval_tags;
