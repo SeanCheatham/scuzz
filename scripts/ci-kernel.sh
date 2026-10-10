@@ -126,6 +126,105 @@ oracle boundaries(): Bool =
 print('input validation and native parity ok')
 PY_INPUT
 
+# Integer operations use an independent model on both engines.
+python3 - <<'PY_ARITHMETIC'
+import os
+from pathlib import Path
+import random
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+minimum, maximum = -(1 << 63), (1 << 63) - 1
+edges = [minimum, minimum + 1, -maximum, -257, -8, -3, -2, -1, 0,
+         1, 2, 3, 8, 257, maximum - 1, maximum]
+pairs = [(a, b) for a in edges for b in edges]
+rng = random.Random(42)
+pairs += [(rng.randint(minimum, maximum), rng.randint(minimum, maximum)) for _ in range(128)]
+
+def model(a, b):
+    if b == 0:
+        return 'error:divisor must be nonzero'
+    q = abs(a) // abs(b)
+    if (a < 0) != (b < 0):
+        q = -q
+    r = a - q * b
+    wrapped = (q + (1 << 63)) % (1 << 64) - (1 << 63)
+    return f'{wrapped},{r}'
+
+with tempfile.TemporaryDirectory(prefix='scuzz-arithmetic-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="arithmetic"\n')
+    shutil.copy('examples/kernel/src/Input.scuzz', root / 'src/Input.scuzz')
+    source = '''def result(pair: (Int, Int)): String =
+  Input.division(pair._1, pair._2) match {
+    case Result.Ok((q, r)) => s"$q,$r"
+    case Result.Err(error) => s"error:$error"
+  }
+
+@main def main: IO[Unit] =
+  IO.foreachDiscard(PAIRS, pair => IO.println(result(pair)))
+'''.replace('PAIRS', '[' + ', '.join(f'({a}, {b})' for a, b in pairs) + ']')
+    main = root / 'src/Main.scuzz'
+    main.write_text(source)
+    def command(action, env=None):
+        return subprocess.run([str(cli), action, str(root)], env=env,
+                              capture_output=True, text=True, timeout=180)
+    formatted = command('fmt')
+    assert formatted.returncode == 0, formatted.stderr
+    before = {p.name: p.read_text() for p in (root / 'src').glob('*.scuzz')}
+    assert command('fmt').returncode == 0
+    assert before == {p.name: p.read_text() for p in (root / 'src').glob('*.scuzz')}
+    assert command('check').returncode == 0
+    expected = [model(a, b) for a, b in pairs]
+    for engine in ('run', 'eval'):
+        run = command(engine)
+        assert run.returncode == 0, (engine, run.stdout[-4000:], run.stderr[-4000:])
+        output = run.stdout.strip().splitlines()
+        if output and output[0] == 'ok':
+            output = output[1:]
+        assert output == expected, (engine, output[-16:], expected[-16:])
+    for operation in ('quotient', 'remainder'):
+        for a in (minimum, 0, maximum):
+            main.write_text(f'@main def main: IO[Unit] = IO.println(Str.fromInt(Input.{operation}({a}, 0)))\n')
+            assert command('fmt').returncode == 0
+            for engine in ('run', 'eval'):
+                for verify in (False, True):
+                    env = dict(os.environ)
+                    env.pop('SCUZZ_TESTRT', None)
+                    env.pop('SCUZZ_EV_TESTRT', None)
+                    if not verify:
+                        run = command(engine, env)
+                        assert run.returncode != 0, (engine, verify, operation, a)
+                        error = run.stdout + run.stderr
+                    elif engine == 'run':
+                        env['SCUZZ_TESTRT'] = '1'
+                        run = subprocess.run([str(root / 'build/arithmetic')], env=env,
+                                             capture_output=True, text=True, timeout=30)
+                        assert run.returncode != 0, (engine, verify, operation, a)
+                        error = run.stdout + run.stderr
+                    else:
+                        probe = root / 'probe'
+                        probe.mkdir(exist_ok=True)
+                        (probe / 'files.txt').write_text('Input\nMain\n')
+                        (probe / '0.scuzz').write_text((root / 'src/Input.scuzz').read_text())
+                        (probe / '1.scuzz').write_text(main.read_text())
+                        log = probe / 'probe.log'
+                        request = probe / 'request.txt'
+                        request.write_text(f'TESTRT=1\nPROBE_LOG={log}\n')
+                        env['SCUZZ_EV_REQUEST'] = str(request)
+                        run = subprocess.run([str(cli), 'eval', '--probe', str(probe)],
+                                             input='probe\n', env=env, capture_output=True,
+                                             text=True, timeout=60)
+                        assert run.returncode == 0 and run.stdout.splitlines() == ['ready', '1'], (run.stdout, run.stderr)
+                        error = log.read_text()
+                    assert 'division by zero' in error and 'Input.scuzz:' in error, error[-4000:]
+                    assert 'Floating point exception' not in error, error[-4000:]
+print(f'Integer boundaries: {len(pairs)} model cases and 24 zero failures across both engines')
+PY_ARITHMETIC
+
 # Result bindings retain an explicit failure policy.
 python3 - <<'PY_RESULT'
 import json

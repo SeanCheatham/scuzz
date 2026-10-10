@@ -22,6 +22,9 @@ oracle tyckGenSeed(): Bool =
 oracle prettyRoundtrip(): Bool =
   Main.prettyIdem(0)
 
+oracle integerLiteralFormat(): Bool =
+  Main.integerLiteralFormat()
+
 oracle tyckGenerated(n: Int where n >= 0): Bool =
   Main.tyckGen(n)
 

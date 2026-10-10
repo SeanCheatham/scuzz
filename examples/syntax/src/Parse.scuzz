@@ -1110,7 +1110,7 @@ def prettyExpr(e: Expr, n: Int): String =
     case Expr.EMethod(recv, name, args, _) => Str.concat(_pad(n), prettyMethod(recv, name, args))
     case Expr.EField(recv, name, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(recv), Str.concat(".", name)))
     case Expr.EBin(op, l, r, _) => Str.concat(_pad(n), prettyBin(op, l, r))
-    case Expr.EUn(op, inner, _) => Str.concat(_pad(n), Str.concat(op, _prettyUn(inner)))
+    case Expr.EUn(op, inner, _) => Str.concat(_pad(n), _prettyUnary(op, inner))
     case Expr.ELam(p, ty, body) => Str.concat(_pad(n), prettyLam(p, ty, body))
     case Expr.EIf(c, t, el, _) => Str.concat(_pad(n), Str.concat("if (", Str.concat(pretty0(c), Str.concat(") ", Str.concat(pretty0(t), Str.concat(" else ", pretty0(el)))))))
     case Expr.EMatch(s, arms, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(s), Str.concat(""" match {
@@ -1158,6 +1158,12 @@ def _prettyUn(e: Expr): String =
 
 def _parenPretty(e: Expr): String =
   Str.concat("(", Str.concat(pretty0(e), ")"))
+
+def _prettyUnary(op: String, e: Expr): String =
+  e match {
+    case Expr.EInt(n, _) => if (op == "-" && n == 0 - 9223372036854775807 - 1) Str.fromInt(n) else Str.concat(op, _prettyUn(e))
+    case _ => Str.concat(op, _prettyUn(e))
+  }
 
 def _prettyBinL(op: String, e: Expr): String =
   e match {
