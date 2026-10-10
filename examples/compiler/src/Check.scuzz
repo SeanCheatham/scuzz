@@ -1309,7 +1309,7 @@ def bindingNamesErr(bindings: List[(String, Ty)]): String =
   if (List.isEmpty(bindings)) "" else if (List.exists(List.tail(bindings), binding => binding._1 == List.at(bindings, 0)._1)) Str.concat("binding pattern repeats name ", List.at(bindings, 0)._1) else bindingNamesErr(List.tail(bindings))
 
 def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (hasErr(vo)) vo else inferForBindOwner(ownerPatErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
+  if (hasErr(vo)) vo else if (d && !isIo(tyStr(vo))) bad(Str.concat("<- needs IO, got ", tyStr(vo)), span) else inferForBindOwner(ownerPatErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
 
 def inferForBindOwner(err: String, d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   if (err != "") bad(err, span) else inferForBindResult(resultBindErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), rest, body, ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
@@ -1318,7 +1318,7 @@ def inferForBindResult(err: String, d: Bool, name: String, vo: Out, rest: List[B
   if (err != "") bad(err, span) else if (!coverWild(coverClean(name), if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens) && !coverComplete([[name]], [if (d) ioPayload(tyStr(vo)) else tyStr(vo)], ens)) bad("binding pattern does not cover every value; use match", span) else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy, span))
 
 def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (Str.startsWith(ty, "Stream") || Str.startsWith(ty, "Resource")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens), span)
+  inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens), span)
 
 def inferForDraw2(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], u: Out, span: (String, Int)): Out =
   if (hasErr(u)) u else inferForGo(rest, body, bindFor(true, name, ty, env, ens), funs, ens, tyStr(u), span)

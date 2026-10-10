@@ -2,6 +2,12 @@ record Quantity(value: Int)
 
 record Read[A](result: Result[String, A], count: Int)
 
+type Effect[E, A] = IO[E, A]
+def aliasEffect[E, A](effect: Effect[E, A]): Effect[E, A] =
+  for {
+    value <- effect
+  } yield value
+
 def fields(text: String): Result[String, Int] =
   for {
     ((first, _), second) = ((Str.parseInt(text), true), Str.parseInt("7"))

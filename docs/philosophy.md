@@ -183,6 +183,7 @@ The language `scuzz` implements. Proof is examples (`examples/hello`, `kernel`, 
 Locks (not an API catalog - run `scuzz docs language` and `scuzz docs kits`):
 
 - Expression dialect only: `for` primary binder (`=` pure, `<-` effect); no `val` / statement blocks / `var`
+- A left-arrow binding requires IO. IO aliases and typed errors use the same check. A pure value or an unresolved generic value is a type error at this boundary.
 - A Unit IO binding, `() <- effect`, executes the effect and propagates its error. The bound payload is Unit. Native emission and evaluation use the same behavior.
 - A `for` binding pattern covers every possible value of its type. The checker uses the match coverage rules for pure and IO bindings. Constructor and tuple patterns can bind fields when all values match. Use `match` for a partial constructor, list, or literal pattern. A `=` binding stays pure. A field access before a tuple binding stays a field access. It does not consume that binding as a method call.
 - Interpolated strings use the same escape rules as ordinary strings. Decode escapes in literal segments once. Parse expressions inside interpolation braces as source. Check each interpolation hole as an expression. Live code and verification use the same rules.

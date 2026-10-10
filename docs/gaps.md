@@ -66,7 +66,6 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Verification scope and application correctness
 
-- **Effect bindings.** The checker accepts `def wrong(): IO[Unit] = for { n <- 1 } yield ()`. A left-arrow binding needs IO. Reject pure values and unresolved generic values at this boundary. Check rejection through check, build, and eval.
 - **Mutation deadlines.** A probe deadline returns status 124. The mutation path counts this status as a detected defect. It also counts other probe errors as detected defects. Keep incomplete probes separate from detected defects. An incomplete probe must not improve the mutation score or become a reusable successful result.
 - **Input boundaries.** Strict integers and required JSON fields return explicit errors. The kernel checks field types and domain ranges in live code. General typed JSON decoding and nested field error paths remain open. Extend the kit when an application needs them. Verification assumptions do not validate live input.
 - **Integer division.** `divide(1, 0)` passes the checker. The evaluator reports a source error. Native execution terminates with a floating-point exception. Remainder by zero has the same difference. Division and remainder of the minimum Int value by -1 terminate both engines with a floating-point exception. Define the result or failure at these boundaries. Check both engines at integer limits.

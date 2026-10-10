@@ -581,8 +581,10 @@ for i, case in enumerate(cases):
     command(['fmt', invalid], f'invalid-{i}-format')
     rejected = command(['check', '--message-format=json', invalid], f'invalid-{i}-check', success=False)
     assert 'type error' in rejected.stdout and 'unexpected token' not in rejected.stdout, rejected.stdout
-    if case['seed'] % 8 >= 4:
+    if 4 <= case['seed'] % 12 < 8:
         assert 'binding pattern does not cover every value' in rejected.stdout, rejected.stdout
+    if case['seed'] % 12 >= 8:
+        assert '<- needs IO' in rejected.stdout, rejected.stdout
 
 # Both engines can agree on a wrong result. The model and oracle must reject it.
 mutant = root / 'mutant'

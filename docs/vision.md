@@ -17,7 +17,7 @@ Keep current work on language, standard kits, and verification tooling. Select e
 Use these seven topics to select and verify application correctness work.
 Complete one slice before starting the next slice.
 
-1. Prevent invalid states. Require IO at each effect binding. Use enums and validated domain types. Extend Result checks for demonstrated container errors.
+1. Prevent invalid states. Use enums and validated domain types. Extend Result checks for demonstrated container errors.
 2. Keep input validation active. Diagnose clear uses of erased checks as input guards. Extend typed decoding for demonstrated input needs. Define arithmetic and collection boundary behavior.
 3. Establish claim reach. Separate claim execution, trigger reach, and verdicts. Require relevant workloads for conditional and absence rules.
 4. Examine rule strength with mutation. Connect survivors to source and claims. Separate invalid, excluded, incomplete, and inert mutations. Do not count infrastructure failures as detected defects.
