@@ -485,8 +485,17 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
-def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded), incomplete), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), "}")))))))))))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String]): String =
+  Str.concat(Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"status\":", Str.concat(Check.jsonStr(campaignStatus(ok, incomplete, scope)), ",\"fuzz\":")), Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded), incomplete), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), "}"))))))))))))
+
+def campaignStatus(ok: Bool, incomplete: Int, scope: InputScope): String =
+  if (incomplete > 0 || List.exists(scope.workloads, w => w.status == "incomplete")) "incomplete" else if (ok) "passed" else "failed"
+
+def propertyNames(raw: String): List[String] =
+  sortStrs(List.distinct(List.map(List.filter(linesOf(raw), l => Str.startsWith(l, "R:")), l => Hex.decode(Str.drop(l, 2)))))
+
+def jGuards(properties: List[String], claims: List[String]): String =
+  Str.concat(",\"guards\":{\"status\":", Str.concat(Check.jsonStr(if (List.isEmpty(properties) && List.isEmpty(claims)) "unguarded" else "guarded"), Str.concat(",\"properties\":", Str.concat(jStrList(properties), Str.concat(",\"claims\":", Str.concat(jStrList(claims), "}"))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -2254,13 +2263,16 @@ def requiredBlocked(ws: List[Workload]): Bool =
   List.exists(ws, w => w.required && w.status != "passed")
 
 def scopeLine(s: InputScope): String =
-  Str.concat("scope: required ", Str.concat(Str.fromInt(scopeCount(s, true, "passed")), Str.concat(" passed, ", Str.concat(Str.fromInt(scopeCount(s, true, "failed")), Str.concat(" failed, ", Str.concat(Str.fromInt(scopeCount(s, true, "excluded")), Str.concat(" excluded; search ", Str.concat(Str.fromInt(scopeCount(s, false, "passed")), Str.concat(" passed, ", Str.concat(Str.fromInt(scopeCount(s, false, "failed")), Str.concat(" failed, ", Str.concat(Str.fromInt(scopeCount(s, false, "excluded")), " excluded"))))))))))))
+  Str.concat("scope: required ", Str.concat(scopeCountsLine(s, true), Str.concat("; search ", scopeCountsLine(s, false))))
+
+def scopeCountsLine(s: InputScope, required: Bool): String =
+  List.join(Str.concat(Str.fromInt(scopeCount(s, required, "passed")), " passed") :: Str.concat(Str.fromInt(scopeCount(s, required, "failed")), " failed") :: Str.concat(Str.fromInt(scopeCount(s, required, "excluded")), " excluded") :: Str.concat(Str.fromInt(scopeCount(s, required, "incomplete")), " incomplete") :: [], ", ")
 
 def jScope(s: InputScope): String =
   Str.concat(",\"scope\":{\"required\":", Str.concat(jScopeCounts(s, true), Str.concat(",\"search\":", Str.concat(jScopeCounts(s, false), Str.concat(",\"inputs\":", Str.concat(jStrList(s.inputs), Str.concat(jReachKey("claims", s.claims, s.checkedClaims), Str.concat(",\"mutant_excluded\":[", Str.concat(List.join(List.map(s.mutantExcluded, n => Str.fromInt(n)), ","), Str.concat("],\"workloads\":[", Str.concat(List.join(List.map(s.workloads, w => jWorkload(w)), ","), "]}")))))))))))
 
 def jScopeCounts(s: InputScope, required: Bool): String =
-  Str.concat("{\"passed\":", Str.concat(Str.fromInt(scopeCount(s, required, "passed")), Str.concat(",\"failed\":", Str.concat(Str.fromInt(scopeCount(s, required, "failed")), Str.concat(",\"excluded\":", Str.concat(Str.fromInt(scopeCount(s, required, "excluded")), Str.concat(if (required) Str.concat(",\"planned\":", Str.concat(Str.fromInt(s.planned), Str.concat(",\"unrun\":", Str.fromInt(s.planned - List.len(List.filter(s.workloads, w => w.required)))))) else "", "}")))))))
+  Str.concat("{\"passed\":", Str.concat(Str.fromInt(scopeCount(s, required, "passed")), Str.concat(",\"failed\":", Str.concat(Str.fromInt(scopeCount(s, required, "failed")), Str.concat(",\"excluded\":", Str.concat(Str.fromInt(scopeCount(s, required, "excluded")), Str.concat(Str.concat(",\"incomplete\":", Str.fromInt(scopeCount(s, required, "incomplete"))), Str.concat(if (required) Str.concat(",\"planned\":", Str.concat(Str.fromInt(s.planned), Str.concat(",\"unrun\":", Str.fromInt(s.planned - List.len(List.filter(s.workloads, w => w.required)))))) else "", "}"))))))))
 
 def jWorkload(w: Workload): String =
   Str.concat("{\"label\":", Str.concat(Check.jsonStr(w.label), Str.concat(",\"required\":", Str.concat(jb(w.required), Str.concat(jStrK("status", w.status), Str.concat(jStrK("engine", w.engine), Str.concat(jStrK("script", w.script), Str.concat(jStrK("schedule", w.schedule), Str.concat(jStrK("fault", w.fault), Str.concat(",\"schedule_picks\":", Str.concat(jStrList(w.picks), Str.concat(jStrK("reason", w.reason), "}"))))))))))))

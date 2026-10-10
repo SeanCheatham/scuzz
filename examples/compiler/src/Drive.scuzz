@@ -1310,6 +1310,7 @@ def fuzzDir(dir: String, outDir: String, iterations: Int, seed: Int, replay: Str
   for {
     _ <- Fs.mkdirs(outDir)
     _ <- Fs.mkdirs(joinSlash(outDir, "fuzz"))
+    _ <- Fs.write(joinSlash(joinSlash(outDir, "fuzz"), "summary.json"), "{\"v\":1,\"kind\":\"fuzz\",\"status\":\"incomplete\",\"reason\":\"campaign does not complete\"}")
     _ <- Fs.write(fuzzCoveragePath(outDir), "")
     _ <- Fs.write(fuzzSometimesPath(outDir), "")
     _ <- Fs.write(fuzzTriggerPath(outDir), "")
@@ -1363,7 +1364,7 @@ def fuzzLiveStampPath(liveDir: String): String =
   joinSlash(liveDir, "fingerprint")
 
 def emitDirLiveStamped(dir: String, liveDir: String, files: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fpText(toml, files).flatMap(fp => emitDirLiveStampedHit(dir, liveDir, files, toml, fp)))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => ensureNative(Manifest.parse(toml).hasUi).flatMap(_ => fpVerifyText(toml, files).flatMap(fp => emitDirLiveStampedHit(dir, liveDir, files, toml, fp))))
 
 def emitDirLiveStampedHit(dir: String, liveDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
   Fs.read(fuzzLiveStampPath(liveDir)).flatMap(old => emitDirLiveStampedGot(dir, liveDir, files, toml, fp, old)).handleErrorWith(_ => emitDirLiveStampedFresh(dir, liveDir, files, toml, fp))
@@ -1530,13 +1531,13 @@ def fuzzBody3(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
   fuzzBody4(job, script, fuzzAddSeeds(runs, joinSlash(job.outDir, "seeds.txt"), script, job.hasUi))
 
 def fuzzBody4(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
-  Fs.write(fuzzExclusionPath(job.outDir), "").flatMap(_ => fuzzUniversals(job).map(_ => "").handleErrorWith(e => IO.println(e).map(_ => e))).flatMap(error => if (error == "") fuzzEngineCheck(job).flatMap(j => fuzzRequiredIdle(j, script, runs)) else fuzzReadOr(fuzzExclusionPath(job.outDir)).flatMap(reason => fuzzDone(job, List.len(runs), FuzzAcc(0, 0, 0, "", climbNew(), Verify.Workload("idle", true, "", "", "", [], "compiled", if (reason != "") "excluded" else "failed", if (reason != "") reason else error) :: []), emptyMut(mutSites(job)))))
+  fuzzProbeClear(job.outDir).flatMap(_ => fuzzUniversals(job).map(_ => "").handleErrorWith(e => IO.println(e).map(_ => e))).flatMap(error => if (error == "") fuzzEngineCheck(job).flatMap(j => fuzzRequiredIdle(j, script, runs)) else fuzzReadOr(fuzzExclusionPath(job.outDir)).flatMap(reason => fuzzReadOr(fuzzRejectionPath(job.outDir)).flatMap(rejection => fuzzDone(job, List.len(runs), FuzzAcc(0, 0, 0, "", climbNew(), Verify.Workload("idle", true, "", "", "", [], "compiled", if (reason != "") "excluded" else fuzzErrorStatus(error, rejection), if (reason != "") reason else error) :: []), emptyMut(mutSites(job))))))
 
 def fuzzRequiredIdle(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
   fuzzRequiredIdleRun(job, script, runs, FuzzRun("", "", "", "", "", []))
 
 def fuzzRequiredIdleRun(job: FuzzJob, script: String, runs: List[FuzzRun], idle: FuzzRun): IO[Unit] =
-  Fs.write(fuzzExclusionPath(job.outDir), "").flatMap(_ => fuzzProbeJob(job, idle).flatMap(code => fuzzRecord(job.outDir, FuzzAcc(0, 0, 0, "", climbNew(), []), idle, "idle", true, if (job.ev) "evaluator" else "compiled", code).flatMap(acc => fuzzReplayGo(job.exe, job.hasUi, job.outDir, runs, acc, job.uiEnv, job.live, job.asan, job.session).flatMap(seen => fuzzAfterReplay(job, script, runs, seen)))))
+  fuzzProbeClear(job.outDir).flatMap(_ => fuzzProbeJob(job, idle).flatMap(code => fuzzRecord(job.outDir, FuzzAcc(0, 0, 0, "", climbNew(), []), idle, "idle", true, if (job.ev) "evaluator" else "compiled", code).flatMap(acc => fuzzReplayGo(job.exe, job.hasUi, job.outDir, runs, acc, job.uiEnv, job.live, job.asan, job.session).flatMap(seen => fuzzAfterReplay(job, script, runs, seen)))))
 
 def fuzzEngineCheck(job: FuzzJob): IO[FuzzJob] =
   if (!job.ev) IO.pure(job) else fuzzIdleAt(job, fuzzEvDir(job.outDir), joinSlash(joinSlash(job.outDir, "fuzz"), "idle/ev")).flatMap(p => fuzzEngineGot(job, p))
@@ -1567,7 +1568,7 @@ def fuzzLivePaintIo(job: FuzzJob): IO[Unit] =
 
 def fuzzLivePaintIoGot(r: (Int, String, String)): IO[Unit] =
   r match {
-    case (code, out, err) => if (code != 0) IO.println(err).flatMap(_ => failMsg("fuzz live graph failed under TestRuntime", "scuzz fuzz")) else Sys.write(out)
+    case (code, out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail(fuzzProbeError("fuzz live graph failed under TestRuntime", code))) else Sys.write(out)
   }
 
 def fuzzLivePaintUi(job: FuzzJob): IO[Unit] =
@@ -1584,7 +1585,7 @@ def fuzzLiveTl(job: FuzzJob): String =
 
 def fuzzLivePaintUiGot(job: FuzzJob, r: (Int, String, String)): IO[Unit] =
   r match {
-    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => failMsg("fuzz live graph failed under TestRuntime", "scuzz fuzz")) else fuzzReadOr(fuzzLiveDump(job)).flatMap(dump => fuzzLivePaintViews(dump))
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail(fuzzProbeError("fuzz live graph failed under TestRuntime", code))) else fuzzReadOr(fuzzLiveDump(job)).flatMap(dump => fuzzLivePaintViews(dump))
   }
 
 def fuzzLivePaintViews(dump: String): IO[Unit] =
@@ -1618,10 +1619,10 @@ def fuzzTlPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "timeline.txt")
 
 def fuzzSplitRun(job: FuzzJob): IO[Unit] =
-  fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir), job.uiEnv, job.outDir).flatMap(cv => fuzzSplitRunGo(job, cv))
+  fuzzProbeClear(job.outDir).flatMap(_ => fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir), job.uiEnv, job.outDir).flatMap(cv => fuzzSplitRunGo(job, cv)))
 
 def fuzzSplitRunGo(job: FuzzJob, cv: Int): IO[Unit] =
-  if (cv != 0) failMsg("fuzz probe failed: app fails under TestRuntime before any event", "scuzz fuzz") else fuzzReadOr(fuzzDumpPath(job.outDir)).flatMap(dump => fuzzSplitViews(job, dump))
+  if (cv != 0) IO.fail(fuzzProbeError("fuzz probe failed before any event", cv)) else fuzzReadOr(fuzzDumpPath(job.outDir)).flatMap(dump => fuzzSplitViews(job, dump))
 
 def fuzzSplitViews(job: FuzzJob, dump: String): IO[Unit] =
   if (!dumpHasView(dump)) failMsg("fuzz verify graph produced no view tree", "scuzz fuzz") else fuzzHasSim(job.dir).flatMap(sim => if (sim) IO.pure(()) else fuzzSplitCmp(job))
@@ -2058,17 +2059,32 @@ def fuzzPromoteFailure(job: FuzzJob, path: String, i: Int): IO[Unit] =
 def fuzzExclusionPath(outDir: String): String =
   joinSlash(outDir, "exclusion.txt")
 
+def fuzzRejectionPath(outDir: String): String =
+  joinSlash(outDir, "rejection.txt")
+
+def fuzzProbeClear(outDir: String): IO[Unit] =
+  Fs.write(fuzzExclusionPath(outDir), "").flatMap(_ => Fs.write(fuzzRejectionPath(outDir), ""))
+
+def fuzzWorkloadStatus(code: Int, rejection: String): String =
+  if (code == 0) "passed" else if (code == 77) "excluded" else if (code == 1 || Str.startsWith(fuzzMutStatus(code, rejection), "killed:")) "failed" else "incomplete"
+
+def fuzzProbeError(message: String, code: Int): String =
+  Str.concat("probe exit ", Str.concat(Str.fromInt(code), Str.concat(": ", message)))
+
+def fuzzErrorStatus(error: String, rejection: String): String =
+  if (!Str.startsWith(error, "probe exit ")) "failed" else fuzzWorkloadStatus(Str.toInt(List.at(Str.split(Str.drop(error, 11), ":"), 0), -1), rejection)
+
 def fuzzFailure(code: Int): Int =
   if (code == 0 || code == 77) 0 else 1
 
 def fuzzRecord(outDir: String, acc: FuzzAcc, run: FuzzRun, label: String, required: Bool, engine: String, code: Int): IO[FuzzAcc] =
-  fuzzReadOr(fuzzExclusionPath(outDir)).flatMap(reason => fuzzReadOr(fuzzSchedPicksPath(outDir)).map(picks => FuzzAcc(acc.search, acc.searchFail, acc.corpFail, acc.repro, acc.climb, Verify.Workload(label, required, run.script, run.sched, run.fault, if (picks == "") run.picks else List.filter(Verify.linesOf(picks), l => l != ""), engine, if (code == 77) "excluded" else if (code == 0) "passed" else "failed", if (code == 77) reason else if (code == 0) "" else Str.concat("exit ", Str.fromInt(code))) :: acc.workloads)))
+  fuzzReadOr(fuzzRejectionPath(outDir)).flatMap(rejection => fuzzReadOr(fuzzExclusionPath(outDir)).flatMap(reason => fuzzReadOr(fuzzSchedPicksPath(outDir)).map(picks => FuzzAcc(acc.search, acc.searchFail, acc.corpFail, acc.repro, acc.climb, Verify.Workload(label, required, run.script, run.sched, run.fault, if (picks == "") run.picks else List.filter(Verify.linesOf(picks), l => l != ""), engine, fuzzWorkloadStatus(code, rejection), if (code == 77) reason else if (code == 0) "" else Str.concat("exit ", Str.fromInt(code))) :: acc.workloads))))
 
 def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun, uiEnv: String, live: Bool, asan: Bool, session: Bool): IO[Int] =
-  Fs.write(fuzzExclusionPath(outDir), "").flatMap(_ => runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, run.picks, outDir, uiEnv, live, session), exe))).flatMap(r => fuzzProbeCodeIo(r)))
+  fuzzProbeClear(outDir).flatMap(_ => runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, run.picks, outDir, uiEnv, live, session), exe))).flatMap(r => fuzzProbeCodeIo(r)))
 
 def fuzzProbeJob(job: FuzzJob, run: FuzzRun): IO[Int] =
-  if (!job.ev) fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv, job.live, job.asan, job.session) else Fs.write(fuzzExclusionPath(job.outDir), "").flatMap(_ => evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", job.hasUi, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, job.uiEnv, false, false)).flatMap(code => IO.pure(code)))
+  if (!job.ev) fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv, job.live, job.asan, job.session) else fuzzProbeClear(job.outDir).flatMap(_ => evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", job.hasUi, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, job.uiEnv, false, false)).flatMap(code => IO.pure(code)))
 
 def kv(pre: String, key: String, val: String): String =
   if (pre == "") Str.concat(key, Str.concat("=", Str.concat(val, """
@@ -2121,7 +2137,7 @@ def fuzzDistancePath(outDir: String): String =
   joinSlash(outDir, "distance.txt")
 
 def fuzzReachEnv(pre: String, outDir: String): String =
-  Str.concat(kv(pre, "EXCLUSION_DUMP", fuzzExclusionPath(outDir)), Str.concat(kv(pre, "SOMETIMES_DUMP", fuzzSometimesPath(outDir)), Str.concat(kv(pre, "TRIGGER_DUMP", fuzzTriggerPath(outDir)), Str.concat(kv(pre, "STATE_VARIED_DUMP", fuzzVariedPath(outDir)), Str.concat(kv(pre, "CLAIM_DUMP", fuzzClaimPath(outDir)), kv(pre, "SCHED_PICKS_DUMP", fuzzSchedPicksPath(outDir)))))))
+  Str.concat(kv(pre, "REJECTION_DUMP", fuzzRejectionPath(outDir)), Str.concat(kv(pre, "EXCLUSION_DUMP", fuzzExclusionPath(outDir)), Str.concat(kv(pre, "SOMETIMES_DUMP", fuzzSometimesPath(outDir)), Str.concat(kv(pre, "TRIGGER_DUMP", fuzzTriggerPath(outDir)), Str.concat(kv(pre, "STATE_VARIED_DUMP", fuzzVariedPath(outDir)), Str.concat(kv(pre, "CLAIM_DUMP", fuzzClaimPath(outDir)), kv(pre, "SCHED_PICKS_DUMP", fuzzSchedPicksPath(outDir))))))))
 
 def fuzzCoveragePath(outDir: String): String =
   joinSlash(outDir, "coverage.txt")
@@ -2203,8 +2219,9 @@ def fuzzWriteSummary(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut, floo
     trigNever = Verify.reachNever(trigDec, trigHit)
     claimNever = Verify.reachNever(claimDec, claimHit)
     ok = Verify.fuzzCampaignOk(fuzzMutIncompleteCount(mut) + acc.searchFail + acc.corpFail + (if (Verify.requiredBlocked(acc.workloads)) 1 else 0), job.iterations, somNever, trigNever, claimNever, Verify.fuzzBelowFloor(scoreMilli(mut), floor))
-    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJson(ok, job.seed, job.iterations, acc.search, acc.searchFail, corpus, acc.corpFail, promo, acc.repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, fuzzMutIncompleteCount(mut), both._1, both._2, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, Verify.InputScope(corpus + 1, List.reverse(acc.workloads), List.map(List.filter(mut.results, r => r._2 == "excluded"), r => r._1), Verify.mapSpecE(Verify.workloadDefs(srcs, job.ens), job.ens), Verify.claimNames(List.map(ver, v => v._2)), Verify.checkedClaimNames(claimDump))), """
+    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJson(ok, job.seed, job.iterations, acc.search, acc.searchFail, corpus, acc.corpFail, promo, acc.repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, fuzzMutIncompleteCount(mut), both._1, both._2, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, Verify.InputScope(corpus + 1, List.reverse(acc.workloads), List.map(List.filter(mut.results, r => r._2 == "excluded"), r => r._1), Verify.mapSpecE(Verify.workloadDefs(srcs, job.ens), job.ens), Verify.claimNames(List.map(ver, v => v._2)), Verify.checkedClaimNames(claimDump)), Verify.propertyNames(hits)), """
 """))
+    _ <- IO.println(Str.concat("author rules: ", if (List.isEmpty(Verify.propertyNames(hits)) && List.isEmpty(Verify.checkedClaimNames(claimDump))) "unguarded" else "guarded"))
     _ <- IO.println(Verify.scopeLine(Verify.InputScope(corpus + 1, acc.workloads, [], [], [], [])))
     _ <- IO.println(Verify.fuzzOut2(Verify.fuzzHead(job.iterations, corpus, mut.sites), acc.search, job.seed, corpus, Verify.fuzzObservations(both._1, both._2, somDec, somHit, trigDec, trigHit, claimDec, claimHit), acc.searchFail, acc.corpFail, promo, Str.concat(Mutate.fuzzMutLine(mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, mut.invalid - fuzzMutExcludedCount(mut), mut.reused), Str.concat(Str.concat("""
 mutate incomplete: """, Str.fromInt(fuzzMutIncompleteCount(mut))), if (fuzzMutExcludedCount(mut) == 0) "" else Str.concat("""
@@ -2259,15 +2276,16 @@ def fuzzMutInput(job: FuzzJob, runs: List[FuzzRun]): IO[String] =
     manifests <- fuzzMutManInputs(job.dir, [])
     native <- fuzzNativeInputs(job.hasUi)
     program <- fuzzArtifact(job.exe)
+    liveProgram <- fuzzArtifact(fuzzLiveExe(job))
     evaluator <- if (job.ev) fuzzArtifact(job.scuzz) else IO.pure("compiled")
     machine <- runLine("uname -m")
     environment <- fuzzHostEnvironment()
-    inputs = fuzzMutInputJson(job, runs, compiler, manifests, native, program, evaluator, Str.trim(machine._2), environment)
+    inputs = fuzzMutInputJson(job, runs, compiler, manifests, native, program, liveProgram, evaluator, Str.trim(machine._2), environment)
     _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "mutation-input.json"), inputs)
   } yield Hash.sha256(inputs)
 
-def fuzzMutInputJson(job: FuzzJob, runs: List[FuzzRun], compiler: String, manifests: List[(String, String)], native: String, program: String, evaluator: String, machine: String, environment: String): String =
-  Str.concat("{\"v\":1,", Str.concat(List.join(Str.concat("\"compiler\":", Check.jsonStr(compiler)) :: Str.concat("\"machine\":", Check.jsonStr(machine)) :: Str.concat("\"environment\":", Check.jsonStr(environment)) :: Str.concat("\"sources\":", fuzzInputPairs(job.files)) :: Str.concat("\"manifests\":", fuzzInputPairs(manifests)) :: Str.concat("\"native\":", native) :: Str.concat("\"program\":", Check.jsonStr(program)) :: Str.concat("\"evaluator\":", Check.jsonStr(evaluator)) :: Str.concat("\"settings\":", fuzzMutSettings(job)) :: Str.concat("\"workloads\":", Str.concat("[", Str.concat(List.join(List.map(runs, r => fuzzMutRunInput(r)), ","), "]"))) :: [], ","), "}"))
+def fuzzMutInputJson(job: FuzzJob, runs: List[FuzzRun], compiler: String, manifests: List[(String, String)], native: String, program: String, liveProgram: String, evaluator: String, machine: String, environment: String): String =
+  Str.concat("{\"v\":1,", Str.concat(List.join(Str.concat("\"compiler\":", Check.jsonStr(compiler)) :: Str.concat("\"machine\":", Check.jsonStr(machine)) :: Str.concat("\"environment\":", Check.jsonStr(environment)) :: Str.concat("\"sources\":", fuzzInputPairs(job.files)) :: Str.concat("\"manifests\":", fuzzInputPairs(manifests)) :: Str.concat("\"native\":", native) :: Str.concat("\"program\":", Check.jsonStr(program)) :: Str.concat("\"live_program\":", Check.jsonStr(liveProgram)) :: Str.concat("\"evaluator\":", Check.jsonStr(evaluator)) :: Str.concat("\"settings\":", fuzzMutSettings(job)) :: Str.concat("\"workloads\":", Str.concat("[", Str.concat(List.join(List.map(runs, r => fuzzMutRunInput(r)), ","), "]"))) :: [], ","), "}"))
 
 def fuzzHostEnvironment(): IO[String] =
   runLine("env").flatMap(r => if (r._1 != 0) IO.fail("host environment identity is unavailable") else IO.pure(Hash.sha256(r._2)))
