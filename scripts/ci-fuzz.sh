@@ -293,6 +293,114 @@ with tempfile.TemporaryDirectory(prefix='scuzz-mutation-picks-') as directory:
 print('Mutation replay: both engines retain recorded scheduler choices in baseline and mutant probes')
 PY_MUT_PICKS
 
+# Mutation cache entries identify the complete recorded campaign input.
+python3 - <<'PY_MUT_IDENTITY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-mutation-identity-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'corpus').mkdir()
+    manifest = root / 'scuzz.toml'
+    source = root / 'src/Main.scuzz'
+    rule = root / 'run.scuzz_verify'
+    scenario = root / 'run.scuzz_scenario'
+    corpus = root / 'corpus/run.toml'
+    manifest.write_text('[package]\nname = "mutation-identity"\n[fuzz]\nscore_floor = 0.000\n')
+    source.write_text('def value(): Int = 0\ndef unused(): Int = 1\n@main def main: IO[Unit] = IO.println(Str.fromInt(value()))\n')
+    scenario.write_text('def setup(): IO[Unit] = IO.pure(())\ndef mark(n: Int): IO[Unit] = Fs.write("value.txt", Str.fromInt(n))\n')
+    rule.write_text('def accepts(t: Timeline): Verdict = Verdict.every(t, i => true)\n')
+    corpus.write_text('[fuzz]\nschedule_seed="1"\nevents=["drive mark 0"]\n')
+    subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+    engine = 'compiled'
+    budget = '1'
+    seed = '7'
+    environment_seed = '7'
+
+    def campaign():
+        env = dict(os.environ, SCUZZ_FUZZ_ENGINE=engine, SCUZZ_RAND_SEED=environment_seed)
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', budget, '--seed', seed, str(root)], env=env, text=True, capture_output=True, timeout=240)
+        assert run.returncode == 0, (run.stdout, run.stderr)
+        inputs = (root / 'build/fuzz/mutation-input.json').read_bytes()
+        record = json.loads(inputs)
+        key = hashlib.sha256(inputs).hexdigest()
+        store = (root / '.scuzz/mutate.results').read_text()
+        assert store.startswith('v 2\ninput ' + key + '\n'), store
+        assert record['sources'] and record['manifests'] and record['native'], record
+        assert record['program'] == hashlib.sha256((root / 'build/mutation-identity').read_bytes()).hexdigest(), record
+        for artifact, digest in record['native']:
+            assert digest == hashlib.sha256(Path(artifact).read_bytes()).hexdigest(), (artifact, digest)
+        if not (root / '.scuzz/mutation-selection-proof').exists():
+            assert 'mutation source: Main.value:' in run.stdout, run.stdout
+            (root / '.scuzz/mutation-selection-proof').write_text('ok')
+        reused = bool(re.search(r'mutant \d+: reused ', run.stdout))
+        return key, reused
+
+    old, reused = campaign()
+    assert not reused
+    same, reused = campaign()
+    assert same == old and reused
+
+    changes = [
+        (rule, 'true', 'i >= 0'),
+        (source, 'IO.println(Str.fromInt(value()))', 'IO.println(Str.concat(Str.fromInt(value()), ""))'),
+        (corpus, 'drive mark 0', 'drive mark 1'),
+        (corpus, 'schedule_seed="1"', 'schedule_seed="2"'),
+        (corpus, 'events=', 'schedule_picks=["setup 1:-", "mark 2:-"]\nevents='),
+        (manifest, 'name = "mutation-identity"', 'name = "mutation-identity"\nversion = "0.1.1"'),
+        (scenario, 'Fs.write("value.txt", Str.fromInt(n))', 'Fs.write("value.txt", Str.concat(Str.fromInt(n), ""))'),
+    ]
+    for path, before, after in changes:
+        text = path.read_text()
+        assert before in text, (path, text)
+        path.write_text(text.replace(before, after, 1))
+        subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+        new, reused = campaign()
+        assert new != old and not reused, (path, old, new, reused)
+        old = new
+    dependency = root / 'dependency'
+    (dependency / 'src').mkdir(parents=True)
+    dep_manifest = dependency / 'scuzz.toml'
+    dep_source = dependency / 'src/Helper.scuzz'
+    dep_manifest.write_text('[package]\nname = "helper"\n')
+    dep_source.write_text('def answer(): Int = 7\n')
+    manifest.write_text(manifest.read_text() + '[dependencies]\nhelper = { path = "dependency" }\n')
+    new, reused = campaign()
+    assert new != old and not reused
+    old = new
+    for path, addition in ((dep_manifest, 'version = "0.1.1"\n'), (dep_source, '\ndef second(): Int = 8\n')):
+        path.write_text(path.read_text() + addition)
+        subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+        new, reused = campaign()
+        assert new != old and not reused
+        old = new
+    budget = '9'
+    new, reused = campaign()
+    assert new != old and not reused
+    old = new
+    seed = '43'
+    new, reused = campaign()
+    assert new != old and not reused
+    old = new
+    environment_seed = '43'
+    new, reused = campaign()
+    assert new != old and not reused
+    old = new
+    engine = 'evaluator'
+    new, reused = campaign()
+    assert new != old and not reused
+    same, reused = campaign()
+    assert same == new and reused
+print('Mutation identity: equal inputs reuse results; rule, caller, corpus, choices, manifest, dependency, driver, limits, environment, and engine changes clear results')
+PY_MUT_IDENTITY
+
 # Claim execution and trigger reach have separate results.
 python3 - <<'PY_REACH'
 import json
@@ -877,9 +985,9 @@ cat /tmp/scuzz-faults.log
 grep -q 'faults entry disk must be fs, net, or queue' /tmp/scuzz-faults.log
 rm -rf "$fault_dir"
 
-# Mutation results persist per site, keyed by compiler SHA-256. A second
-# campaign reuses them. An edit re-mutates only the changed def. The default
-# floor fails a surviving mutant.
+# Mutation results identify the complete campaign input. An equal campaign
+# reuses them. An edit clears site results and selects changed definitions
+# first. The default floor fails a surviving mutant.
 gate_root="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-mutgate.XXXXXX")"
 mkdir -p "$gate_root"
 cp -R examples/counter "$gate_root/counter"
@@ -909,6 +1017,7 @@ grep -q 'mutant 0: survived at Main.capturedLabel' /tmp/scuzz-mutgate-3.log
 reused2="$(grep -c 'reused' /tmp/scuzz-mutgate-2.log)"
 reused3="$(grep -c 'reused' /tmp/scuzz-mutgate-3.log)"
 test "$reused2" -gt "$reused3"
+! grep -Eq 'mutant [0-9]+: reused ' /tmp/scuzz-mutgate-3.log
 rm -rf "$gate_root"
 floordef_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-floordef.XXXXXX")"
 mkdir -p "$floordef_dir/src"
