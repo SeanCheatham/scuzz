@@ -367,7 +367,7 @@ def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir).flatMap(_ => emitVerifyStamp(outDir, toml, own)))
 
 def emitDirVerifyLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fpText(toml, files).flatMap(fp => emitDirVerifyHit(dir, outDir, files, toml, fp)))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => ensureNative(Manifest.parse(toml).hasUi).flatMap(_ => fpVerifyText(toml, files).flatMap(fp => emitDirVerifyHit(dir, outDir, files, toml, fp))))
 
 def emitDirVerifyHit(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
   Fs.read(fpVerifyPath(outDir)).flatMap(old => emitDirVerifyGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirVerifyFresh(dir, outDir, files, toml))
@@ -388,7 +388,7 @@ def emitDirVerifyFreshLink(r: (Int, String, String), outDir: String, toml: Strin
   linkOnlyGot(r).flatMap(_ => emitVerifyStamp(outDir, toml, files))
 
 def emitVerifyStamp(outDir: String, toml: String, own: List[(String, String)]): IO[Unit] =
-  fpText(toml, own).flatMap(fp => Fs.mkdirs(outDir).flatMap(_ => Fs.write(fpVerifyPath(outDir), fp).flatMap(_ => Fs.delete(fpPath(outDir)).handleErrorWith(_ => IO.pure(())))))
+  fpVerifyText(toml, own).flatMap(fp => Fs.mkdirs(outDir).flatMap(_ => Fs.write(fpVerifyPath(outDir), fp).flatMap(_ => Fs.delete(fpPath(outDir)).handleErrorWith(_ => IO.pure(())))))
 
 def fpVerifyPath(outDir: String): String =
   Str.concat(fpPath(outDir), ".verify")
@@ -2242,19 +2242,65 @@ def fuzzMutate3(job: FuzzJob, runs: List[FuzzRun], acc: FuzzAcc, sites: Int, kep
   fuzzMutate4(job, runs, acc, sites, mutTake(job.iterations, sites), kept)
 
 def fuzzMutate4(job: FuzzJob, runs: List[FuzzRun], acc: FuzzAcc, sites: Int, take: Int, kept: List[(String, String, Prog)]): IO[Unit] =
-  if (take <= 0) fuzzDone(job, List.len(runs), acc, emptyMut(sites)) else IO.println(Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutBase(job, runs).flatMap(base => fuzzMutStore(job.dir).flatMap(store => fuzzMutGo(job, kept, Mutate.defSites(kept, job.oracles), store, mutPicks(job.seed, take, sites, Mutate.defSites(kept, job.oracles), store), base, emptyMut(sites), take).flatMap(mut => fuzzMutWrite(job.dir, job.oracles, kept, store, mut).flatMap(_ => fuzzMutFin(job, List.len(runs), acc, mut, take))))))
+  if (take <= 0) fuzzDone(job, List.len(runs), acc, emptyMut(sites)) else IO.println(Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutInput(job, runs).flatMap(input => fuzzMutBase(job, runs).flatMap(base => fuzzMutStore(job.dir, input).flatMap(store => fuzzMutGo(job, kept, Mutate.defSites(kept, job.oracles), store, mutPicks(job.seed, take, sites, Mutate.defSites(kept, job.oracles), store), base, emptyMut(sites), take).flatMap(mut => fuzzMutWrite(job.dir, job.oracles, kept, store, mut).flatMap(_ => fuzzMutFin(job, List.len(runs), acc, mut, take)))))))
 
 def mutStorePath(dir: String): String =
   joinSlash(joinSlash(dir, ".scuzz"), "mutate.results")
 
-def fuzzMutStore(dir: String): IO[MutStore] =
-  Sys.getenv("SCUZZ_EXECUTABLE_SHA256").flatMap(sha => Fs.read(mutStorePath(dir)).map(src => fuzzMutStoreGot(sha, Mutate.storeParse(src))).handleErrorWith(_ => IO.pure(Mutate.noStore())))
-
-def fuzzMutStoreGot(sha: String, store: MutStore): MutStore =
-  if (sha == "" || store.compiler != sha) Mutate.noStore() else store
+def fuzzMutStore(dir: String, input: String): IO[MutStore] =
+  Fs.read(mutStorePath(dir)).map(src => Mutate.storeInput(input, Mutate.storeParse(src))).handleErrorWith(_ => IO.pure(Mutate.MutStore(input, [])))
 
 def fuzzMutWrite(dir: String, o: Bool, kept: List[(String, String, Prog)], store: MutStore, mut: FuzzMut): IO[Unit] =
-  Sys.getenv("SCUZZ_EXECUTABLE_SHA256").flatMap(sha => if (sha == "") IO.pure(()) else Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(mutStorePath(dir), Mutate.storeFormat(sha, Mutate.storeMerge(Mutate.defSites(kept, o), store, mut.results)))))
+  Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(mutStorePath(dir), Mutate.storeFormat(store.input, Mutate.storeMerge(Mutate.defSites(kept, o), store, mut.results))))
+
+def fuzzMutInput(job: FuzzJob, runs: List[FuzzRun]): IO[String] =
+  for {
+    compiler <- fpIdent()
+    manifests <- fuzzMutManInputs(job.dir, [])
+    native <- fuzzNativeInputs(job.hasUi)
+    program <- fuzzArtifact(job.exe)
+    evaluator <- if (job.ev) fuzzArtifact(job.scuzz) else IO.pure("compiled")
+    machine <- runLine("uname -m")
+    environment <- fuzzHostEnvironment()
+    inputs = fuzzMutInputJson(job, runs, compiler, manifests, native, program, evaluator, Str.trim(machine._2), environment)
+    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "mutation-input.json"), inputs)
+  } yield Hash.sha256(inputs)
+
+def fuzzMutInputJson(job: FuzzJob, runs: List[FuzzRun], compiler: String, manifests: List[(String, String)], native: String, program: String, evaluator: String, machine: String, environment: String): String =
+  Str.concat("{\"v\":1,", Str.concat(List.join(Str.concat("\"compiler\":", Check.jsonStr(compiler)) :: Str.concat("\"machine\":", Check.jsonStr(machine)) :: Str.concat("\"environment\":", Check.jsonStr(environment)) :: Str.concat("\"sources\":", fuzzInputPairs(job.files)) :: Str.concat("\"manifests\":", fuzzInputPairs(manifests)) :: Str.concat("\"native\":", native) :: Str.concat("\"program\":", Check.jsonStr(program)) :: Str.concat("\"evaluator\":", Check.jsonStr(evaluator)) :: Str.concat("\"settings\":", fuzzMutSettings(job)) :: Str.concat("\"workloads\":", Str.concat("[", Str.concat(List.join(List.map(runs, r => fuzzMutRunInput(r)), ","), "]"))) :: [], ","), "}"))
+
+def fuzzHostEnvironment(): IO[String] =
+  runLine("env").flatMap(r => if (r._1 != 0) IO.fail("host environment identity is unavailable") else IO.pure(Hash.sha256(r._2)))
+
+def fuzzMutSettings(job: FuzzJob): String =
+  Verify.jStrList(Str.fromInt(job.iterations) :: Str.fromInt(job.seed) :: Verify.jb(job.oracles) :: Verify.jb(job.ev) :: job.uiEnv :: Verify.jb(job.noFailFast) :: Verify.jb(job.diff) :: Verify.jb(job.live) :: Verify.jb(job.asan) :: Verify.jb(job.session) :: [])
+
+def fuzzMutRunInput(run: FuzzRun): String =
+  Verify.jStrList(run.path :: run.src :: run.script :: run.sched :: run.fault :: List.join(run.picks, ";") :: [])
+
+def fuzzInputPairs(pairs: List[(String, String)]): String =
+  Str.concat("[", Str.concat(List.join(List.map(pairs, p => Verify.jStrList(p._1 :: p._2 :: [])), ","), "]"))
+
+def fuzzMutManInputs(dir: String, seen: List[String]): IO[List[(String, String)]] =
+  Fs.canonicalize(dir).flatMap(path => if (List.contains(seen, path)) IO.fail(cycleErr(path)) else Fs.read(joinSlash(path, "scuzz.toml")).flatMap(src => fuzzMutDepInputs(path, Manifest.parse(src).deps, path :: seen).map(deps => (path, src) :: deps)))
+
+def fuzzMutDepInputs(dir: String, deps: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  if (List.isEmpty(deps)) IO.pure(Manifest.noPairs()) else fuzzMutManInputs(depDir(dir, List.at(deps, 0)._2), seen).flatMap(first => fuzzMutDepInputs(dir, List.tail(deps), seen).map(rest => List.concat(first, rest)))
+
+def fuzzArtifact(path: String): IO[String] =
+  Fs.read(path).map(bytes => Hash.sha256(bytes))
+
+def fuzzNativeInputs(hasUi: Bool): IO[String] =
+  crateHome().flatMap(h => fuzzNativeInputsAt(if (hasUi) rtLib(h) :: skiaLib(h) :: deskLib(h) :: mobLib(h) :: [] else rtLib(h) :: []))
+
+def fuzzNativeInputsAt(paths: List[String]): IO[String] =
+  if (List.isEmpty(paths)) IO.pure("[]") else fuzzNativePairs(paths).map(pairs => fuzzInputPairs(pairs))
+
+def fuzzNativePairs(paths: List[String]): IO[List[(String, String)]] =
+  if (List.isEmpty(paths)) IO.pure(Manifest.noPairs()) else fuzzArtifact(List.at(paths, 0)).flatMap(hash => fuzzNativePairs(List.tail(paths)).map(rest => (List.at(paths, 0), hash) :: rest))
+
+def fpVerifyText(toml: String, files: List[(String, String)]): IO[String] =
+  fpText(toml, files).flatMap(input => fuzzNativeInputs(Manifest.parse(toml).hasUi).map(native => Str.concat(input, native)))
 
 def mutPicks(seed: Int, take: Int, sites: Int, ds: List[DefSite], store: MutStore): List[Int] =
   mutPicksGo(Mutate.storeChanged(store, ds), Mutate.pickSites(seed, take, sites), take)

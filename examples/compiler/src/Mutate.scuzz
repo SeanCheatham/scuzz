@@ -8,7 +8,7 @@ record DefSite(stem: String, mod: String, name: String, base: Int, span: Int, ha
 
 record StoreDef(stem: String, mod: String, name: String, hash: Int, sites: List[(Int, String)])
 
-record MutStore(compiler: String, defs: List[StoreDef])
+record MutStore(input: String, defs: List[StoreDef])
 
 record ImplWalk(xs: List[Im], n: Int)
 
@@ -246,6 +246,9 @@ def defSiteOfGo(h: DefSite, rest: List[DefSite], site: Int): List[DefSite] =
 def noStore(): MutStore =
   MutStore("", [])
 
+def storeInput(input: String, store: MutStore): MutStore =
+  if (store.input == input) store else MutStore(input, List.map(store.defs, d => StoreDef(d.stem, d.mod, d.name, d.hash, [])))
+
 def storeDefOf(defs: List[StoreDef], stem: String, mod: String, name: String): List[StoreDef] =
   if (List.isEmpty(defs)) [] else storeDefOfGo(List.at(defs, 0), List.tail(defs), stem, mod, name)
 
@@ -274,7 +277,7 @@ def reusableStatus(status: String): String =
   if (status == "killed" || status == "survived" || status == "inert" || status == "invalid" || status == "excluded") status else ""
 
 def storeChanged(store: MutStore, ds: List[DefSite]): List[Int] =
-  if (store.compiler == "") noInts() else storeChangedGo(ds, store.defs, noInts())
+  if (store.input == "" || List.isEmpty(store.defs)) noInts() else storeChangedGo(ds, store.defs, noInts())
 
 def storeChangedGo(ds: List[DefSite], defs: List[StoreDef], acc: List[Int]): List[Int] =
   if (List.isEmpty(ds)) List.reverse(acc) else storeChangedGo(List.tail(ds), defs, storeChangedHd(List.at(ds, 0), storeDefOf(defs, List.at(ds, 0).stem, List.at(ds, 0).mod, List.at(ds, 0).name), acc))
@@ -295,7 +298,7 @@ def storeParseGo(lines: List[String], acc: MutStore): MutStore =
   if (List.isEmpty(lines)) acc else storeParseHd(List.at(lines, 0), List.tail(lines), acc)
 
 def storeParseHd(line: String, rest: List[String], acc: MutStore): MutStore =
-  if (Str.startsWith(line, "compiler ")) storeParseGo(rest, MutStore(Str.drop(line, 9), acc.defs)) else if (Str.startsWith(line, "def ")) storeParseGo(rest, MutStore(acc.compiler, storeParseDef(Str.split(line, " ")) :: acc.defs)) else if (Str.startsWith(line, "site ")) storeParseGo(rest, MutStore(acc.compiler, storeParseSite(Str.split(line, " "), acc.defs))) else storeParseGo(rest, acc)
+  if (Str.startsWith(line, "input ")) storeParseGo(rest, MutStore(Str.drop(line, 6), acc.defs)) else if (Str.startsWith(line, "def ")) storeParseGo(rest, MutStore(acc.input, storeParseDef(Str.split(line, " ")) :: acc.defs)) else if (Str.startsWith(line, "site ")) storeParseGo(rest, MutStore(acc.input, storeParseSite(Str.split(line, " "), acc.defs))) else storeParseGo(rest, acc)
 
 def storeParseDef(toks: List[String]): StoreDef =
   StoreDef(List.at(toks, 1), List.at(toks, 2), List.at(toks, 3), Str.toInt(List.at(toks, 4), 0), [])
@@ -306,9 +309,9 @@ def storeParseSite(toks: List[String], defs: List[StoreDef]): List[StoreDef] =
 def storeParseSiteHd(d: StoreDef, rest: List[StoreDef], toks: List[String]): List[StoreDef] =
   StoreDef(d.stem, d.mod, d.name, d.hash, List.concat(d.sites, (Str.toInt(List.at(toks, 1), 0), List.at(toks, 2)) :: [])) :: rest
 
-def storeFormat(compiler: String, defs: List[StoreDef]): String =
-  Str.concat("""v 1
-compiler """, Str.concat(compiler, Str.concat("""
+def storeFormat(input: String, defs: List[StoreDef]): String =
+  Str.concat("""v 2
+input """, Str.concat(input, Str.concat("""
 """, storeFormatDefs(defs))))
 
 def storeFormatDefs(defs: List[StoreDef]): String =
