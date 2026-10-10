@@ -12,6 +12,21 @@ Keep one compiler, one verification command, and the existing simulation runtime
 
 Keep current work on language, standard kits, and verification tooling. Select each next slice from a demonstrated application correctness gap. The decision loop gates below remain later work. Keep useful generation and human review results unproven until a real application session measures them.
 
+### Improvement work order
+
+Use these seven topics to select and verify application correctness work.
+Complete one slice before starting the next slice.
+
+1. Prevent invalid states. Reject partial binding patterns. Require IO at each effect binding. Use enums and validated domain types. Extend Result checks for demonstrated container errors.
+2. Keep input validation active. Diagnose clear uses of erased checks as input guards. Extend typed decoding for demonstrated input needs. Define arithmetic and collection boundary behavior.
+3. Establish claim reach. Separate claim execution, trigger reach, and verdicts. Require relevant workloads for conditional and absence rules.
+4. Examine rule strength with mutation. Connect survivors to source and claims. Separate invalid, excluded, incomplete, and inert mutations. Do not count infrastructure failures as detected defects.
+5. Exercise failure and recovery. Cover cancellation, timeout, duplicate requests, interrupted writes, and recovery. Check safety, bounded progress, and relations between executions.
+6. Improve tool evidence. Separate passed, failed, incomplete, and unguarded results. Retain small replay workloads and full input identities. Use the same project checks in the IDE and CLI.
+7. Check compiler and runtime behavior independently. Extend generated compiler checks and native replay. Use independent expected results. Add undefined behavior checks to the C runtime. Keep live platform proof limits explicit.
+
+For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
+
 ## Later arc: development through decisions
 
 A developer sets one objective and reviews a stream of small changes. Each card compares one proposal with the current working tree. Scuzz finds a recorded execution that shows the difference. The developer chooses a blind lane. Accepted changes become the baseline for the next request. Claims constrain the choices. Locks: [`philosophy.md`](philosophy.md#proposal-review).
