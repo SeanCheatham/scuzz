@@ -182,6 +182,8 @@ def guarded(text: String): Bool =
     _ <- Input.attempt(false).flatMap(n => IO.println(Str.fromInt(n)))
     _ <- Input.unitBind(true).flatMap(n => IO.println(Str.fromInt(n)))
     _ <- Input.unitBind(false).handleErrorWith(_ => IO.pure(-1)).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- Input.totalBindings(true, 7).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- Input.totalBindings(false, -1).flatMap(n => IO.println(Str.fromInt(n)))
   } yield ()
 '''
     (root / 'src/Main.scuzz').write_text(source)
@@ -190,7 +192,7 @@ def guarded(text: String): Bool =
         output = command([engine, root]).stdout.strip().splitlines()
         if output and output[0] == 'ok':
             output = output[1:]
-        assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1'], (engine, output)
+        assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1'], (engine, output)
     bad = [('_ = Str.parseInt("7")', '()', 'discarded'),
            ('result = Str.parseInt("7")', '()', 'discarded'),
            ('_ignored = Str.parseInt("7")', '()', 'discarded'),
@@ -223,7 +225,15 @@ def guarded(text: String): Bool =
            ('Input.Read(count = n) <- IO.pure(Input.Read(Str.parseInt("bad"), 7))', '()', 'discarded'),
            ('Result.Ok(n) :: tail = [Str.parseInt("bad")]', '()', 'must cover success and failure'),
            ('_ :: tail = [Str.parseInt("bad")]', '()', 'discarded'),
-           ('(result, n) = (Str.parseInt("bad"), 7)\n    use = (result: Int) => result', '()', 'discarded')]
+           ('(result, n) = (Str.parseInt("bad"), 7)\n    use = (result: Int) => result', '()', 'discarded'),
+           ('Some(n) = None', '()', 'binding pattern does not cover every value'),
+           ('Some(n) <- IO.pure(None)', '()', 'binding pattern does not cover every value'),
+           ('n :: _ = List.empty()', '()', 'binding pattern does not cover every value'),
+           ('[] = [1]', '()', 'binding pattern does not cover every value'),
+           ('true = false', '()', 'binding pattern does not cover every value'),
+           ('(true, n) = (false, 7)', '()', 'binding pattern does not cover every value'),
+           ('0 = 1', '()', 'binding pattern does not cover every value'),
+           ('"ok" = "bad"', '()', 'binding pattern does not cover every value')]
     for bindings, body, message in bad:
         effect = '<-' in bindings
         declaration = 'IO[Unit]' if effect else 'Unit'
@@ -234,7 +244,10 @@ def guarded(text: String): Bool =
         diagnostics = json.loads(result.stdout)
         error = next(row for row in diagnostics if row['severity'] == 'error')
         assert message in error['message'], error
-        assert error['file'].endswith('Bad.scuzz') and error['line'] >= 4 and error['column'] > 0, (bindings, error)
+        minimum_line = 3 if bindings == 'true = false' else 4
+        assert error['file'].endswith('Bad.scuzz') and error['line'] >= minimum_line and error['column'] > 0, (bindings, error)
+        if bindings == 'true = false':
+            assert error['line'] == 3, error
         for entry in ['build', 'eval']:
             result = command([entry, root], ok=False)
             assert message in result.stdout + result.stderr, (entry, result.stdout, result.stderr)

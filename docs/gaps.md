@@ -78,7 +78,7 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
 - **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.
-- **Check scope.** The editor Check button does not perform all format and verify-file checks of `scuzz check`. Candidate gating must use the required shared checks even if the general button stays separate.
+- **Check scope.** The editor Check button does not perform all format and verify-file checks of `scuzz check`. A missing path dependency makes CLI check fail. The language server publishes an empty diagnostic list for the same package. Editor dependency loading can also fall back to the package files. Keep project load errors visible. Use the shared project checks in the editor and CLI. Candidate gating must use the required shared checks even if the general button stays separate.
 - **Standard kits.** OS threads remain missing. Add kit work only when it blocks an ordinary program or a required review proof.
 
 ### Local model evidence

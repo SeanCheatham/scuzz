@@ -454,16 +454,7 @@ def wrapDraw(name: String, v: Expr, body: Expr): Expr =
   if (name == "()") wrapDraw("_", v, body) else if (isSimpleBind(name)) Expr.EMethod(v, "flatMap", Expr.ELam(name, "", body) :: noExpr(), 0) else wrapPatDraw(name, v, body)
 
 def wrapPatDraw(pat: String, v: Expr, body: Expr): Expr =
-  Expr.EMethod(Expr.EMethod(v, "flatMap", Expr.ELam("__p", "", Expr.ECall("IO.pure", Expr.EMatch(Expr.EVar("__p", 0), Arm(pat, "", patResult(pat)) :: noArm(), 0) :: noExpr(), 0)) :: noExpr(), 0), "flatMap", Expr.ELam(patBindName(pat), "", body) :: noExpr(), 0)
-
-def patResult(pat: String): Expr =
-  if (isConsPat(pat)) Expr.EVar(consHead(pat), 0) else if (hasComma(patBind(pat))) Expr.ETuple(patEVars(splitPat(patBind(pat)))) else Expr.EVar(fieldBind(patBind(pat)), 0)
-
-def patEVars(ns: List[String]): List[Expr] =
-  if (List.isEmpty(ns)) noExpr() else Expr.EVar(fieldBind(List.at(ns, 0)), 0) :: patEVars(List.tail(ns))
-
-def patBindName(pat: String): String =
-  if (isConsPat(pat)) consHead(pat) else if (hasComma(patBind(pat))) Str.concat("(", Str.concat(joinComma(splitPat(patBind(pat))), ")")) else fieldBind(patBind(pat))
+  Expr.EMethod(v, "flatMap", Expr.ELam("__ScuzzForValue", "", Expr.EMatch(Expr.EVar("__ScuzzForValue", 0), Arm(pat, "", body) :: noArm(), 0)) :: noExpr(), 0)
 
 def joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) List.at(xs, 0) else Str.concat(List.at(xs, 0), Str.concat(", ", joinComma(List.tail(xs))))
@@ -487,7 +478,7 @@ def eqIsLet(name: String): Bool =
   name == "_" || keepBind(name) && !isTuplePat(name) && isSimpleBind(name)
 
 def isSimpleBind(n: String): Bool =
-  n != "" && parenAt(n, 0) < 0 && !isConsPat(n)
+  n == "_" || Check.isBareName(n) && Lexer._skipIdent(n, 0) == Str.len(n) && !isBoolPat(n)
 
 def emitInterp(parts: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitInterpFold(parts, prefix, strs, defs, ens, ps, loc, 0)
@@ -1545,7 +1536,7 @@ def nethPsTy(bind: String, bty: String, rest: List[Param]): List[Param] =
   if (keepBind(bind)) Param(bind, bty, "", "") :: rest else rest
 
 def nethBindTy(bind: String, body: Expr, rest: List[Param], defs: Ftab): String =
-  if (bind == "__tup") nethTupTy(body, rest, defs) else if (bind == "_ph") phBindTy(body) else if (bind == "__p") matchLamBindTy(body) else if (nameIntUse(body, bind)) "Int" else ""
+  if (bind == "__tup") nethTupTy(body, rest, defs) else if (bind == "_ph") phBindTy(body) else if (bind == "__p" || bind == "__ScuzzForValue") matchLamBindTy(body) else if (nameIntUse(body, bind)) "Int" else ""
 
 def nameIntUse(e: Expr, n: String): Bool =
   e match {
