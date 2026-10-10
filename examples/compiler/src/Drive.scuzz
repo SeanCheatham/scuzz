@@ -243,7 +243,7 @@ def compileFilesOk(m: Man, ll: String, outDir: String, clang: String, lib: Strin
   PkgOut(true, m.name, ll, llName(outDir, m.name), linkLine(clang, llName(outDir, m.name), lib, exeName(outDir, m.name)), "[]")
 
 def manNeed(m: Man): IO[Unit] =
-  if (!m.ok) IO.println(m.err).flatMap(_ => IO.fail("toml")) else IO.pure(())
+  if (!m.ok) IO.fail(m.err) else IO.pure(())
 
 def rtLib(h: String): String =
   crateAt(h, "crates/runtime/build/libscuzz_rt.a")
@@ -415,7 +415,7 @@ def fuzzReadScenario(dir: String): IO[String] =
   fuzzScenarioSrcs(dir).flatMap(xs => fuzzReadScenarioGot(xs))
 
 def fuzzReadScenarioGot(xs: List[String]): IO[String] =
-  if (List.isEmpty(xs)) IO.pure("") else if (List.isEmpty(List.tail(xs))) IO.pure(List.at(xs, 0)) else IO.println(Verify.manyScenarioMsg()).flatMap(_ => IO.fail("scuzz check"))
+  if (List.isEmpty(xs)) IO.pure("") else if (List.isEmpty(List.tail(xs))) IO.pure(List.at(xs, 0)) else IO.fail(Verify.manyScenarioMsg())
 
 def fuzzScenarioSrcs(dir: String): IO[List[String]] =
   Fs.list(dir).flatMap(ents => fuzzScnGo(dir, ents, Verify.noStr())).handleErrorWith(_ => IO.pure(Verify.noStr()))
@@ -487,7 +487,10 @@ def collectDepNamed(dir: String, _name: String, path: String, rest: List[(String
   collectPkg(depDir(dir, path), dir, rest, acc, seen)
 
 def collectPkg(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
-  if (seenHas(seen, pkgDir)) IO.println(cycleErr(pkgDir)).flatMap(_ => IO.fail("toml")) else Fs.read(joinSlash(pkgDir, "scuzz.toml")).flatMap(toml => collectPkgMan(pkgDir, parentDir, rest, acc, Manifest.parse(toml), seen))
+  Fs.canonicalize(pkgDir).flatMap(path => collectPkgAt(path, parentDir, rest, acc, seen))
+
+def collectPkgAt(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  if (seenHas(seen, pkgDir)) IO.fail(cycleErr(pkgDir)) else Fs.read(joinSlash(pkgDir, "scuzz.toml")).flatMap(toml => collectPkgMan(pkgDir, parentDir, rest, acc, Manifest.parse(toml), seen))
 
 def collectPkgMan(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], m: Man, seen: List[String]): IO[List[(String, String)]] =
   manNeed(m).flatMap(_ => Fs.list(joinSlash(pkgDir, "src")).flatMap(ents => collectPkgListed(pkgDir, parentDir, rest, acc, m.deps, ents, seen)))
@@ -651,10 +654,7 @@ def tapNEnvMan(m: Man, tap: Bool): String =
   if (!tap || Manifest.uiTap(Manifest.manUi(m)) == "") "" else Str.concat("SCUZZ_UI_TAP_N=", Str.concat(Manifest.uiTap(Manifest.manUi(m)), " "))
 
 def checkDir(dir: String, json: Bool): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkDirMan(dir, json, Manifest.parse(toml)))
-
-def checkDirMan(dir: String, json: Bool, m: Man): IO[Unit] =
-  manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => checkDirListed(dir, json, m.deps, ents)))
+  checkOverlay(dir, []).flatMap(raw => checkPrint(json, raw))
 
 def evWriteFiles(dir: String, files: List[(String, String)]): IO[Unit] =
   Fs.mkdirs(dir).flatMap(_ => Fs.write(joinSlash(dir, "files.txt"), Verify.nls(evStems(files))).flatMap(_ => evWriteSrcs(dir, files, 0)))
@@ -680,58 +680,81 @@ def skipWalk(name: String): Bool =
 def joinRel(rel: String, name: String): String =
   if (rel == "") name else joinSlash(rel, name)
 
-def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDriveNames(dir, json, deps, own, ents))
+def checkDriveNames(dir: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)]): IO[String] =
+  fuzzReadScenario(dir).flatMap(scn => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGo(dir, deps, own, overlays, scn, vers, if (List.isEmpty(vers)) Verify.noStr() else Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)))))
 
-def checkDriveNames(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  fuzzReadScenario(dir).flatMap(scn => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGo(dir, json, deps, own, scn, vers, if (List.isEmpty(vers)) Verify.noStr() else Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)))))
+def checkDriveNamesGo(dir: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], scn: String, vers: List[String], oracles: List[String]): IO[String] =
+  checkDriveNamesRule(dir, deps, own, overlays, Verify.ruleFirst(Verify.driveRule(List.concat(oracles, Verify.scenarioDrvNames(scn))), Verify.driveClaimRule(vers, Verify.driveClaimNames(scn, oracles))))
 
-def checkDriveNamesGo(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], scn: String, vers: List[String], oracles: List[String]): IO[Unit] =
-  checkDriveNamesRule(dir, json, deps, own, Verify.ruleFirst(Verify.driveRule(List.concat(oracles, Verify.scenarioDrvNames(scn))), Verify.driveClaimRule(vers, Verify.driveClaimNames(scn, oracles))))
+def checkDriveNamesRule(dir: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], msg: String): IO[String] =
+  if (msg == "") checkDirVerify(dir, deps, own, overlays) else IO.pure(projectError(msg))
 
-def checkDriveNamesRule(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], msg: String): IO[Unit] =
-  if (msg == "") checkDirVerify(dir, json, deps, own) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
+def checkDirVerify(dir: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)]): IO[String] =
+  Fs.list(dir).flatMap(ents => checkVerifyGo(dir, "", deps, own, overlays, ents))
 
-def checkDirVerify(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  Fs.list(dir).flatMap(ents => checkVerifyGo(dir, "", json, deps, own, ents))
+def checkVerifyGo(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], ents: List[(String, Bool)]): IO[String] =
+  if (List.isEmpty(ents)) checkVerifyDone(dir, rel, deps, own, overlays) else checkVerifyHd(dir, rel, deps, own, overlays, List.at(ents, 0), List.tail(ents))
 
-def checkVerifyGo(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  if (List.isEmpty(ents)) checkVerifyDone(dir, rel, json, deps, own) else checkVerifyHd(dir, rel, json, deps, own, List.at(ents, 0), List.tail(ents))
+def checkVerifyDone(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)]): IO[String] =
+  if (rel != "") IO.pure("[]") else fuzzVerSrcs(dir).flatMap(vers => collectDeps(dir, deps, own).flatMap(files => checkProjectLive(dir, substOverlay(files, overlays), own, vers)))
 
-def checkVerifyDone(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  if (rel != "") IO.pure(()) else fuzzVerSrcs(dir).flatMap(vers => collectDeps(dir, deps, own).flatMap(files => checkFmtGo(json, files, own, fileStems(own), vers, Map.empty())))
+def checkProjectLive(dir: String, files: List[(String, String)], own: List[(String, String)], vers: List[String]): IO[String] =
+  for {
+    stems = fileStems(own)
+    raw = checkProjectFmt(files, own, stems, vers, Map.empty())
+    scn <- fuzzReadScenario(dir)
+    checked <- if (Str.contains(raw, "\"severity\":\"error\"") || List.isEmpty(vers) && scn == "") IO.pure(raw) else fuzzCollectFiles(dir, files).map(graph => checkProjectVerify(graph, stems, raw))
+  } yield checked
 
-def checkVerifyHd(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)]): IO[Unit] =
+def checkProjectVerify(graph: List[(String, String)], stems: List[String], live: String): String =
+  for {
+    checked = Verify.wrapMod() :: stems
+    files = sigFiles(graph, checked)
+    message = Check.humanFilesOwn(files, checked)
+  } yield if (message == "scuzz check ok") live else projectError(message)
+
+def checkVerifyHd(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)]): IO[String] =
   ent match {
-    case (name, isDir) => checkVerifyPick(dir, rel, json, deps, own, name, isDir, rest)
+    case (name, isDir) => checkVerifyPick(dir, rel, deps, own, overlays, name, isDir, rest)
   }
 
-def checkVerifyPick(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], name: String, isDir: Bool, rest: List[(String, Bool)]): IO[Unit] =
-  if (isDir) checkVerifyDir(dir, rel, json, deps, own, name, rest) else if (isIntent(name)) IO.println(Verify.intentMsg(joinRel(rel, name))).flatMap(_ => IO.fail("scuzz check")) else if (isSimName(name)) IO.println(Verify.simLeftoverMsg(joinRel(rel, name))).flatMap(_ => IO.fail("scuzz check")) else if (isDrivers(name)) IO.println(Verify.drvLeftoverMsg(joinRel(rel, name))).flatMap(_ => IO.fail("scuzz check")) else if (isScenario(name)) Fs.read(joinSlash(dir, name)).flatMap(src => checkScenarioGot(dir, rel, json, deps, own, joinRel(rel, name), src, rest)) else if (!isVerify(name)) checkVerifyGo(dir, rel, json, deps, own, rest) else Fs.read(joinSlash(dir, name)).flatMap(src => checkVerifySrc(dir, rel, json, deps, own, joinRel(rel, name), src, rest))
+def checkVerifyPick(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], name: String, isDir: Bool, rest: List[(String, Bool)]): IO[String] =
+  if (isDir) checkVerifyDir(dir, rel, deps, own, overlays, name, rest) else if (isIntent(name)) IO.pure(projectError(Verify.intentMsg(joinRel(rel, name)))) else if (isSimName(name)) IO.pure(projectError(Verify.simLeftoverMsg(joinRel(rel, name)))) else if (isDrivers(name)) IO.pure(projectError(Verify.drvLeftoverMsg(joinRel(rel, name)))) else if (isScenario(name)) Fs.read(joinSlash(dir, name)).flatMap(src => checkScenarioGot(dir, rel, deps, own, overlays, joinRel(rel, name), src, rest)) else if (!isVerify(name)) checkVerifyGo(dir, rel, deps, own, overlays, rest) else Fs.read(joinSlash(dir, name)).flatMap(src => checkVerifySrc(dir, rel, deps, own, overlays, joinRel(rel, name), src, rest))
 
-def checkVerifyDir(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], name: String, rest: List[(String, Bool)]): IO[Unit] =
-  if (skipWalk(name)) checkVerifyGo(dir, rel, json, deps, own, rest) else Fs.list(joinSlash(dir, name)).flatMap(sub => checkVerifyGo(joinSlash(dir, name), joinRel(rel, name), json, deps, own, sub).flatMap(_ => checkVerifyGo(dir, rel, json, deps, own, rest)))
+def checkVerifyDir(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], name: String, rest: List[(String, Bool)]): IO[String] =
+  if (skipWalk(name)) checkVerifyGo(dir, rel, deps, own, overlays, rest) else Fs.list(joinSlash(dir, name)).flatMap(sub => checkVerifyGo(joinSlash(dir, name), joinRel(rel, name), deps, own, overlays, sub).flatMap(raw => if (raw != "[]") IO.pure(raw) else checkVerifyGo(dir, rel, deps, own, overlays, rest)))
 
-def checkVerifySrc(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], file: String, src: String, rest: List[(String, Bool)]): IO[Unit] =
-  checkVerifyGot(dir, rel, json, deps, own, rest, Verify.checkVerifyEns(src, file, Verify.ensOfFiles(own)))
+def checkVerifySrc(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], file: String, src: String, rest: List[(String, Bool)]): IO[String] =
+  checkVerifyGot(dir, rel, deps, own, overlays, rest, Verify.checkVerifyEns(src, file, Verify.ensOfFiles(own)))
 
-def checkScenarioGot(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], file: String, src: String, rest: List[(String, Bool)]): IO[Unit] =
-  collectDeps(dir, deps, own).flatMap(files => checkScenarioMsg(dir, rel, json, deps, own, rest, file, Verify.checkScenario(src, file, files)))
+def checkScenarioGot(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], file: String, src: String, rest: List[(String, Bool)]): IO[String] =
+  collectDeps(dir, deps, own).flatMap(files => checkScenarioMsg(dir, rel, deps, own, overlays, rest, file, Verify.checkScenario(src, file, substOverlay(files, overlays))))
 
-def checkScenarioMsg(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], rest: List[(String, Bool)], file: String, msg: String): IO[Unit] =
-  if (msg == "scuzz check ok") checkVerifyGo(dir, rel, json, deps, own, rest) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
+def checkScenarioMsg(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], rest: List[(String, Bool)], file: String, msg: String): IO[String] =
+  if (msg == "scuzz check ok") checkVerifyGo(dir, rel, deps, own, overlays, rest) else IO.pure(projectError(msg))
 
-def checkVerifyGot(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], rest: List[(String, Bool)], msg: String): IO[Unit] =
-  if (msg == "scuzz check ok") checkVerifyGo(dir, rel, json, deps, own, rest) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
+def checkVerifyGot(dir: String, rel: String, deps: List[(String, String)], own: List[(String, String)], overlays: List[(String, String)], rest: List[(String, Bool)], msg: String): IO[String] =
+  if (msg == "scuzz check ok") checkVerifyGo(dir, rel, deps, own, overlays, rest) else IO.pure(projectError(msg))
 
 def checkFmtGo(json: Bool, all: List[(String, String)], rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
-  if (List.isEmpty(rest)) checkFmtDone(json, all, stems, vers, parsed) else checkFmtHd(json, all, List.at(rest, 0), List.tail(rest), stems, vers, parsed)
+  checkPrint(json, checkProjectFmt(all, rest, stems, vers, parsed))
 
-def checkFmtDone(json: Bool, all: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
-  checkFmtDone2(json, stems, sigFiles(all, stems), vers, parsed)
+def checkProjectFmt(all: List[(String, String)], rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): String =
+  if (List.isEmpty(rest)) checkProjectDone(sigFiles(all, stems), stems, vers, parsed) else checkProjectFmtHd(all, List.at(rest, 0), List.tail(rest), stems, vers, parsed)
 
-def checkFmtDone2(json: Bool, stems: List[String], sigs: List[(String, String)], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
-  checkDirOutParsed(json, parseFilesCached(sigs, parsed, Parse.emptyProg()), sigs, stems, vers)
+def checkProjectFmtHd(all: List[(String, String)], h: (String, String), rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): String =
+  h match {
+    case (stem, src) => checkProjectFmtSrc(all, stem, src, rest, stems, vers, parsed, Parse.parseFile(stem, src))
+  }
+
+def checkProjectFmtSrc(all: List[(String, String)], stem: String, src: String, rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)], p: Prog): String =
+  if (Parse.hasParseError(p)) Check.checkFilesOwn([(stem, src)], [stem]) else if (Parse.pretty(p) != src) sourceError(Str.concat(stem, ".scuzz"), "needs formatting (run scuzz fmt)") else checkProjectFmt(all, rest, stems, vers, Map.set(parsed, stem, (src, p)))
+
+def checkProjectDone(files: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): String =
+  for {
+    p = parseFilesCached(files, parsed, Parse.emptyProg())
+    diags = Check.check3(files, Check.checkProgOwn(p, stems))
+  } yield if (diags == "[]") Check.unclaimedJsonVer(p, filesForStems(files, stems), stems, vers) else diags
 
 def parseFilesCached(files: List[(String, String)], parsed: Map[String, (String, Prog)], acc: Prog): Prog =
   if (List.isEmpty(files)) acc else parseFilesCachedHd(List.at(files, 0), List.tail(files), parsed, acc)
@@ -754,14 +777,6 @@ def filesForStemsHd(h: (String, String), rest: List[(String, String)], stems: Li
   h match {
     case (stem, src) => if (hasFileStem(stems, stem)) h :: filesForStems(rest, stems) else filesForStems(rest, stems)
   }
-
-def checkFmtHd(json: Bool, all: List[(String, String)], h: (String, String), rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
-  h match {
-    case (stem, src) => checkFmtSrc(json, all, stem, src, rest, stems, vers, parsed, Parse.parseFile(stem, src))
-  }
-
-def checkFmtSrc(json: Bool, all: List[(String, String)], stem: String, src: String, rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)], p: Prog): IO[Unit] =
-  if (Parse.hasParseError(p)) IO.fail(Str.concat("scuzz check: ", Check.human(src))) else if (Parse.pretty(p) == src) checkFmtGo(json, all, rest, stems, vers, Map.set(parsed, stem, (src, p))) else checkFmtFail(stem)
 
 def fileStems(files: List[(String, String)]): List[String] =
   if (List.isEmpty(files)) [] else fileStemsHd(List.at(files, 0), List.tail(files))
@@ -831,24 +846,31 @@ def lineIsDef(line: String): Bool =
 def lineIsTop(line: String): Bool =
   lineIsDef(line) || Str.startsWith(line, "enum ") || Str.startsWith(line, "record ") || Str.startsWith(line, "import ") || Str.startsWith(line, "type ") || Str.startsWith(line, "opaque ") || Str.startsWith(line, "trait ") || Str.startsWith(line, "impl ") || Str.startsWith(line, "package ") || Str.startsWith(line, "@")
 
-def checkFmtFail(stem: String): IO[Unit] =
-  IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail(Str.concat("scuzz check: ", Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)"))))
+def sourceError(file: String, message: String): String =
+  projectDiagnostic(file, "source", message)
 
-def checkDirOutParsed(json: Bool, p: Prog, sigs: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  if (json) checkDirJson(Check.check3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers) else checkDirHuman(Check.human3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers)
+def projectError(message: String): String =
+  projectDiagnostic("scuzz.toml", "project", message)
 
-def checkDirJson(diags: String, p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  if (diags == "[]") IO.println(Check.unclaimedJsonVer(p, files, stems, vers)) else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))
+def projectDiagnostic(file: String, scope: String, message: String): String =
+  Str.concat("[{\"severity\":\"error\",\"scope\":", Str.concat(Check.jsonStr(scope), Str.concat(",\"file\":", Str.concat(Check.jsonStr(file), Str.concat(",\"line\":1,\"column\":1,\"end_line\":1,\"end_column\":1,\"message\":", Str.concat(Check.jsonStr(message), "}]"))))))
 
-def checkDirHuman(human: String, p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  if (human == "scuzz check ok") checkDirHumanOk(p, files, stems, vers) else IO.println(human).flatMap(_ => IO.fail(Str.concat("scuzz check: ", human)))
+def checkPrint(json: Bool, raw: String): IO[Unit] =
+  Json.parse(raw) match {
+    case Result.Err(message) => IO.fail(Str.concat("invalid project diagnostic: ", message))
+    case Result.Ok(value) => checkPrintRows(json, raw, Json.arr(value))
+  }
 
-def checkDirHumanOk(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  IO.println("scuzz check ok").flatMap(_ => checkDirHumanUnclaimed(Check.unclaimedLines(p, files, stems, vers)))
+def checkPrintRows(json: Bool, raw: String, rows: List[Json]): IO[Unit] =
+  for {
+    failed = List.exists(rows, row => Json.getStr(row, "severity", "") == "error")
+    _ <- if (json) IO.println(raw) else if (failed) IO.println(List.join(List.map(rows, row => checkHumanRow(row)), """
+""")) else IO.println("scuzz check ok").flatMap(_ => IO.foreachDiscard(rows, row => IO.println(Json.getStr(row, "message", ""))))
+    _ <- if (failed) IO.fail("scuzz check") else IO.pure(())
+  } yield ()
 
-def checkDirHumanUnclaimed(lines: List[String]): IO[Unit] =
-  if (List.isEmpty(lines)) IO.pure(()) else IO.println(List.join(List.map(lines, s => Str.concat("unclaimed ", s)), """
-"""))
+def checkHumanRow(row: Json): String =
+  Str.concat(Json.getStr(row, "file", "scuzz.toml"), Str.concat(":", Str.concat(Str.fromInt(Json.getInt(row, "line", 1)), Str.concat(":", Str.concat(Str.fromInt(Json.getInt(row, "column", 1)), Str.concat(": error: ", Json.getStr(row, "message", "")))))))
 
 def overlayStemHit(overlays: List[(String, String)], stem: String): (Bool, String) =
   overlayStemHitGo(overlays, Str.concat(stem, ".scuzz"))
@@ -878,7 +900,7 @@ def substOverlayPick(stem: String, src: String, rest: List[(String, String)], ov
   }
 
 def checkOverlay(dir: String, overlays: List[(String, String)]): IO[String] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkOverlayMan(dir, overlays, Manifest.parse(toml))).handleErrorWith(_ => IO.pure("[]"))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkOverlayMan(dir, overlays, Manifest.parse(toml))).handleErrorWith(message => IO.pure(projectError(message)))
 
 def checkOverlayMan(dir: String, overlays: List[(String, String)], m: Man): IO[String] =
   manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => checkOverlayListed(dir, overlays, m.deps, ents)))
@@ -887,10 +909,7 @@ def checkOverlayListed(dir: String, overlays: List[(String, String)], deps: List
   readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkOverlayOwn(dir, overlays, deps, own))
 
 def checkOverlayOwn(dir: String, overlays: List[(String, String)], deps: List[(String, String)], own: List[(String, String)]): IO[String] =
-  collectDeps(dir, deps, own).flatMap(files => IO.pure(checkOverlayGot(files, fileStems(own), overlays)))
-
-def checkOverlayGot(files: List[(String, String)], stems: List[String], overlays: List[(String, String)]): String =
-  Check.checkFilesOwn(sigFiles(substOverlay(files, overlays), stems), stems)
+  checkDriveNames(dir, deps, substOverlay(own, overlays), overlays)
 
 def uiDumpEnvOf(toml: String, dump: String, snap: String, tap: Bool): String =
   Str.concat(headlessEnvOf(toml), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(snap, Str.concat(" SCUZZ_FUZZ_DUMP=", Str.concat(dump, Str.concat(if (tap) " SCUZZ_UI_TAP=1 " else " ", tapNEnv(toml, tap)))))))

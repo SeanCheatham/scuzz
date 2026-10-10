@@ -21,11 +21,8 @@ def analyze(path: String, body: String): IO[String] =
     above = Fs.dirname(parent)
     up2 <- Fs.exists(Fs.join(above, "scuzz.toml"))
     root = if (hit != 0) here else if (up != 0) parent else if (up2 != 0) above else here
-    toml <- Fs.read(Fs.join(root, "scuzz.toml")).handleErrorWith(_ => IO.pure(""))
-    ents <- Fs.list(Fs.join(root, "src")).handleErrorWith(_ => IO.pure([]))
-    own <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
-    files <- Drive.collectDeps(root, Manifest.parse(toml).deps, own).handleErrorWith(_ => IO.pure(own))
-  } yield Check.checkFilesOwn(files, Drive.fileStems(own))
+    raw <- Drive.checkOverlay(root, [(path, body)])
+  } yield raw
 
 def runProject(root: String): IO[String] =
   for {
@@ -47,9 +44,10 @@ def scuzzCli(): IO[String] =
 
 def diskFiles(root: String, toml: String): IO[List[(String, String)]] =
   for {
-    ents <- Fs.list(Fs.join(root, "src")).handleErrorWith(_ => IO.pure([]))
+    _ <- Drive.manNeed(Manifest.parse(toml))
+    ents <- Fs.list(Fs.join(root, "src"))
     own <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
-    files <- Drive.collectDeps(root, Manifest.parse(toml).deps, own).handleErrorWith(_ => IO.pure(own))
+    files <- Drive.collectDeps(root, Manifest.parse(toml).deps, own)
   } yield files
 
 def compareBuffers(root: String, toml: String, disk: List[(String, String)], buffers: List[(String, String)]): IO[Unit] =
@@ -1110,7 +1108,8 @@ Y
   _ = Signal.set(page, 0)
   _ = Signal.set(developSection, 0)
   root = Signal.get(dirSig)
-  ents <- Fs.list(Fs.join(root, "src")).handleErrorWith(_ => IO.pure([]))
+  _ <- Drive.manNeed(Manifest.parse(toml))
+  ents <- Fs.list(Fs.join(root, "src"))
   own <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
   i = Signal.get(idx)
   set = Chrome.bufferFiles(own, List.map(Signal.get(paths), p => Chrome.stemOf(p)), List.setAt(Signal.get(bodies), i, Signal.get(buf)))

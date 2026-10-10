@@ -293,3 +293,6 @@ def queueAdmissionReleasesCapacity(t: Timeline): Verdict =
 def readyQueueRestoresFrozenEvidence(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.driveHas(t, i, "queueCacheFlow") || Timeline.signalInt(t, i, "queueCacheBound") == 1)
 
+def projectChecksKeepErrors(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "projectChecks") || Timeline.signalInt(t, i, "projectChecked") == 1)
+
