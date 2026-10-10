@@ -1115,3 +1115,43 @@ def generationBurst(model: Int): IO[Unit] =
     _ = Signal.set(burstBound, if (Signal.get(session.count) == 8 && Json.getInt(counted, "requests", 0) == 8 && List.len(List.filter(published, entry => entry._2)) == 1 && Str.isEmpty(owner.token) && List.isEmpty(owner.fibers) && Str.isEmpty(review.token) && List.isEmpty(review.fibers)) 1 else 0)
   } yield ()
 
+private def hasCheckError(raw: String): Bool =
+  Str.contains(raw, "\"severity\":\"error\"")
+
+def projectChecks(): IO[Unit] =
+  for {
+    root = "project-check"
+    path = "project-check/src/Main.scuzz"
+    source = Parse.pretty(Parse.parseFile("Main", "@main def main: IO[Unit] = IO.pure(())"))
+    manifest = "[package]\nname=\"check\"\n[dependencies]\nhelper={path=\"dep\"}\n"
+    _ <- Fs.mkdirs("project-check/src")
+    _ <- Fs.write("project-check/scuzz.toml", manifest)
+    missing <- Main.analyze(path, source)
+    inputs <- IO.attempt(Main.diskFiles(root, manifest))
+    blocked = inputs match {
+  case Result.Err(_) => true
+  case Result.Ok(_) => false
+}
+    _ <- Fs.write("project-check/scuzz.toml", "[package]\nname=\"check\"\nunknown=1\n")
+    invalid <- Main.analyze(path, source)
+    _ <- Fs.write("project-check/scuzz.toml", manifest)
+    _ <- Fs.mkdirs("project-check/dep/src")
+    _ <- Fs.write("project-check/dep/scuzz.toml", "[package]\nname=\"helper\"\n")
+    _ <- Fs.write("project-check/dep/src/Help.scuzz", Parse.pretty(Parse.parseFile("Help", "def value(): Int = 7")))
+    format <- Main.analyze(path, "@main def main: IO[Unit] = IO.pure(())")
+    _ <- Fs.write("project-check/bad.scuzz_verify", """def broken(): Bool = true
+""")
+    verify <- Main.analyze(path, source)
+    _ <- Fs.write("project-check/bad.scuzz_verify", Parse.pretty(Parse.parseFile("bad", "oracle wrong(): Bool = 7")))
+    typedVerify <- Main.analyze(path, source)
+    _ <- Fs.delete("project-check/bad.scuzz_verify")
+    _ <- Fs.write("project-check/run.scuzz_scenario", Parse.pretty(Parse.parseFile("run", """def setup(): IO[Unit] = IO.pure(())
+def wrong(): IO[Unit] = IO.println(7)""")))
+    typedDriver <- Main.analyze(path, source)
+    _ <- Fs.delete("project-check/run.scuzz_scenario")
+    valid <- Main.analyze(path, source)
+    checked = blocked && hasCheckError(missing) && hasCheckError(invalid) && Str.contains(format, "needs formatting") && hasCheckError(verify) && hasCheckError(typedVerify) && hasCheckError(typedDriver) && !hasCheckError(valid)
+    projectChecked = Signal.make(if (checked) 1 else 0)
+    _ = Signal.set(projectChecked, if (checked) 1 else 0)
+  } yield ()
+

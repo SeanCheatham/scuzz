@@ -4,6 +4,117 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 SCUZZ="${SCUZZ:-$ROOT/examples/cli/build/cli}"
 
+# CLI and language server share project diagnostics.
+python3 - <<'PY_PROJECT'
+import json
+import os
+import re
+from pathlib import Path
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+def command(*args, ok=True):
+    result = subprocess.run([str(cli), *map(str, args)], capture_output=True, text=True, timeout=180)
+    assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
+    return result
+
+def diagnostics(root, source, additional=None):
+    messages = [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': root.as_uri()}},
+        {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': (root / 'src/Main.scuzz').as_uri(), 'languageId': 'scuzz', 'version': 1, 'text': source}}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'shutdown', 'params': None},
+        {'jsonrpc': '2.0', 'method': 'exit', 'params': None},
+    ]
+    if additional:
+        messages.insert(2, {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': additional[0].as_uri(), 'languageId': 'scuzz', 'version': 1, 'text': additional[1]}}})
+    wire = b''
+    for message in messages:
+        body = json.dumps(message).encode()
+        wire += f'Content-Length: {len(body)}\r\n\r\n'.encode() + body
+    run = subprocess.run([str(cli), 'lsp', str(root)], input=wire, capture_output=True, timeout=180)
+    assert run.returncode == 0, run.stderr.decode()
+    data = run.stdout
+    rows = []
+    while data:
+        header, data = re.split(b'\r?\n\r?\n', data, maxsplit=1)
+        size = int(header.split(b':', 1)[1].strip())
+        message = json.loads(data[:size])
+        data = data[size:]
+        if message.get('method') == 'textDocument/publishDiagnostics':
+            rows += message['params']['diagnostics']
+    return rows
+
+with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    manifest = root / 'scuzz.toml'
+    source_file = root / 'src/Main.scuzz'
+    manifest.write_text('[package]\nname="project-check"\n')
+    source_file.write_text('@main def main: IO[Unit] = IO.pure(())\n')
+    command('fmt', root)
+    source = source_file.read_text()
+    good_manifest = manifest.read_text()
+    for mode in ('missing-dependency', 'invalid-manifest', 'format', 'verify', 'typed-verify', 'typed-driver'):
+        (root / "bad.scuzz_verify").unlink(missing_ok=True)
+        (root / "run.scuzz_scenario").unlink(missing_ok=True)
+        manifest.write_text(good_manifest)
+        source_file.write_text(source)
+        if mode == 'missing-dependency':
+            manifest.write_text(good_manifest + '[dependencies]\nhelper={path="dep"}\n')
+        elif mode == 'invalid-manifest':
+            manifest.write_text('[package]\nname="project-check"\nunknown=1\n')
+        elif mode == 'format':
+            source_file.write_text('@main def main: IO[Unit] = IO.pure(())')
+        elif mode == 'verify':
+            (root / 'bad.scuzz_verify').write_text('def broken(): Bool = true\n')
+        elif mode == 'typed-verify':
+            (root / 'bad.scuzz_verify').write_text('oracle wrong(): Bool = 7\n')
+            command('fmt', root)
+        else:
+            (root / 'run.scuzz_scenario').write_text('def setup(): IO[Unit] = IO.pure(())\ndef wrong(): IO[Unit] = IO.println(7)\n')
+            command('fmt', root)
+        report = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
+        errors = [row for row in report if row['severity'] == 'error']
+        assert errors, (mode, report)
+        rows = diagnostics(root, source_file.read_text())
+        assert [row['message'] for row in rows if row['severity'] == 1] == [row['message'] for row in errors], (mode, errors, rows)
+    (root / 'bad.scuzz_verify').unlink(missing_ok=True)
+    (root / 'run.scuzz_scenario').unlink(missing_ok=True)
+    manifest.write_text(good_manifest)
+    source_file.write_text(source)
+    command('check', root)
+    assert not [row for row in diagnostics(root, source) if row['severity'] == 1]
+    source_file.write_text('@main def main: IO[Unit] = IO.println(missing)\n')
+    command('fmt', root)
+    overlay = source_file.read_text()
+    errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
+    source_file.write_text(source)
+    rows = diagnostics(root, overlay)
+    assert [row['message'] for row in rows if row['severity'] == 1] == [row['message'] for row in errors], (errors, rows)
+    assert 'unbound variable missing' in rows[0]['message'], rows
+    dep = root / 'dep'
+    (dep / 'src').mkdir(parents=True)
+    (dep / 'scuzz.toml').write_text('[package]\nname="helper"\n')
+    helper = dep / 'src/Help.scuzz'
+    helper.write_text('def word(): String = "ok"\n')
+    manifest.write_text(good_manifest + '[dependencies]\nhelper={path="dep"}\n')
+    source_file.write_text('@main def main: IO[Unit] = IO.println(Help.word())\n')
+    command('fmt', root)
+    source = source_file.read_text()
+    helper.write_text('def word(): Int = 7\n')
+    command('fmt', dep)
+    bad_helper = helper.read_text()
+    errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
+    helper.write_text('def word(): String =\n  "ok"\n\n')
+    rows = diagnostics(root, source, (helper, bad_helper))
+    assert any(row['message'] == errors[0]['message'] and row['severity'] == 1 for row in rows), (errors, rows)
+    (dep / 'scuzz.toml').write_text('[package]\nname="helper"\n[dependencies]\nagain={path=".."}\n')
+    errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
+    assert errors[0]['scope'] == 'project' and 'cycle' in errors[0]['message'], errors
+print('Project checks: CLI and language server retain load, format, verify, and overlay errors')
+PY_PROJECT
+
 # Input errors and domain checks stay active on both engines.
 python3 - <<'PY_INPUT'
 import json

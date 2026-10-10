@@ -670,7 +670,13 @@ def lspDiagOk(): Bool =
   Str.contains(Check.check(lspHelpBad()), "Main.scuzz") && !Str.contains(Check.check(lspHelpBad()), "Help.scuzz") && Str.contains(Check.checkFilesOwn(("Help", lspHelpBad()) :: ("Main", lspMainOk()) :: Manifest.noPairs(), "Help" :: "Main" :: []), "Help.scuzz") && Check.checkFilesOwn(("Main", lspMainCall()) :: ("Help", lspHelpSrc()) :: Manifest.noPairs(), "Main" :: "Help" :: []) == "[]" && Str.contains(Check.checkFilesOwn(("Main", lspMainTy()) :: ("Help", lspHelpSrc()) :: Manifest.noPairs(), "Main" :: "Help" :: []), "type error")
 
 def lspOk(): Bool =
-  lspSpanOk() && lspWireOk() && lspDiagOk()
+  lspSpanOk() && lspWireOk() && lspDiagOk() && projectDiagOk()
+
+def projectDiagOk(): Bool =
+  for {
+    missing = Lsp.publishDiags("file:///pkg/src/Main.scuzz", Drive.projectError("missing dependency"))
+    other = Lsp.publishDiags("file:///pkg/src/Main.scuzz", Drive.sourceError("Other.scuzz", "needs formatting"))
+  } yield Str.contains(missing, "missing dependency") && Str.contains(missing, "\"severity\":1") && !Str.contains(other, "needs formatting")
 
 def srcPanic(): String =
   """def boom(): Int =

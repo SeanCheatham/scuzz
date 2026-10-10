@@ -407,7 +407,7 @@ def diagsKeep(xs: List[Json], file: String): List[Json] =
   if (List.isEmpty(xs)) [] else diagsKeepHd(List.at(xs, 0), List.tail(xs), file)
 
 def diagsKeepHd(h: Json, rest: List[Json], file: String): List[Json] =
-  if (jStr(jGet(h, "file")) == file) h :: diagsKeep(rest, file) else diagsKeep(rest, file)
+  if (jStr(jGet(h, "file")) == file || jStr(jGet(h, "scope")) == "project") h :: diagsKeep(rest, file) else diagsKeep(rest, file)
 
 def overlayGet(open: List[Open], path: String): String =
   if (List.isEmpty(open)) "" else overlayGetHd(List.at(open, 0), List.tail(open), path)
@@ -501,8 +501,8 @@ def didChange(root: String, open: List[Open], j: Json): IO[List[Open]] =
 def didOpen2(root: String, open: List[Open], path: String, src: String): IO[List[Open]] =
   didOpen3(root, overlayPut(open, path, src), path)
 
-def didOpen3(root: String, open: List[Open], path: String): IO[List[Open]] =
-  Drive.checkOverlay(root, overlayPairs(open)).handleErrorWith(_ => IO.pure("[]")).flatMap(raw => lspNotifyKeep(publishDiags(uriOfPath(path), raw), open))
+def didOpen3(root: String, open: List[Open], _path: String): IO[List[Open]] =
+  Drive.checkOverlay(root, overlayPairs(open)).flatMap(raw => IO.foreachDiscard(open, document => notify(publishDiags(uriOfPath(document.path), raw))).map(_ => open))
 
 def lspNotifyKeep(msg: String, open: List[Open]): IO[List[Open]] =
   notify(msg).flatMap(_ => IO.pure(open))
