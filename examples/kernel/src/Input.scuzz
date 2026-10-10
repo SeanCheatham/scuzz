@@ -14,8 +14,15 @@ def fields(text: String): Result[String, Int] =
 def effectFields(text: String): IO[Result[String, Int]] =
   for {
     (result, _) <- IO.pure((fields(text), 1))
-    head :: _ = [result]
-  } yield head
+  } yield result
+
+def totalBindings(flag: Bool, n: Int): IO[Int] =
+  for {
+    __p = n
+    true | false = flag
+    true | false <- IO.pure(flag)
+    (Quantity(value), ()) <- IO.pure((Quantity(n), ()))
+  } yield value + __p - n
 
 def quantity(n: Int): Result[String, Quantity] =
   if (n >= 1 && n <= 100) Result.Ok(Quantity(n)) else Result.Err("quantity must be 1 through 100")

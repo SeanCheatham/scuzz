@@ -1011,7 +1011,7 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
     case Expr.EField(recv, name, off) => inferField(recv, name, env, funs, ens, (modFile(env), off))
     case Expr.ELam(p, ty, body) => inferLam(ty, infer(body, bindLam(p, ty, env), funs, ens))
     case Expr.EMatch(s, arms, off) => inferMatch(s, arms, env, funs, ens, (modFile(env), off))
-    case Expr.EFor(bs, body, _) => inferFor(bs, body, env, funs, ens)
+    case Expr.EFor(bs, body, _) => inferFor(bs, body, env, funs, ens, exprSpan(env, e))
     case Expr.EAscribe(inner, ty, off) => inferAscribe(inner, ty, off, env, funs, ens)
   }
 
@@ -1042,15 +1042,15 @@ def inferAscribe3(o: Out, want: Ty, ty: String, span: (String, Int), ens: List[E
 def inferLam(ty: String, o: Out): Out =
   if (hasErr(o)) o else okTy(Type.tFun(Type.parse(if (ty == "") "A" else ty), o.ty))
 
-def inferFor(bs: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  inferForGo(bs, body, env, funs, ens, "")
+def inferFor(bs: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  inferForGo(bs, body, env, funs, ens, "", span)
 
-def inferForGo(bs: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String): Out =
-  if (List.isEmpty(bs)) inferFor2(infer(body, env, funs, ens), errTy) else inferForBind(List.at(bs, 0), List.tail(bs), body, env, funs, ens, errTy)
+def inferForGo(bs: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (List.isEmpty(bs)) inferFor2(infer(body, env, funs, ens), errTy) else inferForBind(List.at(bs, 0), List.tail(bs), body, env, funs, ens, errTy, span)
 
-def inferForBind(b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String): Out =
+def inferForBind(b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   b match {
-    case Bind(d, name, v) => inferForBind2(d, name, inferBindVal(d, name, v, rest, body, env, funs, ens), rest, body, refineEnv(v, env, funs, ens), funs, ens, errTy, exprSpan(env, v))
+    case Bind(d, name, v) => inferForBind2(d, name, inferBindVal(d, name, v, rest, body, env, funs, ens), rest, body, refineEnv(v, env, funs, ens), funs, ens, errTy, spanPick(exprSpan(env, v), span))
   }
 
 def inferBindVal(d: Bool, name: String, v: Expr, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
@@ -1315,13 +1315,13 @@ def inferForBindOwner(err: String, d: Bool, name: String, vo: Out, rest: List[Bi
   if (err != "") bad(err, span) else inferForBindResult(resultBindErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), rest, body, ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
 
 def inferForBindResult(err: String, d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (err != "") bad(err, span) else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy))
+  if (err != "") bad(err, span) else if (!coverWild(coverClean(name), if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens) && !coverComplete([[name]], [if (d) ioPayload(tyStr(vo)) else tyStr(vo)], ens)) bad("binding pattern does not cover every value; use match", span) else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy, span))
 
 def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (Str.startsWith(ty, "Stream") || Str.startsWith(ty, "Resource")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens))
+  if (Str.startsWith(ty, "Stream") || Str.startsWith(ty, "Resource")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens), span)
 
-def inferForDraw2(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], u: Out): Out =
-  if (hasErr(u)) u else inferForGo(rest, body, bindFor(true, name, ty, env, ens), funs, ens, tyStr(u))
+def inferForDraw2(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], u: Out, span: (String, Int)): Out =
+  if (hasErr(u)) u else inferForGo(rest, body, bindFor(true, name, ty, env, ens), funs, ens, tyStr(u), span)
 
 def bindFor(d: Bool, name: String, ty: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   if (name == "_" || name == "") env else bindPat(name, if (d) ioPayload(ty) else ty, env, ens)

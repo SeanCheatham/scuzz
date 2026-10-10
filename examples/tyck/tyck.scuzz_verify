@@ -34,6 +34,9 @@ oracle pureForArguments(): Bool =
 oracle forBindTypes(): Bool =
   Main.forBindTypes()
 
+oracle totalBindingPatterns(): Bool =
+  Main.totalBindingPatterns()
+
 oracle factsTier(): Bool =
   Main.factsTier()
 

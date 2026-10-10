@@ -1744,7 +1744,7 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  resultBindings() && resultFieldBindings() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
+  resultBindings() && resultFieldBindings() && totalBindingPatterns() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
 
 def closedMatchCoverage(): Bool =
   List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()
@@ -2336,7 +2336,7 @@ def field(b: Box): Int =
   } yield a + List.len(rest)
 """
     pretty = Parse.pretty(Parse.parse(Lexer.lex(source)))
-  } yield Check.check(source) == "[]" && Check.check(pretty) == "[]" && Str.contains(pretty, "head :: tail = b.value") && !Str.contains(pretty, "b.value(a, rest)")
+  } yield rejects(source, "binding pattern does not cover every value") && rejects(pretty, "binding pattern does not cover every value") && Str.contains(pretty, "head :: tail = b.value") && !Str.contains(pretty, "b.value(a, rest)")
 
 def pureForArguments(): Bool =
   Check.check("""def accept(b: Bool): Bool = b
@@ -2345,24 +2345,26 @@ def wrong(): Bool = accept(for { x = 1 } yield x)""", "expected Bool, got Int") 
 def wrong(): Bool = accept(for { x <- IO.pure(true) } yield x)""", "expected Bool, got IO[Bool]")
 
 def forBindTypes(): Bool =
-  Check.check("""enum Opt:
-  case Some(n: Int)
-  case None
+  Check.check("""record Box(n: Int)
 
-def right(o: Opt): Int =
+def right(o: Box): Int =
   for {
-    Opt.Some(n) = o
+    Box(n) = o
     (a, b) = (n, 1)
   } yield a + b
-""") == "[]" && rejects("""enum Opt:
-  case Some(n: Int)
-  case None
+""") == "[]" && rejects("""record Box(n: Int)
 
-def wrong(o: Opt): Int =
+def wrong(o: Box): Int =
   for {
-    Opt.Some(n) = o
+    Box(n) = o
   } yield Str.len(n)
-""", "type mismatch")
+""", "type mismatch") && totalBindingPatterns()
+
+def totalBindingPatterns(): Bool =
+  List.forall(["def wrong(o: Option[Int]): Int = for { Some(n) = o } yield n", "def wrong(xs: List[Int]): Int = for { n :: _ = xs } yield n", "def wrong(xs: List[Int]): Unit = for { [] = xs } yield ()", "def wrong(b: Bool): Unit = for { true = b } yield ()", "def wrong(n: Int): Unit = for { 0 = n } yield ()", "def wrong(s: String): Unit = for { \"ok\" = s } yield ()", "def wrong(o: Option[Int]): IO[Int] = for { Some(n) <- IO.pure(o) } yield n", """record Box[A](value: A)
+def wrong(b: Box[Option[Int]]): Int = for { Box(Some(n)) = b } yield n""", "def wrong(p: (Bool, Int)): Int = for { (true, n) = p } yield n", """type Maybe = Option[Int]
+def wrong(o: Maybe): Int = for { Some(n) = o } yield n"""], source => rejects(source, "binding pattern does not cover every value")) && List.forall(["def right(b: Bool): Unit = for { true | false = b } yield ()", "def right(u: Unit): Unit = for { () = u } yield ()", """record Box[A](value: A)
+def right(b: Box[Int]): Int = for { Box(n) = b } yield n""", "def right(p: (Int, String)): String = for { (n, s) = p } yield s", "def right[A](a: A): A = for { b = a } yield b", "def right(o: Option[Int]): Option[Int] = for { value = o } yield value"], source => Check.check(source) == "[]")
 
 def genericRecordFields(): Bool =
   Check.check("record Holder[A](item: A)\ndef right(): List[String] = List.flatMap([Holder([\"a\"])], holder => holder.item)") == "[]" && rejects("""record Holder[A](item: A)

@@ -581,6 +581,8 @@ for i, case in enumerate(cases):
     command(['fmt', invalid], f'invalid-{i}-format')
     rejected = command(['check', '--message-format=json', invalid], f'invalid-{i}-check', success=False)
     assert 'type error' in rejected.stdout and 'unexpected token' not in rejected.stdout, rejected.stdout
+    if case['seed'] % 8 >= 4:
+        assert 'binding pattern does not cover every value' in rejected.stdout, rejected.stdout
 
 # Both engines can agree on a wrong result. The model and oracle must reject it.
 mutant = root / 'mutant'
@@ -607,7 +609,7 @@ for label, actual in [('evaluator', ev), ('native', compiled)]:
 command(['fuzz', '--iterations', '0', mutant], 'mutant-campaign', success=False)
 rejected = json.loads((mutant / 'build/fuzz/summary.json').read_text())
 assert not rejected['fuzz']['ok'] and rejected['corpus']['failures'] == 1
-print('Generated compiler checks: 54 cases, six families, three input signs, three depths, invalid types, 12 module checks, evaluator/native models, search, mutation, and wrong-result rejection')
+print('Generated compiler checks: 54 cases, six families, three input signs, three depths, invalid types and binding patterns, 12 module checks, evaluator/native models, search, mutation, and wrong-result rejection')
 PY_CASES
   mkdir -p "$cases_dir/generator/src"
   cp examples/compiler-cases/src/*.scuzz "$cases_dir/generator/src/"

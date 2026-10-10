@@ -272,10 +272,12 @@ def describe(o: Opt[Int]): String =
   }
 
 def bindSome(o: Opt[Int]): String =
-  for {
-    Opt.Some(n) = o
-    (a, b) = (n, 1)
-  } yield Str.concat("bind:", Str.fromInt(a + b))
+  o match {
+    case Opt.Some(n) => for {
+  (a, b) = (n, 1)
+} yield Str.concat("bind:", Str.fromInt(a + b))
+    case Opt.None => "bind:none"
+  }
 
 def describeBare(o: Opt[Int]): String =
   o match {
@@ -1095,11 +1097,14 @@ def firsts(xs: List[(Int, String)]): List[Int] =
 def unpackProof(): IO[Unit] =
   for {
     Point(x, y) = Point(3, 5)
-    Opt.Some(n) = Opt.Some(7)
-    Opt.Some(k) = Opt.Some(6)
-    h :: _t = [8, 9]
+    n = namedSome(Opt.Some(7))
+    k = namedSome(Opt.Some(6))
+    h = [8, 9] match {
+  case head :: _ => head
+  case [] => 0
+}
     got <- IO.pure(Opt.Some(4))
-    Opt.Some(m) = got
+    m = namedSome(got)
     xs = List.map([Opt.Some(1), Opt.Some(2)], __p => __p match {
   case Opt.Some(k) => k
   case Opt.None => 0
