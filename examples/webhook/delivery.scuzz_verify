@@ -64,3 +64,8 @@ def batchStatus(t: Timeline): Verdict =
   case (a, b) => !(Timeline.driveHas(t, b, "concurrent") || Timeline.driveHas(t, b, "continued")) || (Timeline.fileTextIs(t, b, "alpha.status", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "alpha.status", "503") || Timeline.fileSame(t, a, b, "alpha.status"))) && (Timeline.fileTextIs(t, b, "beta.status", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "beta.status", "503") || Timeline.fileSame(t, a, b, "beta.status"))) && (Timeline.fileTextIs(t, b, "forged.status", "401") || faulted(t, b) && (Timeline.fileTextIs(t, b, "forged.status", "503") || Timeline.fileSame(t, a, b, "forged.status"))) && (!Timeline.driveHas(t, b, "continued") || Timeline.fileTextIs(t, b, "final.status", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "final.status", "503") || Timeline.fileSame(t, a, b, "final.status")))
 })
 
+def repeatedDelivery(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, a, "delivery") && Timeline.driveHas(t, b, "delivery")) || faulted(t, a) || faulted(t, b) || Timeline.fileSame(t, a, b, "webhook.json") && Timeline.fileTextIs(t, b, "status.txt", "200")
+})
+

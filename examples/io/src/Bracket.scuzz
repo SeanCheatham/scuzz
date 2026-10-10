@@ -1,5 +1,60 @@
+def canceled(): IO[Unit] =
+  for {
+    released <- Ref.of(0)
+    writes <- Ref.of(0)
+    entered <- Deferred.empty()
+    resource = Resource.make(IO.pure("token"), _ => Ref.update(released, count => count + 1))
+    worker <- Fiber.fork(Resource.use(resource, _ => Deferred.complete(entered, "entered").flatMap(_ => IO.sleep(100).flatMap(_ => Ref.update(writes, count => count + 1)))))
+    _ <- Deferred.get(entered)
+    _ <- Fiber.interrupt(worker)
+    result <- IO.attempt(Fiber.join(worker))
+    interrupted = result match {
+  case Result.Err(_) => true
+  case Result.Ok(_) => false
+}
+    releaseCount <- Ref.get(released)
+    writeCount <- Ref.get(writes)
+    _ <- Property.assert("cancel releases once without a later write", interrupted && releaseCount == 1 && writeCount == 0)
+  } yield ()
+
+def timedOut(): IO[Unit] =
+  for {
+    released <- Ref.of(0)
+    writes <- Ref.of(0)
+    entered <- Ref.of(0)
+    resource = Resource.make(IO.pure("token"), _ => Ref.update(released, count => count + 1))
+    result <- IO.attempt(IO.timeout(1, Resource.use(resource, _ => Ref.set(entered, 1).flatMap(_ => IO.sleep(100).flatMap(_ => Ref.update(writes, count => count + 1))))))
+    expired = result match {
+  case Result.Err(_) => true
+  case Result.Ok(_) => false
+}
+    entryCount <- Ref.get(entered)
+    releaseCount <- Ref.get(released)
+    writeCount <- Ref.get(writes)
+    _ <- Property.assert("timeout releases once without a later write", expired && entryCount == 1 && releaseCount == 1 && writeCount == 0)
+  } yield ()
+
+def recovered(): IO[Unit] =
+  for {
+    released <- Ref.of(0)
+    recovered <- Ref.of(0)
+    resource = Resource.make(IO.pure("token"), _ => Ref.update(released, count => count + 1))
+    result <- IO.attempt(Resource.use(resource, _ => IO.fail("expected")))
+    _ <- result match {
+  case Result.Err(message) => Property.assert("resource error remains explicit", message == "expected").flatMap(_ => Ref.update(recovered, count => count + 1))
+  case Result.Ok(_) => Property.assert("resource operation fails", false)
+}
+    releaseCount <- Ref.get(released)
+    recoveryCount <- Ref.get(recovered)
+    _ <- Property.assert("error releases once and recovers once", releaseCount == 1 && recoveryCount == 1)
+  } yield ()
+
+def lifecycle(): IO[Unit] =
+  canceled().flatMap(_ => timedOut()).flatMap(_ => recovered())
+
 def run(): IO[Unit] =
   for {
+    _ <- lifecycle()
     res = Resource.make(IO.pure("token"), t => IO.println(s"release:$t"))
     _ <- Resource.use(res, t => IO.println(s"use:$t"))
     res2 = Resource.make(IO.pure("token2"), t => IO.println(s"release:$t"))

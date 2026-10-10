@@ -1532,6 +1532,47 @@ if fuzz --iterations 64 "$partial_dir" > /tmp/scuzz-fault-partial.log 2>&1; then
 fi
 grep -q 'fault_seed = "289"' "$partial_dir/build/fuzz/repro.toml"
 rm -rf "$fault_dir" "$partial_dir"
+# Resource rules reject changes to release, cancellation, and timeout.
+python3 - <<'PY_RESOURCE'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+original = Path('examples/io/src/Bracket.scuzz').read_text()
+changes = [
+    (original.replace('count => count + 1', 'count => count + 2', 1), 'cancel releases once without a later write'),
+    (original.replace('Fiber.interrupt(worker)', 'IO.sleep(101)', 1), 'cancel releases once without a later write'),
+    (original.split('def timedOut()', 1)[0] + 'def timedOut()' + original.split('def timedOut()', 1)[1].replace('IO.sleep(100)', 'IO.sleep(0)', 1), 'timeout releases once without a later write'),
+    (original.split('def recovered()', 1)[0] + 'def recovered()' + original.split('def recovered()', 1)[1].replace('count => count + 1', 'count => count + 2', 1), 'error releases once and recovers once'),
+]
+with tempfile.TemporaryDirectory(prefix='scuzz-resource-rules-') as directory:
+    root = Path(directory)
+    shutil.copytree('examples/io/src', root / 'src')
+    shutil.copytree('examples/io/corpus', root / 'corpus')
+    shutil.copyfile('examples/io/scuzz.toml', root / 'scuzz.toml')
+    for path in Path('examples/io').glob('*.scuzz_*'):
+        shutil.copyfile(path, root / path.name)
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        for source, rule in changes:
+            assert source != original
+            (root / 'src/Bracket.scuzz').write_text(source)
+            run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, capture_output=True, text=True, timeout=180)
+            assert run.returncode != 0 and ('oracle ' + rule + ' rejected') in run.stdout + run.stderr, (engine, rule, run.stdout[-1500:], run.stderr[-1500:])
+            report = json.loads((root / 'build/fuzz/summary.json').read_text())
+            assert report['scope']['required']['failed'] >= 1 and report['fuzz']['ok'] is False, report
+            if engine == 'evaluator':
+                assert 'probes run compiled' not in run.stdout, run.stdout
+print('Resource rules: both engines reject wrong release counts, missing cancellation, late writes, and missing timeout')
+PY_RESOURCE
+
 fuzz_both_engines examples/io 16 io
 python3 - <<'PY'
 import json
