@@ -197,6 +197,52 @@ finally:
         print('Mutation status artifacts:', root)
 PY_MUTATION
 
+# Workload fields retain their values with optional TOML spaces.
+python3 - <<'PY_FIELDS'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+layouts = [
+    '[fuzz]\nschedule_seed = "42"\nfault_seed = "0"\nschedule_picks = ["setup 1:-", "writeValue 2:-"]\nevents = ["drive writeValue 7"]\n',
+    '[fuzz]\nschedule_seed="42"\nfault_seed="0"\nschedule_picks=["setup 1:-", "writeValue 2:-"]\nevents=["drive writeValue 7"]\n',
+    '[fuzz]\n# events=["drive writeValue 8"]\nschedule_seed\t=\t"42"\nfault_seed ="0"\nschedule_picks= [\n"setup 1:-", # "ignored"\n"writeValue 2:-"\n]\nevents=\n[\n"drive writeValue 7", # "drive writeValue 8"\n]\n',
+]
+with tempfile.TemporaryDirectory(prefix='scuzz-corpus-fields-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'corpus').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="corpus-fields"\n')
+    (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = IO.pure(())\n')
+    (root / 'run.scuzz_scenario').write_text('def setup(): IO[Unit] = IO.pure(())\ndef writeValue(n: Int): IO[Unit] = Fs.write("value.txt", Str.fromInt(n))\n')
+    (root / 'run.scuzz_verify').write_text('def contents(t: Timeline): Verdict = Verdict.every(t, i => !Timeline.driveHas(t, i, "writeValue") || Timeline.fileTextIs(t, i, "value.txt", "7"))\n')
+    subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        for source in layouts:
+            (root / 'corpus/run.toml').write_text(source)
+            run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+            assert run.returncode == 0, (run.stdout, run.stderr)
+            report = json.loads((root / 'build/fuzz/summary.json').read_text())
+            row = next(row for row in report['scope']['workloads'] if row['label'].endswith('run.toml'))
+            assert row['script'] == 'drive writeValue 7\n', row
+            assert row['schedule'] == '42' and row['fault'] == '0' and row['schedule_picks'] == ['setup 1:-', 'writeValue 2:-'], row
+            assert row['status'] == 'passed' and report['scope']['claims']['reached'] == ['contents'], report
+            if engine == 'evaluator':
+                assert 'probes run compiled' not in run.stdout, run.stdout
+        (root / 'corpus/run.toml').write_text(layouts[1].replace('drive writeValue 7', 'drive writeValue 8'))
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+        assert run.returncode != 0 and 'claim contents rejected' in run.stdout + run.stderr, (run.stdout, run.stderr)
+print('Corpus fields: layouts retain scripts, seeds, and scheduler picks; both engines reject wrong contents')
+PY_FIELDS
+
 # Claim execution and trigger reach have separate results.
 python3 - <<'PY_REACH'
 import json
