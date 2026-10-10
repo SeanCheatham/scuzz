@@ -2290,7 +2290,7 @@ def fuzzMutBaseRuns(job: FuzzJob, runs: List[FuzzRun], i: Int, tls: List[String]
   if (List.isEmpty(runs)) IO.pure((tls, pass)) else fuzzMutBaseRunHd(job, List.at(runs, 0), List.tail(runs), i, tls, pass)
 
 def fuzzMutBaseRunHd(job: FuzzJob, h: FuzzRun, rest: List[FuzzRun], i: Int, tls: List[String], pass: List[FuzzRun]): IO[(List[String], List[FuzzRun])] =
-  fuzzProbeAt(job, fuzzBaseExe(job), joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate/baseline"), Str.fromInt(i)), h.script, h.sched, h.fault).flatMap(p => fuzzMutBaseGot(job, h, rest, i, tls, pass, p))
+  fuzzProbeAt(job, fuzzBaseExe(job), joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate/baseline"), Str.fromInt(i)), h.script, h.sched, h.fault, h.picks).flatMap(p => fuzzMutBaseGot(job, h, rest, i, tls, pass, p))
 
 def fuzzMutBaseGot(job: FuzzJob, h: FuzzRun, rest: List[FuzzRun], i: Int, tls: List[String], pass: List[FuzzRun], p: (Int, String, String)): IO[(List[String], List[FuzzRun])] =
   if (p._1 == 0) fuzzMutBaseRuns(job, rest, i + 1, List.concat(tls, p._2 :: Verify.noStr()), List.concat(pass, h :: noRuns())) else if (p._1 == 77 || Str.startsWith(fuzzMutStatus(p._1, p._3), "killed:")) fuzzMutBaseRuns(job, rest, i + 1, tls, pass) else IO.fail("mutation baseline probe is incomplete")
@@ -2352,7 +2352,7 @@ def fuzzMutReplay(job: FuzzJob, site: Int, exe: String, runs: List[FuzzRun], i: 
   if (List.isEmpty(runs)) IO.pure(acc) else fuzzMutReplayHd(job, site, exe, List.at(runs, 0), List.tail(runs), i, acc)
 
 def fuzzMutReplayHd(job: FuzzJob, site: Int, exe: String, h: FuzzRun, rest: List[FuzzRun], i: Int, acc: List[String]): IO[List[String]] =
-  fuzzProbeAt(job, exe, joinSlash(joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)), Str.fromInt(i)), h.script, h.sched, h.fault).flatMap(p => fuzzMutReplayGot(job, site, exe, rest, i, acc, p))
+  fuzzProbeAt(job, exe, joinSlash(joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)), Str.fromInt(i)), h.script, h.sched, h.fault, h.picks).flatMap(p => fuzzMutReplayGot(job, site, exe, rest, i, acc, p))
 
 def fuzzMutReplayGot(job: FuzzJob, site: Int, exe: String, rest: List[FuzzRun], i: Int, acc: List[String], p: (Int, String, String)): IO[List[String]] =
   if (p._1 != 0) IO.fail(fuzzMutStatus(p._1, p._3)) else fuzzMutReplay(job, site, exe, rest, i + 1, List.concat(acc, p._2 :: Verify.noStr()))
@@ -2373,16 +2373,16 @@ def fuzzMutLived(job: FuzzJob, kept: List[(String, String, Prog)], site: Int, ac
   IO.println(Str.concat("  mutant ", Str.concat(Str.fromInt(site), Str.concat(": survived at ", Mutate.siteLocKept(kept, site, job.oracles))))).flatMap(_ => IO.pure(FuzzMut(acc.killed, acc.survived + 1, acc.inert, acc.ran, acc.sites, acc.invalid, acc.reused, (site, "survived") :: acc.results)))
 
 def fuzzIdleAt(job: FuzzJob, exe: String, mutDir: String): IO[(Int, String, String)] =
-  fuzzProbeAt(job, exe, mutDir, "", "", "")
+  fuzzProbeAt(job, exe, mutDir, "", "", "", Verify.noStr())
 
-def fuzzProbeAt(job: FuzzJob, exe: String, mutDir: String, script: String, sched: String, fault: String): IO[(Int, String, String)] =
-  Fs.mkdirs(mutDir).flatMap(_ => Fs.write(joinSlash(mutDir, "rejection.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "drive.json"), Verify.scriptJson(script)).flatMap(_ => fuzzProbeAtRun(job, exe, mutDir, script, sched, fault).flatMap(code => fuzzIdleRead(mutDir, code))))))
+def fuzzProbeAt(job: FuzzJob, exe: String, mutDir: String, script: String, sched: String, fault: String, picks: List[String]): IO[(Int, String, String)] =
+  Fs.mkdirs(joinSlash(mutDir, "fuzz")).flatMap(_ => Fs.write(joinSlash(mutDir, "rejection.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "replay.toml"), Verify.reproText(sched, fault, picks, Verify.linesOf(script))).flatMap(_ => Fs.write(joinSlash(mutDir, "drive.json"), Verify.scriptJson(script)).flatMap(_ => fuzzProbeAtRun(job, exe, mutDir, script, sched, fault, picks).flatMap(code => fuzzIdleRead(mutDir, code)))))))
 
-def fuzzProbeAtRun(job: FuzzJob, exe: String, mutDir: String, script: String, sched: String, fault: String): IO[Int] =
-  if (job.ev) evProbe(job, exe, fuzzProbeAtEnv("", job, mutDir, script, sched, fault)) else runProbe(Str.concat(fuzzProbeAtEnv("SCUZZ_", job, mutDir, script, sched, fault), exe)).flatMap(r => Fs.write(joinSlash(mutDir, "probe.log"), Str.concat(r._2, r._3)).map(_ => r._1))
+def fuzzProbeAtRun(job: FuzzJob, exe: String, mutDir: String, script: String, sched: String, fault: String, picks: List[String]): IO[Int] =
+  if (job.ev) evProbe(job, exe, fuzzProbeAtEnv("", job, mutDir, script, sched, fault, picks)) else runProbe(Str.concat(fuzzProbeAtEnv("SCUZZ_", job, mutDir, script, sched, fault, picks), exe)).flatMap(r => Fs.write(joinSlash(mutDir, "probe.log"), Str.concat(r._2, r._3)).map(_ => r._1))
 
-def fuzzProbeAtEnv(pre: String, job: FuzzJob, mutDir: String, script: String, sched: String, fault: String): String =
-  Str.concat(kv(pre, "REJECTION_DUMP", joinSlash(mutDir, "rejection.txt")), Str.concat(fuzzProbeEnv(pre, job.hasUi, joinSlash(mutDir, "drive.json"), joinSlash(mutDir, "dump.json"), script != "", sched, fault, Verify.noStr(), mutDir, job.uiEnv, false, false), fuzzTlEnv(pre, joinSlash(mutDir, "timeline.txt"))))
+def fuzzProbeAtEnv(pre: String, job: FuzzJob, mutDir: String, script: String, sched: String, fault: String, picks: List[String]): String =
+  Str.concat(kv(pre, "REJECTION_DUMP", joinSlash(mutDir, "rejection.txt")), Str.concat(fuzzProbeEnv(pre, job.hasUi, joinSlash(mutDir, "drive.json"), joinSlash(mutDir, "dump.json"), script != "", sched, fault, picks, mutDir, job.uiEnv, false, false), fuzzTlEnv(pre, joinSlash(mutDir, "timeline.txt"))))
 
 def fuzzTlEnv(pre: String, path: String): String =
   kv(pre, "TIMELINE_DUMP", path)
