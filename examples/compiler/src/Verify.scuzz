@@ -479,8 +479,8 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
-def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded)), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), "}")))))))))))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope): String =
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded), incomplete), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), "}")))))))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -500,8 +500,8 @@ def jClassRest(lines: List[String]): String =
 def jClassOne(line: String): String =
   Str.concat("{\"name\":", Str.concat(Check.jsonStr(className(line)), Str.concat(",\"true\":", Str.concat(classYes(classNums(line)), Str.concat(",\"false\":", Str.concat(classNo(classNums(line)), "}"))))))
 
-def jMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int, excluded: Int): String =
-  Str.concat(",\"mutate\":{\"killed\":", Str.concat(Str.fromInt(killed), Str.concat(",\"survived\":", Str.concat(Str.fromInt(survived), Str.concat(",\"inert\":", Str.concat(Str.fromInt(inert), Str.concat(",\"ran\":", Str.concat(Str.fromInt(ran), Str.concat(",\"sites\":", Str.concat(Str.fromInt(sites), Str.concat(",\"oracles\":", Str.concat(jb(oracles), Str.concat(",\"invalid\":", Str.concat(Str.fromInt(invalid), Str.concat(Str.concat(",\"excluded\":", Str.fromInt(excluded)), Str.concat(jScore(killed, ran - invalid - inert), "}"))))))))))))))))
+def jMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int, excluded: Int, incomplete: Int): String =
+  Str.concat(",\"mutate\":{\"killed\":", Str.concat(Str.fromInt(killed), Str.concat(",\"survived\":", Str.concat(Str.fromInt(survived), Str.concat(",\"inert\":", Str.concat(Str.fromInt(inert), Str.concat(",\"ran\":", Str.concat(Str.fromInt(ran), Str.concat(",\"sites\":", Str.concat(Str.fromInt(sites), Str.concat(",\"oracles\":", Str.concat(jb(oracles), Str.concat(",\"invalid\":", Str.concat(Str.fromInt(invalid), Str.concat(Str.concat(",\"incomplete\":", Str.fromInt(incomplete)), Str.concat(Str.concat(",\"excluded\":", Str.fromInt(excluded)), Str.concat(jScore(killed, ran - invalid - inert), "}")))))))))))))))))
 
 def jScore(killed: Int, sites: Int): String =
   if (sites <= 0) "" else Str.concat(",\"score\":", score3(killed, sites))
@@ -965,8 +965,19 @@ def wrapFun(_stem: String, d: Fun): String =
 
 def wrapFunBody(name: String, ps: String, body: Expr): String =
   body match {
-    case Expr.EBin(op, l, r, _) => if (op == "==") wrapEq(name, ps, l, r) else wrapFun2(name, ps, Parse.pretty0(body))
+    case Expr.EBin(op, l, r, _) => if (op == "==" && (scalarEqOperand(l) || scalarEqOperand(r))) wrapEq(name, ps, l, r) else wrapFun2(name, ps, Parse.pretty0(body))
     case _ => wrapFun2(name, ps, Parse.pretty0(body))
+  }
+
+def scalarEqOperand(e: Expr): Bool =
+  e match {
+    case Expr.EInt(_, _) => true
+    case Expr.EStr(_, _) => true
+    case Expr.EBool(_) => true
+    case Expr.EFloat(_, _) => true
+    case Expr.EBin(op, _, _, _) => op != "::"
+    case Expr.EUn(_, _, _) => true
+    case _ => false
   }
 
 def wrapEq(name: String, ps: String, l: Expr, r: Expr): String =

@@ -26,10 +26,10 @@ def retryDelay(status: Int, headers: Map[String, String], nowMs: Int): Int =
   if (!retryable(status)) -1 else retryHeader(status, headers, nowMs, List.filter(Map.keys(headers), name => Str.toLower(name) == "retry-after"))
 
 private def retryHeader(status: Int, headers: Map[String, String], nowMs: Int, names: List[String]): Int =
-  if (List.isEmpty(names)) if (status == 429) 1000 else 100 else if (List.len(names) != 1) -1 else Net.retryAfterMillis(Map.getOrElse(headers, List.at(names, 0), ""), nowMs)
+  if (List.isEmpty(names)) if (status == 429) 1000 else 100 else if (List.len(names) != 1) -1 else Net.retryAfterMillis(Map.getOrElse(headers, List.at(names, 0.require(index => index >= 0 && index < List.len(names))), ""), nowMs)
 
 private def waitForRetry(url: String, headers: Map[String, String], remaining: Int, response: (Int, Map[String, String], String), delay: Int): IO[(Int, Map[String, String], String)] =
-  if (delay < 0) IO.pure(response) else IO.sleep(delay).flatMap(_ => fetch(url, headers, remaining - 1))
+  if (delay < 0) IO.pure(response) else IO.sleep(delay).flatMap(_ => fetch(url, headers, (remaining - 1).require(next => next >= 0 && next < remaining)))
 
 private def continueRequest(url: String, headers: Map[String, String], remaining: Int, response: (Int, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
   response match {
@@ -43,7 +43,7 @@ def nextPage(headers: Map[String, String], current: Int): Int =
   pageHeader(headers, current, List.filter(Map.keys(headers), name => Str.toLower(name) == "x-next-page"))
 
 private def pageHeader(headers: Map[String, String], current: Int, names: List[String]): Int =
-  if (List.isEmpty(names)) 0 else if (List.len(names) != 1) -1 else pageNumber(Str.trim(Map.getOrElse(headers, List.at(names, 0), "")), current)
+  if (List.isEmpty(names)) 0 else if (List.len(names) != 1) -1 else pageNumber(Str.trim(Map.getOrElse(headers, List.at(names, 0.require(index => index >= 0 && index < List.len(names))), "")), current)
 
 private def boundedPage(page: Int, current: Int): Int =
   if (page == 100) if (page > current) page else -1 else if (page > current && page < 100) page else -1
@@ -67,7 +67,7 @@ def linkHeader(headers: Map[String, String]): String =
   List.join(List.map(List.filter(Map.keys(headers), name => Str.toLower(name) == "link"), name => Map.getOrElse(headers, name, "")), ",")
 
 private def readPage(base: String, url: String, headers: Map[String, String], page: Int, rows: List[Json], seen: List[String]): IO[List[Json]] =
-  if (List.len(seen) >= 100 || List.contains(seen, url)) IO.fail("Pagination cycle or page limit") else fetch(url, headers, 2).flatMap(response => collectPage(base, url, headers, page, rows, url :: seen, response))
+  if (List.len(seen.require(xs => List.len(xs) <= 100)) >= 100 || List.contains(seen, url)) IO.fail("Pagination cycle or page limit") else fetch(url, headers, 2).flatMap(response => collectPage(base, url, headers, page, rows, url :: seen, response))
 
 private def collectPage(base: String, url: String, headers: Map[String, String], page: Int, rows: List[Json], seen: List[String], response: (Int, Map[String, String], String)): IO[List[Json]] =
   response match {

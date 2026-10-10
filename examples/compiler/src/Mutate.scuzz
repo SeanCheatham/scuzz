@@ -268,7 +268,10 @@ def storeReusableHd(found: List[StoreDef], d: DefSite, site: Int): String =
   if (List.isEmpty(found)) "" else storeReusableHash(List.at(found, 0), d, site)
 
 def storeReusableHash(sd: StoreDef, d: DefSite, site: Int): String =
-  if (sd.hash != d.hash) "" else storeSiteOf(sd.sites, site - d.base)
+  if (sd.hash != d.hash) "" else reusableStatus(storeSiteOf(sd.sites, site - d.base))
+
+def reusableStatus(status: String): String =
+  if (status == "killed" || status == "survived" || status == "inert" || status == "invalid" || status == "excluded") status else ""
 
 def storeChanged(store: MutStore, ds: List[DefSite]): List[Int] =
   if (store.compiler == "") noInts() else storeChangedGo(ds, store.defs, noInts())
@@ -722,11 +725,18 @@ def walkIfKidsE(c: Expr, t: Expr, el: Expr, off: Int, target: Int, inO: Bool, hs
   }
 
 def walkCall(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
-  if (isOracle(f)) walkArgs(args, target, seen, true, hs, hi, o) match {
+  if (f == "Property.check" && List.len(args) == 3) walkCheck(args, target, seen, inO, hs, hi, o) else if (isOracle(f)) walkArgs(args, target, seen, true, hs, hi, o) match {
   case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0), n, h)
 } else if (f == "Signal.map") walkMap(f, args, target, seen, inO, hs, hi, o) else if (isHandler(f)) walkHandler(f, args, target, seen, inO, hs, hi, o) else walkArgs(args, target, seen, inO, hs, hi, o) match {
   case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0), n, h)
 }
+
+def walkCheck(args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walkArgs(List.take(args, 2), target, seen, true, hs, hi, o) match {
+    case Walks(rules, n1, h1) => walkArgs(List.drop(args, 2), target, n1, inO, hs, h1, o) match {
+  case Walks(values, n2, h2) => Walk(Expr.ECall("Property.check", List.concat(rules, values), 0), n2, h2)
+}
+  }
 
 def walkMap(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   if (progSite(inO, o) && mapParam(args) != "") walkMapHit(f, args, target, seen, inO, hs, hi, o, mapParam(args)) else walkArgs(args, target, seen, inO, hs, hi, o) match {

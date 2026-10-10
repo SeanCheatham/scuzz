@@ -19,5 +19,5 @@ def handle(secret: String, output: String, request: (String, String, Map[String,
   }
 
 def run(secret: String, port: Int, output: String): IO[Unit] =
-  if (secret == "") IO.fail("Set SCUZZ_WEBHOOK_SECRET") else Net.serve(port, request => handle(secret, output, request))
+  if (secret == "") IO.fail("Set SCUZZ_WEBHOOK_SECRET".require(secret == "")) else Net.serve(port, request => handle(secret, output, request))
 

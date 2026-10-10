@@ -2148,7 +2148,7 @@ def bytesOf(v: Value): Bytes =
   }
 
 def unitOf(io: IO[Value, Value]): IO[Unit] =
-  io.map(_ => ()).handleErrorWith(e => IO.fail(show(e)))
+  io.map(_ => ()).handleErrorWith(e => IO.fail(errText(e)))
 
 def unitIo(io: IO[Unit]): IO[Value, Value] =
   liftIo(io.map(_ => Value.VUnit))
@@ -2302,7 +2302,7 @@ def reqVal(req: (String, String, Map[String, String], String)): Value =
   }
 
 def serveHandler(fn: Value, req: (String, String, Map[String, String], String), env: EvEnv, p: EvProg, off: Int): IO[(Int, Map[String, String], String)] =
-  ioOf(applyValue(fn, reqVal(req) :: noVals(), env, p, off)).map(v => natResp(v)).handleErrorWith(e => IO.fail(show(e)))
+  ioOf(applyValue(fn, reqVal(req) :: noVals(), env, p, off)).map(v => natResp(v)).handleErrorWith(e => IO.fail(errText(e)))
 
 def resultVal(r: Result[String, String]): Value =
   r match {
@@ -2444,7 +2444,7 @@ def fuzzRel(fn: Value, a: Timeline, b: Timeline, env: EvEnv, p: EvProg, off: Int
 
 def propForce(v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   v match {
-    case Value.VIo(io) => Property.force(io.handleErrorWith(e => IO.fail(show(e))))
+    case Value.VIo(io) => Property.force(io.handleErrorWith(e => IO.fail(errText(e))))
     case Value.VErr(_) => v
     case _ => errAt("Property.force needs IO", env, p, off)
   }
@@ -2677,8 +2677,8 @@ def drvValuesSame(p: EvProg, ps: List[Param], es: List[Expr]): List[Value] =
 def claimVerdict(v: Value): Verdict =
   v match {
     case Value.VVerdict(vd) => vd
-    case Value.VErr(msg) => Verdict.fail(0 - 1, msg)
-    case _ => Verdict.fail(0 - 1, "claim did not produce Verdict")
+    case Value.VErr(msg) => Property.force(IO.fail(msg).map(_ => Verdict.ok()))
+    case _ => Property.force(IO.fail("claim did not produce Verdict").map(_ => Verdict.ok()))
   }
 
 def evValue(v: Value): IO[Value] =

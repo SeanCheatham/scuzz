@@ -44,6 +44,159 @@ assert any(line.startswith(f"scuzz fuzz {status} ({summary['fuzz']['search']} se
 PY_CHECK
 }
 
+# Mutation probes need terminal rejection evidence.
+python3 - <<'PY_MUTATION'
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import tempfile
+import time
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+root = Path(tempfile.mkdtemp(prefix='scuzz-mutation-status-'))
+passed = False
+try:
+    (root / 'src').mkdir()
+    (root / 'corpus').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname = "mutation-status"\n[fuzz]\nscore_floor = 0\n')
+    (root / 'run.scuzz_scenario').write_text('def setup(): IO[Unit] = IO.pure(())\ndef exercise(): IO[Unit] = Main.probe()\n')
+    (root / 'corpus/run.toml').write_text('[fuzz]\nevents = ["drive exercise"]\n')
+    verify = root / 'run.scuzz_verify'
+    verify.write_text('def completes(t: Timeline): Verdict = Verdict.every(t, i => !Timeline.driveHas(t, i, "exercise") || i >= 0)\n')
+    def command(args, env=None, ok=True):
+        result = subprocess.run([str(cli), *map(str, args)], env=env, capture_output=True, text=True, timeout=180)
+        assert (result.returncode == 0) == ok, (args, result.stdout[-4000:], result.stderr[-4000:])
+        return result
+    def campaign(engine, body, expected, extra_env=None):
+        (root / 'src/Main.scuzz').write_text('def choose(): Bool = true\ndef probe(): IO[Unit] = if (choose()) IO.pure(()) else ' + body + '\n@main def main: IO[Unit] = IO.pure(())\n')
+        command(['fmt', root])
+        shutil.rmtree(root / '.scuzz', ignore_errors=True)
+        shutil.rmtree(root / 'build/fuzz/mutate', ignore_errors=True)
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        if extra_env:
+            env.update(extra_env)
+        started = time.monotonic()
+        run = command(['fuzz', '--iterations', 1, '--seed', 0, root], env, expected != 'incomplete')
+        if engine == 'evaluator':
+            assert 'probes run compiled' not in run.stdout, run.stdout
+        if extra_env and extra_env.get('SCUZZ_DEADLINE_PROOF') == '1':
+            assert time.monotonic() - started >= 19, run.stdout
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        mut = report['mutate']
+        assert mut['ran'] == 1, report
+        assert mut['invalid'] == 0 and mut['excluded'] == 0, report
+        assert mut['killed'] == (1 if expected == 'killed' else 0), report
+        assert mut['incomplete'] == (1 if expected == 'incomplete' else 0), report
+        assert report['scope']['required']['failed'] == 0 and report['scope']['required']['passed'] == 2, report
+        assert mut['killed'] + mut['survived'] + mut['inert'] + mut['invalid'] + mut['excluded'] + mut['incomplete'] == mut['ran'], report
+        if expected == 'incomplete':
+            assert mut['score'] == 0 and report['fuzz']['ok'] is False, report
+            assert 'mutation probes are incomplete' in run.stdout, run.stdout
+            store = root / '.scuzz/mutate.results'
+            assert 'incomplete' in store.read_text()
+            again = command(['fuzz', '--iterations', 1, '--seed', 0, root], env, False)
+            assert 'reused incomplete' not in again.stdout, again.stdout
+        else:
+            assert report['fuzz']['ok'] is True and mut['score'] == 1, report
+            evidence = list((root / 'build/fuzz/mutate').rglob('rejection.txt'))
+            assert any(path.read_text().startswith('v1\n') for path in evidence), evidence
+            assert 'mutation source: Main.' in run.stdout and 'killed:' in run.stdout, run.stdout
+        return run, report
+    stall_source = root / 'stall.c'
+    # Delay evidence publication past the unchanged host deadline.
+    stall_source.write_text('''#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+extern char **environ;
+char *getenv(const char *name) {
+  size_t n = strlen(name);
+  for (char **entry = environ; *entry; entry++) {
+    if (strncmp(*entry, name, n) == 0 && (*entry)[n] == '=') {
+      char *value = *entry + n + 1;
+      if (strcmp(name, "SCUZZ_REJECTION_DUMP") == 0 && strstr(value, "/mutate/1/"))
+        sleep(30);
+      return value;
+    }
+  }
+  return NULL;
+}
+''')
+    stall = root / ('stall.dylib' if os.uname().sysname == 'Darwin' else 'stall.so')
+    subprocess.run(['clang', '-dynamiclib' if os.uname().sysname == 'Darwin' else '-shared', '-fPIC', str(stall_source), '-o', str(stall)], check=True)
+    stall_env = {'SCUZZ_DEADLINE_PROOF': '1', 'DYLD_INSERT_LIBRARIES' if os.uname().sysname == 'Darwin' else 'LD_PRELOAD': str(stall)}
+    if os.uname().sysname == 'Darwin':
+        stall_env['DYLD_FORCE_FLAT_NAMESPACE'] = '1'
+    for engine in ('evaluator', 'compiled'):
+        campaign(engine, 'Property.assert("terminal rule", false)', 'killed')
+        campaign(engine, 'IO.pure(().require(false))', 'killed')
+        campaign(engine, 'Fs.read("/definitely/missing").map(_ => ())', 'incomplete')
+        campaign(engine, 'Property.assert("caught rule", false).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.read("/definitely/missing").map(_ => ()))', 'incomplete')
+        campaign(engine, 'IO.forever(IO.pure(()))', 'incomplete')
+        campaign(engine, 'Property.assert("delayed rule", false)', 'incomplete', stall_env)
+        verify.write_text('def noWrites(t: Timeline): Verdict = Verdict.every(t, i => !Timeline.effectHas(t, i, "Fs.write"))\n')
+        campaign(engine, 'Fs.write("forbidden.txt", "write")', 'killed')
+        verify.write_text('def completes(t: Timeline): Verdict = Verdict.every(t, i => !Timeline.driveHas(t, i, "exercise") || i >= 0)\n')
+    heap = root / 'heap'
+    (heap / 'src').mkdir(parents=True)
+    (heap / 'scuzz.toml').write_text('[package]\nname = "heap-oracle"\n[fuzz]\nscore_floor = 0\n')
+    (heap / 'src/Main.scuzz').write_text('record Box(flag: Bool)\ndef choose(): Bool = true\n@main def main: IO[Unit] = IO.pure(())\n')
+    command(['fmt', heap])
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        for expression in ('[Main.choose()] == [true]', '(Main.choose(), 1) == (true, 1)', 'Result.Ok(Main.choose()) == Result.Ok(true)', 'Main.Box(Main.choose()) == Main.Box(true)'):
+            (heap / 'heap.scuzz_verify').write_text('oracle heapEquality(): Bool = ' + expression + '\n')
+            shutil.rmtree(heap / '.scuzz', ignore_errors=True)
+            shutil.rmtree(heap / 'build/fuzz/mutate', ignore_errors=True)
+            run = command(['fuzz', '--iterations', 1, '--seed', 0, heap], env)
+            report = json.loads((heap / 'build/fuzz/summary.json').read_text())
+            assert report['mutate']['killed'] == 1 and report['mutate']['incomplete'] == 0, report
+            assert 'killed: oracle heapEquality rejected' in run.stdout, run.stdout
+            if engine == 'evaluator':
+                assert 'probes run compiled' not in run.stdout, run.stdout
+    (heap / 'src/Main.scuzz').write_text('def checked(): Int = (0).require(value => value == 0)\n@main def main: IO[Unit] = IO.pure(())\n')
+    (heap / 'heap.scuzz_verify').write_text('oracle checkedValue(): Bool = Main.checked() == 0\n')
+    command(['fmt', heap])
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        shutil.rmtree(heap / '.scuzz', ignore_errors=True)
+        shutil.rmtree(heap / 'build/fuzz/mutate', ignore_errors=True)
+        run = command(['fuzz', '--iterations', 1, '--seed', 0, heap], env)
+        report = json.loads((heap / 'build/fuzz/summary.json').read_text())
+        assert report['mutate']['sites'] == 1 and report['mutate']['killed'] == 1, report
+        assert 'killed: property check failed: require' in run.stdout, run.stdout
+        if engine == 'evaluator':
+            assert 'probes run compiled' not in run.stdout, run.stdout
+    shutil.rmtree(heap)
+    # A failed native link is incomplete. It does not become an invalid source.
+    tools = root / 'tools'
+    tools.mkdir()
+    compiler = shutil.which('clang')
+    assert compiler
+    wrapper = tools / 'clang'
+    wrapper.write_text('#!/bin/sh\ncase "$*" in *"/fuzz/mutate/"*) echo "link probe failure" >&2; exit 1;; esac\nexec ' + shlex.quote(compiler) + ' "$@"\n')
+    wrapper.chmod(0o755)
+    campaign('compiled', 'Property.assert("terminal rule", false)', 'incomplete', {'PATH': str(tools) + os.pathsep + os.environ['PATH']})
+    passed = True
+    print('Mutation status: terminal rejections, caught errors, real deadlines, link failures, and cache reuse checked')
+finally:
+    if passed:
+        shutil.rmtree(root)
+    else:
+        print('Mutation status artifacts:', root)
+PY_MUTATION
+
 # Claim execution and trigger reach have separate results.
 python3 - <<'PY_REACH'
 import json
@@ -210,7 +363,7 @@ def history(t: Timeline): Verdict =
         assert scope['inputs'] == ['check i'], scope
         excluded = [row for row in scope['workloads'] if row['status'] == 'excluded']
         assert all(row['reason'] == 'nonnegative input' and 'drive check' in row['script'] for row in excluded)
-        assert report['mutate']['killed'] + report['mutate']['survived'] + report['mutate']['inert'] + report['mutate']['invalid'] + report['mutate']['excluded'] == report['mutate']['ran']
+        assert report['mutate']['killed'] + report['mutate']['survived'] + report['mutate']['inert'] + report['mutate']['invalid'] + report['mutate']['excluded'] + report['mutate']['incomplete'] == report['mutate']['ran']
     assert any(report['scope']['mutant_excluded'] for report in reports), reports
     for report in reports:
         mut = report['mutate']
@@ -418,8 +571,9 @@ assert d["fuzz"]["ok"] is False
 assert d["fuzz"]["search_failures"] >= 1
 assert d["corpus"]["entries"] >= 1
 assert d["corpus"]["failures"] >= 1
-assert d["mutate"]["ran"] >= 1
-assert d["mutate"]["inert"] >= 1
+assert d["scope"]["required"]["failed"] >= 1
+assert d["mutate"]["ran"] == 0
+assert d["mutate"]["killed"] == 0 and d["mutate"]["inert"] == 0
 PY
 if fuzz --replay /tmp/bad-example/build/fuzz/repro.toml /tmp/bad-example; then
   echo "replay should have reproduced the property failure" && exit 1
@@ -1104,11 +1258,13 @@ rm -rf "$match_require_dir"
 # The default run must use the evaluator.
 fuzz_both_engines() {
   local dir="$1" iterations="$2" name="$3"
+  rm -f "$dir/.scuzz/mutate.results"
   fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-summary.log"
   if grep -q 'probes run compiled' "/tmp/scuzz-$name-summary.log"; then
     echo "$dir: the evaluator engine fell back to compiled probes" && exit 1
   fi
   cp "$dir/build/fuzz/summary.json" "/tmp/scuzz-$name-ev.json"
+  rm -f "$dir/.scuzz/mutate.results"
   SCUZZ_FUZZ_ENGINE=compiled fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-compiled.log"
   python3 - "/tmp/scuzz-$name-ev.json" "$dir/build/fuzz/summary.json" <<'PY_ENGINE'
 import json, sys
@@ -1145,6 +1301,7 @@ PY_WEBHOOK
 
 fuzz_api_report() {
   local dir="examples/api-report" iterations=320 name="api-report"
+  rm -f "$dir/.scuzz/mutate.results"
   fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-summary.log"
   if grep -q 'probes run compiled' "/tmp/scuzz-$name-summary.log"; then
     echo "$dir: the evaluator engine fell back to compiled probes" && exit 1
