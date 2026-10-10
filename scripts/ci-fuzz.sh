@@ -44,6 +44,100 @@ assert any(line.startswith(f"scuzz fuzz {status} ({summary['fuzz']['search']} se
 PY_CHECK
 }
 
+# Claim execution and trigger reach have separate results.
+python3 - <<'PY_REACH'
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-claim-reach-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="claim-reach"\n[fuzz]\nscore_floor=0\n')
+    main = root / 'src/Main.scuzz'
+    main.write_text('def identity(n: Int): Int = n\n@main def main: IO[Unit] = IO.pure(())\n')
+    verify = root / 'reach.scuzz_verify'
+    verify.write_text('''oracle identity(n: Int): Bool =
+  Main.identity(n) == n
+
+def conditional(t: Timeline): Verdict =
+  Verdict.afterHit(t, "button:Missing", "text:ready")
+''')
+    def command(args, env=None, ok=True):
+        run = subprocess.run([str(cli), *map(str, args)], env=env,
+                             capture_output=True, text=True, timeout=180)
+        assert (run.returncode == 0) == ok, (args, run.stdout[-4000:], run.stderr[-4000:])
+        return run
+    command(['fmt', root])
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        def campaign(iterations, ok):
+            run = command(['fuzz', '--iterations', iterations, '--seed', 42, root], env, ok)
+            report = json.loads((root / 'build/fuzz/summary.json').read_text())
+            assert report['fuzz']['ok'] == ok, report
+            return run, report
+        _, partial = campaign(0, True)
+        assert partial['scope']['claims']['declared'] == ['conditional'], partial
+        assert partial['scope']['claims']['reached'] == ['conditional'], partial
+        assert partial['triggers']['declared'] == ['button:Missing'], partial
+        assert partial['triggers']['reached'] == [], partial
+        assert partial['triggers']['never'] == ['button:Missing'], partial
+        run, blocked = campaign(8, False)
+        assert blocked['scope']['claims']['reached'] == ['conditional'], blocked
+        assert blocked['triggers']['never'] == ['button:Missing'], blocked
+        assert 'trigger never fired: button:Missing' in run.stdout, run.stdout
+
+    verify.write_text('''oracle identity(n: Int): Bool =
+  Main.identity(n) == n
+
+def noWrites(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.effectHas(t, i, "Fs.write"))
+''')
+    command(['fmt', root])
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        main.write_text('def identity(n: Int): Int = n\n@main def main: IO[Unit] = IO.pure(())\n')
+        command(['fmt', root])
+        _, passed = campaign(0, True)
+        assert passed['scope']['claims']['reached'] == ['noWrites'], passed
+        main.write_text('def identity(n: Int): Int = n\n@main def main: IO[Unit] = Fs.write("forbidden.txt", "changed")\n')
+        command(['fmt', root])
+        run, rejected = campaign(0, False)
+        assert rejected['scope']['required']['failed'] == 1, rejected
+        assert rejected['scope']['required']['unrun'] > 0, rejected
+        assert rejected['scope']['workloads'][0]['label'] == 'idle', rejected
+        assert rejected['scope']['workloads'][0]['status'] == 'failed', rejected
+        assert rejected['scope']['claims']['reached'] == ['noWrites'], rejected
+        assert 'claim noWrites rejected' in run.stdout + run.stderr, (run.stdout, run.stderr)
+        if engine == 'evaluator':
+            assert 'claim noWrites rejected' in (root / 'build/fuzz/ev/probe.log').read_text()
+    # Idle UI workloads contain no implicit tap.
+    (root / 'scuzz.toml').write_text('[package]\nname="claim-reach"\n[ui]\ndefault_runtime="headless"\n[fuzz]\nscore_floor=0\n')
+    main.write_text('@main def main: IO[Unit] = Ui.run(_ => View.text("idle"))\n')
+    verify.write_text('def conditional(t: Timeline): Verdict =\n  Verdict.afterHit(t, "button:Missing", "text:ready")\n')
+    command(['fmt', root])
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine == 'compiled':
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        command(['fuzz', '--iterations', 0, root], env)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        idle = report['scope']['workloads'][0]
+        assert idle['label'] == 'idle' and idle['script'] == '' and idle['status'] == 'passed', report
+        assert report['triggers']['never'] == ['button:Missing'], report
+print('Claim reach and absence rules: both engines separate execution, reach, and rejection')
+PY_REACH
+
 # Excluded inputs have separate results on both engines.
 python3 - <<'PY_SCOPE'
 import json
@@ -1022,7 +1116,7 @@ from pathlib import Path
 ev, compiled = [json.loads(Path(path).read_text()) for path in sys.argv[1:]]
 for report, engine in ((ev, "evaluator"), (compiled, "compiled")):
     rows = report["scope"]["workloads"]
-    assert all(row["engine"] == ("compiled" if row["required"] else engine) for row in rows)
+    assert all(row["engine"] == ("compiled" if row["required"] and row["label"] != "idle" else engine) for row in rows)
     for row in rows:
         row.pop("engine")
         row.pop("schedule_picks")
@@ -1112,6 +1206,39 @@ fi
 if ! fuzz --session --iterations 0 examples/transport | tee /tmp/scuzz-transport-session.log | grep "fuzz ok" >/dev/null; then
   echo "examples/transport: session replay failed" && exit 1
 fi
+
+# TLS rules constrain each completed request driver.
+python3 - <<'PY_TRANSPORT'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+report = json.loads(Path('examples/transport/build/fuzz/summary.json').read_text())
+assert report['scope']['required']['passed'] == 2, report
+assert report['claim_drives']['declared'] == ['cases'], report
+assert report['claim_drives']['reached'] == ['cases'], report
+assert report['scope']['claims']['reached'] == ['handshakeFails', 'trustFails'], report
+with tempfile.TemporaryDirectory(prefix='scuzz-transport-rule-') as directory:
+    root = Path(directory)
+    shutil.copytree('examples/transport/src', root / 'src')
+    shutil.copytree('examples/transport/corpus', root / 'corpus')
+    for name in ('scuzz.toml', 'transport.scuzz_verify'):
+        shutil.copyfile(Path('examples/transport') / name, root / name)
+    original = Path('examples/transport/transport.scuzz_scenario').read_text()
+    for path, claim in (('handshake.txt', 'handshakeFails'), ('trust.txt', 'trustFails')):
+        broken = original.replace('Fs.write(path, message)', 'Fs.write(path, if (path == "' + path + '") "wrong result" else message)')
+        assert broken != original
+        (root / 'transport.scuzz_scenario').write_text(broken)
+        run = subprocess.run([str(cli), 'fuzz', '--session', '--iterations', '0', str(root)], capture_output=True, text=True, timeout=180)
+        assert run.returncode != 0 and ('claim ' + claim + ' rejected') in run.stdout + run.stderr, (run.stdout, run.stderr)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert report['scope']['workloads'][0]['status'] == 'passed', report
+        assert report['scope']['required']['failed'] == 1 and report['corpus']['failures'] == 1, report
+print('Transport rules: idle passes; each wrong TLS result fails its request claim')
+PY_TRANSPORT
 
 # File comparisons judge recorded contents at both states.
 file_compare_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-file-compare.XXXXXX")"
