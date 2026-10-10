@@ -1110,6 +1110,7 @@ static SzString *string_alloc(size_t len) {
   s->data[len] = '\0';
   s->cp_hint = 0;
   s->off_hint = 0;
+  s->rejection = 0;
   return s;
 }
 
@@ -1278,6 +1279,7 @@ static void string_set_join(SzString *s, size_t nlen, int ascii) {
   s->data[nlen] = '\0';
   s->cp_hint = 0;
   s->off_hint = 0;
+  s->rejection = 0;
   if (ascii) {
     s->is_ascii = 1;
     s->ulen = (int64_t)nlen;
@@ -2501,6 +2503,8 @@ SzError *sz_error_value(void *payload) {
     sz_release(e->message);
     e->message = payload;
     sz_retain(e->message);
+    if (e->message->rejection)
+      e->code = SZ_ERROR_PROPERTY_REJECT;
   }
   return e;
 }
@@ -5003,6 +5007,7 @@ void *sz_io_unsafe_run_or_die(SzIo *root) {
   sz_retain(root);
   SzIoResult r = run_io(root);
   if (!r.ok) {
+    sz_property_reject_error(r.error);
     fprintf(stderr, "scuzz: IO failed in UI callback: %s\n",
             r.error ? sz_string_cstr(r.error->message) : "unknown");
     fflush(stderr);
@@ -5015,6 +5020,7 @@ void *sz_io_unsafe_run_or_die(SzIo *root) {
 
 static SzIo *ui_callback_error(SzError *error, void *env) {
   (void)env;
+  sz_property_reject_error(error);
   fprintf(stderr, "scuzz: IO failed in UI callback: %s\n",
           error ? sz_string_cstr(error->message) : "unknown");
   fflush(stderr);
@@ -5155,6 +5161,7 @@ static void *sz_runtime_main_worker(void *arg) {
       sz_sched_set_pick_name("main");
       r = sz_io_unsafe_run(a->program);
       if (!r.ok) {
+        sz_property_reject_error(r.error);
         fprintf(stderr, "scuzz: IO failed: %s\n",
                 r.error ? sz_string_cstr(r.error->message) : "unknown");
         if (r.error)

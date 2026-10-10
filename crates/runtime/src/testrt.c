@@ -295,6 +295,7 @@ void sz_scenario_run_setup(void) {
   }
   r = sz_io_unsafe_run(io);
   if (!r.ok) {
+    sz_property_reject_error(r.error);
     fprintf(stderr, "scuzz: scenario setup failed: %s\n",
             r.error ? sz_string_cstr(r.error->message) : "unknown");
     sz_panic("scenario setup failed");
@@ -2964,6 +2965,33 @@ static void print_drive_args(void) {
   fclose(f);
 }
 
+static void rejection_record(const char *reason) {
+  const char *path = getenv("SCUZZ_REJECTION_DUMP");
+  char temporary[4096];
+  FILE *file;
+  int failed;
+  if (!path || !path[0])
+    return;
+  if (snprintf(temporary, sizeof temporary, "%s.tmp", path) >=
+      (int)sizeof temporary)
+    sz_panic("rejection path is too long");
+  file = fopen(temporary, "w");
+  if (!file)
+    sz_panic("cannot write rejection evidence");
+  failed = fprintf(file, "v1\n%s\n", reason) < 0;
+  if (fclose(file) != 0)
+    failed = 1;
+  if (failed || rename(temporary, path) != 0) {
+    remove(temporary);
+    sz_panic("cannot publish rejection evidence");
+  }
+}
+
+void sz_property_reject_error(const SzError *error) {
+  if (error && error->code == SZ_ERROR_PROPERTY_REJECT)
+    rejection_record(sz_string_cstr(error->message));
+}
+
 SzIo *sz_property_assert(SzString *name, int64_t ok) {
   const char *tr = getenv("SCUZZ_TESTRT");
   char buf[512];
@@ -2974,7 +3002,13 @@ SzIo *sz_property_assert(SzString *name, int64_t ok) {
   snprintf(buf, sizeof buf, "oracle %s rejected", name ? sz_string_cstr(name) : "?");
   fprintf(stderr, "scuzz: %s\n", buf);
   print_drive_args();
-  return sz_io_fail_cstr(buf);
+  {
+    SzError *error = sz_error_new(SZ_ERROR_PROPERTY_REJECT, buf);
+    error->message->rejection = 1;
+    SzIo *io = sz_io_fail(error);
+    sz_release(error);
+    return io;
+  }
 }
 
 /* An assumption ends this input. It cannot recover as an IO error. */
@@ -3013,6 +3047,7 @@ void sz_property_check(SzString *name, int64_t ok) {
   snprintf(buf, sizeof buf, "property check failed: %s",
            name ? sz_string_cstr(name) : "?");
   fprintf(stderr, "scuzz: %s\n", buf);
+  rejection_record(buf);
   sz_panic(buf);
 }
 
@@ -5147,6 +5182,7 @@ static void *fuzz_probe_run(SzIo *program) {
     sz_retain(program);
     r = sz_io_unsafe_run(program);
     if (!r.ok) {
+      sz_property_reject_error(r.error);
       out = sz_string_from_cstr(r.error ? sz_string_cstr(r.error->message)
                                         : "unknown");
       if (r.error)
@@ -5213,6 +5249,7 @@ static void claim_fail(const char *kind, const char *name, int idx) {
   snprintf(buf, sizeof buf, "%s failed: %s at state %d", kind,
            name ? name : "?", idx);
   fprintf(stderr, "scuzz: %s\n", buf);
+  rejection_record(buf);
   sz_panic(buf);
 }
 static void verdict_msg(char *buf, size_t cap, const char *name,
@@ -5237,6 +5274,7 @@ static void claim_fail_verdict(const char *name, const SzVerdict *v) {
   char buf[256];
   verdict_msg(buf, sizeof buf, name, v);
   fprintf(stderr, "scuzz: %s\n", buf);
+  rejection_record(buf);
   sz_panic(buf);
 }
 
@@ -5792,6 +5830,7 @@ void sz_driver_run_line(const char *spec) {
   }
   r = sz_io_unsafe_run(io);
   if (!r.ok) {
+    sz_property_reject_error(r.error);
     fprintf(stderr, "scuzz: driver %s failed: %s\n", name,
             r.error ? sz_string_cstr(r.error->message) : "unknown");
     sz_panic("Ui.run: driver failed");

@@ -79,10 +79,14 @@ def indexToksGroupsDone(cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n:
   Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total, bad)
 
 def _sp(toks: Toks, i: Int): SpTok =
-  if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "", 0) else _spOff(List.at(List.at(toks.groups, i / tokGroup()), i % tokGroup() / tokChunk()), i % tokChunk())
+  if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "", 0) else for {
+  group = (i / tokGroup()).require(n => n >= 0 && n < List.len(toks.groups))
+  chunks = List.at(toks.groups, group)
+  chunk = (i % tokGroup() / tokChunk()).require(n => n >= 0 && n < List.len(chunks))
+} yield _spOff(List.at(chunks, chunk), i % tokChunk())
 
 def _spOff(chunk: List[SpTok], i: Int): SpTok =
-  List.at(chunk, i)
+  List.at(chunk, i.require(n => n >= 0 && n < List.len(chunk)))
 
 def _at(toks: Toks, i: Int): Tok =
   _sp(toks, i).tok

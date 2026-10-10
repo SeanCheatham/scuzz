@@ -6,5 +6,5 @@ def runConfigured(url: String, token: String, output: String): IO[Unit] =
     url <- Sys.getenv("SCUZZ_API_URL")
     token <- Sys.getenv("SCUZZ_API_TOKEN")
     output <- Sys.getenv("SCUZZ_API_OUTPUT")
-    _ <- if (url == "") IO.println("Set SCUZZ_API_URL and SCUZZ_API_TOKEN. Set SCUZZ_API_OUTPUT to choose the report path. The default is report.json.") else runConfigured(url, token, output)
+    _ <- if (url == "") IO.println("Set SCUZZ_API_URL and SCUZZ_API_TOKEN. Set SCUZZ_API_OUTPUT to choose the report path. The default is report.json.") else runConfigured(url.require(value => value != ""), token, output)
   } yield ()

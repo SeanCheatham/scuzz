@@ -115,6 +115,8 @@ typedef struct SzString {
   int64_t ulen; /* code-point count; Str.len reads this */
   char *data; /* len bytes + trailing NUL */
   uint8_t is_ascii;
+  /* Preserve the origin of an assertion error through evaluator wrappers. */
+  uint8_t rejection;
   /* UTF-8 walk cursor. A later or earlier code-point index continues from here. */
   int64_t cp_hint;
   int64_t off_hint;
@@ -246,6 +248,8 @@ typedef struct SzError {
   SzString *message;
   void *payload;
 } SzError;
+
+#define SZ_ERROR_PROPERTY_REJECT (-1)
 
 SzError *sz_error_new(int32_t code, const char *msg);
 SzError *sz_error_value(void *payload);
@@ -1191,6 +1195,7 @@ void sz_testrt_proc_kill(int64_t pid); /* drop from table */
 void sz_property_stash_a11y(const char *dump);
 int64_t sz_property_a11y_has(SzString *needle);
 SzIo *sz_property_assert(SzString *name, int64_t ok);
+void sz_property_reject_error(const SzError *error);
 void sz_property_check(SzString *name, int64_t ok);
 void sz_property_assume(SzString *name, int64_t ok);
 void sz_property_sometimes(SzString *name);
