@@ -374,7 +374,12 @@ def wantQuoteEv(): String =
   "drive bump \"x\"\n"
 
 def campReproOk(): Bool =
-  mutationScoreOk() && campReproSeeds() && scriptJsonOk()
+  mutationScoreOk() && campReproSeeds() && scriptJsonOk() && corpusFieldsOk()
+
+def corpusFieldsOk(): Bool =
+  for {
+    source = "[fuzz]\n# events=[\"ignored\"]\nschedule_seed=\"42\"\nfault_seed\t=\t\"7\"\nevents= [\n\"drive bump \\\"x\\\"\", # \"ignored\"\n\"drive bump 0\"\n]\nschedule_picks=[\"1:-\"]\n"
+  } yield Verify.parseEvents(source) == ["drive bump \"x\"", "drive bump 0"] && Verify.tomlQuoted(source, "schedule_seed") == "42" && Verify.tomlQuoted(source, "fault_seed") == "7" && Verify.parseStrArr(source, "schedule_picks") == ["1:-"] && Verify.parseEvents("[fuzz]\nevents=[\"drive note events = [\"]\n") == ["drive note events = ["]
 
 def scriptJsonOk(): Bool =
   Verify.scriptJson("""tap 0
