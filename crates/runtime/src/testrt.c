@@ -2992,11 +2992,26 @@ void sz_property_reject_error(const SzError *error) {
     rejection_record(sz_string_cstr(error->message));
 }
 
-SzIo *sz_property_assert(SzString *name, int64_t ok) {
-  const char *tr = getenv("SCUZZ_TESTRT");
+static void property_rule_record(SzString *name) {
+  SzString *label = name ? name : sz_string_from_cstr("?");
+  SzString *hex = sz_hex_encode(label);
+  SzString *prefix = sz_string_from_cstr("R:");
+  SzString *key = sz_string_concat(prefix, hex);
+  sz_coverage_hit_key(sz_string_cstr(key));
+  sz_release(key);
+  sz_release(prefix);
+  sz_release(hex);
+  if (!name)
+    sz_release(label);
+}
+
+static SzIo *property_assert_run(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *name = (SzString *)pack->left;
+  int64_t ok = sz_unbox_i64(pack->right);
   char buf[512];
-  if (!tr || tr[0] != '1')
-    return pure_drop(NULL);
+  (void)value;
+  property_rule_record(name);
   if (ok)
     return pure_drop(NULL);
   snprintf(buf, sizeof buf, "oracle %s rejected", name ? sz_string_cstr(name) : "?");
@@ -3009,6 +3024,21 @@ SzIo *sz_property_assert(SzString *name, int64_t ok) {
     sz_release(error);
     return io;
   }
+}
+
+SzIo *sz_property_assert(SzString *name, int64_t ok) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  void *boxed;
+  SzPair *pack;
+  SzIo *io;
+  if (!tr || tr[0] != '1')
+    return pure_drop(NULL);
+  boxed = sz_box_i64(ok);
+  pack = sz_pair_new(name, boxed);
+  sz_release(boxed);
+  io = fm_drop(sz_io_pure(NULL), property_assert_run, pack);
+  sz_release(pack);
+  return io;
 }
 
 /* An assumption ends this input. It cannot recover as an IO error. */
@@ -3042,6 +3072,7 @@ void sz_property_check(SzString *name, int64_t ok) {
   char buf[256];
   if (!tr || tr[0] != '1')
     return;
+  property_rule_record(name);
   if (ok)
     return;
   snprintf(buf, sizeof buf, "property check failed: %s",

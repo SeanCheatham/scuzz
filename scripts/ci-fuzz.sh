@@ -335,6 +335,7 @@ with tempfile.TemporaryDirectory(prefix='scuzz-mutation-identity-') as directory
         assert store.startswith('v 2\ninput ' + key + '\n'), store
         assert record['sources'] and record['manifests'] and record['native'], record
         assert record['program'] == hashlib.sha256((root / 'build/mutation-identity').read_bytes()).hexdigest(), record
+        assert record['live_program'] == hashlib.sha256((root / 'build/live/mutation-identity').read_bytes()).hexdigest(), record
         for artifact, digest in record['native']:
             assert digest == hashlib.sha256(Path(artifact).read_bytes()).hexdigest(), (artifact, digest)
         if not (root / '.scuzz/mutation-selection-proof').exists():
@@ -400,6 +401,155 @@ with tempfile.TemporaryDirectory(prefix='scuzz-mutation-identity-') as directory
     assert same == new and reused
 print('Mutation identity: equal inputs reuse results; rule, caller, corpus, choices, manifest, dependency, driver, limits, environment, and engine changes clear results')
 PY_MUT_IDENTITY
+
+# Author rule evidence counts executed rules.
+python3 - <<'PY_GUARDS'
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+cases = [
+    ('plain', '@main def main: IO[Unit] = IO.pure(())\n', [], []),
+    ('unused', '@main def main: IO[Unit] = for { _ = Property.assert("unused", false)\n _ <- IO.pure(()) } yield ()\n', [], []),
+    ('uncalled', 'def rule(): IO[Unit] = Property.assert("uncalled", true)\n@main def main: IO[Unit] = IO.pure(())\n', [], []),
+    ('assert', '@main def main: IO[Unit] = Property.assert("active", true)\n', ['active'], []),
+    ('check', '@main def main: IO[Unit] = IO.println(Str.fromInt((1).require("positive", n => n == 1)))\n', ['positive'], []),
+    ('assume', '@main def main: IO[Unit] = for { _ = Property.assume("assumed", true)\n _ <- IO.pure(()) } yield ()\n', [], []),
+    ('caught', '@main def main: IO[Unit] = Property.assert("caught", false).handleErrorWith(_ => IO.pure(()))\n', ['caught'], []),
+    ('escaped', '@main def main: IO[Unit] = Property.assert("line\\nquoted \\"name\\"", true)\n', ['line\nquoted "name"'], []),
+    ('claim', '@main def main: IO[Unit] = IO.pure(())\n', [], ['accepts']),
+]
+with tempfile.TemporaryDirectory(prefix='scuzz-guard-evidence-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="guard-evidence"\n')
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ, SCUZZ_FUZZ_ENGINE=engine)
+        for label, source, properties, claims in cases:
+            (root / 'src/Main.scuzz').write_text(source)
+            rule = root / 'run.scuzz_verify'
+            if claims:
+                rule.write_text('def accepts(t: Timeline): Verdict = Verdict.every(t, i => true)\n')
+            else:
+                rule.unlink(missing_ok=True)
+            formatted = subprocess.run([str(cli), 'fmt', str(root)], text=True, capture_output=True)
+            assert formatted.returncode == 0, (label, formatted.stdout, formatted.stderr)
+            run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+            assert run.returncode == 0, (engine, label, run.stdout, run.stderr)
+            report = json.loads((root / 'build/fuzz/summary.json').read_text())
+            expected = {'status': 'guarded' if properties or claims else 'unguarded', 'properties': properties, 'claims': claims}
+            assert report['guards'] == expected, (engine, label, report['guards'], expected)
+            assert report['scope']['required']['passed'] == 1, report
+            assert all(not row['location'].startswith('R:') for row in report['coverage']['regions']), report
+            if engine == 'evaluator':
+                assert 'probes run compiled' not in run.stdout, (label, run.stdout)
+        rule.unlink(missing_ok=True)
+        (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = IO.pure(())\n')
+        (root / 'run.scuzz_scenario').write_text('def setup(): IO[Unit] = IO.pure(())\ndef mirror(value: String): IO[Unit] = IO.println(value)\n')
+        (root / 'corpus').mkdir(exist_ok=True)
+        (root / 'corpus/run.toml').write_text('[fuzz]\nevents=[' + json.dumps('drive mirror "hello"') + ']\n')
+        subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+        assert run.returncode == 0, (run.stdout, run.stderr)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert report['guards'] == {'status': 'unguarded', 'properties': [], 'claims': []}, (engine, report)
+        (root / 'run.scuzz_scenario').unlink()
+        (root / 'corpus/run.toml').unlink()
+        (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = Property.assert("rejects", false)\n')
+        rule.unlink(missing_ok=True)
+        subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+        assert run.returncode != 0 and 'oracle rejects rejected' in run.stdout + run.stderr, (engine, run.stdout, run.stderr)
+print('Author rules: both engines distinguish execution from unused assertions and assumptions; active assertions, checks, caught assertions, and claims retain names')
+PY_GUARDS
+
+# Workload reports distinguish failure from incomplete execution.
+python3 - <<'PY_STATUS'
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import time
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-workload-status-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'corpus').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="workload-status"\n')
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ, SCUZZ_FUZZ_ENGINE=engine)
+        for source, status in (
+            ('@main def main: IO[Unit] = IO.pure(())\n', 'passed'),
+            ('@main def main: IO[Unit] = Property.assert("rejects", false)\n', 'failed'),
+            ('@main def main: IO[Unit] = IO.println(Str.fromInt((0).require("positive", n => n > 0)))\n', 'failed'),
+            ('def loop(): IO[Unit] = if (false) IO.pure(()) else IO.forever(IO.pure(()))\n@main def main: IO[Unit] = loop()\n', 'incomplete'),
+            ('def failure(): IO[Unit] = if (false) IO.pure(()) else IO.fail("ordinary error")\n@main def main: IO[Unit] = failure()\n', 'failed'),
+        ):
+            (root / 'src/Main.scuzz').write_text(source)
+            subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+            run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+            assert (run.returncode == 0) == (status == 'passed'), (engine, status, run.stdout, run.stderr)
+            report = json.loads((root / 'build/fuzz/summary.json').read_text())
+            assert report['status'] == status, (engine, status, report)
+            assert 'scope' in report, (engine, source, run.stdout, run.stderr, report)
+            assert report['scope']['required'][status] == 1, report
+            assert report['scope']['workloads'][0]['status'] == status, report
+        (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = IO.pure(())\n')
+        (root / 'run.scuzz_scenario').write_text('def setup(): IO[Unit] = IO.pure(())\ndef hang(): IO[Unit] = IO.forever(IO.pure(()))\n')
+        (root / 'corpus/run.toml').write_text('[fuzz]\nevents=["drive hang"]\n')
+        subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert run.returncode != 0 and report['status'] == 'incomplete', (run.stdout, run.stderr, report)
+        assert report['scope']['required']['passed'] == 1 and report['scope']['required']['incomplete'] == 1 and report['scope']['required']['failed'] == 0, report
+        (root / 'run.scuzz_scenario').unlink()
+        (root / 'corpus/run.toml').unlink()
+        (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = IO.println(7)\n')
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=180)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert run.returncode != 0 and report['status'] == 'incomplete' and 'fuzz' not in report, report
+    (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = IO.pure(())\n')
+    subprocess.run([str(cli), 'fmt', str(root)], check=True, capture_output=True)
+    shim_source = root / 'deadline.c'
+    shim_source.write_text(r'''#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+extern char **environ;
+char *getenv(const char *name) {
+  size_t n = strlen(name);
+  for (char **entry = environ; *entry; entry++) {
+    if (strncmp(*entry, name, n) == 0 && (*entry)[n] == '=') {
+      if (strcmp(name, "SCUZZ_RAND_SEED") == 0)
+        sleep(30);
+      return *entry + n + 1;
+    }
+  }
+  return NULL;
+}
+''')
+    mac = os.uname().sysname == 'Darwin'
+    shim = root / ('deadline.dylib' if mac else 'deadline.so')
+    subprocess.run(['clang', '-dynamiclib' if mac else '-shared', '-fPIC', str(shim_source), '-o', str(shim)], check=True)
+    for engine in ('evaluator', 'compiled'):
+        env = dict(os.environ, SCUZZ_FUZZ_ENGINE=engine, SCUZZ_RAND_SEED='1')
+        env['DYLD_INSERT_LIBRARIES' if mac else 'LD_PRELOAD'] = str(shim)
+        if mac:
+            env['DYLD_FORCE_FLAT_NAMESPACE'] = '1'
+        started = time.monotonic()
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root)], env=env, text=True, capture_output=True, timeout=90)
+        elapsed = time.monotonic() - started
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert run.returncode != 0 and report['status'] == 'incomplete', (run.stdout, run.stderr, report)
+        assert report['scope']['required']['incomplete'] == 1 and report['scope']['required']['failed'] == 0, report
+        assert '124' in report['scope']['workloads'][0]['reason'], report
+        assert 18 <= elapsed < 35, elapsed
+print('Workload status: both engines retain rule failures, distinguish bounded and deadline probes, and replace stale reports before a source failure')
+PY_STATUS
 
 # Claim execution and trigger reach have separate results.
 python3 - <<'PY_REACH'
@@ -545,12 +695,12 @@ def history(t: Timeline): Verdict =
         scope = report['scope']
         for required, key in ((True, 'required'), (False, 'search')):
             rows = [row for row in scope['workloads'] if row['required'] == required]
-            for status in ('passed', 'failed', 'excluded'):
+            for status in ('passed', 'failed', 'excluded', 'incomplete'):
                 assert scope[key][status] == sum(row['status'] == status for row in rows), scope
             if required:
                 assert len(rows) + scope[key]['unrun'] == scope[key]['planned']
         assert len([row for row in scope['workloads'] if not row['required']]) == report['fuzz']['search']
-        assert scope['search']['failed'] == report['fuzz']['search_failures']
+        assert scope['search']['failed'] + scope['search']['incomplete'] == report['fuzz']['search_failures']
         assert 'scope: required ' in result.stdout
         return report
 
