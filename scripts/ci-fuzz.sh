@@ -243,6 +243,56 @@ with tempfile.TemporaryDirectory(prefix='scuzz-corpus-fields-') as directory:
 print('Corpus fields: layouts retain scripts, seeds, and scheduler picks; both engines reject wrong contents')
 PY_FIELDS
 
+# Mutation probes retain each workload's recorded scheduler choices.
+python3 - <<'PY_MUT_PICKS'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import tomllib
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-mutation-picks-') as directory:
+    root = Path(directory)
+    shutil.copytree('examples/bad-sched', root / 'app')
+    app = root / 'app'
+    (app / 'scuzz.toml').write_text('[package]\nname = "mutation-picks"\n[fuzz]\nscore_floor = 0.000\n')
+    (app / 'order.scuzz_verify').write_text('def accepts(t: Timeline): Verdict = Verdict.every(t, i => true)\n')
+    (app / 'src/Main.scuzz').write_text('def value(): Int = 0\n@main def main: IO[Unit] = IO.println(Str.fromInt(value()))\n')
+    subprocess.run([str(cli), 'fmt', str(app)], check=True, capture_output=True)
+    corpus = app / 'corpus/d037d00bc981a2fb.toml'
+    pinned = corpus.read_text().replace('checkOrder 4:4,4', 'checkOrder 4:3,3')
+    expected = ['setup 1:-', 'checkOrder 4:3,3']
+    for engine in ('evaluator', 'compiled'):
+        shutil.rmtree(app / 'build', ignore_errors=True)
+        shutil.rmtree(app / '.scuzz', ignore_errors=True)
+        env = dict(os.environ, SCUZZ_FUZZ_ENGINE=engine)
+        corpus.write_text('[fuzz]\nschedule_seed = "1"\nevents = ["drive checkOrder"]\n')
+        control = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(app)], env=env, text=True, capture_output=True, timeout=240)
+        assert control.returncode == 0, (control.stdout, control.stderr)
+        control_report = json.loads((app / 'build/fuzz/summary.json').read_text())
+        control_row = next(row for row in control_report['scope']['workloads'] if row['label'].endswith('.toml'))
+        assert control_row['schedule_picks'] != expected, control_row
+        corpus.write_text(pinned)
+        run = subprocess.run([str(cli), 'fuzz', '--iterations', '8' , str(app)], env=env, text=True, capture_output=True, timeout=240)
+        assert run.returncode == 0, (run.stdout, run.stderr)
+        report = json.loads((app / 'build/fuzz/summary.json').read_text())
+        assert report['mutate']['ran'] > 0, report
+        base = app / 'build/fuzz/mutate/baseline/0/fuzz/schedule.picks'
+        assert base.read_text().splitlines() == expected, (engine, base.read_text())
+        replay_input = tomllib.loads((base.parents[1] / 'replay.toml').read_text())['fuzz']
+        assert replay_input['schedule_picks'] == expected and replay_input['schedule_seed'] == '1', replay_input
+        replay = list((app / 'build/fuzz/mutate').glob('[0-9]*/0/fuzz/schedule.picks'))
+        assert replay, (engine, run.stdout)
+        for path in replay:
+            assert path.read_text().splitlines() == expected, (engine, path, path.read_text())
+        if engine == 'evaluator':
+            assert 'probes run compiled' not in run.stdout, run.stdout
+print('Mutation replay: both engines retain recorded scheduler choices in baseline and mutant probes')
+PY_MUT_PICKS
+
 # Claim execution and trigger reach have separate results.
 python3 - <<'PY_REACH'
 import json
