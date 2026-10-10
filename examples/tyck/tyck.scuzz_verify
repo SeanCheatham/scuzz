@@ -37,6 +37,9 @@ oracle forBindTypes(): Bool =
 oracle totalBindingPatterns(): Bool =
   Main.totalBindingPatterns()
 
+oracle effectBindingTypes(): Bool =
+  Main.effectBindingTypes()
+
 oracle factsTier(): Bool =
   Main.factsTier()
 

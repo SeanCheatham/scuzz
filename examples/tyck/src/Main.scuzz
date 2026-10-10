@@ -1744,7 +1744,7 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  resultBindings() && resultFieldBindings() && totalBindingPatterns() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
+  resultBindings() && resultFieldBindings() && totalBindingPatterns() && effectBindingTypes() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
 
 def closedMatchCoverage(): Bool =
   List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()
@@ -1780,7 +1780,7 @@ def dumpFail(): String =
   if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else if (!moduleIdentity()) Str.concat("moduleIdentity:", Check.checkFiles(Cases.moduleFiles(0, false))) else "other"
 
 def dumpTyckRes(): String =
-  if (!nestedPatTypes()) dumpNestedPat() else if (!namedIoTypes()) dumpNamedIo() else "tyckRes"
+  if (!tyckDiff(srcResArity(), wantResArity())) Str.concat("Resource arity: ", Check.check(srcResArity())) else if (!tyckDiff(srcResDraw(), wantResDraw())) Str.concat("Resource binding: ", Check.check(srcResDraw())) else if (!tyckDiff(srcResLam(), wantResLam())) Str.concat("Resource cleanup: ", Check.check(srcResLam())) else if (!tyckDiff(srcResUnk(), wantResUnk())) Str.concat("Resource lookup: ", Check.check(srcResUnk())) else if (!tyckDiff(srcJsonUnk(), wantJsonUnk())) Str.concat("JSON lookup: ", Check.check(srcJsonUnk())) else if (!tyckDiff(srcDefUnk(), wantDefUnk())) Str.concat("Deferred lookup: ", Check.check(srcDefUnk())) else if (!tyckDiff(srcDefMis(), wantDefMis())) Str.concat("Deferred payload: ", Check.check(srcDefMis())) else if (!tyckDiff(srcQueUnk(), wantQueUnk())) Str.concat("Queue lookup: ", Check.check(srcQueUnk())) else if (!tyckDiff(srcQueMis(), wantQueMis())) Str.concat("Queue offer: ", Check.check(srcQueMis())) else if (!tyckDiff(srcQueTake(), wantQueTake())) Str.concat("Queue take: ", Check.check(srcQueTake())) else if (!tyckDiff(srcQuePay(), wantQuePay())) Str.concat("Queue payload: ", Check.check(srcQuePay())) else if (!tyckDiff(srcNetStr(), wantNetStr())) Str.concat("Net handler: ", Check.check(srcNetStr())) else if (!emptyCtorTypes()) "empty constructor types" else if (!queueRefineTypes()) "queue refinement" else if (!queueLambdaPinTypes()) "queue lambda types" else if (!nestedPatTypes()) dumpNestedPat() else if (!lambdaApplyTypes()) "lambda application" else if (!expectedLamTypes()) "expected lambda types" else "tyckRes"
 
 def dumpNestedPat(): String =
   if (Check.check("""enum Inner:
@@ -2196,14 +2196,16 @@ def queueLambdaPinTypes(): Bool =
 """, "expected String, got Int") && Check.check("""@main def main: IO[Unit] =
   for {
     q <- Queue.unbounded()
-    _ <- [q].map(x => Queue.offer(x, 1))
+    effects = [q].map(x => Queue.offer(x, 1))
+    _ <- IO.foreachDiscard(effects, effect => effect)
     n <- Queue.take(q)
     _ <- IO.println(Str.fromInt(n))
   } yield ()
 """) == "[]" && rejects("""@main def main: IO[Unit] =
   for {
     q <- Queue.unbounded()
-    _ <- [q].map(x => Queue.offer(x, 1))
+    effects = [q].map(x => Queue.offer(x, 1))
+    _ <- IO.foreachDiscard(effects, effect => effect)
     s <- Queue.take(q)
     _ <- IO.println(s)
   } yield ()
@@ -2365,6 +2367,15 @@ def totalBindingPatterns(): Bool =
 def wrong(b: Box[Option[Int]]): Int = for { Box(Some(n)) = b } yield n""", "def wrong(p: (Bool, Int)): Int = for { (true, n) = p } yield n", """type Maybe = Option[Int]
 def wrong(o: Maybe): Int = for { Some(n) = o } yield n"""], source => rejects(source, "binding pattern does not cover every value")) && List.forall(["def right(b: Bool): Unit = for { true | false = b } yield ()", "def right(u: Unit): Unit = for { () = u } yield ()", """record Box[A](value: A)
 def right(b: Box[Int]): Int = for { Box(n) = b } yield n""", "def right(p: (Int, String)): String = for { (n, s) = p } yield s", "def right[A](a: A): A = for { b = a } yield b", "def right(o: Option[Int]): Option[Int] = for { value = o } yield value"], source => Check.check(source) == "[]")
+
+def effectBindingTypes(): Bool =
+  List.forall(["Int", "String", "Bool", "Float", "Unit", "List[Int]", "Map[String, Int]", "Option[Int]", "Result[String, Int]", "(Int, String)", "Int => Int", "Stream[Int]", "Resource[Int]"], ty => rejects(Str.concat("def wrong(value: ", Str.concat(ty, "): IO[Unit] = for { _ <- value } yield ()")), "<- needs IO")) && List.forall(["def wrong[A](value: A): IO[A] = for { result <- value } yield result", """type Count = Int
+def wrong(value: Count): IO[Unit] = for { _ <- value } yield ()""", """record Box[A](value: A)
+def wrong(value: Box[IO[Int]]): IO[Unit] = for { _ <- value } yield ()"""], source => rejects(source, "<- needs IO")) && rejects("def wrong(): IO[Unit] = for { _ <- missing() } yield ()", "unknown function missing") && List.forall(["def right[A](effect: IO[A]): IO[A] = for { value <- effect } yield value", "def right[E, A](effect: IO[E, A]): IO[E, A] = for { value <- effect } yield value", """type Effect[A] = IO[A]
+def right[A](effect: Effect[A]): Effect[A] = for { value <- effect } yield value""", """type Effect[E, A] = IO[E, A]
+def right[E, A](effect: Effect[E, A]): Effect[E, A] = for { value <- effect } yield value""", "def right[A](value: A): A = for { result = value } yield result", """enum Failure:
+  case Absent
+def right(effect: IO[Failure, Int]): IO[Failure, Int] = for { value <- effect } yield value"""], source => Check.check(source) == "[]")
 
 def genericRecordFields(): Bool =
   Check.check("record Holder[A](item: A)\ndef right(): List[String] = List.flatMap([Holder([\"a\"])], holder => holder.item)") == "[]" && rejects("""record Holder[A](item: A)

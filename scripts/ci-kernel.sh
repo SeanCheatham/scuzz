@@ -184,6 +184,8 @@ def guarded(text: String): Bool =
     _ <- Input.unitBind(false).handleErrorWith(_ => IO.pure(-1)).flatMap(n => IO.println(Str.fromInt(n)))
     _ <- Input.totalBindings(true, 7).flatMap(n => IO.println(Str.fromInt(n)))
     _ <- Input.totalBindings(false, -1).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- Input.aliasEffect((IO.pure(7): IO[String, Int])).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- Input.aliasEffect((IO.fail("alias failure"): IO[String, Int])).handleErrorWith(error => IO.pure(if (error == "alias failure") -1 else -2)).flatMap(n => IO.println(Str.fromInt(n)))
   } yield ()
 '''
     (root / 'src/Main.scuzz').write_text(source)
@@ -192,7 +194,7 @@ def guarded(text: String): Bool =
         output = command([engine, root]).stdout.strip().splitlines()
         if output and output[0] == 'ok':
             output = output[1:]
-        assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1'], (engine, output)
+        assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1', '7', '-1'], (engine, output)
     bad = [('_ = Str.parseInt("7")', '()', 'discarded'),
            ('result = Str.parseInt("7")', '()', 'discarded'),
            ('_ignored = Str.parseInt("7")', '()', 'discarded'),
@@ -233,7 +235,10 @@ def guarded(text: String): Bool =
            ('true = false', '()', 'binding pattern does not cover every value'),
            ('(true, n) = (false, 7)', '()', 'binding pattern does not cover every value'),
            ('0 = 1', '()', 'binding pattern does not cover every value'),
-           ('"ok" = "bad"', '()', 'binding pattern does not cover every value')]
+           ('"ok" = "bad"', '()', 'binding pattern does not cover every value'),
+           ('_ <- 1', '()', '<- needs IO'),
+           ('_ <- Str.parseInt("7")', '()', '<- needs IO'),
+           ('_ <- [IO.pure(7)]', '()', '<- needs IO')]
     for bindings, body, message in bad:
         effect = '<-' in bindings
         declaration = 'IO[Unit]' if effect else 'Unit'
@@ -251,6 +256,23 @@ def guarded(text: String): Bool =
         for entry in ['build', 'eval']:
             result = command([entry, root], ok=False)
             assert message in result.stdout + result.stderr, (entry, result.stdout, result.stderr)
+        (root / 'src/Bad.scuzz').unlink()
+    effect_types = ['Int', 'String', 'Bool', 'Float', 'Unit', 'List[Int]',
+                    'List[IO[Int]]', 'Map[String, Int]', 'Option[Int]',
+                    'Result[String, Int]', '(Int, String)', 'Int => Int',
+                    'Stream[Int]', 'Resource[Int]', 'Input.Quantity', 'A']
+    for ty in effect_types:
+        generic = '[A]' if ty == 'A' else ''
+        broken = f'def broken{generic}(value: {ty}): IO[Unit] =\n  for {{\n    _ <- value\n  }} yield ()\n'
+        (root / 'src/Bad.scuzz').write_text(broken)
+        command(['fmt', root])
+        result = command(['check', '--message-format=json', root], ok=False)
+        error = next(row for row in json.loads(result.stdout) if row['severity'] == 'error')
+        assert '<- needs IO' in error['message'], (ty, error)
+        assert error['file'].endswith('Bad.scuzz') and error['line'] == 3 and error['column'] > 0, (ty, error)
+        for entry in ['build', 'eval']:
+            result = command([entry, root], ok=False)
+            assert '<- needs IO' in result.stdout + result.stderr, (ty, entry, result.stdout, result.stderr)
         (root / 'src/Bad.scuzz').unlink()
     (root / 'result.scuzz_verify').write_text('''oracle handled(n: Int): Bool =
   Input.resolved(Str.fromInt(n)) == n && Input.resolved("bad") == -1
