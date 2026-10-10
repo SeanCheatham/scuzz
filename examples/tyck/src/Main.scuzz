@@ -332,8 +332,16 @@ def tyckGen(n: Int where n >= 0): Bool =
 def prettyIdem(n: Int where n >= 0): Bool =
   Cases.roundtrip(n)
 
+def integerLiteralFormat(): Bool =
+  List.forall(["-9223372036854775808", "-9_223_372_036_854_775_808", "0x8000000000000000", "-0x8000000000000000", "--9223372036854775808", "-9223372036854775807", "9223372036854775807"], literal => integerLiteralFormatOne(Str.concat("def edge(): Int = ", literal)))
+
+def integerLiteralFormatOne(source: String): Bool =
+  for {
+    formatted = Parse.pretty(Parse.parse(Lexer.lex(source)))
+  } yield formatted == Parse.pretty(Parse.parse(Lexer.lex(formatted))) && Check.check(formatted) == "[]"
+
 def tyckCore(): Bool =
-  sourceOffsets() && funLookup() && tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcArity(), wantArity()) && tyckDiff(srcRet(), wantRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
+  sourceOffsets() && funLookup() && integerLiteralFormat() && tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcArity(), wantArity()) && tyckDiff(srcRet(), wantRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
 
 def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit()) && unaryNumTypes()

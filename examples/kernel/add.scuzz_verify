@@ -64,6 +64,12 @@ oracle integerRoundTrip(n: Int): Bool =
 oracle integerRejectsSuffix(n: Int): Bool =
   Input.parsed(s"${n}x") == "error:Str.parseInt: invalid integer"
 
+oracle divisionLaw(a: Int, b: Int): Bool =
+  Input.division(a, b) match {
+    case Result.Ok((q, r)) => b != 0 && q * b + r == a && (r == 0 || r < 0 == (a < 0))
+    case Result.Err(error) => b == 0 && error == "divisor must be nonzero"
+  }
+
 oracle quantityRange(n: Int): Bool =
   Input.accepted(Input.parseQuantity(Str.fromInt(n))) == (n >= 1 && n <= 100) && Input.accepted(Input.decodeQuantity(s"{\"quantity\":$n}")) == (n >= 1 && n <= 100)
 

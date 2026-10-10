@@ -529,6 +529,22 @@ void sz_panic(const char *msg) {
 
 void sz_panic_exit(void) { g_panic_exit = 1; }
 
+int64_t sz_int_div(int64_t a, int64_t b) {
+  if (b == 0)
+    sz_panic("division by zero");
+  if (a == INT64_MIN && b == -1)
+    return INT64_MIN;
+  return a / b;
+}
+
+int64_t sz_int_rem(int64_t a, int64_t b) {
+  if (b == 0)
+    sz_panic("division by zero");
+  if (a == INT64_MIN && b == -1)
+    return 0;
+  return a % b;
+}
+
 void *sz_alloc(size_t size) {
   return alloc_block(size, 0, SZ_ALLOC_MAGIC, SZ_RC_RAW);
 }

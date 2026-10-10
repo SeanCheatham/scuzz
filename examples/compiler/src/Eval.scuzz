@@ -1032,7 +1032,7 @@ def bitInts(op: String, a: Int, b: Int, env: EvEnv, p: EvProg, off: Int): Value 
   if (op == "&") Value.VInt(a & b) else if (op == "|") Value.VInt(a | b) else if (op == "^") Value.VInt(a ^ b) else if (op == "<<") Value.VInt(a << b) else if (op == ">>") Value.VInt(a >> b) else unsupported(Str.concat("operator ", op), env, p, off)
 
 def divInts(a: Int, b: Int, rem: Bool, env: EvEnv, p: EvProg, off: Int): Value =
-  if (b == 0) errAt("division by zero", env, p, off) else if (rem) Value.VInt(a % b) else Value.VInt(a / b)
+  if (b == 0) errAt("division by zero", env, p, off) else if (a == -9223372036854775808 && b == -1) Value.VInt(if (rem) 0 else a) else if (rem) Value.VInt(a % b) else Value.VInt(a / b)
 
 def unValue(e: Expr, op: String, inner: Expr, env: EvEnv, p: EvProg, off: Int): Value =
   if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else unVal(op, step(EvStep.Next(inner, env), p), env, p, off)

@@ -16,6 +16,9 @@ void sz_panic(const char *msg) __attribute__((noreturn));
 void sz_panic_exit(void);
 void sz_panic_push_src(const char *loc);
 void sz_panic_pop_src(void);
+/* Integer division rounds toward zero. Zero divisors panic. */
+int64_t sz_int_div(int64_t a, int64_t b);
+int64_t sz_int_rem(int64_t a, int64_t b);
 /* Record one coverage hit (def entry or branch arm) when SCUZZ_COVERAGE_DUMP
  * is set. Cheap no-op otherwise. The path is read once; tests call
  * sz_coverage_env_refresh after a setenv. */

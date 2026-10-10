@@ -1,6 +1,9 @@
 oracle adtFacts(): Bool =
   Main.describe(Opt.Some(42)) == "adt:describe:42" && Main.describeBare(Opt.Some(42)) == "bare:42" && Main.describeBare(Main.noneInt()) == "bare:none" && Main.hueBare(Color.Red) == "barehue" && Main.calledHue() == "barehue" && Main.kitRgb() == 4278256131
 
+oracle divisionLimits(): Bool =
+  Input.division(--9223372036854775808, -1) == Result.Ok((--9223372036854775808, 0)) && Input.division(7, -3) == Result.Ok((-2, 1)) && Input.division(-7, 3) == Result.Ok((-2, -1)) && Input.division(7, 0) == Result.Err("divisor must be nonzero")
+
 oracle bindFacts(): Bool =
   Main.bindSome(Opt.Some(42)) == "bind:43" && Main.bindSome(Opt.None) == "bind:none"
 

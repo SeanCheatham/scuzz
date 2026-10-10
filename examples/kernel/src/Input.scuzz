@@ -8,6 +8,15 @@ def aliasEffect[E, A](effect: Effect[E, A]): Effect[E, A] =
     value <- effect
   } yield value
 
+def quotient(a: Int, b: Int): Int =
+  a / b
+
+def remainder(a: Int, b: Int): Int =
+  a % b
+
+def division(a: Int, b: Int): Result[String, (Int, Int)] =
+  if (b == 0) Result.Err("divisor must be nonzero") else Result.Ok((quotient(a, b), remainder(a, b)))
+
 def fields(text: String): Result[String, Int] =
   for {
     ((first, _), second) = ((Str.parseInt(text), true), Str.parseInt("7"))
