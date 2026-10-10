@@ -1511,7 +1511,13 @@ def fuzzBody3(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
   fuzzBody4(job, script, fuzzAddSeeds(runs, joinSlash(job.outDir, "seeds.txt"), script, job.hasUi))
 
 def fuzzBody4(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
-  Fs.write(fuzzExclusionPath(job.outDir), "").flatMap(_ => fuzzUniversals(job).map(_ => "").handleErrorWith(e => IO.println(e).map(_ => e))).flatMap(error => if (error == "") fuzzEngineCheck(job).flatMap(j => fuzzReplayGo(j.exe, j.hasUi, j.outDir, runs, FuzzAcc(0, 0, 0, "", climbNew(), Verify.Workload("idle", true, "", "", "", [], "compiled", "passed", "") :: []), j.uiEnv, j.live, j.asan, j.session).flatMap(acc => fuzzAfterReplay(j, script, runs, acc))) else fuzzReadOr(fuzzExclusionPath(job.outDir)).flatMap(reason => fuzzDone(job, List.len(runs), FuzzAcc(0, 0, 0, "", climbNew(), Verify.Workload("idle", true, "", "", "", [], "compiled", if (reason != "") "excluded" else "failed", if (reason != "") reason else error) :: []), emptyMut(mutSites(job)))))
+  Fs.write(fuzzExclusionPath(job.outDir), "").flatMap(_ => fuzzUniversals(job).map(_ => "").handleErrorWith(e => IO.println(e).map(_ => e))).flatMap(error => if (error == "") fuzzEngineCheck(job).flatMap(j => fuzzRequiredIdle(j, script, runs)) else fuzzReadOr(fuzzExclusionPath(job.outDir)).flatMap(reason => fuzzDone(job, List.len(runs), FuzzAcc(0, 0, 0, "", climbNew(), Verify.Workload("idle", true, "", "", "", [], "compiled", if (reason != "") "excluded" else "failed", if (reason != "") reason else error) :: []), emptyMut(mutSites(job)))))
+
+def fuzzRequiredIdle(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
+  fuzzRequiredIdleRun(job, script, runs, FuzzRun("", "", "", "", "", []))
+
+def fuzzRequiredIdleRun(job: FuzzJob, script: String, runs: List[FuzzRun], idle: FuzzRun): IO[Unit] =
+  Fs.write(fuzzExclusionPath(job.outDir), "").flatMap(_ => fuzzProbeJob(job, idle).flatMap(code => fuzzRecord(job.outDir, FuzzAcc(0, 0, 0, "", climbNew(), []), idle, "idle", true, if (job.ev) "evaluator" else "compiled", code).flatMap(acc => fuzzReplayGo(job.exe, job.hasUi, job.outDir, runs, acc, job.uiEnv, job.live, job.asan, job.session).flatMap(seen => fuzzAfterReplay(job, script, runs, seen)))))
 
 def fuzzEngineCheck(job: FuzzJob): IO[FuzzJob] =
   if (!job.ev) IO.pure(job) else fuzzIdleAt(job, fuzzEvDir(job.outDir), joinSlash(joinSlash(job.outDir, "fuzz"), "idle/ev")).flatMap(p => fuzzEngineGot(job, p))
@@ -2078,7 +2084,7 @@ def fuzzPicksEnv(pre: String, picks: List[String]): String =
   if (List.isEmpty(picks)) "" else kv(pre, "SCHED_PICKS", List.join(picks, ";"))
 
 def fuzzScriptEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool): String =
-  if (hasScript) fuzzDriveEnv(pre, hasUi, scriptPath, dumpPath) else if (hasUi) Str.concat(kv(pre, "UI_TAP", "1"), kv(pre, "FUZZ_DUMP", dumpPath)) else ""
+  if (hasScript) fuzzDriveEnv(pre, hasUi, scriptPath, dumpPath) else if (hasUi) kv(pre, "FUZZ_DUMP", dumpPath) else ""
 
 def fuzzDriveEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String): String =
   if (hasUi) Str.concat(kv(pre, "UI_SCRIPT", scriptPath), kv(pre, "FUZZ_DUMP", dumpPath)) else kv(pre, "DRIVE_SCRIPT", scriptPath)
@@ -2123,7 +2129,7 @@ def fuzzProbeCode(r: (Int, String, String)): Int =
 
 def fuzzProbeCodeIo(r: (Int, String, String)): IO[Int] =
   r match {
-    case (code, _out, err) => if (code > 0 && Str.contains(err, "schedule drift")) IO.println(Verify.driftLine(err)).flatMap(_ => IO.pure(code)) else if (code == 77) IO.println(err).flatMap(_ => IO.pure(code)) else if (code != 0 && Str.contains(err, "Sanitizer")) IO.println(err).flatMap(_ => IO.pure(code)) else IO.pure(code)
+    case (code, _out, err) => if (code > 0 && Str.contains(err, "schedule drift")) IO.println(Verify.driftLine(err)).flatMap(_ => IO.pure(code)) else if (code == 77) IO.println(err).flatMap(_ => IO.pure(code)) else if (code != 0 && Str.contains(err, "Sanitizer")) IO.println(err).flatMap(_ => IO.pure(code)) else if (code != 0 && err != "") IO.println(firstLine(err)).flatMap(_ => IO.pure(code)) else IO.pure(code)
   }
 
 def fuzzDone(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut): IO[Unit] =
