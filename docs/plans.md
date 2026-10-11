@@ -34,4 +34,7 @@ Focused check, build, and eval diagnostics pass.
 Native and evaluator receiver-use controls pass.
 The new type-checker oracle executes and passes.
 The product manual states the live-use requirement.
+All 34 required type-checker workloads pass.
+The evaluator idle deadline requires compiled fallback.
+Generated type-checker timelines and claims match on both engines.
 The remaining compiler and integration checks remain open.
