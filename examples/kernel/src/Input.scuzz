@@ -48,6 +48,23 @@ def parseQuantity(text: String): Result[String, Quantity] =
     case Result.Err(error) => Result.Err(error)
   }
 
+def collectQuantities(results: List[Result[String, Quantity]]): Result[String, List[Quantity]] =
+  results match {
+    case [] => Result.Ok([])
+    case head :: tail => head match {
+  case Result.Err(error) => Result.Err(error)
+  case Result.Ok(value) => collectQuantities(tail) match {
+  case Result.Err(error) => Result.Err(error)
+  case Result.Ok(values) => Result.Ok(value :: values)
+}
+}
+  }
+
+def batch(texts: List[String]): Result[String, List[Quantity]] =
+  for {
+    results = List.map(texts, text => parseQuantity(text))
+  } yield collectQuantities(results)
+
 def decodeQuantity(text: String): Result[String, Quantity] =
   Json.parse(text) match {
     case Result.Ok(json) => Json.field(json, "quantity") match {

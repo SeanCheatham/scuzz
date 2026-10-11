@@ -421,6 +421,15 @@ def guarded(text: String): Bool =
     case _ => false
   }
 
+def batchText(texts: List[String]): String =
+  Input.batch(texts) match {
+    case Result.Ok(values) => Str.concat("ok:", List.join(List.map(values, value => Str.fromInt(value.value)), ","))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def batchAlias(value: List[Read]): List[Read] =
+  for { all @ _ = value } yield all
+
 @main def main: IO[Unit] =
   for {
     _ <- IO.println(Str.fromInt(handled("7")))
@@ -435,6 +444,10 @@ def guarded(text: String): Bool =
     _ <- Input.totalBindings(false, -1).flatMap(n => IO.println(Str.fromInt(n)))
     _ <- Input.aliasEffect((IO.pure(7): IO[String, Int])).flatMap(n => IO.println(Str.fromInt(n)))
     _ <- Input.aliasEffect((IO.fail("alias failure"): IO[String, Int])).handleErrorWith(error => IO.pure(if (error == "alias failure") -1 else -2)).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- IO.println(batchText(["1", "100"]))
+    _ <- IO.println(batchText(["7", "bad"]))
+    _ <- IO.println(batchText(["0"]))
+    _ <- IO.println(batchText([]))
   } yield ()
 '''
     (root / 'src/Main.scuzz').write_text(source)
@@ -443,8 +456,21 @@ def guarded(text: String): Bool =
         output = command([engine, root]).stdout.strip().splitlines()
         if output and output[0] == 'ok':
             output = output[1:]
-        assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1', '7', '-1'], (engine, output)
-    bad = [('_ = Str.parseInt("7")', '()', 'discarded'),
+        assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1', '7', '-1',
+                          'ok:1,100', 'error:Str.parseInt: invalid integer',
+                          'error:quantity must be 1 through 100', 'ok:'], (engine, output)
+    bad = [('_ = List.map(["7", "bad"], text => Str.parseInt(text))', '()', 'Result list is discarded'),
+           ('ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
+           ('_ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
+           ('ignored = [[Str.parseInt("bad")]]', '()', 'Result list is discarded'),
+           ('ignored <- IO.pure([Str.parseInt("bad")])', '()', 'Result list is discarded'),
+           ('ignored = [Str.parseInt("bad")]\n    use = (ignored: Int) => ignored', '()', 'Result list is discarded'),
+           ('ignored = [Str.parseInt("bad")]', 'for { ignored = 1 } yield ()', 'Result list is discarded'),
+           ('ignored = [Str.parseInt("bad")]\n    copy = ignored', '()', 'Result list is discarded'),
+           ('_ = ([Str.parseInt("bad")]: List[Read])', '()', 'Result list is discarded'),
+           ('_ = ([Str.parseInt("bad")]: List[Result])', '()', 'Result list is discarded'),
+           ('all @ _ = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
+           ('_ = Str.parseInt("7")', '()', 'discarded'),
            ('result = Str.parseInt("7")', '()', 'discarded'),
            ('_ignored = Str.parseInt("7")', '()', 'discarded'),
            ('Result.Ok(n) = Str.parseInt("7")', '()', 'must cover success and failure'),

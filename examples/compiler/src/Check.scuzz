@@ -1279,10 +1279,21 @@ def resultBindAlternatives(err: String, name: String, ty: String, rest: List[Bin
   if (err != "") err else resultBindChecked(name, ty, rest, body, ens)
 
 def resultBindChecked(name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
-  if (Type.appName(Type.parse(ty)) != "Result") resultPatternErr(coverClean(name), ty, rest, body, ens) else if (!coverComplete([[name]], [ty], ens)) "Result binding must cover success and failure; use match" else resultBindUse(bindPat(name, ty, [], ens), rest, body)
+  if (Type.appName(Type.parse(ty)) == "Result") if (!coverComplete([[name]], [ty], ens)) "Result binding must cover success and failure; use match" else resultBindUse(bindPat(name, ty, [], ens), rest, body) else if (resultListTy(Type.parse(ty)) && coverWild(coverClean(name), ty, ens)) resultListUse(name, ty, rest, body, ens) else resultPatternErr(coverClean(name), ty, rest, body, ens)
 
 def resultPatternErr(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
   if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) resultAlternativeErr(pat, ty, rest, body, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (coverWild(pat, ty, ens)) "" else resultPatternCasesErr(coverCases(ty, ens), pat, ty, rest, body, ens)
+
+def resultListTy(ty: Ty): Bool =
+  ty match {
+    case Ty.Named("Result") => true
+    case Ty.App("Result", _) => true
+    case Ty.App("List", args) => List.exists(args, item => resultListTy(item))
+    case _ => false
+  }
+
+def resultListUse(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (!resultListTy(Type.parse(ty))) "" else if (List.exists(bindPat(pat, ty, [], ens), binding => resultListTy(binding._2) && forFreeVar(rest, body, binding._1))) "" else "Result list is discarded; return it or pass it to a function"
 
 def resultAlternativeErr(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En], i: Int): String =
   resultAlternativeNext(resultBindErr(Str.take(pat, i), ty, rest, body, ens), Str.drop(pat, i + 3), ty, rest, body, ens)
