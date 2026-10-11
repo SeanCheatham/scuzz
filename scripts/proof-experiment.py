@@ -2,6 +2,7 @@
 """Check the pure function and effect protocol in the formal experiment."""
 
 import argparse
+from collections import deque
 import hashlib
 import json
 import os
@@ -9,7 +10,9 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import signal
 import subprocess
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -70,9 +73,9 @@ def check(solver, queries):
     return dict(status=status, reason=reason, queries=rows)
 
 
-def command(cli, args, logs, label, success=True, env=None, stdin=None):
+def command(cli, args, logs, label, success=True, env=None, stdin=None, seconds=180):
     run = subprocess.run([str(cli), *map(str, args)], capture_output=True, text=True,
-                         timeout=180, env=env, input=stdin)
+                         timeout=seconds, env=env, input=stdin)
     (logs / (label + '.stdout')).write_text(run.stdout)
     (logs / (label + '.stderr')).write_text(run.stderr)
     if (run.returncode == 0) != success:
@@ -210,7 +213,7 @@ def protocol_package(cli, data, package, logs, defective=False):
     return package / 'build/protocol', probe
 
 
-def protocol_probe(executable, directory, driver, n, fault, prefix=(), recorded=None):
+def protocol_probe(executable, directory, driver, n, fault, prefix=(), recorded=None, seconds=20):
     directory.mkdir(parents=True, exist_ok=True)
     script = f'drive {driver} {n}\n'
     drive = directory / 'drive.json'
@@ -228,7 +231,7 @@ def protocol_probe(executable, directory, driver, n, fault, prefix=(), recorded=
         if key.startswith('SCUZZ_'):
             del env[key]
     env.update({'SCUZZ_' + key: value for key, value in settings.items()})
-    run = subprocess.run([str(executable)], env=env, text=True, capture_output=True, timeout=20)
+    run = subprocess.run([str(executable)], env=env, text=True, capture_output=True, timeout=seconds)
     (directory / 'stdout').write_text(run.stdout)
     (directory / 'stderr').write_text(run.stderr)
     rejection = (directory / 'rejection.txt').read_text()
@@ -259,7 +262,7 @@ def executed_properties(path):
     return sorted(bytes.fromhex(line[2:]).decode() for line in path.read_text().splitlines() if line.startswith('R:'))
 
 
-def protocol_parity(cli, probe, row, directory, logs, step_limit):
+def protocol_parity(cli, probe, row, directory, logs, step_limit, seconds=180):
     request = directory / 'request.txt'
     settings = dict(row['settings'], PROBE_LOG=str(directory / 'evaluator.log'),
                     SCHED_PICKS=';'.join(row['schedule_picks']),
@@ -272,7 +275,7 @@ def protocol_parity(cli, probe, row, directory, logs, step_limit):
         (directory / name).write_text('')
     request.write_text(''.join(f'{key}={value}\n' for key, value in settings.items()))
     run = command(cli, ['eval', '--probe', probe], logs, directory.name + '-evaluator',
-                  env=dict(os.environ, SCUZZ_EV_REQUEST=str(request)), stdin='probe\nquit\n')
+                  env=dict(os.environ, SCUZZ_EV_REQUEST=str(request)), stdin='probe\nquit\n', seconds=seconds)
     lines = run.stdout.splitlines()
     assert len(lines) == 2 and lines[0] == 'ready', lines
     assert (lines[1] == '0') == (row['status'] == 'passed'), ('protocol replay mismatch', row, lines)
@@ -383,9 +386,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cli', default=os.environ.get('SCUZZ', 'examples/cli/build/cli'))
     parser.add_argument('--solver', default=os.environ.get('SCUZZ_SOLVER', 'z3'))
+    parser.add_argument('--recovery', action='store_true', help='Check the application recovery path without a solver.')
     args = parser.parse_args()
     os.chdir(ROOT)
     cli = Path(args.cli).resolve()
+    if args.recovery:
+        return recovery_experiment(cli)
     output = ROOT / 'examples/proof/build/experiment'
     output.mkdir(parents=True, exist_ok=True)
     report_path = output / 'summary.json'
@@ -498,6 +504,308 @@ def main():
     except Exception as error:
         status = 'incomplete' if isinstance(error, (IncompleteCheck, subprocess.TimeoutExpired, FileNotFoundError)) else 'failed'
         report.update(status=status, reason=str(error), checking_seconds=time.monotonic() - started)
+        save()
+        raise
+
+
+def recovery_sources():
+    selected = {
+        'examples/editor/src/Cards.scuzz': ['text', 'str', 'pairs', 'safePath', 'need', 'inside', 'storage',
+            'setupStorage', 'propsOf', 'sourceWrites', 'matches', 'writeOne', 'recordPath', 'finish',
+            'readOptional', 'recover', 'undoOperation'],
+        'examples/editor/generation/src/Proposal.scuzz': ['str', 'pairsJson', 'pairs', 'safePath', 'inside'],
+        'examples/editor/generation/src/Models.scuzz': ['need'],
+        'examples/editor/src/Diags.scuzz': ['jsonField'],
+        'examples/editor/src/LspClient.scuzz': ['parseJson'],
+    }
+    sources, identities = {}, []
+    for name, functions in selected.items():
+        source = (ROOT / name).read_text()
+        starts = list(re.finditer(r'^def ([A-Za-z_][A-Za-z0-9_]*)\(', source, re.M))
+        bodies = {match[1]: source[match.start():starts[i + 1].start() if i + 1 < len(starts) else len(source)]
+                  for i, match in enumerate(starts)}
+        assert set(functions) <= bodies.keys(), ('production function is missing', name)
+        subset = ''.join(bodies[function] for function in functions)
+        sources[Path(name).stem] = subset
+        identities.append(dict(path=name, sha256=digest(source.encode()), functions=functions,
+                               selected_sha256=digest(subset.encode())))
+    sources['Recovery'] = (ROOT / 'examples/proof/recovery.scuzz').read_text()
+    sources['Main'] = '@main def main: IO[Unit] = IO.pure(())\n'
+    return sources, identities
+
+
+def recovery_package(cli, sources, output, variant):
+    package = output / variant
+    (package / 'src').mkdir(parents=True, exist_ok=True)
+    (package / 'scuzz.toml').write_text('[package]\nname="recovery"\n')
+    for name, source in sources.items():
+        (package / 'src' / (name + '.scuzz')).write_text(source)
+    setup = ['def setup(): IO[Unit] =', '  for {']
+    before = '@main def main: IO[Unit] =\n  IO.println(1)\n'
+    after = '@main def main: IO[Unit] =\n  IO.println(2)\n'
+    addition = 'def other(): Int =\n  3\n'
+    identity = digest(b'finite recovery')
+    writes = [dict(path='src/Main.scuzz', before=before, before_exists=True, after=after, after_exists=True),
+              dict(path='src/Other.scuzz', before='', before_exists=False, after=addition, after_exists=True)]
+    accepted = dict(operation='accept-' + identity, card=identity, decision='accept', writes=writes)
+    undone = dict(operation='undo-' + identity, card=identity, decision='undo',
+                  writes=[dict(path=w['path'], before=w['after'], before_exists=w['after_exists'],
+                               after=w['before'], after_exists=w['before_exists']) for w in writes], time=2)
+    for mode in range(4):
+        root = f'recovery-{mode}'
+        storage = root + '/.scuzz/ide'
+        for path in (root + '/src', storage + '/cards', storage + '/records'):
+            setup.append(f'    _ <- Fs.mkdirs({json.dumps(path)})')
+        files = {root + '/src/Main.scuzz': 'external bytes' if mode in (1, 3) else after if mode == 0 else before,
+                 storage + '/journal.json': json.dumps(accepted if mode < 2 else undone, separators=(',', ':'))}
+        if mode >= 2:
+            files[root + '/src/Other.scuzz'] = addition
+            files[storage + '/last.json'] = json.dumps(accepted, separators=(',', ':'))
+        for path, content in files.items():
+            setup.append(f'    _ <- Fs.write({json.dumps(path)}, {json.dumps(content)})')
+    setup.append('  } yield ()')
+    (package / 'recovery.scuzz_scenario').write_text('\n'.join(setup) + '\n\n'
+        'def faults(): List[String] = ["fs:fail"]\n\n'
+        'def recover(n: Int where n >= 0 && n <= 7): IO[Unit] = Recovery.run(n)\n')
+    (package / 'recovery.scuzz_verify').write_text(
+        'def externalBytes(t: Timeline): Verdict =\n'
+        '  Verdict.every(t, i => !Timeline.driveHas(t, i, "recover") || '
+        'Timeline.fileTextIs(t, i, "recovery-1/src/Main.scuzz", "external bytes") && '
+        'Timeline.fileTextIs(t, i, "recovery-3/src/Main.scuzz", "external bytes"))\n')
+    command(cli, ['fmt', package], output, variant + '-format')
+    command(cli, ['fuzz', '--iterations', '0', package], output, variant + '-build')
+    exported = command(cli, ['run', 'examples/proof'], output, variant + '-export',
+                       env=dict(os.environ, SCUZZ_PROOF_EXPORT='recovery', SCUZZ_RECOVERY_PACKAGE=str(package)))
+    files = json.loads(next(line for line in exported.stdout.splitlines() if line.startswith('[')))
+    probe = package / 'evaluator'
+    probe.mkdir(exist_ok=True)
+    (probe / 'files.txt').write_text(''.join(name + '\n' for name, _ in files))
+    for index, (_, source) in enumerate(files):
+        (probe / f'{index}.scuzz').write_text(source)
+    (package / 'corpus').mkdir(exist_ok=True)
+    for n in range(8):
+        (package / f'corpus/recovery-{n}.toml').write_text(
+            '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive recover {n}']) + '\n')
+    return package, package / 'build/recovery', probe
+
+
+def recovery_finite(cli, package, executable, probe, output, defective=False):
+    started = time.monotonic()
+    rows, incomplete, unique = [], [], set()
+    faults = [0] + [1 + 9 * i for i in range(16)] + [289 + 9 * i for i in range(16)]
+    bounds = dict(inputs=list(range(8)), fault_calls=[1, 16], fault_modes=['fail', 'partial'],
+                  contention_steps=1000, scheduler_steps=1000, executions=2048, seconds=60)
+    required = {'recovery preserves external bytes', 'recovery completes both source writes',
+                'recovery retains a conflicting journal', 'recovery clears a completed journal',
+                'recovery records completed writes', 'recovery retains the Undo state'}
+    def remaining():
+        seconds = bounds['seconds'] - (time.monotonic() - started)
+        if seconds <= 0:
+            raise IncompleteCheck('checking budget')
+        return seconds
+    pending = deque((n, fault, prefix) for n in bounds['inputs'] for fault in faults
+                    for prefix in ([(), (2, 2)] if n >= 4 else [()]))
+    queued = set(pending)
+    covered = set()
+    try:
+        while pending:
+            if time.monotonic() - started >= bounds['seconds'] or len(rows) >= bounds['executions']:
+                sequential = [row for row in rows if row['input'] < 4]
+                return dict(status='incomplete', reason='checking budget', bounds=bounds,
+                            seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
+                            distinct_replays=len(unique), pending_prefixes=len(pending),
+                            sequential_scope=dict(status='passed' if len(sequential) == 132 else 'incomplete',
+                                                  inputs=[0, 1, 2, 3], workloads=len(sequential)))
+            n, fault, prefix = pending.popleft()
+            if (n, fault, prefix) in covered:
+                continue
+            directory = output / f'finite-{len(rows)}'
+            row = protocol_probe(executable, directory, 'recover', n, fault, prefix,
+                                 seconds=min(20, remaining()))
+            rows.append(row)
+            row['executed_properties'] = executed_properties(directory / 'coverage.txt')
+            terminals = [run for run in row['runs'] if run['name'] == 'recover']
+            if len(terminals) != 1:
+                raise IncompleteCheck('terminal scheduler evidence is missing')
+            terminal = terminals[0]
+            choices = [choice for choice in row['choices'] if choice['name'] == 'recover']
+            if terminal['contention'] > bounds['contention_steps'] or terminal['steps'] > bounds['scheduler_steps'] or row['status'] == 'incomplete':
+                row['scope_status'] = 'incomplete'
+                incomplete.append(dict(input=n, fault=fault, reason='scheduler bound or incomplete execution',
+                                       workload=row['workload'], contention=terminal['contention']))
+                continue
+            assert terminal['bounded'] and len(choices) == terminal['contention']
+            picks = next(line for line in row['schedule_picks'] if line.startswith('recover ')).split(':')[1]
+            path = tuple(map(int, picks.split(','))) if picks != '-' else ()
+            assert len(path) == len(choices) and path[:len(prefix)] == prefix
+            for length in range(len(path) + 1):
+                covered.add((n, fault, path[:length]))
+            key = n, fault, path
+            if key not in unique:
+                unique.add(key)
+                row['parity'] = protocol_parity(cli, probe, row, directory, output, 1000, seconds=remaining())
+                if row['status'] == 'passed':
+                    assert 'checked\texternalBytes' in (directory / 'claims.txt').read_text()
+            if row['status'] == 'failed':
+                assert defective, ('application recovery rejects', row)
+                command(cli, ['fuzz', '--replay', row['workload'], package], output,
+                        'counterexample-replay', success=False, seconds=remaining())
+                return dict(status='failed', bounds=bounds, counterexample=row,
+                            seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete)
+            assert required <= set(row['executed_properties']), 'recovery author rules do not execute'
+            for index, choice in enumerate(choices):
+                assert choice['step'] == index + 1 and path[index] in choice['ready']
+                for alternative in choice['ready']:
+                    branch = path[:index] + (alternative,)
+                    if alternative != path[index] and (n, fault, branch) not in queued:
+                        queued.add((n, fault, branch))
+                        pending.append((n, fault, branch))
+    except (IncompleteCheck, subprocess.TimeoutExpired) as error:
+        sequential = [row for row in rows if row['input'] < 4]
+        return dict(status='incomplete', reason='checking budget' if isinstance(error, subprocess.TimeoutExpired) else str(error), bounds=bounds,
+                    seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
+                    distinct_replays=sum('parity' in row for row in rows), pending_prefixes=len(pending) + 1,
+                    sequential_scope=dict(status='passed' if len(sequential) == 132
+                        and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
+                        else 'incomplete', inputs=[0, 1, 2, 3], workloads=len(sequential)))
+    reached = {name: any(name in (Path(row['workload']).parent / 'stdout').read_text()
+                        for row in rows if 'parity' in row)
+               for name in ('Fs: injected fault', 'Fs: partial write', 'fiber interrupted')}
+    assert all(reached.values()), ('required application paths do not execute', reached)
+    sequential = [row for row in rows if row['input'] < 4]
+    assert len(sequential) == 132 and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
+    return dict(status='incomplete' if incomplete else 'passed', bounds=bounds, reached=reached,
+                sequential_scope=dict(status='passed', inputs=[0, 1, 2, 3], workloads=len(sequential)),
+                seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
+                distinct_replays=len(unique))
+
+
+def recovery_sampled(cli, package, output):
+    started = time.monotonic()
+    process = subprocess.Popen([str(cli), 'fuzz', '--no-fail-fast', '--iterations', '64', '--seed', '42', str(package)],
+                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=60)
+        (output / 'sampled.stdout').write_text(stdout)
+        (output / 'sampled.stderr').write_text(stderr)
+        summary = json.loads((package / 'build/fuzz/summary.json').read_text())
+        return dict(status=summary['status'], exit=process.returncode, seconds=time.monotonic() - started,
+                    seconds_budget=60, requested_iterations=64, report=summary)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate()
+        (output / 'sampled.stdout').write_text(stdout)
+        (output / 'sampled.stderr').write_text(stderr)
+        return dict(status='incomplete', reason='checking budget', seconds=time.monotonic() - started,
+                    seconds_budget=60, requested_iterations=64)
+
+
+def recovery_experiment(cli):
+    destination = ROOT / 'examples/proof/build/recovery'
+    destination.mkdir(parents=True, exist_ok=True)
+    output = Path(tempfile.mkdtemp(prefix='run-', dir=destination))
+    report = dict(status='incomplete', methods=['exhaustive-bounded-simulation', 'ordinary-fuzz'],
+                  trusted=['source function selection', 'Scuzz compiler and evaluator', 'C runtime', 'host OS'],
+                  open_obligations=['fault calls after 16', 'multiple faults', 'external edits during recovery',
+                                    'live filesystem and process termination', 'other application paths'])
+    path = destination / 'summary.json'
+    def save():
+        path.write_text(json.dumps(report, indent=2) + '\n')
+    save()
+    try:
+        sources, identities = recovery_sources()
+        report['identities'] = dict(production_sources=identities, compiler_sha256=digest(cli.read_bytes()),
+            runtime_sha256=digest((ROOT / 'crates/runtime/build/libscuzz_rt.a').read_bytes()),
+            checking_script_sha256=digest(Path(__file__).read_bytes()),
+            author_source_sha256=digest(sources['Recovery'].encode()), platform=platform.platform())
+        clang = shutil.which('clang')
+        if clang is None:
+            raise IncompleteCheck('native compiler identity is missing')
+        report['identities']['clang'] = dict(path=clang, sha256=digest(Path(clang).read_bytes()),
+            version=subprocess.run([clang, '--version'], capture_output=True, text=True,
+                                   check=True, timeout=5).stdout)
+        report['identities']['graph_exporter_source_sha256'] = digest((ROOT / 'examples/proof/src/Main.scuzz').read_bytes())
+        report['identities']['python'] = platform.python_version()
+        report['scope'] = dict(files=2, operations=['accept', 'undo'], external_edit='before recovery only',
+                              entry='resume one pending write, then recover twice',
+                              methods_budget_seconds=60, sampled_seed=42, sampled_iterations=64, required_recovery_inputs=list(range(8)),
+                              ordinary_scope='the default search also includes repeated calls and persistent faults')
+        variants = {'correct': sources}
+        skip = dict(sources)
+        anchor = '_ <- IO.foreachDiscard(ws, w => writeOne(root, w))'
+        assert sources['Cards'].count(anchor) == 1
+        skip['Cards'] = sources['Cards'].replace(anchor, '_ <- IO.pure(())')
+        variants['missing-write'] = skip
+        overwrite = dict(sources)
+        anchor = '_ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")'
+        assert sources['Cards'].count(anchor) == 1
+        overwrite['Cards'] = sources['Cards'].replace(anchor, '_ <- IO.pure(())')
+        anchor = '_ <- need(after || before, Str.concat("recovery conflict: ", str(w, "path")))'
+        assert overwrite['Cards'].count(anchor) == 1
+        overwrite['Cards'] = overwrite['Cards'].replace(anchor, '_ <- IO.pure(())')
+        variants['external-overwrite'] = overwrite
+        report['variants'] = {}
+        for variant, source in variants.items():
+            started = time.monotonic()
+            package, executable, probe = recovery_package(cli, source, output, variant)
+            row = dict(build_seconds=time.monotonic() - started,
+                       native_sha256=digest(executable.read_bytes()),
+                       inputs=[dict(path=str(file.relative_to(package)), sha256=digest(file.read_bytes()))
+                               for file in sorted(package.rglob('*')) if file.is_file()
+                               and file.suffix in ('.scuzz', '.scuzz_scenario', '.scuzz_verify', '.toml')
+                               and 'build' not in file.relative_to(package).parts],
+                       exporter_sha256=digest((ROOT / 'examples/proof/build/proof').read_bytes()))
+            report['variants'][variant] = row
+            print('Check recovery:', variant, flush=True)
+            row['finite'] = recovery_finite(cli, package, executable, probe, package, variant != 'correct')
+            save()
+            row['sampled'] = recovery_sampled(cli, package, package)
+            search = row['sampled'].get('report', {}).get('scope', {}).get('search', {})
+            row['sampled']['search_status'] = ('failed' if search.get('failed', 0) else 'incomplete'
+                if search.get('incomplete', 0) or not search else 'passed')
+            save()
+            if variant != 'correct':
+                assert row['finite']['status'] == 'failed', 'deliberate recovery defect is not rejected'
+                assert row['sampled']['search_status'] == 'failed', 'ordinary search does not reject the deliberate defect'
+        report['mutation_regressions'] = {}
+        regressions = [
+            ('field-lookup', 'Diags', 'p._1 == key', 'p._1 != key'),
+            ('path-guard', 'Models', 'if (ok) IO.pure(()) else IO.fail(why)',
+             'if (ok) IO.fail(why) else IO.pure(())'),
+            ('resolved-path', 'Proposal', 'resolved == Fs.join(base, path)',
+             'resolved != Fs.join(base, path)'),
+        ]
+        for name, module, anchor, replacement in regressions:
+            changed = dict(sources)
+            assert changed[module].count(anchor) == 1
+            changed[module] = changed[module].replace(anchor, replacement)
+            package, executable, probe = recovery_package(cli, changed, output, 'mutation-' + name)
+            directory = package / 'witness'
+            witness = protocol_probe(executable, directory, 'recover', 0, 0)
+            assert witness['status'] == 'failed' and 'recovery returns an expected error' in witness['rejection']
+            assert next(run for run in witness['runs'] if run['name'] == 'setup')['ok']
+            witness['parity'] = protocol_parity(cli, probe, witness, directory, package, 1000)
+            command(cli, ['fuzz', '--replay', witness['workload'], package], package,
+                    'mutation-replay', success=False)
+            report['mutation_regressions'][name] = dict(status='detected', module=module,
+                source_sha256=digest(changed[module].encode()), native_sha256=digest(executable.read_bytes()),
+                counterexample=witness)
+            save()
+        report['comparison'] = dict(
+            deliberate_defects=dict(finite=2, ordinary_search=2),
+            conclusion='Both methods reject the controls. General application benefit remains unproven.',
+            limits=['finite exploration must complete within its checking budget',
+                    'search scopes differ; timing does not establish a speed advantage'])
+        report['status'] = 'incomplete' if report['variants']['correct']['finite']['status'] == 'incomplete' else 'passed'
+        if any(row['sampled']['status'] == 'incomplete' for row in report['variants'].values()):
+            report['status'] = 'incomplete'
+        save()
+        print('Recovery experiment:', report['status'], 'Report:', path)
+        return 2 if report['status'] == 'incomplete' else 0
+    except Exception as error:
+        report.update(status='incomplete' if isinstance(error, (IncompleteCheck, subprocess.TimeoutExpired, FileNotFoundError)) else 'failed',
+                      reason=str(error))
         save()
         raise
 

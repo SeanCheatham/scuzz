@@ -73,9 +73,11 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Formal verification
 
-**Unproven.** One author claim supports both testing and formal checking without a second app implementation. Solver results match Scuzz integer and effect behavior. Counterexamples reproduce on evaluator and native execution. The supported subset and resource cost fit an ordinary author workflow.
+**Unproven.** The supported subset and resource cost fit an ordinary application author workflow. Formal methods add useful defect detection beyond ordinary fuzzing. General solver translation and compilation correctness remain unproven.
 
-**Experiment.** Use the [formal verification experiment](vision.md#formal-verification-experiment). Check one pure invariant and one bounded effect protocol. Include deliberate defects, contradictory assumptions, unreachable triggers, and solver failures. Record exact bounds and trusted components. Keep unsupported or incomplete checks distinct from proofs.
+**Evidence.** The optional [formal checks](vision.md#formal-verification-methods) reuse author rules. One pure invariant covers all signed 64-bit inputs. A finite effect protocol checks cancellation and interrupted writes. Both engines replay the concrete counterexamples. The application recovery check uses exact editor function bodies. Its sequential scope passes. Both finite exploration and ordinary search reject two deliberate defects. Long cancellation paths retain exact replay records. Fixed setup inputs keep helper mutations out of setup. Recovery corpus inputs exercise the mutation checks. The exhaustive application search still exceeds its checking budget. Run instructions and measured limits live in `developer-environment.md`.
+
+**Next gate.** Complete the finite application search within the stated checking budget. Keep search rejection separate from incomplete mutation evidence. Measure an author workflow and compare equal checking budgets. Do not infer a method advantage from different search scopes.
 
 **Limits.** Refinement types, static effect protocols, inductive proofs, and compilation validation remain proposals. Existing finite campaigns do not establish these guarantees. A proof establishes a stated property under its assumptions. It does not establish that the specification matches all product needs.
 
