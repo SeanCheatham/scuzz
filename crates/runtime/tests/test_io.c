@@ -15330,6 +15330,56 @@ int main(void) {
     remove(path);
   }
 
+  {
+    /* Both coverage paths share text identity across bucket collisions. */
+    enum { count = 4097 };
+    const char *path = "/tmp/scuzz_test_coverage_shared.txt";
+    char (*names)[64] = malloc(count * sizeof(*names));
+    char (*aliases)[64] = malloc(count * sizeof(*aliases));
+    char text[80];
+    FILE *file;
+    int i;
+    assert(names && aliases);
+    remove(path);
+    setenv("SCUZZ_COVERAGE_DUMP", path, 1);
+    sz_coverage_env_refresh();
+    for (i = 0; i < count; i++) {
+      snprintf(names[i], sizeof(names[i]), "Shared.scuzz:%d:1", i);
+      strcpy(aliases[i], names[i]);
+      if (i % 2)
+        sz_coverage_hit(names[i]);
+      else
+        sz_coverage_hit_key(names[i]);
+      sz_coverage_hit_key(aliases[i]);
+      sz_coverage_hit(aliases[i]);
+      sz_coverage_hit(names[i]);
+    }
+    sz_coverage_env_refresh();
+    file = fopen(path, "r");
+    assert(file);
+    for (i = 0; i < count; i++) {
+      assert(fgets(text, sizeof(text), file));
+      assert(strlen(text) == strlen(names[i]) + 1);
+      assert(!strncmp(text, names[i], strlen(names[i])));
+      assert(text[strlen(names[i])] == '\n');
+    }
+    assert(!fgets(text, sizeof(text), file));
+    fclose(file);
+    remove(path);
+    sz_coverage_hit_key(names[0]);
+    sz_coverage_hit(names[0]);
+    unsetenv("SCUZZ_COVERAGE_DUMP");
+    sz_coverage_env_refresh();
+    file = fopen(path, "r");
+    assert(file && fgets(text, sizeof(text), file));
+    assert(!strcmp(text, "Shared.scuzz:0:1\n"));
+    assert(!fgets(text, sizeof(text), file));
+    fclose(file);
+    remove(path);
+    free(names);
+    free(aliases);
+  }
+
   test_pick_names();
   test_driver_growth();
   test_fuzz_probe_closures();

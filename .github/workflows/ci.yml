@@ -50,7 +50,7 @@ jobs:
           - name: fixedpoint
             slices: fixedpoint
           - name: native
-            slices: install-dry runtime asan skia embedders
+            slices: install-dry runtime asan ubsan skia embedders
           - name: apps
             slices: embedders kernel package ui gpu differential new-ui desktop mobile
           - name: fuzz

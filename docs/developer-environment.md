@@ -33,10 +33,21 @@ export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13
 | Slice | Packages |
 | --- | --- |
 | ASan (`make -C crates/runtime test-asan`) | `libclang-rt-18-dev` (match host clang) |
+| UBSan (`make -C crates/runtime test-ubsan`) | `libclang-rt-18-dev` (match host clang) |
 | GPU (`SCUZZ_SKIA=gpu`) | `libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri xvfb` |
 | Desktop X11 | `libx11-dev xvfb` |
 
 ASan skips when the ASan runtime cannot link. GPU needs `LIBGL_ALWAYS_SOFTWARE=1` when the host has no GPU.
+
+UBSan fails when compile or link support is unavailable.
+The target rejects a known signed overflow before the runtime checks.
+It compiles and links with `-fsanitize=undefined -fno-sanitize-recover=undefined`.
+See [Clang UBSan](https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html).
+It instruments runtime C, C tests, and reload libraries.
+It keeps binaries in `crates/runtime/build/ubsan/`.
+Fixtures with relative `build/` paths use this directory.
+The Skia wrapper and prebuilt Skia code keep their normal build flags.
+These checks do not establish that all runtime behavior is correct.
 
 ## Git hooks
 
@@ -53,6 +64,7 @@ A pre-commit hook checks conflict markers. When you stage runtime, ffi-skia, or 
 ./examples/cli/build/cli run examples/hello
 make -C crates/runtime test CC=clang
 make -C crates/runtime test-asan CC=clang   # skip if ASan cannot link
+make -C crates/runtime test-ubsan CC=clang
 ```
 
 Same slices as GitHub. List them, then run the required PR path:

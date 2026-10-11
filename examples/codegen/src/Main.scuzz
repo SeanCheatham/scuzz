@@ -79,8 +79,11 @@ def internInterpLit(): Bool =
 def srcViewEq(): String =
   "oracle sides(v: View): Bool =\n  v == View.text(\"milk\")\n"
 
-def viewEqShows(): Bool =
-  Str.contains(Emit.emit(Verify.wrapSrc("t", srcViewEq())), "call ptr @sz_view_show")
+def viewEqGuard(): Bool =
+  for {
+    wrapped = Verify.wrapSrc("t", srcViewEq())
+    ir = Emit.emit(wrapped)
+  } yield Check.check(wrapped) == "[]" && Str.contains(ir, "call i32 @sz_ptr_eq") && Str.contains(ir, "call ptr @sz_property_assert") && !Str.contains(ir, "call ptr @sz_view_show")
 
 def rewriteInterpLit(): Bool =
   Emit.rewriteInterpStr("hi$n lo", "n", "x") == "hi$x lo" && Emit.rewriteInterpStr("a${n}b", "n", "x") == "a${x}b"

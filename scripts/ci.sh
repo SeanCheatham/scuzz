@@ -70,6 +70,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   fetch-skia      fetch_skia.sh retry proof (no GitHub Releases)
   runtime         make -C crates/runtime test
   asan            make -C crates/runtime test-asan
+  ubsan           make -C crates/runtime test-ubsan
   skia            ffi-skia tests
   embedders       ffi-skia lib + desktop and mobile embedders
   hello           hello, fmt
@@ -254,6 +255,10 @@ slice_runtime() {
 
 slice_asan() {
   make -C crates/runtime test-asan -j"$JOBS" CC=clang
+}
+
+slice_ubsan() {
+  make -C crates/runtime test-ubsan -j"$JOBS" CC=clang
 }
 
 slice_skia() {
@@ -2606,6 +2611,7 @@ slice_linux_headless() {
   slice_install_dry
   slice_runtime
   slice_asan
+  slice_ubsan
   slice_skia
   slice_embedders
   slice_oracles
@@ -2632,6 +2638,7 @@ case "$SLICE" in
   fetch-skia) prove_fetch_skia_retry ;;
   runtime) slice_runtime ;;
   asan) slice_asan ;;
+  ubsan) slice_ubsan ;;
   skia) slice_skia ;;
   embedders) slice_embedders ;;
   hello) slice_hello ;;

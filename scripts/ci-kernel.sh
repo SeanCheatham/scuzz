@@ -336,6 +336,45 @@ with tempfile.TemporaryDirectory(prefix='scuzz-arithmetic-') as directory:
 print(f'Integer boundaries: {len(pairs)} model cases and 24 zero failures across both engines')
 PY_ARITHMETIC
 
+python3 - <<'PY_JSON_LARGE'
+import json
+import os
+from pathlib import Path
+import resource
+import subprocess
+import sys
+import tempfile
+
+repo = Path.cwd()
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-json-large-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    dependency = os.path.relpath(repo / 'examples/compiler', root)
+    (root / 'scuzz.toml').write_text('[package]\nname="json-large"\n[dependencies]\ncompiler={path="' + dependency + '"}\n')
+    (root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] =\n  Fs.read("input").flatMap(s => IO.println(Check.jsonStr(s)))\n')
+    unit = 'prefix "\\\t\n\r' + ''.join(chr(i) for i in range(32)) + 'éλ🙂 suffix\n'
+    text = unit * 4096
+    (root / 'input').write_bytes(text.encode())
+    # The wire format uses Unicode escapes for backspace and form feed.
+    expected = (json.dumps(text, ensure_ascii=False).replace('\\b', '\\u0008').replace('\\f', '\\u000c') + '\n').encode()
+    env = dict(os.environ, SCUZZ_HOME=str(repo))
+    build = subprocess.run([str(cli), 'run', str(root)], cwd=root, env=env,
+                           capture_output=True, timeout=180)
+    assert build.returncode == 0, build.stderr[-2000:]
+    assert build.stdout.endswith(expected), (len(build.stdout), len(expected))
+    def limits():
+        if sys.platform.startswith('linux'):
+            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
+        resource.setrlimit(resource.RLIMIT_STACK, (8 * 1024 * 1024,) * 2)
+    result = subprocess.run([str(root / 'build/json-large')], cwd=root, env=env,
+                            capture_output=True, timeout=20, preexec_fn=limits)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout == expected, (len(result.stdout), len(expected))
+    assert json.loads(result.stdout) == text
+    print(f'Native JSON: exact {len(text.encode())} input bytes and {len(expected)} output bytes; control bytes and UTF-8; 8 MiB stack; Linux 512 MiB memory; 20-second deadline')
+PY_JSON_LARGE
+
 # Result bindings retain an explicit failure policy.
 python3 - <<'PY_RESULT'
 import json
