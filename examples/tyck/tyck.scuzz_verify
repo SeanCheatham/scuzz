@@ -67,3 +67,6 @@ oracle resultBindings(): Bool =
 oracle resultFieldBindings(): Bool =
   Main.resultFieldBindings()
 
+oracle resultListBindings(): Bool =
+  Main.resultListBindings()
+
