@@ -37,4 +37,6 @@ The product manual states the live-use requirement.
 All 34 required type-checker workloads pass.
 The evaluator idle deadline requires compiled fallback.
 Generated type-checker timelines and claims match on both engines.
-The remaining compiler and integration checks remain open.
+All 38 required code-generation workloads pass.
+The code-generation evaluator idle probe requires compiled fallback.
+The remaining compiler parity and integration checks remain open.
