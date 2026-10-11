@@ -212,3 +212,66 @@ Checking takes 17.97 seconds. The cached package build takes 4.58 seconds.
 A cold package build takes 35.91 seconds.
 These measurements apply to this finite experiment on this host.
 These results do not establish an inductive proof or correctness for other programs.
+
+### Application recovery comparison
+
+Run the application check without a solver:
+
+```bash
+python3 scripts/proof-experiment.py --recovery
+```
+
+The report lives in `examples/proof/build/recovery/summary.json`.
+Each run uses a new scratch directory. It retains logs and replay workloads.
+The script selects exact function bodies from the editor recovery code and its helpers.
+It compiles these bodies with the existing compiler.
+It exports the evaluator graph through the existing compiler verification modules.
+Source selection remains a trusted step. This check does not run the complete IDE.
+The fixture source lives in `examples/proof/recovery.scuzz`.
+
+The check uses two source files and four journal states.
+They cover interrupted acceptance, interrupted Undo, and an external edit before recovery.
+One pending source write runs before journal recovery.
+Two further recovery attempts check completion and repeated recovery.
+Four more inputs cancel this operation in a worker fiber.
+The caller waits for worker entry before cancellation.
+External edits during recovery and live process termination remain unchecked.
+
+Faults cover no fault or one file failure or interrupted write at calls 1 through 16.
+Setup does not consume the fault bound.
+The execution limit is 2048. Each driver has a 1000-step limit.
+The replay record retains every contention choice.
+The checker permits up to 1000 contention choices within the driver step limit.
+Replay rejects missing, additional, or unavailable recorded choices.
+The 16-point schedule sampling policy stays separate from replay storage.
+Bounded paths compare exact scheduler choices, timelines, claims, and author rule execution.
+They also compare evaluator and native terminal verdicts.
+The sequential sub-scope covers 132 executions.
+The complete application result stays incomplete when the checking budget ends.
+The report retains the number of pending scheduler prefixes.
+
+Both methods use the same author rules and a 60-second checking limit per source variant.
+Build time stays separate. Ordinary fuzzing uses 64 iterations and seed 42.
+Eight corpus inputs exercise acceptance, Undo, conflict, and cancellation.
+The search continues after a required failure to check both defect controls.
+Setup writes fixed journal inputs without application helpers.
+Unexpected recovery errors reject an author rule. Tool failures stay incomplete.
+Its default search also includes repeated drives and persistent faults.
+The driver retains a pending operation when file access remains unavailable.
+The finite checker requires all six live assertions on each passing bounded path.
+The methods have different search scopes. Their elapsed times do not establish a speed advantage.
+
+One Linux sample checks 727 native executions and 726 exact replay paths.
+The 132 sequential paths pass. Cancellation paths reach 144 contention choices.
+The 60-second budget ends with more than 37000 scheduler prefixes pending.
+Ordinary fuzzing takes about 6 seconds. Its nine required probes and 40 search probes pass.
+It detects all 24 sampled mutations. No sampled mutation remains incomplete.
+These sampled mutations affect fixture functions.
+Three direct mutation checks exercise application helpers.
+They corrupt field lookup and path guards.
+Their setup passes. Each check rejects the recovery error in both engines.
+These three checks also reproduce through ordinary native replay.
+Both methods reject a missing-write defect and an external-overwrite defect.
+Finite counterexamples also reproduce through ordinary native replay.
+The complete comparison returns exit status 2 because finite exploration remains incomplete.
+These controls do not establish a new application defect or a general method advantage.

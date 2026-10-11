@@ -5078,34 +5078,34 @@ static void fuzz_probe_env(void) {
  * child, so one server process runs many probes with different env. */
 static void fuzz_probe_request(const char *path) {
   FILE *f = fopen(path, "r");
-  char line[4096];
+  char *line = NULL;
+  size_t cap = 0;
+  ssize_t length;
   if (!f)
-    return;
-  while (fgets(line, sizeof line, f)) {
+    sz_panic("cannot open probe request");
+  while ((length = getline(&line, &cap, f)) >= 0) {
     char key[300];
     char *eq = strchr(line, '=');
-    size_t n = strlen(line);
-    if (n && line[n - 1] == '\n')
-      line[--n] = 0;
+    if (length && line[length - 1] == '\n')
+      line[--length] = 0;
     if (!eq || eq == line)
       continue;
     *eq = 0;
-    snprintf(key, sizeof key, "SCUZZ_%s", line);
-    setenv(key, eq + 1, 1);
+    if (snprintf(key, sizeof key, "SCUZZ_%s", line) >= (int)sizeof key)
+      sz_panic("probe request key exceeds limit");
+    if (setenv(key, eq + 1, 1) != 0)
+      sz_panic("cannot set probe request value");
   }
-  fclose(f);
+  free(line);
+  if (ferror(f)) {
+    fclose(f);
+    sz_panic("cannot read probe request");
+  }
+  if (fclose(f) != 0)
+    sz_panic("cannot close probe request");
 }
 
 static void fuzz_probe_child_limits(void) {
-  const char *log = getenv("SCUZZ_PROBE_LOG");
-  int fd = open(log && log[0] ? log : "/dev/null",
-                O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (fd >= 0) {
-    dup2(fd, STDOUT_FILENO);
-    dup2(fd, STDERR_FILENO);
-    if (fd > STDERR_FILENO)
-      close(fd);
-  }
   sz_panic_exit();
 #if defined(__linux__)
   {
@@ -5115,6 +5115,18 @@ static void fuzz_probe_child_limits(void) {
     setrlimit(RLIMIT_AS, &rl);
   }
 #endif
+}
+
+static void fuzz_probe_child_log(void) {
+  const char *log = getenv("SCUZZ_PROBE_LOG");
+  int fd = open(log && log[0] ? log : "/dev/null",
+                O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd >= 0) {
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    if (fd > STDERR_FILENO)
+      close(fd);
+  }
 }
 
 /* Clear setup, drivers, and claims after a forked probe so the server
@@ -5168,8 +5180,9 @@ static void *fuzz_probe_thunk(void *env) {
     return sz_string_from_cstr("probe fork failed");
   if (pid == 0) {
     void *out;
-    fuzz_probe_request(req);
     fuzz_probe_child_limits();
+    fuzz_probe_request(req);
+    fuzz_probe_child_log();
     out = fuzz_probe_run(program);
     if (out)
       fprintf(stderr, "scuzz: probe failed: %s\n",

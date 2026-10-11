@@ -104,6 +104,12 @@ Do not silently replace an author claim with a weaker solver claim.
 `examples/proof` supplies optional bit-vector and finite protocol checks.
 Run instructions and measured scope live in `developer-environment.md`.
 The default app path remains `scuzz fuzz`.
+The application recovery check uses the editor journal functions.
+Long cancellation paths replay exactly in both engines.
+Independent setup and recovery corpus inputs support the mutation checks.
+Ordinary search rejects the deliberate defects.
+The exhaustive application search still exceeds its checking budget.
+Resolve this cost limit before adding a public exhaustive application method.
 Select a new product method only for a demonstrated application need.
 Keep its supported subset explicit before adding syntax or dependencies.
 Reuse the author rule. Preserve claims, hermetic simulation, and exact replay.

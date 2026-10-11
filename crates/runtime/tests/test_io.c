@@ -35,6 +35,8 @@
 #include <unistd.h>
 
 static SzIo *pure_drop(void *value);
+static SzIo *repeat_n_drop(int64_t n, SzIo *inner);
+static SzIo *both_drop(SzIo *left, SzIo *right);
 
 static void *nested_pick_name(void *env) {
   char name[] = "inner";
@@ -73,6 +75,117 @@ static void test_pick_names(void) {
   assert(strstr(text, "\nouter "));
   unsetenv("SCUZZ_SCHED_PICKS_DUMP");
   sz_sched_picks_probe_reset();
+  remove(path);
+}
+
+static void *replay_tick(void *env) {
+  (void)env;
+  return NULL;
+}
+
+static void test_long_replay(void) {
+  const char *path = "/tmp/scuzz_test_long_replay.txt";
+  char *record = NULL;
+  char *replayed = NULL;
+  size_t cap = 0;
+  FILE *file;
+  SzIoResult result;
+  SzIo *io;
+  setenv("SCUZZ_SCHED_SEED", "0", 1);
+  setenv("SCUZZ_SCHED_PICKS_DUMP", path, 1);
+  sz_testrt_install();
+  sz_sched_picks_probe_reset();
+  sz_sched_set_pick_name("long");
+  io = both_drop(repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)),
+                 repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)));
+  result = sz_io_unsafe_run(io);
+  assert(result.ok);
+  sz_release(result.value);
+  file = fopen(path, "r");
+  assert(file && getline(&record, &cap, file) > 4096);
+  fclose(file);
+  record[strcspn(record, "\n")] = 0;
+  setenv("SCUZZ_SCHED_PICKS", record, 1);
+  setenv("SCUZZ_SCHED_SEED", "42", 1);
+  sz_sched_picks_probe_reset();
+  sz_sched_set_pick_name("long");
+  io = both_drop(repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)),
+                 repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)));
+  result = sz_io_unsafe_run(io);
+  assert(result.ok);
+  sz_release(result.value);
+  file = fopen(path, "r");
+  cap = 0;
+  assert(file && getline(&replayed, &cap, file) > 4096);
+  fclose(file);
+  replayed[strcspn(replayed, "\n")] = 0;
+  assert(strcmp(record, replayed) == 0);
+
+  /* A complete replay must not accept a missing final choice. */
+  char *last = strrchr(record, ',');
+  assert(last);
+  *last = 0;
+  setenv("SCUZZ_SCHED_PICKS", record, 1);
+  sz_sched_picks_probe_reset();
+  sz_sched_set_pick_name("long");
+  io = both_drop(repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)),
+                 repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)));
+  result = sz_io_unsafe_run(io);
+  assert(!result.ok);
+  assert(strstr(sz_string_cstr(result.error->message), "schedule drift"));
+  sz_error_free(result.error);
+  *last = ',';
+
+  /* An unavailable fiber after choice 16 must cause replay drift. */
+  last[1] = '9';
+  setenv("SCUZZ_SCHED_PICKS", record, 1);
+  sz_sched_picks_probe_reset();
+  sz_sched_set_pick_name("long");
+  io = both_drop(repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)),
+                 repeat_n_drop(3000, sz_io_delay(replay_tick, NULL)));
+  result = sz_io_unsafe_run(io);
+  assert(!result.ok);
+  assert(strstr(sz_string_cstr(result.error->message), "schedule drift"));
+  sz_error_free(result.error);
+  free(record);
+  free(replayed);
+  unsetenv("SCUZZ_SCHED_SEED");
+  unsetenv("SCUZZ_SCHED_PICKS");
+  unsetenv("SCUZZ_SCHED_PICKS_DUMP");
+  sz_sched_picks_probe_reset();
+  sz_testrt_reset();
+  remove(path);
+}
+
+static void *check_long_request(void *env) {
+  const char *value = getenv("SCUZZ_LONG_REQUEST");
+  (void)env;
+  assert(value && strlen(value) == 7000);
+  for (int i = 0; i < 7000; i++)
+    assert(value[i] == 'x');
+  return NULL;
+}
+
+static void test_long_probe_request(void) {
+  const char *path = "/tmp/scuzz_test_long_request.txt";
+  SzIo *io;
+  SzIo *probe;
+  SzIoResult result;
+  FILE *file = fopen(path, "w");
+  assert(file);
+  fputs("TESTRT=1\nLONG_REQUEST=", file);
+  for (int i = 0; i < 7000; i++)
+    fputc('x', file);
+  fputc('\n', file);
+  fclose(file);
+  setenv("SCUZZ_EV_REQUEST", path, 1);
+  io = sz_io_delay(check_long_request, NULL);
+  probe = sz_fuzz_probe(io);
+  result = sz_io_unsafe_run(probe);
+  assert(result.ok);
+  sz_release(io);
+  assert(!getenv("SCUZZ_LONG_REQUEST"));
+  unsetenv("SCUZZ_EV_REQUEST");
   remove(path);
 }
 
@@ -15381,6 +15494,8 @@ int main(void) {
   }
 
   test_pick_names();
+  test_long_replay();
+  test_long_probe_request();
   test_driver_growth();
   test_fuzz_probe_closures();
   test_comparison_distances();

@@ -1,0 +1,90 @@
+def root(mode: Int): String =
+  Str.concat("recovery-", Str.fromInt(mode))
+
+def before(): String =
+  """@main def main: IO[Unit] =
+  IO.println(1)
+"""
+
+def after(): String =
+  """@main def main: IO[Unit] =
+  IO.println(2)
+"""
+
+def addition(): String =
+  """def other(): Int =
+  3
+"""
+
+def writes(mode: Int): List[Json] =
+  if (mode < 2) [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str(before())), ("before_exists", Json.Bool(true)), ("after", Json.Str(after())), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Other.scuzz")), ("before", Json.Str("")), ("before_exists", Json.Bool(false)), ("after", Json.Str(addition())), ("after_exists", Json.Bool(true))])] else [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str(after())), ("before_exists", Json.Bool(true)), ("after", Json.Str(before())), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Other.scuzz")), ("before", Json.Str(addition())), ("before_exists", Json.Bool(true)), ("after", Json.Str("")), ("after_exists", Json.Bool(false))])]
+
+def prepared(mode: Int): Json =
+  for {
+    id = Hash.sha256("finite recovery")
+    op = Json.Obj([("operation", Json.Str(Str.concat(if (mode < 2) "accept-" else "undo-", id))), ("card", Json.Str(id)), ("decision", Json.Str(if (mode < 2) "accept" else "undo")), ("writes", Json.Arr(writes(mode)))])
+  } yield if (mode < 2) op else Json.set(op, "time", Json.Int(2))
+
+def text(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(value) => value
+    case Result.Err(error) => error
+  }
+
+def readOptional(path: String): IO[String] =
+  Fs.exists(path).flatMap(hit => if (hit == 0) IO.pure("") else Fs.read(path))
+
+def expectedError(error: String): Bool =
+  error == "Fs: injected fault" || error == "Fs: partial write" || error == "fiber interrupted" || Str.startsWith(error, "recovery conflict:")
+
+def attempt(path: String): IO[Unit] =
+  Cards.recover(path).handleErrorWith(error => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false))
+
+def resume(mode: Int): IO[Unit] =
+  for {
+    index = if (mode == 1 || mode == 3) 0 else 1
+    write = List.at(writes(mode), index)
+    _ <- Cards.writeOne(root(mode), write).handleErrorWith(error => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false))
+    _ <- attempt(root(mode))
+  } yield ()
+
+def settled(mode: Int): IO[Unit] =
+  for {
+    path = root(mode)
+    main <- Fs.read(Fs.join(path, "src/Main.scuzz"))
+    otherExists <- Fs.exists(Fs.join(path, "src/Other.scuzz"))
+    other <- if (otherExists == 0) IO.pure("") else Fs.read(Fs.join(path, "src/Other.scuzz"))
+    journal <- Fs.read(Fs.join(Fs.join(path, ".scuzz/ide"), "journal.json"))
+    completed <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide/records"), Str.concat(Json.getStr(prepared(mode), "operation", ""), ".json")))
+    last <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide"), "last.json"))
+    conflict = mode == 1 || mode == 3
+    _ <- Property.assert("recovery preserves external bytes", !conflict || main == "external bytes")
+    _ <- Property.assert("recovery completes both source writes", conflict || (if (mode == 0) main == after() && otherExists != 0 && other == addition() else main == before() && otherExists == 0))
+    _ <- Property.assert("recovery retains a conflicting journal", !conflict || journal == text(prepared(mode)))
+    _ <- Property.assert("recovery clears a completed journal", conflict || journal == "")
+    _ <- Property.assert("recovery records completed writes", conflict || completed == text(prepared(mode)))
+    _ <- Property.assert("recovery retains the Undo state", conflict || (if (mode == 0) last == completed else last == ""))
+  } yield ()
+
+def run(n: Int): IO[Unit] =
+  if (n < 0 || n > 7) IO.fail("recovery input out of range") else (for {
+  mode = n % 4
+  _ <- if (n < 4) resume(mode) else canceled(mode)
+  _ <- attempt(root(mode))
+  _ <- attempt(root(mode))
+  _ <- settled(mode)
+} yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+
+def canceled(mode: Int): IO[Unit] =
+  for {
+    entered <- Deferred.empty()
+    worker <- Fiber.fork(Deferred.complete(entered, ()).flatMap(_ => resume(mode)))
+    _ <- Deferred.get(entered)
+    _ <- Fiber.interrupt(worker)
+    result <- IO.attempt(Fiber.join(worker))
+    _ <- result match {
+  case Result.Ok(_) => IO.pure(())
+  case Result.Err(error) => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false)
+}
+  } yield ()
+

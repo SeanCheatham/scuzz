@@ -3057,12 +3057,13 @@ typedef struct Sched {
   int32_t pct_low;   /* next demotion priority (0, -1, -2, ...) */
   int pct_contention; /* 1-based count of ready_count>1 picks */
   int pct_change[SZ_PCT_K_MAX];
-  int32_t replay[SZ_PCT_STEP_BOUND]; /* recorded picks for this run */
+  int32_t *replay; /* recorded picks for this run */
   int replay_n;         /* recorded pick count; 0 = no replay */
   int32_t replay_fibers; /* cumulative fiber count the segment recorded */
   int drift_step;       /* contention step where replay diverged */
   int32_t drift_want;   /* recorded fiber missing at drift_step */
-  int32_t pick_log[SZ_PCT_STEP_BOUND]; /* picks made this run */
+  int32_t *pick_log; /* picks made this run */
+  int pick_cap;
   int pick_n;
   int bounded;       /* 1 under the fake clock: step and spin limits apply */
   int signal_owner;
@@ -3074,7 +3075,7 @@ static Sched *g_sched = NULL;
 static int32_t g_fiber_ordinal; /* next fiber ordinal across the probe run */
 
 enum { SZ_PICK_SEG_MAX = 64 };
-static int32_t g_pick_segs[SZ_PICK_SEG_MAX][SZ_PCT_STEP_BOUND];
+static int32_t *g_pick_segs[SZ_PICK_SEG_MAX];
 static int g_pick_seg_len[SZ_PICK_SEG_MAX];
 static int32_t g_pick_run_fibers[SZ_PICK_SEG_MAX]; /* fiber count per segment */
 static char g_pick_seg_name[SZ_PICK_SEG_MAX][96];
@@ -3095,12 +3096,12 @@ static void pick_parse_env(void) {
   while (p && g_pick_seg_n < SZ_PICK_SEG_MAX) {
     char *end = strchr(p, ';');
     size_t n = end ? (size_t)(end - p) : strlen(p);
-    char seg[1024];
+    char *seg = malloc(n + 1);
     char *csv;
     char *sp;
     int len = 0;
-    if (n >= sizeof seg)
-      n = sizeof seg - 1;
+    if (!seg)
+      sz_panic("cannot allocate scheduler replay");
     memcpy(seg, p, n);
     seg[n] = 0;
     sp = strchr(seg, ' ');
@@ -3108,7 +3109,7 @@ static void pick_parse_env(void) {
     if (sp) {
       size_t nn = (size_t)(sp - seg);
       if (nn >= sizeof g_pick_seg_name[0])
-        nn = sizeof g_pick_seg_name[0] - 1;
+        sz_panic("scheduler replay name exceeds limit");
       memcpy(g_pick_seg_name[g_pick_seg_n], seg, nn);
       g_pick_seg_name[g_pick_seg_n][nn] = 0;
       if (strcmp(g_pick_seg_name[g_pick_seg_n], "-") == 0)
@@ -3116,14 +3117,31 @@ static void pick_parse_env(void) {
     } else {
       g_pick_seg_name[g_pick_seg_n][0] = 0;
     }
-    g_pick_run_fibers[g_pick_seg_n] =
-        sp ? (int32_t)strtol(sp + 1, NULL, 10) : 0;
+    g_pick_run_fibers[g_pick_seg_n] = 0;
+    if (sp) {
+      char *tail;
+      errno = 0;
+      long fibers = strtol(sp + 1, &tail, 10);
+      if (!csv || tail == sp + 1 || tail != csv || errno || fibers < 0 ||
+          fibers > INT32_MAX)
+        sz_panic("invalid scheduler replay fiber count");
+      g_pick_run_fibers[g_pick_seg_n] = (int32_t)fibers;
+    }
     csv = csv ? csv + 1 : seg;
-    while (len < SZ_PCT_STEP_BOUND) {
+    g_pick_segs[g_pick_seg_n] = malloc((n + 1) * sizeof(int32_t));
+    if (!g_pick_segs[g_pick_seg_n])
+      sz_panic("cannot allocate scheduler replay picks");
+    while (1) {
       char *comma;
+      errno = 0;
       long v = strtol(csv, &comma, 10);
-      if (comma == csv)
-        break;
+      if (comma == csv) {
+        if (strcmp(csv, "-") == 0 && len == 0)
+          break;
+        sz_panic("invalid scheduler replay pick");
+      }
+      if (errno || v <= 0 || v > INT32_MAX || (*comma && *comma != ','))
+        sz_panic("invalid scheduler replay pick");
       g_pick_segs[g_pick_seg_n][len++] = (int32_t)v;
       if (*comma != ',')
         break;
@@ -3132,24 +3150,35 @@ static void pick_parse_env(void) {
     g_pick_seg_len[g_pick_seg_n] = len;
     g_pick_seg_used[g_pick_seg_n] = 0;
     g_pick_seg_n++;
+    free(seg);
     p = end ? end + 1 : NULL;
   }
+  if (p && p[0])
+    sz_panic("scheduler replay segment count exceeds limit");
 }
 
 void sz_sched_set_pick_name(const char *name) {
+  if (name && strlen(name) >= sizeof g_pick_run_name)
+    sz_panic("scheduler pick name exceeds limit");
   snprintf(g_pick_run_name, sizeof g_pick_run_name, "%s", name ? name : "");
 }
 
 void sz_sched_picks_probe_reset(void) {
   const char *path = getenv("SCUZZ_SCHED_PICKS_DUMP");
   FILE *f;
+  for (int i = 0; i < SZ_PICK_SEG_MAX; i++) {
+    free(g_pick_segs[i]);
+    g_pick_segs[i] = NULL;
+  }
   g_fiber_ordinal = 0;
   g_pick_seg_n = -1;
   g_pick_run_name[0] = 0;
   if (path && path[0]) {
     f = fopen(path, "w");
-    if (f)
-      fclose(f);
+    if (!f)
+      sz_panic("cannot open scheduler picks evidence");
+    if (fclose(f) != 0)
+      sz_panic("cannot close scheduler picks evidence");
   }
   path = getenv("SCUZZ_SCHED_CHOICES_DUMP");
   if (path && path[0]) {
@@ -3264,8 +3293,14 @@ static void sched_arm_from_env(Sched *s) {
         continue;
       if (strcmp(g_pick_seg_name[i], s->pick_name) != 0)
         continue;
-      memcpy(s->replay, g_pick_segs[i], sizeof s->replay);
       s->replay_n = g_pick_seg_len[i];
+      if (s->replay_n) {
+        size_t bytes = (size_t)s->replay_n * sizeof(int32_t);
+        s->replay = malloc(bytes);
+        if (!s->replay)
+          sz_panic("cannot allocate scheduler replay");
+        memcpy(s->replay, g_pick_segs[i], bytes);
+      }
       s->replay_fibers = g_pick_run_fibers[i];
       g_pick_seg_used[i] = 1;
       break;
@@ -3540,7 +3575,7 @@ static void sched_pick_log_flush(const Sched *s) {
     return;
   f = fopen(path, "a");
   if (!f)
-    return;
+    sz_panic("cannot append scheduler picks evidence");
   fprintf(f, "%s %d:", s->pick_name[0] ? s->pick_name : "-",
           (int)g_fiber_ordinal);
   if (s->pick_n <= 0) {
@@ -3550,7 +3585,12 @@ static void sched_pick_log_flush(const Sched *s) {
       fprintf(f, "%s%d", i ? "," : "", (int)s->pick_log[i]);
   }
   fprintf(f, "\n");
-  fclose(f);
+  if (ferror(f)) {
+    fclose(f);
+    sz_panic("cannot write scheduler picks evidence");
+  }
+  if (fclose(f) != 0)
+    sz_panic("cannot close scheduler picks evidence");
 }
 
 static Fiber *ready_find_ordinal(Sched *s, int32_t ord) {
@@ -3624,9 +3664,17 @@ static Fiber *ready_dequeue(Sched *s) {
   } else {
     f = ready_highest(s);
   }
-  if (s->pct_contention <= SZ_PCT_STEP_BOUND) {
-    s->pick_log[s->pct_contention - 1] = f->ordinal;
-    s->pick_n = s->pct_contention;
+  const char *dump = getenv("SCUZZ_SCHED_PICKS_DUMP");
+  if (dump && dump[0]) {
+    if (s->pick_n == s->pick_cap) {
+      int cap = s->pick_cap ? s->pick_cap * 2 : 32;
+      int32_t *picks = realloc(s->pick_log, (size_t)cap * sizeof(int32_t));
+      if (!picks)
+        sz_panic("cannot allocate scheduler picks evidence");
+      s->pick_log = picks;
+      s->pick_cap = cap;
+    }
+    s->pick_log[s->pick_n++] = f->ordinal;
   }
   ready_remove(s, f);
   return f;
@@ -4383,6 +4431,11 @@ static int step_node(Sched *s, Fiber *f) {
     else
       err = sz_error_new(3, "unknown failure");
     fiber_fail(s, f, err);
+    /* Error conversion does not add a scheduler choice. */
+    if (f->state == FIB_READY && f->cur) {
+      ready_remove(s, f);
+      fiber_yield(s, f);
+    }
     return 0;
   }
   case SZ_IO_FLATMAP: {
@@ -5005,10 +5058,11 @@ static SzIoResult run_io(SzIo *root) {
   } else if (sched.root->state == FIB_DONE && sched.root->result_ok &&
              (sched.replay_n > sched.pct_contention ||
               (sched.replay_fibers &&
-               sched.replay_fibers != g_fiber_ordinal))) {
+               (sched.replay_n != sched.pct_contention ||
+                sched.replay_fibers != g_fiber_ordinal)))) {
     result.ok = 0;
     result.error = sz_error_new(
-        1, "schedule drift: recorded picks outlast the run");
+        1, "schedule drift: recorded picks or fiber count differ");
   } else if (sched.root->state == FIB_DONE && sched.root->result_ok) {
     result.ok = 1;
     result.value = sched.root->result_value;
@@ -5041,6 +5095,8 @@ static SzIoResult run_io(SzIo *root) {
   sched_pick_log_flush(&sched);
   sched_choices(&sched, 1, steps, result.ok);
   sched_free_fibers(&sched);
+  free(sched.pick_log);
+  free(sched.replay);
   return result;
 }
 

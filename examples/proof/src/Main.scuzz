@@ -71,5 +71,17 @@ def protocolJson(protocol: String, scenario: String, rules: String): Json =
     defect = Str.replace(protocol, "Ref.update(released, count => count + 1)", "Ref.update(released, count => count)")
   } yield Json.Obj([("source", Json.Str(protocol)), ("scenario", Json.Str(scenario)), ("claims", Json.Str(rules)), ("files", protocolGraph(protocol, scenario, rules)), ("defective_source", Json.Str(defect)), ("defective_files", protocolGraph(defect, scenario, rules))])
 
+def exportRecovery(): IO[Unit] =
+  for {
+    path <- Sys.getenv("SCUZZ_RECOVERY_PACKAGE")
+    entries <- Fs.list(Fs.join(path, "src"))
+    names = List.sort(List.map(List.filter(entries, entry => !entry._2 && Str.endsWith(entry._1, ".scuzz")), entry => entry._1))
+    sources <- IO.foreach(names, name => Fs.read(Fs.join(Fs.join(path, "src"), name)).map(source => (Str.dropRight(name, 6), source)))
+    scenario <- Fs.read(Fs.join(path, "recovery.scuzz_scenario"))
+    rules <- Fs.read(Fs.join(path, "recovery.scuzz_verify"))
+    files = Drive.fuzzFiles(Verify.applyScenarioFiles(sources, scenario), [("recovery", rules)], Verify.scenarioWrap(scenario))
+    _ <- printJson(Json.Arr(List.map(files, pair => Json.Arr([Json.Str(pair._1), Json.Str(pair._2)]))))
+  } yield ()
+
 @main def main: IO[Unit] =
-  Sys.getenv("SCUZZ_PROOF_EXPORT").flatMap(mode => if (mode == "1") exportQueries() else IO.pure(()))
+  Sys.getenv("SCUZZ_PROOF_EXPORT").flatMap(mode => if (mode == "1") exportQueries() else if (mode == "recovery") exportRecovery() else IO.pure(()))
