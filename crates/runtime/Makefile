@@ -30,7 +30,7 @@ SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/str
 BUILDDIR ?= build
 OBJ := $(SRC:src/%.c=$(BUILDDIR)/%.o)
 
-.PHONY: all clean test test-asan lib lib-asan ffi-skia
+.PHONY: all clean test test-asan test-ubsan lib lib-asan ffi-skia
 
 all: lib
 
@@ -73,26 +73,26 @@ RELOAD_EXT := so
 RELOAD_LIB := -shared
 endif
 
-build/reload_a.$(RELOAD_EXT): tests/reload_a.c include/scuzz_ui.h | build
+$(BUILDDIR)/reload_a.$(RELOAD_EXT): tests/reload_a.c include/scuzz_ui.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -fPIC $(RELOAD_LIB) tests/reload_a.c -o $@
 
-build/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | build
+$(BUILDDIR)/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
 
-build/reload_bad.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | build
+$(BUILDDIR)/reload_bad.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -DRELOAD_SCHEMA='"counter:string"' -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
 
-build/test_io: tests/test_io.c build/libscuzz_rt.a | build ffi-skia
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
+$(BUILDDIR)/test_io: tests/test_io.c $(BUILDDIR)/libscuzz_rt.a | $(BUILDDIR) ffi-skia
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
-build/test_ui: tests/test_ui.c build/libscuzz_rt.a build/reload_a.$(RELOAD_EXT) build/reload_b.$(RELOAD_EXT) build/reload_bad.$(RELOAD_EXT) | build ffi-skia
-	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
+$(BUILDDIR)/test_ui: tests/test_ui.c $(BUILDDIR)/libscuzz_rt.a $(BUILDDIR)/reload_a.$(RELOAD_EXT) $(BUILDDIR)/reload_b.$(RELOAD_EXT) $(BUILDDIR)/reload_bad.$(RELOAD_EXT) | $(BUILDDIR) ffi-skia
+	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
-test: build/test_io build/test_ui
-	./build/test_io
-	./build/test_ui
+test: $(BUILDDIR)/test_io $(BUILDDIR)/test_ui
+	"$(abspath $(BUILDDIR))/test_io"
+	"$(abspath $(BUILDDIR))/test_ui"
 
 # Optional ASan. Not part of default `make test` (slow / host-dependent).
 # Skip if -fsanitize=address cannot link. Exit-time leaks in the C tests
@@ -118,6 +118,26 @@ test-asan:
 	else \
 		echo "test-asan: AddressSanitizer not supported by $(CC) on this host; skipping"; \
 	fi
+
+# Keep UBSan binaries and file fixtures separate from the normal build.
+UBSAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+
+test-ubsan:
+	@ubsan_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/scuzz-ubsan.XXXXXX") || exit 1; \
+	trap 'rm -rf "$$ubsan_dir"' 0; \
+	if ! printf '%s\n' '#include <limits.h>' 'int main(void){volatile int n=INT_MAX;volatile int result=n+1;(void)result;return 0;}' | $(CC) $(UBSAN_CFLAGS) -x c - -o "$$ubsan_dir/probe"; then \
+		echo "test-ubsan: cannot compile and link UBSan with $(CC)" >&2; exit 1; \
+	fi; \
+	if "$$ubsan_dir/probe" >"$$ubsan_dir/output" 2>&1; then \
+		echo "test-ubsan: the known overflow does not fail" >&2; exit 1; \
+	fi; \
+	if ! grep -q 'signed integer overflow' "$$ubsan_dir/output"; then \
+		cat "$$ubsan_dir/output" >&2; \
+		echo "test-ubsan: the overflow probe has no UBSan evidence" >&2; exit 1; \
+	fi; \
+	echo "UBSan rejects the known signed overflow."; \
+	$(MAKE) BUILDDIR=build/ubsan/build CFLAGS='$(UBSAN_CFLAGS)' build/ubsan/build/test_io build/ubsan/build/test_ui && \
+	(cd build/ubsan && ./build/test_io && ./build/test_ui)
 
 clean:
 	rm -rf build

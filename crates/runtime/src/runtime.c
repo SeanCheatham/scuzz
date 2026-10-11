@@ -300,11 +300,14 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg) {
 
 typedef struct CoverageHit {
   struct CoverageHit *next;
+  struct CoverageHit *text_next;
   const char *loc;
   char *text;
 } CoverageHit;
 
-static CoverageHit *coverage_hits[256];
+enum { COVERAGE_BUCKETS = 4096 };
+static CoverageHit *coverage_hits[COVERAGE_BUCKETS];
+static CoverageHit *coverage_text_hits[COVERAGE_BUCKETS];
 static char *coverage_path;
 static FILE *coverage_file;
 static int coverage_probed;
@@ -323,7 +326,7 @@ static void coverage_close(void) {
 static void coverage_clear(void) {
   size_t i;
   coverage_close();
-  for (i = 0; i < 256; i++) {
+  for (i = 0; i < COVERAGE_BUCKETS; i++) {
     CoverageHit *hit = coverage_hits[i];
     while (hit) {
       CoverageHit *next = hit->next;
@@ -332,6 +335,7 @@ static void coverage_clear(void) {
       hit = next;
     }
     coverage_hits[i] = NULL;
+    coverage_text_hits[i] = NULL;
   }
   free(coverage_path);
   coverage_path = NULL;
@@ -364,14 +368,14 @@ void sz_coverage_env_refresh(void) {
 
 void sz_coverage_own_off(void) { coverage_own_off = 1; }
 
+static unsigned coverage_hash_text(const char *loc);
+
 static int coverage_text_seen(const char *loc) {
-  size_t i;
-  for (i = 0; i < 256; i++) {
-    CoverageHit *hit;
-    for (hit = coverage_hits[i]; hit; hit = hit->next)
-      if (hit->text && strcmp(hit->text, loc) == 0)
-        return 1;
-  }
+  CoverageHit *hit;
+  for (hit = coverage_text_hits[coverage_hash_text(loc)]; hit;
+       hit = hit->text_next)
+    if (strcmp(hit->text, loc) == 0)
+      return 1;
   return 0;
 }
 
@@ -381,12 +385,18 @@ static void coverage_remember(const char *loc, char *text, unsigned hash) {
     sz_panic("coverage: out of memory");
   hit->loc = loc;
   hit->text = text;
+  hit->text_next = NULL;
+  if (text) {
+    unsigned text_hash = coverage_hash_text(text);
+    hit->text_next = coverage_text_hits[text_hash];
+    coverage_text_hits[text_hash] = hit;
+  }
   hit->next = coverage_hits[hash];
   coverage_hits[hash] = hit;
 }
 
 static unsigned coverage_hash_ptr(const char *loc) {
-  return (unsigned)((uintptr_t)loc >> 4) % 256;
+  return (unsigned)((uintptr_t)loc >> 4) % COVERAGE_BUCKETS;
 }
 
 /* FNV-1a. Evaluator keys are heap text, so they share a bucket by text. */
@@ -397,7 +407,7 @@ static unsigned coverage_hash_text(const char *loc) {
     h ^= *p++;
     h *= 16777619u;
   }
-  return h % 256;
+  return h % COVERAGE_BUCKETS;
 }
 
 static void coverage_write(const char *loc, const char *id, unsigned hash) {
@@ -440,14 +450,10 @@ static void coverage_hit(const char *loc) {
  * text. Do not store that pointer. */
 static void coverage_hit_text(const char *loc) {
   unsigned hash;
-  CoverageHit *hit;
   coverage_probe();
   if (!coverage_path || !loc)
     return;
   hash = coverage_hash_text(loc);
-  for (hit = coverage_hits[hash]; hit; hit = hit->next)
-    if (hit->text && strcmp(hit->text, loc) == 0)
-      return;
   if (coverage_text_seen(loc))
     return;
   coverage_write(loc, NULL, hash);

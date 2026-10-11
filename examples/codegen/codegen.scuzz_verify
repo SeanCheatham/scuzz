@@ -1,8 +1,8 @@
 oracle internInterpLit(): Bool =
   Main.internInterpLit()
 
-oracle viewEqShows(): Bool =
-  Main.viewEqShows()
+oracle viewEqGuard(): Bool =
+  Main.viewEqGuard()
 
 oracle rewriteInterpLit(): Bool =
   Main.rewriteInterpLit()

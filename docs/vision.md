@@ -23,7 +23,7 @@ Complete one slice before starting the next slice.
 4. Examine rule strength with mutation. Connect survivors to source and claims. Separate invalid, excluded, incomplete, and inert mutations. Do not count infrastructure failures as detected defects.
 5. Exercise failure and recovery. Cover cancellation, timeout, duplicate requests, interrupted writes, and recovery. Check safety, bounded progress, and relations between executions.
 6. Improve tool evidence. Separate passed, failed, incomplete, and unguarded results. Retain small replay workloads and full input identities. Use the same project checks in the IDE and CLI.
-7. Check compiler and runtime behavior independently. Extend generated compiler checks and native replay. Use independent expected results. Add undefined behavior checks to the C runtime. Keep live platform proof limits explicit.
+7. Check compiler and runtime behavior independently. Extend generated compiler checks and native replay. Use independent expected results. Run undefined behavior checks on the C runtime. Keep live platform proof limits explicit.
 
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
 
