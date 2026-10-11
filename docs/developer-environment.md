@@ -146,3 +146,69 @@ Set `SCUZZ_IOS_DEVICE` to select a simulator name or ID.
 Regular `./scripts/ci.sh fuzz` runs `./scripts/ci.sh compiler-cases`. This slice uses one bounded source generator. It checks 54 fixed cases across six source families, three input signs, and three expression depths. It compares evaluator and native output with an independent host model. It rejects invalid types and proves that the model rejects a wrong result when both engines agree. It runs 16-iteration search and mutation campaigns on the generated programs and the generator. The generator campaign derives its seed from the mutation sites in `Cases.evaluated`. Native subprocesses run outside simulation. Campaigns use temporary packages. A failure keeps the packages and logs.
 
 The separate `tyck-replay` and `codegen-replay` slices preserve compiler corpus replay. Set `SCUZZ_COMPILER_FUZZ=1` to add the larger proof packages to the search campaign on source copies. These extra campaigns are slower. The bounded checks are finite. They do not prove correctness for every program.
+
+## Formal verification experiment
+
+`examples/proof` supplies the formal experiment in `vision.md`.
+The example `Proof` module translates checked Int and Bool expressions.
+It uses signed 64-bit comparisons and arithmetic modulo 2^64.
+It rejects effects, recursion, implicit assumptions, and unsupported expressions.
+The same `balance` oracle supplies fuzz checks and solver queries.
+The optional checker report covers this experiment.
+Run the required project checks separately with `./scripts/ci.sh pr`.
+
+The experiment uses an optional Z3 executable. It does not install a solver.
+For a local isolated installation, use:
+
+```bash
+python3 -m venv /tmp/scuzz-proof-solver
+/tmp/scuzz-proof-solver/bin/pip install z3-solver==4.15.4.0
+python3 scripts/proof-experiment.py --solver /tmp/scuzz-proof-solver/bin/z3
+```
+
+Set `SCUZZ_SOLVER` or pass `--solver` to select the executable.
+Set `SCUZZ` or pass `--cli` to select the product compiler.
+Run the script from any directory. It uses the checkout root.
+It writes evidence to `examples/proof/build/experiment/summary.json`.
+Each run replaces the previous result before checks start.
+Missing solver support returns an incomplete result and exit status 2.
+Unknown solver results and deadline failures cannot produce a proof result.
+
+The check covers all signed 64-bit inputs for one pure balance invariant.
+It checks assumption consistency and required trigger reach separately.
+It checks an overflow defect at maximum Int.
+It replays that input and minimum Int through both engines.
+It compares 70 expression results with independent host arithmetic.
+It also checks live input validation in both engines.
+Its ordinary 16-iteration fuzz campaign uses the same author oracle.
+The effect protocol starts two requests in sequence.
+The first request runs in a worker fiber. Its caller can cancel it.
+The second request starts after the first request settles.
+The checker examines every ready fiber choice for inputs 1 and 2.
+It checks no fault, one file failure, or one interrupted write.
+The fault call bound is 1 through 4. Setup does not consume this bound.
+The scheduler bounds are 16 contention choices and 128 steps per driver run.
+The execution budget is 1024. An unmet bound leaves the check incomplete.
+Each request must release its resource once.
+The checker requires one release after the first join and two after both requests.
+A request waits at least one clock unit before its write.
+A failed write must preserve the previous file.
+Each write payload has seven bytes. An interrupted write stages three bytes.
+Cancellation must preserve the first request file.
+The same live assertions and timeline claims run in ordinary fuzzing.
+Recorded scheduler choices replay through both engines.
+The check compares exact picks, timelines, claim records, rejection records,
+and executed property names.
+It also compares permitted scheduler choices and terminal verdicts.
+It checks the scheduler step bound in each engine.
+It rejects a release defect with a concrete replay workload.
+These finite schedules do not prove eventual completion for all executions.
+The report records queries, source identities, tool identities, trust, and cost.
+The checking budget is 60 seconds after the experiment package build.
+One Linux sample uses 468 scheduler executions and 252 distinct replay paths.
+It reaches at most four contention choices per run.
+Native runs reach at most 39 scheduler steps. Evaluator runs reach at most 41.
+Checking takes 17.97 seconds. The cached package build takes 4.58 seconds.
+A cold package build takes 35.91 seconds.
+These measurements apply to this finite experiment on this host.
+These results do not establish an inductive proof or correctness for other programs.

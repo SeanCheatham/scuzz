@@ -1,0 +1,7 @@
+[package]
+name = "proof"
+version = "0.1.0"
+description = "Finite formal verification experiment"
+
+[dependencies]
+compiler = { path = "../compiler" }

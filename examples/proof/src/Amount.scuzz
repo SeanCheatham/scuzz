@@ -1,0 +1,21 @@
+def bounded(n: Int): Int =
+  if (n < 0) 0 else if (n >= 100) 100 else n + 1
+
+def inputDomain(n: Int): Bool =
+  n == n
+
+def boundaryTrigger(n: Int): Bool =
+  n == 9223372036854775807
+
+def contradiction(n: Int): Bool =
+  n < 0 && n >= 0
+
+def impossible(n: Int): Bool =
+  n > 9223372036854775807
+
+def validated(text: String): Result[String, Int] =
+  Str.parseInt(text) match {
+    case Result.Ok(n) => if (n < 0 || n > 100) Result.Err("amount out of range") else Result.Ok(bounded(n))
+    case Result.Err(error) => Result.Err(error)
+  }
+

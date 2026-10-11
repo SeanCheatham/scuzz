@@ -1,0 +1,3 @@
+oracle balance(n: Int): Bool =
+  bounded(n) >= 0 && bounded(n) <= 100
+

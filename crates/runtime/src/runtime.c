@@ -3151,6 +3151,14 @@ void sz_sched_picks_probe_reset(void) {
     if (f)
       fclose(f);
   }
+  path = getenv("SCUZZ_SCHED_CHOICES_DUMP");
+  if (path && path[0]) {
+    f = fopen(path, "w");
+    if (!f)
+      sz_panic("cannot open scheduler choices evidence");
+    if (fclose(f) != 0)
+      sz_panic("cannot close scheduler choices evidence");
+  }
 }
 
 /* Same LCG as `scuzz fuzz` schedule search. */
@@ -3553,6 +3561,35 @@ static Fiber *ready_find_ordinal(Sched *s, int32_t ord) {
   return NULL;
 }
 
+/* Record every permitted choice before the scheduler removes a fiber. */
+static void sched_choices(const Sched *s, int end, int steps, int ok) {
+  const char *path = getenv("SCUZZ_SCHED_CHOICES_DUMP");
+  FILE *out;
+  Fiber *f;
+  if (!path || !path[0])
+    return;
+  out = fopen(path, "a");
+  if (!out)
+    sz_panic("cannot append scheduler choices evidence");
+  if (end) {
+    fprintf(out, "end %s %d %d %d %d %d\n",
+            s->pick_name[0] ? s->pick_name : "-", s->pct_contention,
+            steps, (int)g_fiber_ordinal, ok, s->bounded);
+  } else {
+    fprintf(out, "choice %s %d", s->pick_name[0] ? s->pick_name : "-",
+            s->pct_contention);
+    for (f = s->ready_head; f; f = f->ready_next)
+      fprintf(out, " %d", (int)f->ordinal);
+    fputc('\n', out);
+  }
+  if (ferror(out)) {
+    fclose(out);
+    sz_panic("cannot write scheduler choices evidence");
+  }
+  if (fclose(out) != 0)
+    sz_panic("cannot close scheduler choices evidence");
+}
+
 /* Pick next ready fiber: FIFO when disarmed or n<=1; else PCT (highest prio,
  * with at most k inversions at pre-drawn contention steps). A recorded pick
  * segment pins the choice at each contention step it covers; a recorded
@@ -3568,6 +3605,7 @@ static Fiber *ready_dequeue(Sched *s) {
   if (n <= 1)
     return ready_dequeue_fifo(s);
   s->pct_contention++;
+  sched_choices(s, 0, 0, 0);
   if (pct_is_change(s, s->pct_contention)) {
     f = ready_highest(s);
     if (f) {
@@ -5001,6 +5039,7 @@ static SzIoResult run_io(SzIo *root) {
 
   g_sched = previous_sched;
   sched_pick_log_flush(&sched);
+  sched_choices(&sched, 1, steps, result.ok);
   sched_free_fibers(&sched);
   return result;
 }

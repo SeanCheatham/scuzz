@@ -1,0 +1,60 @@
+def request(path: String, n: Int, entered: Deferred[Unit], released: Ref[Int], writes: Ref[Int]): IO[Unit] =
+  Resource.use(Resource.make(IO.pure(()), _ => Ref.update(released, count => count + 1)), _ => for {
+  started <- Clock.monotonic()
+  _ <- Deferred.complete(entered, ())
+  _ <- IO.sleep(1)
+  now <- Clock.monotonic()
+  _ <- Property.assert("a request waits before its write", now - started >= 1)
+  previous <- Fs.read(path)
+  result <- IO.attempt(Fs.write(path, Str.concat("value:", Str.fromInt(n))))
+  _ <- result match {
+  case Result.Ok(_) => Ref.update(writes, count => count + 1)
+  case Result.Err(error) => Fs.read(path).flatMap(current => Property.assert("failed write preserves the file", current == previous).flatMap(_ => IO.fail(error)))
+}
+} yield ())
+
+def outcome(result: Result[String, Unit]): IO[Unit] =
+  result match {
+    case Result.Ok(_) => IO.println("request completes")
+    case Result.Err(error) => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "fiber interrupted") IO.println(Str.concat("request stops: ", error)) else IO.fail(error)
+  }
+
+def execute(n: Int, cancel: Bool): IO[Unit] =
+  if (n < 1 || n > 2) IO.fail("request input out of range") else for {
+  released <- Ref.of(0)
+  writes <- Ref.of(0)
+  entered <- Deferred.empty()
+  first <- Fiber.fork(request("one", n, entered, released, writes))
+  _ <- Deferred.get(entered)
+  _ <- if (cancel) Fiber.interrupt(first) else IO.pure(())
+  firstResult <- IO.attempt(Fiber.join(first))
+  _ <- outcome(firstResult)
+  firstReleases <- Ref.get(released)
+  _ <- Property.assert("first request releases once", firstReleases == 1)
+  firstWrites <- Ref.get(writes)
+  _ <- Property.assert("cancellation prevents a write", !cancel || firstWrites == 0)
+  secondEntered <- Deferred.empty()
+  secondResult <- IO.attempt(request("two", n, secondEntered, released, writes))
+  _ <- outcome(secondResult)
+  releaseCount <- Ref.get(released)
+  writeCount <- Ref.get(writes)
+  _ <- Property.assert("each request releases once", releaseCount == 2)
+  _ <- Property.assert("two requests bound writes", writeCount >= 0 && writeCount <= 2 && (!cancel || writeCount <= 1))
+} yield ()
+
+def succeeds(result: Result[String, Unit]): Bool =
+  result match {
+    case Result.Ok(_) => true
+    case Result.Err(_) => false
+  }
+
+def run(n: Int, cancel: Bool): IO[Unit] =
+  for {
+    result <- IO.attempt(execute(n, cancel))
+    _ <- Property.assert("valid inputs settle", n < 1 || n > 2 || succeeds(result))
+    _ <- result match {
+  case Result.Ok(_) => IO.pure(())
+  case Result.Err(error) => IO.fail(error)
+}
+  } yield ()
+

@@ -1,0 +1,132 @@
+record Term(code: String, ty: String)
+
+record Queries(domain: String, violation: String, reach: String)
+
+import Parse.Expr
+import Parse.Fun
+import Parse.Param
+import Parse.Bind
+
+def fail(reason: String): Result[String, Term] =
+  Result.Err(Str.concat("unsupported: ", reason))
+
+def atom(code: String, ty: String): Result[String, Term] =
+  Result.Ok(Term(code, ty))
+
+def sort(ty: String): String =
+  if (ty == "Int") "(_ BitVec 64)" else "Bool"
+
+def signature(f: Fun): Bool =
+  List.isEmpty(f.tparams) && (f.ret == "Int" || f.ret == "Bool") && List.len(f.params) <= 4 && List.forall(f.params, p => (p.ty == "Int" || p.ty == "Bool") && p.w == "" && p.d == "")
+
+def lookup(name: String, env: List[(String, Term)]): Result[String, Term] =
+  if (List.isEmpty(env)) fail(Str.concat("variable ", name)) else if (List.at(env, 0)._1 == name) Result.Ok(List.at(env, 0)._2) else lookup(name, List.tail(env))
+
+def integer(n: Int): String =
+  if (n == -9223372036854775808) "#x8000000000000000" else if (n < 0) s"(bvneg (_ bv${0 - n} 64))" else s"(_ bv$n 64)"
+
+def binary(op: String, a: Term, b: Term): Result[String, Term] =
+  if (a.ty != b.ty) fail("operand types") else if (op == "==") atom(s"(= ${a.code} ${b.code})", "Bool") else if (op == "!=") atom(s"(not (= ${a.code} ${b.code}))", "Bool") else if (a.ty == "Bool") boolBinary(op, a, b) else intBinary(op, a, b)
+
+def boolBinary(op: String, a: Term, b: Term): Result[String, Term] =
+  if (op == "&&") atom(s"(and ${a.code} ${b.code})", "Bool") else if (op == "||") atom(s"(or ${a.code} ${b.code})", "Bool") else fail(Str.concat("Boolean operator ", op))
+
+def intBinary(op: String, a: Term, b: Term): Result[String, Term] =
+  for {
+    smt = if (op == "+") "bvadd" else if (op == "-") "bvsub" else if (op == "*") "bvmul" else if (op == "<") "bvslt" else if (op == "<=") "bvsle" else if (op == ">") "bvsgt" else if (op == ">=") "bvsge" else ""
+  } yield if (smt == "") fail(Str.concat("integer operator ", op)) else atom(s"($smt ${a.code} ${b.code})", if (op == "+" || op == "-" || op == "*") "Int" else "Bool")
+
+def unary(op: String, a: Term): Result[String, Term] =
+  if (op == "!" && a.ty == "Bool") atom(s"(not ${a.code})", "Bool") else if (op == "-" && a.ty == "Int") atom(s"(bvneg ${a.code})", "Int") else fail(Str.concat("unary operator ", op))
+
+def conditional(c: Term, a: Term, b: Term): Result[String, Term] =
+  if (c.ty != "Bool" || a.ty != b.ty) fail("conditional types") else atom(s"(ite ${c.code} ${a.code} ${b.code})", a.ty)
+
+def nextTerm(value: Result[String, Term], next: Term => Result[String, Term]): Result[String, Term] =
+  value match {
+    case Result.Ok(term) => next(term)
+    case Result.Err(reason) => Result.Err(reason)
+  }
+
+def expression(e: Expr, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  if (depth > 32) fail("expression depth exceeds 32") else e match {
+  case Expr.EInt(n, _) => atom(integer(n), "Int")
+  case Expr.EBool(b) => atom(if (b) "true" else "false", "Bool")
+  case Expr.EVar(name, _) => lookup(name, env)
+  case Expr.EBin(op, a, b, _) => nextTerm(expression(a, env, defs, stack, depth + 1), left => nextTerm(expression(b, env, defs, stack, depth + 1), right => binary(op, left, right)))
+  case Expr.EUn(op, a, _) => nextTerm(expression(a, env, defs, stack, depth + 1), value => unary(op, value))
+  case Expr.EIf(c, a, b, _) => nextTerm(expression(c, env, defs, stack, depth + 1), test => nextTerm(expression(a, env, defs, stack, depth + 1), left => nextTerm(expression(b, env, defs, stack, depth + 1), right => conditional(test, left, right))))
+  case Expr.ECall(name, args, _) => callArgs(arguments(args, env, defs, stack, depth + 1), name, defs, stack, depth + 1)
+  case Expr.EFor(bs, body, _) => bindings(bs, body, env, defs, stack, depth + 1)
+  case _ => fail("expression or effect")
+}
+
+def callArgs(values: Result[String, List[Term]], name: String, defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  values match {
+    case Result.Ok(args) => call(name, args, defs, stack, depth)
+    case Result.Err(reason) => Result.Err(reason)
+  }
+
+def arguments(args: List[Expr], env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, List[Term]] =
+  if (List.isEmpty(args)) Result.Ok([]) else expression(List.at(args, 0), env, defs, stack, depth) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(value) => arguments(List.tail(args), env, defs, stack, depth) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(rest) => Result.Ok(value :: rest)
+}
+}
+
+def bindings(bs: List[Bind], body: Expr, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  if (List.isEmpty(bs)) expression(body, env, defs, stack, depth) else for {
+  b = List.at(bs, 0)
+} yield if (b.draw || !simpleName(b.name)) fail("effect or pattern binding") else nextTerm(expression(b.value, env, defs, stack, depth), value => bindings(List.tail(bs), body, (b.name, value) :: env, defs, stack, depth + 1))
+
+def simpleName(name: String): Bool =
+  Str.len(name) > 0 && nameChars(name, 0)
+
+def nameChars(name: String, i: Int): Bool =
+  if (i == Str.len(name)) true else for {
+  c = Str.charAt(name, i)
+} yield (c == 95 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || i > 0 && c >= 48 && c <= 57) && nameChars(name, i + 1)
+
+def call(name: String, values: List[Term], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  if (List.contains(stack, name)) fail("recursive call") else if (List.len(stack) >= 8) fail("call depth exceeds 8") else callFound(List.filter(defs, f => f.name == name), name, values, defs, stack, depth)
+
+def callFound(hit: List[Fun], name: String, values: List[Term], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  if (List.len(hit) != 1) fail(Str.concat("call ", name)) else for {
+  f = List.at(hit, 0)
+} yield if (!signature(f) || List.len(f.params) != List.len(values)) fail("function signature or implicit assumption") else if (!List.forall(List.zip(f.params, values), pair => pair._1.ty == pair._2.ty)) fail("argument types") else expression(f.body, List.map(List.zip(f.params, values), pair => (pair._1.name, pair._2)), defs, name :: stack, depth)
+
+def symbols(ps: List[Param], i: Int): List[Term] =
+  if (List.isEmpty(ps)) [] else Term(s"p$i", List.at(ps, 0).ty) :: symbols(List.tail(ps), i + 1)
+
+def declarations(values: List[Term]): String =
+  List.join(List.map(values, value => s"(declare-fun ${value.code} () ${sort(value.ty)})"), """
+""")
+
+def query(decls: String, condition: String): String =
+  s"(set-logic QF_BV)\n$decls\n(assert $condition)\n"
+
+def queries(source: String, claimName: String, assumption: String, trigger: String): Result[String, Queries] =
+  if (Check.check(source) != "[]") Result.Err("invalid: source check fails") else queriesChecked(Parse.parse(Lexer.lex(source)).defs, claimName, assumption, trigger)
+
+def queriesChecked(defs: List[Fun], claimName: String, assumption: String, trigger: String): Result[String, Queries] =
+  queriesRoot(List.filter(defs, f => f.name == claimName && f.ora), defs, assumption, trigger)
+
+def queriesRoot(hit: List[Fun], defs: List[Fun], assumption: String, trigger: String): Result[String, Queries] =
+  if (List.len(hit) != 1) Result.Err("unsupported: one named author oracle is required") else for {
+  f = List.at(hit, 0)
+  values = symbols(f.params, 0)
+} yield if (!signature(f) || f.ret != "Bool") Result.Err("unsupported: oracle signature or implicit assumption") else nextQueries(call(f.name, values, defs, [], 0), claim => nextQueries(call(assumption, values, defs, [], 0), domain => nextQueries(call(trigger, values, defs, [], 0), reach => assemble(values, claim, domain, reach))))
+
+def assemble(values: List[Term], claim: Term, domain: Term, reach: Term): Result[String, Queries] =
+  if (claim.ty != "Bool" || domain.ty != "Bool" || reach.ty != "Bool") Result.Err("unsupported: claim, assumption, and trigger must return Bool") else for {
+  decls = declarations(values)
+} yield Result.Ok(Queries(query(decls, domain.code), query(decls, s"(and ${domain.code} (not ${claim.code}))"), query(decls, s"(and ${domain.code} ${reach.code})")))
+
+def nextQueries(value: Result[String, Term], next: Term => Result[String, Queries]): Result[String, Queries] =
+  value match {
+    case Result.Ok(term) => next(term)
+    case Result.Err(reason) => Result.Err(reason)
+  }
+

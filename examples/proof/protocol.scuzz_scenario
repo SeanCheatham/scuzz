@@ -1,0 +1,12 @@
+def setup(): IO[Unit] =
+  Fs.write("one", "old").flatMap(_ => Fs.write("two", "old"))
+
+def faults(): List[String] =
+  ["fs:fail"]
+
+def complete(n: Int where n >= 1 && n <= 2): IO[Unit] =
+  Protocol.run(n, false)
+
+def cancel(n: Int where n >= 1 && n <= 2): IO[Unit] =
+  Protocol.run(n, true)
+

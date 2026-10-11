@@ -1,0 +1,8 @@
+def filesRemainValid(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "complete") || Timeline.driveHas(t, i, "cancel")) || (Timeline.fileTextIs(t, i, "one", "old") || Timeline.fileTextIs(t, i, "one", "value:1") || Timeline.fileTextIs(t, i, "one", "value:2")) && (Timeline.fileTextIs(t, i, "two", "old") || Timeline.fileTextIs(t, i, "two", "value:1") || Timeline.fileTextIs(t, i, "two", "value:2")))
+
+def cancellationPreserves(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "cancel") || Timeline.fileSame(t, a, b, "one")
+})
+
