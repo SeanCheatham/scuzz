@@ -43,4 +43,9 @@ Generated code, module, and View timelines match on both engines.
 The native lexer and probe startup controls pass.
 The compiler fixed-point check passes.
 Shared CLI and language-server project checks pass.
-The remaining application and integration checks remain open.
+Application input validation and source diagnostics pass.
+All 229 required editor workloads pass.
+All 22 editor claim drivers execute.
+Three editor sometimes labels and four triggers remain unreached.
+The full integration run passes the replay and mutation report controls.
+The remaining generated compiler, resource, and diff checks remain open.
