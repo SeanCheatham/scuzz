@@ -19,6 +19,9 @@ app_alive() {
 }
 
 stop_app() {
+  if [ -n "$BUNDLE" ]; then
+    xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
+  fi
   if [ -n "$CONSOLE" ]; then
     kill -KILL "$CONSOLE" 2>/dev/null || true
     wait "$CONSOLE" 2>/dev/null || true
