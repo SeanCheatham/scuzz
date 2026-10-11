@@ -9861,6 +9861,21 @@ int main(void) {
   }
 
   {
+    /* Each shell owns its cancellation group under repeated starts. */
+    SzString *cmd = sz_string_from_cstr("test \"$(ps -o pgid= -p $$)\" -eq $$");
+    for (int i = 0; i < 32; i++) {
+      r = sz_io_unsafe_run(sz_sys_exec(cmd));
+      assert(r.ok);
+      SzPair *result = (SzPair *)r.value;
+      SzPair *output = (SzPair *)result->right;
+      assert(sz_unbox_i64(result->left) == 0);
+      assert(sz_string_len((SzString *)output->right) == 0);
+      sz_release(r.value);
+    }
+    sz_release(cmd);
+  }
+
+  {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
     sz_alloc_stats(&base_bytes, &base_count);
