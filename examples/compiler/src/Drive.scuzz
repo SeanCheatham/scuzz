@@ -1310,13 +1310,14 @@ def fuzzDir(dir: String, outDir: String, iterations: Int, seed: Int, replay: Str
   for {
     _ <- Fs.mkdirs(outDir)
     _ <- Fs.mkdirs(joinSlash(outDir, "fuzz"))
-    _ <- Fs.write(joinSlash(joinSlash(outDir, "fuzz"), "summary.json"), "{\"v\":1,\"kind\":\"fuzz\",\"status\":\"incomplete\",\"reason\":\"campaign does not complete\"}")
+    _ <- Fs.write(joinSlash(joinSlash(outDir, "fuzz"), "summary.json"), fuzzInitialSummary(replay, live, asan, session))
     _ <- Fs.write(fuzzCoveragePath(outDir), "")
     _ <- Fs.write(fuzzSometimesPath(outDir), "")
     _ <- Fs.write(fuzzTriggerPath(outDir), "")
     _ <- Fs.write(fuzzVariedPath(outDir), "")
     _ <- Fs.write(fuzzClaimPath(outDir), "")
     _ <- Fs.write(fuzzClassPath(outDir), "")
+    _ <- Fs.write(fuzzSchedPicksPath(outDir), "")
     _ <- fuzzDirBuild(dir, outDir, iterations, seed, replay, noFailFast, oracles, differential, live, asan, session)
   } yield ()
 
@@ -1451,22 +1452,41 @@ def uiHostLinked(r: (Int, String, String), dir: String, fp: String, exe: String)
   if (r._1 == 0) Fs.write(uiHostStampPath(dir), fp).map(_ => exe) else IO.println(r._3).flatMap(_ => IO.pure(""))
 
 def fuzzMan2(job: FuzzJob, replay: String): IO[Unit] =
-  (if (job.asan) fuzzAsanPrepare(job) else IO.pure(())).flatMap(_ => if (replay != "") fuzzReplayFile(job.outDir, job.exe, job.hasUi, replay, job.uiEnv, job.live, job.asan, job.session) else IO.ensure(fuzzBody(job), evStop(job)))
+  (if (job.asan) fuzzAsanPrepare(job) else IO.pure(())).flatMap(_ => if (replay != "") fuzzReplayFile(job, replay) else IO.ensure(fuzzBody(job), evStop(job)))
 
-def fuzzReplayFile(outDir: String, exe: String, hasUi: Bool, replay: String, uiEnv: String, live: Bool, asan: Bool, session: Bool): IO[Unit] =
-  Fs.read(replay).flatMap(src => fuzzReplayGot(outDir, exe, hasUi, replay, src, uiEnv, live, asan, session))
+def fuzzInitialSummary(replay: String, live: Bool, asan: Bool, session: Bool): String =
+  if (replay == "") "{\"v\":1,\"kind\":\"fuzz\",\"status\":\"incomplete\",\"reason\":\"campaign does not complete\"}" else Str.concat("{\"v\":1,\"kind\":\"replay\",\"status\":\"incomplete\",\"reason\":\"replay does not complete\"", Str.concat(Verify.jStrK("input", replay), Str.concat(Verify.jStrK("mode", fuzzReplayMode(live, session)), Str.concat(",\"asan\":", Str.concat(Verify.jb(asan), Str.concat(Verify.jScope(Verify.InputScope(1, [], [], replay :: [], [], [])), "}"))))))
 
-def fuzzReplayGot(outDir: String, exe: String, hasUi: Bool, replay: String, src: String, uiEnv: String, live: Bool, asan: Bool, session: Bool): IO[Unit] =
-  fuzzReplayRun(outDir, exe, hasUi, replay, fuzzRunOf(replay, src), uiEnv, live, asan, session)
+def fuzzReplayMode(live: Bool, session: Bool): String =
+  if (session) "session" else if (live) "live" else "simulation"
 
-def fuzzReplayRun(outDir: String, exe: String, hasUi: Bool, replay: String, run: FuzzRun, uiEnv: String, live: Bool, asan: Bool, session: Bool): IO[Unit] =
-  IO.println(fuzzReplayHead(replay, run)).flatMap(_ => fuzzWriteDrive(outDir, run.script).flatMap(_ => fuzzProbeRun(exe, hasUi, outDir, run, uiEnv, live, asan, session).flatMap(bad => fuzzReplayDone(bad))))
+def fuzzReplayFile(job: FuzzJob, replay: String): IO[Unit] =
+  Fs.read(replay).flatMap(src => fuzzReplayRun(job, replay, fuzzRunOf(replay, src)))
+
+def fuzzReplayRun(job: FuzzJob, replay: String, run: FuzzRun): IO[Unit] =
+  IO.println(fuzzReplayHead(replay, run)).flatMap(_ => fuzzWriteDrive(job.outDir, run.script).flatMap(_ => fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv, job.live, job.asan, job.session).flatMap(code => fuzzReplayReport(job, replay, run, code).flatMap(status => fuzzReplayDone(status)))))
+
+def fuzzReplayReport(job: FuzzJob, replay: String, run: FuzzRun, code: Int): IO[String] =
+  for {
+    rejection <- fuzzReadOr(fuzzRejectionPath(job.outDir))
+    reason <- fuzzReadOr(fuzzExclusionPath(job.outDir))
+    picks <- fuzzReadOr(fuzzSchedPicksPath(job.outDir))
+    hits <- fuzzReadOr(fuzzCoveragePath(job.outDir))
+    claims <- fuzzReadOr(fuzzClaimPath(job.outDir))
+    ver <- fuzzVerPairs(job.dir)
+    status = fuzzWorkloadStatus(code, rejection)
+    workload = Verify.Workload("replay", true, run.script, run.sched, run.fault, List.filter(Verify.linesOf(picks), l => l != ""), "compiled", status, if (code == 77) reason else if (code == 0) "" else Str.concat("exit ", Str.fromInt(code)))
+    scope = Verify.InputScope(1, workload :: [], [], replay :: [], Verify.claimNames(List.map(ver, v => v._2)), Verify.checkedClaimNames(claims))
+    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Verify.replayJson(replay, fuzzReplayMode(job.live, job.session), job.asan, run.picks, scope, Verify.propertyNames(hits)))
+    _ <- IO.println(Str.concat("author rules: ", if (List.isEmpty(Verify.propertyNames(hits)) && List.isEmpty(scope.checkedClaims)) "unguarded" else "guarded"))
+    _ <- IO.println(Verify.scopeLine(scope))
+  } yield status
 
 def fuzzReplayHead(replay: String, run: FuzzRun): String =
   Str.concat("scuzz fuzz --replay ", Str.concat(replay, Str.concat(" (", Str.concat(Str.fromInt(List.len(Verify.linesOf(run.script))), " events)"))))
 
-def fuzzReplayDone(bad: Int): IO[Unit] =
-  if (bad == 77) IO.println("fuzz replay excluded the required input").flatMap(_ => IO.fail("fuzz")) else if (bad > 0) IO.println("fuzz replay reproduced a failure").flatMap(_ => IO.fail("fuzz")) else IO.println("fuzz replay ok (no failure)")
+def fuzzReplayDone(status: String): IO[Unit] =
+  if (status == "passed") IO.println("fuzz replay ok (no failure)") else IO.println(if (status == "excluded") "fuzz replay excluded the required input" else if (status == "failed") "fuzz replay reproduced a failure" else "fuzz replay incomplete").flatMap(_ => IO.fail("fuzz"))
 
 def fuzzBody(job: FuzzJob): IO[Unit] =
   fuzzClearPromo(job.outDir).flatMap(_ => fuzzEvFiles(job).flatMap(_ => fuzzSeedText(job.dir, job.ens).flatMap(script => fuzzBody2(job, script))))

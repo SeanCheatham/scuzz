@@ -34,7 +34,13 @@ One replay does not establish that a full campaign passes.
 
 ## Status
 
-A small successful replay leaves an incomplete campaign summary.
-Its command returns success and prints a passed replay message.
-The replay path returns without writing a final report.
-The source change and its proofs remain open.
+The replay path writes one final workload report.
+The console and report use the existing workload verdict rules.
+Focused checks pass for all four verdicts and three execution modes.
+Source, link, and missing-input failures replace previous success.
+Recorded choices and executed author rule names remain visible.
+The 20-second deadline reports incomplete and returns failure.
+The rebuilt product includes the manual report fields and limits.
+The compiler source check passes.
+The full verification integration and compiler fixed-point checks run.
+Live application IO, sanitizer mode, and campaign preservation remain open.

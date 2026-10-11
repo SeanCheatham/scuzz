@@ -548,8 +548,116 @@ char *getenv(const char *name) {
         assert report['scope']['required']['incomplete'] == 1 and report['scope']['required']['failed'] == 0, report
         assert '124' in report['scope']['workloads'][0]['reason'], report
         assert 18 <= elapsed < 35, elapsed
+        if engine == 'compiled':
+            replay = root / 'deadline.toml'
+            replay.write_text('[fuzz]\nevents=[]\n')
+            started = time.monotonic()
+            run = subprocess.run([str(cli), 'fuzz', '--replay', str(replay), str(root)], env=env, text=True, capture_output=True, timeout=90)
+            report = json.loads((root / 'build/fuzz/summary.json').read_text())
+            assert run.returncode != 0 and report['kind'] == 'replay' and report['status'] == 'incomplete', report
+            assert report['scope']['required']['incomplete'] == 1 and '124' in report['scope']['workloads'][0]['reason'], report
+            assert 'fuzz replay incomplete' in run.stdout and 'reproduced a failure' not in run.stdout, run.stdout
+            assert 18 <= time.monotonic() - started < 35
 print('Workload status: both engines retain rule failures, distinguish bounded and deadline probes, and replace stale reports before a source failure')
 PY_STATUS
+
+# Replay reports describe one executed input.
+python3 - <<'PY_REPLAY'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-replay-report-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="replay-report"\n')
+    main = root / 'src/Main.scuzz'
+    replay = root / 'replay.toml'
+    replay.write_text('[fuzz]\nschedule_seed="19"\nfault_seed="23"\nevents=[]\n')
+
+    def command(args, ok, env=None):
+        run = subprocess.run([str(cli), *map(str, args)], env=env, text=True, capture_output=True, timeout=180)
+        assert (run.returncode == 0) == ok, (args, run.stdout, run.stderr)
+        return run
+
+    def report(status, extra=(), properties=(), mode='simulation'):
+        command(['fmt', root], True)
+        run = command(['fuzz', *extra, '--replay', replay, root], status == 'passed')
+        data = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert data['kind'] == 'replay' and data['status'] == status, (data, run.stdout)
+        assert data['input'] == str(replay) and data['mode'] == mode and data['asan'] is False, data
+        assert data['scope']['required'] == dict(passed=int(status == 'passed'), failed=int(status == 'failed'), excluded=int(status == 'excluded'), incomplete=int(status == 'incomplete'), planned=1, unrun=0), data
+        assert data['scope']['search'] == dict(passed=0, failed=0, excluded=0, incomplete=0), data
+        row, = data['scope']['workloads']
+        assert row['status'] == status and row['engine'] == 'compiled' and row['required'], row
+        assert row['script'] == '' and row['schedule'] == '19' and row['fault'] == '23', row
+        assert data['declared_schedule_picks'] == [], data
+        assert data['guards']['properties'] == list(properties) and data['guards']['claims'] == [], data
+        assert data['guards']['status'] == ('guarded' if properties else 'unguarded'), data
+        assert ('author rules: guarded' if properties else 'author rules: unguarded') in run.stdout, run.stdout
+        expected = {'passed': 'fuzz replay ok', 'failed': 'fuzz replay reproduced a failure', 'excluded': 'fuzz replay excluded', 'incomplete': 'fuzz replay incomplete'}[status]
+        assert expected in run.stdout, run.stdout
+        return data
+
+    for source, status, properties in (
+        ('@main def main: IO[Unit] = IO.pure(())\n', 'passed', ()),
+        ('@main def main: IO[Unit] = Property.assert("active", true)\n', 'passed', ('active',)),
+        ('@main def main: IO[Unit] = Property.assert("rejects", false)\n', 'failed', ('rejects',)),
+        ('@main def main: IO[Unit] = for { _ = Property.assume("excluded input", false)\n _ <- IO.pure(()) } yield ()\n', 'excluded', ()),
+        ('def loop(): IO[Unit] = if (false) IO.pure(()) else IO.forever(IO.pure(()))\n@main def main: IO[Unit] = loop()\n', 'incomplete', ()),
+        ('def failure(): IO[Unit] = if (false) IO.pure(()) else IO.fail("ordinary error")\n@main def main: IO[Unit] = failure()\n', 'failed', ()),
+    ):
+        main.write_text(source)
+        report(status, properties=properties)
+
+    main.write_text('@main def main: IO[Unit] = IO.pure(())\n')
+    report('passed', ('--live',), mode='live')
+    report('passed', ('--session',), mode='session')
+    rule = root / 'run.scuzz_verify'
+    rule.write_text('def accepts(t: Timeline): Verdict = Verdict.every(t, i => true)\n')
+    command(['fmt', root], True)
+    command(['fuzz', '--replay', replay, root], True)
+    data = json.loads((root / 'build/fuzz/summary.json').read_text())
+    assert data['guards'] == dict(status='guarded', properties=[], claims=['accepts']), data
+    rule.unlink()
+    for failure in ('source', 'input', 'link'):
+        report('passed')
+        args = ['fuzz', '--replay', replay, root]
+        env = None
+        if failure == 'source':
+            main.write_text('@main def main: IO[Unit] = missing()\n')
+        elif failure == 'input':
+            args = ['fuzz', '--replay', root / 'absent.toml', root]
+        else:
+            (root / 'build/replay-report').unlink(missing_ok=True)
+            shim = root / 'tools'
+            shim.mkdir()
+            (shim / 'clang').write_text('#!/bin/sh\nexit 9\n')
+            (shim / 'clang').chmod(0o755)
+            env = dict(os.environ, PATH=str(shim) + os.pathsep + os.environ['PATH'])
+            main.write_text('@main def main: IO[Unit] = IO.println(12345)\n')
+            command(['fmt', root], True)
+        command(args, False, env)
+        data = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert data['kind'] == 'replay' and data['status'] == 'incomplete', data
+        assert data['scope']['required']['unrun'] == 1 and data['scope']['workloads'] == [], data
+        main.write_text('@main def main: IO[Unit] = IO.pure(())\n')
+
+    app = root / 'scheduled'
+    shutil.copytree('examples/bad-sched', app, ignore=shutil.ignore_patterns('build'))
+    pinned = app / 'corpus/d037d00bc981a2fb.toml'
+    command(['fuzz', '--replay', pinned, app], False)
+    data = json.loads((app / 'build/fuzz/summary.json').read_text())
+    assert data['status'] == 'failed' and data['declared_schedule_picks'] == ['setup 1:-', 'checkOrder 4:4,4'], data
+    row, = data['scope']['workloads']
+    assert row['schedule_picks'] == data['declared_schedule_picks'] and row['script'] == 'drive checkOrder\n', row
+    assert data['guards']['status'] == 'guarded', data
+print('Replay reports: verdicts, modes, rule execution, choices, and stale report replacement pass')
+PY_REPLAY
 
 # Claim execution and trigger reach have separate results.
 python3 - <<'PY_REACH'
@@ -1714,6 +1822,16 @@ if ! fuzz --live --replay examples/api-report/live.toml examples/api-report | te
   echo "examples/api-report: live loopback replay failed" && exit 1
 fi
 
+python3 - <<'PY_LIVE_REPLAY'
+import json
+from pathlib import Path
+report = json.loads(Path('examples/api-report/build/fuzz/summary.json').read_text())
+assert report['kind'] == 'replay' and report['status'] == 'passed' and report['mode'] == 'live', report
+assert report['scope']['required']['passed'] == 1 and report['scope']['required']['planned'] == 1, report
+assert report['guards']['status'] == 'guarded', report
+assert report['scope']['workloads'][0]['script'] == 'drive success 0\n', report
+PY_LIVE_REPLAY
+
 # URLSession certificate checks and TLS handshake errors on host loopback.
 if ! fuzz --session --iterations 0 examples/transport | tee /tmp/scuzz-transport-session.log | grep "fuzz ok" >/dev/null; then
   echo "examples/transport: session replay failed" && exit 1
@@ -1945,6 +2063,16 @@ fi
 if grep -E 'ERROR: (Address|Leak)Sanitizer' /tmp/scuzz-io-asan.log; then
   echo "examples/io: ASan reported a defect" && exit 1
 fi
+fuzz --asan --replay examples/io/corpus/composition.toml examples/io
+python3 - <<'PY_ASAN_REPLAY'
+import json
+from pathlib import Path
+report = json.loads(Path('examples/io/build/fuzz/summary.json').read_text())
+assert report['kind'] == 'replay' and report['status'] == 'passed' and report['asan'] is True, report
+assert report['mode'] == 'simulation' and report['guards']['status'] == 'guarded', report
+assert report['scope']['required']['passed'] == 1 and report['scope']['required']['planned'] == 1, report
+assert report['scope']['workloads'][0]['engine'] == 'compiled', report
+PY_ASAN_REPLAY
 fuzz --iterations 4 examples/hello
 grep -q 'drive greetFact' examples/hello/build/seeds.txt
 # Distance feedback: the evaluator search climbs to `code == 4242` and
