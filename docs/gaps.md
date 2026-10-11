@@ -71,6 +71,14 @@ There is no explicit claim suggestion or installation path from a preference. A 
 - **Behavior rules.** Make rules about state, effects, cancellation, duplicate requests, and recovery easy to express and diagnose. Check relationships between executions without a second app implementation.
 - **Reference models.** Deferred. A model is optional. It is not the default verification path.
 
+### Formal verification
+
+**Unproven.** One author claim supports both testing and formal checking without a second app implementation. Solver results match Scuzz integer and effect behavior. Counterexamples reproduce on evaluator and native execution. The supported subset and resource cost fit an ordinary author workflow.
+
+**Experiment.** Use the [formal verification experiment](vision.md#formal-verification-experiment). Check one pure invariant and one bounded effect protocol. Include deliberate defects, contradictory assumptions, unreachable triggers, and solver failures. Record exact bounds and trusted components. Keep unsupported or incomplete checks distinct from proofs.
+
+**Limits.** Refinement types, static effect protocols, inductive proofs, and compilation validation remain proposals. Existing finite campaigns do not establish these guarantees. A proof establishes a stated property under its assumptions. It does not establish that the specification matches all product needs.
+
 ### Supporting compiler and editor work
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.

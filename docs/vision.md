@@ -27,6 +27,109 @@ Complete one slice before starting the next slice.
 
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
 
+## Formal verification experiment
+
+Extend the seven correctness topics above with formal verification methods.
+These ideas are proposals. They are not shipped guarantees.
+Start with the experiment below before selecting a product implementation.
+Keep one compiler, one verification command, and the existing simulation runtime.
+Reference models remain optional. Current design locks remain in `philosophy.md`.
+
+### Direction: one claim, several methods
+
+Let an author write a property once.
+Use the property for fuzzing, bounded symbolic checking, and later proof by induction.
+Return evidence through the same report.
+Turn concrete counterexamples into ordinary replay workloads.
+Define the supported expression and effect subset for each method.
+An arbitrary `Timeline => Verdict` function can need proof annotations or remain unsupported.
+Do not silently replace an author claim with a weaker solver claim.
+
+### Seven proposals
+
+1. **Types that carry proof.** Add refinement types with predicates on values.
+   Examples include positive amounts, valid list indices, and sorted collections.
+   Prove that each constructor and function preserves the predicate.
+   Check external input in live code before it enters the type.
+   Use actual fixed-width integer behavior in arithmetic proofs.
+   Mathematical integers require a separate proof that overflow cannot occur.
+   Study [F* refinement types](https://fstar-lang.org/tutorial/book/part1/part1_getting_off_the_ground.html).
+
+2. **Function contracts and effect protocols.** State the input conditions and output guarantees of a function.
+   Check each call and the function body.
+   Let resource operations consume one protocol state and produce the next.
+   Use states such as open, committed, and closed to prevent invalid operations.
+   Check release obligations on error, cancellation, and timeout paths.
+   An erased `.require` check does not establish live input validation.
+   Study [Dafny contracts](https://dafny.org/dafny/OnlineTutorial/guide).
+
+3. **Exhaustive bounded simulation.** Explore all permitted inputs, schedules, and faults within stated bounds.
+   Derive transitions from executable Scuzz code.
+   Start with two requests, one cancellation, and one interrupted write.
+   Report input, schedule, fault, and step bounds separately.
+   State exploration is exhaustive only for the supported finite scope.
+   An abstraction needs evidence that it preserves the checked property.
+   Study [CBMC bounded checking](https://diffblue.github.io/cbmc/man/cbmc.html).
+
+4. **Useful specifications.** Check that assumptions admit inputs.
+   Check that required claim triggers are reachable.
+   Distinguish an impossible trigger from a failed reach search.
+   Mutate assumptions and claims to expose specifications that admit bad behavior.
+   Keep specification mutation separate from application mutation.
+   Do not weaken the installed claims or assumptions automatically.
+
+5. **Inductive safety and explicit progress.** Prove that an invariant holds initially.
+   Prove that each permitted transition preserves it.
+   Start with balance conservation or the absence of effects after cancellation.
+   Treat eventual completion as a separate obligation.
+   State scheduler fairness and external response assumptions beside progress results.
+   Bounded completion checks do not prove eventual completion for all executions.
+   Study [TLA+ safety and liveness](https://lamport.azurewebsites.net/tla/high-level-view.html).
+
+6. **Evidence for each guarantee.** Distinguish sampled tests, exhaustive bounded checks, and proofs.
+   Record assumptions, input identities, supported operations, platform scope, and open obligations.
+   Solver timeouts and unknown results remain incomplete.
+   Extend relations between executions toward proofs of idempotence and information flow.
+   Define the observed output and the relation between inputs and schedules.
+   Equal public output does not establish protection against timing leaks.
+
+7. **Compilation validation.** Check that native output preserves the proved source behavior.
+   Start with arithmetic, enums, records, and matches.
+   Validate individual compilation results before attempting a whole compiler proof.
+   State which compiler, runtime, foreign code, and operating system behavior remains trusted.
+   Study [Alive2 translation validation](https://github.com/AliveToolkit/alive2).
+
+### First experiment and implementation gate
+
+Use one pure function and one small effect protocol in `examples/`.
+Select the smallest supported subset before adding syntax or solver dependencies.
+Put only this experiment in `plans.md` when work starts.
+
+- Prove one domain invariant for the pure function across its declared input domain.
+  Include signed integer boundaries and overflow behavior.
+  Keep external input validation active in evaluator and native runs.
+- Check the effect protocol exhaustively within explicit finite bounds.
+  Include normal completion, effect failure, cancellation, and interrupted writes.
+  Check preserved state and required release behavior.
+- Reuse the author property across testing and the new checking method.
+  Report unsupported claims and operations explicitly.
+- Reject deliberate defects with concrete counterexamples.
+  Replay those inputs and scheduler choices through evaluator and native execution.
+  Report a replay mismatch as a failure.
+- Check a contradictory assumption and an unreachable required trigger.
+  Keep unknown reach results separate from proof that a trigger is impossible.
+- Exercise solver timeout, missing solver support, and unsupported operations.
+  None of these cases can produce a proof result.
+- Record the trusted components, exact proof scope, bounds, and resource cost.
+  A finite check cannot produce an unbounded proof label.
+
+**Gate:** The experiment preserves existing claims, hermetic simulation, and replay.
+It supplies useful failures and exact evidence for successful checks.
+Its measured cost fits a stated author workflow and budget.
+If these criteria pass, select one small product slice and update `philosophy.md`.
+If a criterion fails, record the blocker and retain the working verification path.
+Do not add a general proof language, a second compiler, or a mandatory second app model.
+
 ## Later arc: development through decisions
 
 A developer sets one objective and reviews a stream of small changes. Each card compares one proposal with the current working tree. Scuzz finds a recorded execution that shows the difference. The developer chooses a blind lane. Accepted changes become the baseline for the next request. Claims constrain the choices. Locks: [`philosophy.md`](philosophy.md#proposal-review).
