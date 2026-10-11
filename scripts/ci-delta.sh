@@ -89,16 +89,23 @@ reset_tree
 # A broken +1 handler fails a claim on the working tree only.
 sed -i.bak 's/Signal.get(count) + 1/Signal.get(count) + 2/' "$main"
 rm -f "$main.bak"
-expect_diff 1 3 0 0 0
+expect_diff 1 2 0 0 0
 python3 - "$report" <<'PY_CHECK'
 import json, sys
 report = json.load(open(sys.argv[1]))
 changed = report["claims"]["changed"]
 assert {"name": "afterPlusShowsOne", "a": "pass", "b": "fail"} in changed, changed
+classes = {row["label"]: row["class"] for row in report["workloads"]}
+assert classes == {
+    "idle": "same",
+    "corpus/632cecf9331a5d5a.toml": "same",
+    "corpus/5e4dd5a610aba46a.toml": "regressed",
+    "corpus/two-taps.toml": "regressed",
+}, classes
 PY_CHECK
 
 # Divergence search writes witnesses that `scuzz fuzz --replay` reproduces.
-expect_diff 1 3 0 0 0 --iterations 16 --seed 7
+expect_diff 1 2 0 0 0 --iterations 16 --seed 7
 python3 - "$report" <<'PY_CHECK'
 import json, sys
 report = json.load(open(sys.argv[1]))

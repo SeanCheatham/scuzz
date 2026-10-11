@@ -32,14 +32,21 @@ It does not cover the Skia wrapper, prebuilt Skia, or emitted LLVM code.
 Other hosts need their own sanitizer proof.
 Finite checks do not prove all programs correct.
 
-The generated-program campaign writes its complete mutation input record.
-It reaches all six mutation sites under a 1 GiB outer-process memory limit.
-Its final result remains incomplete because the run stops before completion.
+Mutation status, input identity, recorded choices, author rule execution,
+workload status, claim reach, and verification scope controls pass on both engines.
+Counter, Studio, Kernel, Scale, and formatter campaigns pass.
+The independent compiler proof passes 54 cases and 12 module checks.
+The full generated-program campaign remains open.
+
+Delta integration checks pass.
+The broken Counter handler changes the two tap workloads.
+Idle and the zero-increment workload remain equal.
+Witness replay rejects the broken version and accepts the baseline.
 The per-probe limits remain unchanged.
 
 ## Remaining checks
 
 - Finish the generated-program campaign with the current compiler.
-- Run the full fuzz and delta integration checks with the current sources.
+- Finish the full fuzz integration checks with the current sources.
 - Keep the three unreached Editor conditional claims and four unreached UI triggers explicit.
 - Use the seven improvement topics in `vision.md` to select the next slice.
