@@ -27,6 +27,11 @@ Complete one slice before starting the next slice.
 
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
 
+Recovery rules compare all five operation files across a conflict and repeated recovery.
+A deliberate conflict write passes the endpoint rules but fails the file comparison.
+Select the next slice from another demonstrated application rule gap.
+Keep formal checking optional until its application benefit and cost meet the stated gate.
+
 ## Formal verification methods
 
 Extend the seven correctness topics above with formal verification methods.

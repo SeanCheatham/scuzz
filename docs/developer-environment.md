@@ -253,6 +253,12 @@ The report retains the number of pending scheduler prefixes.
 Both methods use the same author rules and a 60-second checking limit per source variant.
 Build time stays separate. Ordinary fuzzing uses 64 iterations and seed 42.
 Eight corpus inputs exercise acceptance, Undo, conflict, and cancellation.
+Six more corpus inputs check repeated recovery and conflict preservation.
+The comparisons read two sources, the journal, the operation record, and the Undo state.
+They compare file presence and contents. A missing file differs from an empty file.
+Separate drivers keep observation reads out of the existing recovery fault paths.
+The report requires the added rules to execute on all six relevant fault-free inputs.
+The eight existing fault-free recovery inputs also retain exact replay checks.
 The search continues after a required failure to check both defect controls.
 Setup writes fixed journal inputs without application helpers.
 Unexpected recovery errors reject an author rule. Tool failures stay incomplete.
@@ -261,16 +267,30 @@ The driver retains a pending operation when file access remains unavailable.
 The finite checker requires all six live assertions on each passing bounded path.
 The methods have different search scopes. Their elapsed times do not establish a speed advantage.
 
-One Linux sample checks 727 native executions and 726 exact replay paths.
+One Linux sample checks 705 native executions and 705 exact replay paths.
 The 132 sequential paths pass. Cancellation paths reach 144 contention choices.
-The 60-second budget ends with more than 37000 scheduler prefixes pending.
-Ordinary fuzzing takes about 6 seconds. Its nine required probes and 40 search probes pass.
+The 60-second budget ends with more than 35000 scheduler prefixes pending.
+The 14 fault-free rule checks and exact engine comparisons take 1.21 seconds.
+Ordinary fuzzing takes 6.49 seconds. Its 15 required probes and 40 search probes pass.
 It detects all 24 sampled mutations. No sampled mutation remains incomplete.
 These sampled mutations affect fixture functions.
 Three direct mutation checks exercise application helpers.
 They corrupt field lookup and path guards.
 Their setup passes. Each check rejects the recovery error in both engines.
 These three checks also reproduce through ordinary native replay.
+Two more direct checks alter conflict handling and repeated recovery.
+One writes the second source file before reporting a conflict.
+The endpoint rules pass this defect. The file comparison rejects it in both engines.
+The other clears the Undo state when the journal is empty.
+The repeated recovery rule rejects it in both engines.
+Ordinary native replay reproduces both author rule failures.
+Each direct check reports build, native check, evaluator comparison, and replay time.
+The two added defect builds take 4.34 and 4.38 seconds in this sample.
+Their native checks take less than 0.01 seconds each.
+Their evaluator comparisons take 0.08 seconds each.
+Their ordinary native replays take 0.22 and 0.21 seconds.
+These times exclude human effort to write or understand the rules.
+One host sample does not establish a general cost bound.
 Both methods reject a missing-write defect and an external-overwrite defect.
 Finite counterexamples also reproduce through ordinary native replay.
 The complete comparison returns exit status 2 because finite exploration remains incomplete.

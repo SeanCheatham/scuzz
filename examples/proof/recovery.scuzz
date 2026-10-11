@@ -34,6 +34,36 @@ def text(j: Json): String =
 def readOptional(path: String): IO[String] =
   Fs.exists(path).flatMap(hit => if (hit == 0) IO.pure("") else Fs.read(path))
 
+def snapshot(mode: Int): IO[String] =
+  for {
+    path = root(mode)
+    storage = Fs.join(path, ".scuzz/ide")
+    files = [Fs.join(path, "src/Main.scuzz"), Fs.join(path, "src/Other.scuzz"), Fs.join(storage, "journal.json"), Fs.join(Fs.join(storage, "records"), Str.concat(Json.getStr(prepared(mode), "operation", ""), ".json")), Fs.join(storage, "last.json")]
+    values <- IO.foreach(files, file => for {
+  hit <- Fs.exists(file)
+  contents <- if (hit == 0) IO.pure("") else Fs.read(file)
+} yield Json.Obj([("path", Json.Str(file)), ("exists", Json.Bool(hit != 0)), ("contents", Json.Str(contents))]))
+  } yield text(Json.Arr(values))
+
+def repeated(mode: Int): IO[Unit] =
+  for {
+    before <- snapshot(mode)
+    _ <- attempt(root(mode))
+    after <- snapshot(mode)
+    _ <- Property.assert("repeated recovery preserves settled files", before == after)
+  } yield ()
+
+def repeat(mode: Int): IO[Unit] =
+  Cards.recover(root(mode)).flatMap(_ => repeated(mode)).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+
+def preserve(n: Int): IO[Unit] =
+  (for {
+    before <- snapshot(n % 4)
+    _ <- run(n)
+    after <- snapshot(n % 4)
+    _ <- Property.assert("recovery conflict preserves all operation files", before == after)
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+
 def expectedError(error: String): Bool =
   error == "Fs: injected fault" || error == "Fs: partial write" || error == "fiber interrupted" || Str.startsWith(error, "recovery conflict:")
 

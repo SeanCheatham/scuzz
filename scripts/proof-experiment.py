@@ -566,7 +566,9 @@ def recovery_package(cli, sources, output, variant):
     setup.append('  } yield ()')
     (package / 'recovery.scuzz_scenario').write_text('\n'.join(setup) + '\n\n'
         'def faults(): List[String] = ["fs:fail"]\n\n'
-        'def recover(n: Int where n >= 0 && n <= 7): IO[Unit] = Recovery.run(n)\n')
+        'def recover(n: Int where n >= 0 && n <= 7): IO[Unit] = Recovery.run(n)\n\n'
+        'def repeat(n: Int where n == 0 || n == 2): IO[Unit] = Recovery.repeat(n)\n\n'
+        'def preserve(n: Int where n == 1 || n == 3 || n == 5 || n == 7): IO[Unit] = Recovery.preserve(n)\n')
     (package / 'recovery.scuzz_verify').write_text(
         'def externalBytes(t: Timeline): Verdict =\n'
         '  Verdict.every(t, i => !Timeline.driveHas(t, i, "recover") || '
@@ -587,6 +589,10 @@ def recovery_package(cli, sources, output, variant):
         (package / f'corpus/recovery-{n}.toml').write_text(
             '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
             'events=' + json.dumps([f'drive recover {n}']) + '\n')
+    for driver, n in [('repeat', 0), ('repeat', 2)] + [('preserve', n) for n in (1, 3, 5, 7)]:
+        (package / f'corpus/{driver}-{n}.toml').write_text(
+            '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive {driver} {n}']) + '\n')
     return package, package / 'build/recovery', probe
 
 
@@ -730,6 +736,8 @@ def recovery_experiment(cli):
         report['scope'] = dict(files=2, operations=['accept', 'undo'], external_edit='before recovery only',
                               entry='resume one pending write, then recover twice',
                               methods_budget_seconds=60, sampled_seed=42, sampled_iterations=64, required_recovery_inputs=list(range(8)),
+                              required_repeat_inputs=[0, 2], required_preserve_inputs=[1, 3, 5, 7],
+                              observed_files=['two sources', 'journal', 'operation record', 'Undo state'],
                               ordinary_scope='the default search also includes repeated calls and persistent faults')
         variants = {'correct': sources}
         skip = dict(sources)
@@ -758,6 +766,29 @@ def recovery_experiment(cli):
                        exporter_sha256=digest((ROOT / 'examples/proof/build/proof').read_bytes()))
             report['variants'][variant] = row
             print('Check recovery:', variant, flush=True)
+            if variant == 'correct':
+                checked = time.monotonic()
+                rules = []
+                inputs = [('recover', n) for n in range(8)] + [('repeat', 0), ('repeat', 2)]
+                inputs += [('preserve', n) for n in (1, 3, 5, 7)]
+                for driver, n in inputs:
+                    directory = package / f'rule-{driver}-{n}'
+                    witness = protocol_probe(executable, directory, driver, n, 0)
+                    assert witness['status'] == 'passed', ('recovery rule check rejects', witness)
+                    witness['executed_properties'] = executed_properties(directory / 'coverage.txt')
+                    if driver == 'repeat':
+                        assert 'repeated recovery preserves settled files' in witness['executed_properties']
+                    elif driver == 'preserve':
+                        assert 'recovery conflict preserves all operation files' in witness['executed_properties']
+                    else:
+                        assert {'recovery preserves external bytes', 'recovery completes both source writes',
+                                'recovery retains a conflicting journal', 'recovery clears a completed journal',
+                                'recovery records completed writes', 'recovery retains the Undo state'} <= set(witness['executed_properties'])
+                    witness['parity'] = protocol_parity(cli, probe, witness, directory, package, 1000)
+                    rules.append(witness)
+                report['rule_checks'] = dict(status='passed', fault=0, workloads=rules,
+                                            seconds=time.monotonic() - checked)
+                save()
             row['finite'] = recovery_finite(cli, package, executable, probe, package, variant != 'correct')
             save()
             row['sampled'] = recovery_sampled(cli, package, package)
@@ -770,30 +801,61 @@ def recovery_experiment(cli):
                 assert row['sampled']['search_status'] == 'failed', 'ordinary search does not reject the deliberate defect'
         report['mutation_regressions'] = {}
         regressions = [
-            ('field-lookup', 'Diags', 'p._1 == key', 'p._1 != key'),
+            ('field-lookup', 'Diags', 'p._1 == key', 'p._1 != key', 'recover', 0,
+             'recovery returns an expected error'),
             ('path-guard', 'Models', 'if (ok) IO.pure(()) else IO.fail(why)',
-             'if (ok) IO.fail(why) else IO.pure(())'),
+             'if (ok) IO.fail(why) else IO.pure(())', 'recover', 0, 'recovery returns an expected error'),
             ('resolved-path', 'Proposal', 'resolved == Fs.join(base, path)',
-             'resolved != Fs.join(base, path)'),
+             'resolved != Fs.join(base, path)', 'recover', 0, 'recovery returns an expected error'),
+            ('conflict-write', 'Cards',
+             '_ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")',
+             '_ <- if (List.forall(checks, b => b)) IO.pure(()) else Fs.write(Fs.join(root, "src/Other.scuzz"), "unexpected bytes")\n'
+             '    _ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")',
+             'preserve', 1, 'recovery conflict preserves all operation files'),
+            ('repeat-undo-state', 'Cards',
+             'if (Str.isEmpty(raw)) IO.pure(()) else finish(root, LspClient.parseJson(raw))',
+             'if (Str.isEmpty(raw)) Fs.write(Fs.join(storage(root), "last.json"), "") else finish(root, LspClient.parseJson(raw))',
+             'repeat', 0, 'repeated recovery preserves settled files'),
         ]
-        for name, module, anchor, replacement in regressions:
+        for name, module, anchor, replacement, driver, n, rule in regressions:
             changed = dict(sources)
             assert changed[module].count(anchor) == 1
             changed[module] = changed[module].replace(anchor, replacement)
+            started = time.monotonic()
             package, executable, probe = recovery_package(cli, changed, output, 'mutation-' + name)
+            build_seconds = time.monotonic() - started
             directory = package / 'witness'
-            witness = protocol_probe(executable, directory, 'recover', 0, 0)
-            assert witness['status'] == 'failed' and 'recovery returns an expected error' in witness['rejection']
+            started = time.monotonic()
+            witness = protocol_probe(executable, directory, driver, n, 0)
+            native_seconds = time.monotonic() - started
+            assert witness['status'] == 'failed' and rule in witness['rejection']
             assert next(run for run in witness['runs'] if run['name'] == 'setup')['ok']
+            started = time.monotonic()
             witness['parity'] = protocol_parity(cli, probe, witness, directory, package, 1000)
-            command(cli, ['fuzz', '--replay', witness['workload'], package], package,
-                    'mutation-replay', success=False)
+            parity_seconds = time.monotonic() - started
+            started = time.monotonic()
+            replay = command(cli, ['fuzz', '--replay', witness['workload'], package], package,
+                             'mutation-replay', success=False)
+            replay_seconds = time.monotonic() - started
+            replay_report = json.loads((package / 'build/fuzz/summary.json').read_text())
+            assert replay_report['status'] == 'failed' and rule in replay_report['guards']['properties']
+            assert replay_report['scope']['required']['incomplete'] == 0
+            assert f'oracle {rule} rejected' in replay.stdout
             report['mutation_regressions'][name] = dict(status='detected', module=module,
                 source_sha256=digest(changed[module].encode()), native_sha256=digest(executable.read_bytes()),
+                build_seconds=build_seconds, native_check_seconds=native_seconds,
+                parity_seconds=parity_seconds, replay_seconds=replay_seconds,
                 counterexample=witness)
+            if name == 'conflict-write':
+                directory = package / 'existing-rules'
+                previous = protocol_probe(executable, directory, 'recover', 1, 0)
+                assert previous['status'] == 'passed', 'existing recovery rules reject the conflict control'
+                previous['parity'] = protocol_parity(cli, probe, previous, directory, package, 1000)
+                report['mutation_regressions'][name]['existing_rules'] = previous
             save()
         report['comparison'] = dict(
             deliberate_defects=dict(finite=2, ordinary_search=2),
+            stronger_rule_control=dict(defect='conflict-write', existing_rules='passed', added_rule='failed'),
             conclusion='Both methods reject the controls. General application benefit remains unproven.',
             limits=['finite exploration must complete within its checking budget',
                     'search scopes differ; timing does not establish a speed advantage'])
