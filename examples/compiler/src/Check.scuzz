@@ -1232,41 +1232,41 @@ def lamPinTyOf3(v: Expr, vo: Out, pin: String, env: List[(String, Ty)], defs: Ft
 def patternBindsName(pat: String, name: String): Bool =
   List.exists(bindPat(pat, "", [], []), binding => binding._1 == name)
 
-def exprFreeVar(e: Expr, s: String): Bool =
+def exprFreeVar(e: Expr, s: String, live: Bool): Bool =
   e match {
     case Expr.EVar(n, _) => n == s
-    case Expr.EPrint(inner, _) => exprFreeVar(inner, s)
-    case Expr.ECall(f, args, _) => f == s || listFreeVar(args, s)
-    case Expr.EMethod(recv, _, args, _) => exprFreeVar(recv, s) || listFreeVar(args, s)
-    case Expr.EField(recv, _, _) => exprFreeVar(recv, s)
-    case Expr.EBin(_, l, r, _) => exprFreeVar(l, s) || exprFreeVar(r, s)
-    case Expr.EUn(_, inner, _) => exprFreeVar(inner, s)
-    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprFreeVar(body, s)
-    case Expr.EIf(c, t, el, _) => exprFreeVar(c, s) || exprFreeVar(t, s) || exprFreeVar(el, s)
-    case Expr.EMatch(sc, arms, _) => exprFreeVar(sc, s) || List.exists(arms, arm => armFreeVar(arm, s))
-    case Expr.EInterp(_, parts, _) => listFreeVar(parts, s)
-    case Expr.EList(xs) => listFreeVar(xs, s)
-    case Expr.ETuple(xs) => listFreeVar(xs, s)
-    case Expr.ENamed(_, inner) => exprFreeVar(inner, s)
-    case Expr.EAscribe(inner, _, _) => exprFreeVar(inner, s)
-    case Expr.EFor(bs, body, _) => forFreeVar(bs, body, s)
+    case Expr.EPrint(inner, _) => exprFreeVar(inner, s, live)
+    case Expr.ECall(f, args, _) => f == s || listFreeVar(args, s, live)
+    case Expr.EMethod(recv, name, args, _) => exprFreeVar(recv, s, live) || (!live || name != "require") && listFreeVar(args, s, live)
+    case Expr.EField(recv, _, _) => exprFreeVar(recv, s, live)
+    case Expr.EBin(_, l, r, _) => exprFreeVar(l, s, live) || exprFreeVar(r, s, live)
+    case Expr.EUn(_, inner, _) => exprFreeVar(inner, s, live)
+    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprFreeVar(body, s, live)
+    case Expr.EIf(c, t, el, _) => exprFreeVar(c, s, live) || exprFreeVar(t, s, live) || exprFreeVar(el, s, live)
+    case Expr.EMatch(sc, arms, _) => exprFreeVar(sc, s, live) || List.exists(arms, arm => armFreeVar(arm, s, live))
+    case Expr.EInterp(_, parts, _) => listFreeVar(parts, s, live)
+    case Expr.EList(xs) => listFreeVar(xs, s, live)
+    case Expr.ETuple(xs) => listFreeVar(xs, s, live)
+    case Expr.ENamed(_, inner) => exprFreeVar(inner, s, live)
+    case Expr.EAscribe(inner, _, _) => exprFreeVar(inner, s, live)
+    case Expr.EFor(bs, body, _) => forFreeVar(bs, body, s, live)
     case _ => false
   }
 
-def listFreeVar(xs: List[Expr], s: String): Bool =
-  List.exists(xs, e => exprFreeVar(e, s))
+def listFreeVar(xs: List[Expr], s: String, live: Bool): Bool =
+  List.exists(xs, e => exprFreeVar(e, s, live))
 
-def armFreeVar(arm: Arm, s: String): Bool =
+def armFreeVar(arm: Arm, s: String, live: Bool): Bool =
   arm match {
-    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprFreeVar(body, s) || guard != "" && exprFreeVar(Parse.parseExprList(Lexer.lex(guard), 0)._1, s))
+    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprFreeVar(body, s, live) || guard != "" && exprFreeVar(Parse.parseExprList(Lexer.lex(guard), 0)._1, s, live))
   }
 
-def forFreeVar(bs: List[Bind], body: Expr, s: String): Bool =
-  if (List.isEmpty(bs)) exprFreeVar(body, s) else forFreeBind(List.at(bs, 0), List.tail(bs), body, s)
+def forFreeVar(bs: List[Bind], body: Expr, s: String, live: Bool): Bool =
+  if (List.isEmpty(bs)) exprFreeVar(body, s, live) else forFreeBind(List.at(bs, 0), List.tail(bs), body, s, live)
 
-def forFreeBind(b: Bind, rest: List[Bind], body: Expr, s: String): Bool =
+def forFreeBind(b: Bind, rest: List[Bind], body: Expr, s: String, live: Bool): Bool =
   b match {
-    case Bind(_, pat, value) => exprFreeVar(value, s) || !patternBindsName(pat, s) && forFreeVar(rest, body, s)
+    case Bind(_, pat, value) => exprFreeVar(value, s, live) || !patternBindsName(pat, s) && forFreeVar(rest, body, s, live)
   }
 
 def resultBindErr(name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
@@ -1293,7 +1293,7 @@ def resultListTy(ty: Ty): Bool =
   }
 
 def resultListUse(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
-  if (!resultListTy(Type.parse(ty))) "" else if (List.exists(bindPat(pat, ty, [], ens), binding => resultListTy(binding._2) && forFreeVar(rest, body, binding._1))) "" else "Result list is discarded; return it or pass it to a function"
+  if (!resultListTy(Type.parse(ty))) "" else if (List.exists(bindPat(pat, ty, [], ens), binding => resultListTy(binding._2) && forFreeVar(rest, body, binding._1, true))) "" else "Result list is discarded in live code; return it or pass it to a function"
 
 def resultAlternativeErr(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En], i: Int): String =
   resultAlternativeNext(resultBindErr(Str.take(pat, i), ty, rest, body, ens), Str.drop(pat, i + 3), ty, rest, body, ens)
@@ -1314,7 +1314,7 @@ def resultPatternFieldNext(err: String, pats: List[String], fields: List[Param],
   if (err != "") err else resultPatternFieldsErr(pats, fields, rest, body, ens)
 
 def resultBindUse(bindings: List[(String, Ty)], rest: List[Bind], body: Expr): String =
-  if (List.exists(bindings, binding => Type.appName(binding._2) == "Result" && forFreeVar(rest, body, binding._1))) "" else "Result value is discarded; match it, return it, or pass it to a function"
+  if (List.exists(bindings, binding => Type.appName(binding._2) == "Result" && forFreeVar(rest, body, binding._1, true))) "" else "Result value is discarded in live code; match it, return it, or pass it to a function"
 
 def bindingNamesErr(bindings: List[(String, Ty)]): String =
   if (List.isEmpty(bindings)) "" else if (List.exists(List.tail(bindings), binding => binding._1 == List.at(bindings, 0)._1)) Str.concat("binding pattern repeats name ", List.at(bindings, 0)._1) else bindingNamesErr(List.tail(bindings))

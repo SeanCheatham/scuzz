@@ -6108,7 +6108,7 @@ def withSelfFuns(ds: List[Fun]): List[Fun] =
 
 def withSelfFun(d: Fun): Fun =
   d match {
-    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => if (paramKnown(ps, "self") || !Check.exprFreeVar(body, "self")) d else Fun(priv, ora, name, ts, Param("self", if (mod == "") "" else mod, "", "") :: ps, ret, body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => if (paramKnown(ps, "self") || !Check.exprFreeVar(body, "self", false)) d else Fun(priv, ora, name, ts, Param("self", if (mod == "") "" else mod, "", "") :: ps, ret, body, mod, off)
   }
 
 def implFuns(impls: List[Im], defs: List[Fun]): List[Fun] =
