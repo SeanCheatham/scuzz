@@ -39,4 +39,8 @@ The evaluator idle deadline requires compiled fallback.
 Generated type-checker timelines and claims match on both engines.
 All 38 required code-generation workloads pass.
 The code-generation evaluator idle probe requires compiled fallback.
-The remaining compiler parity and integration checks remain open.
+Generated code, module, and View timelines match on both engines.
+The native lexer and probe startup controls pass.
+The compiler fixed-point check passes.
+Shared CLI and language-server project checks pass.
+The remaining application and integration checks remain open.
