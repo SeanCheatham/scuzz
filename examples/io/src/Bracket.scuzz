@@ -49,8 +49,21 @@ def recovered(): IO[Unit] =
     _ <- Property.assert("error releases once and recovers once", releaseCount == 1 && recoveryCount == 1)
   } yield ()
 
+def failedChild(): IO[Int] =
+  IO.fail("expected joined failure")
+
+def joinedFailure(): IO[Unit] =
+  for {
+    child <- Fiber.fork(failedChild())
+    result <- IO.attempt(Fiber.join(child))
+    _ <- result match {
+  case Result.Err(error) => Property.assert("join retains the failure value", error == "expected joined failure")
+  case Result.Ok(_) => Property.assert("joined child fails", false)
+}
+  } yield ()
+
 def lifecycle(): IO[Unit] =
-  canceled().flatMap(_ => timedOut()).flatMap(_ => recovered())
+  joinedFailure().flatMap(_ => canceled()).flatMap(_ => timedOut()).flatMap(_ => recovered())
 
 def run(): IO[Unit] =
   for {

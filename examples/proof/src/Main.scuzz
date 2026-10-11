@@ -1,0 +1,75 @@
+def resultJson(result: Result[String, Proof.Queries]): Json =
+  result match {
+    case Result.Err(reason) => Json.Obj([("status", Json.Str("unsupported")), ("reason", Json.Str(reason))])
+    case Result.Ok(q) => Json.Obj([("status", Json.Str("ready")), ("domain", Json.Str(q.domain)), ("violation", Json.Str(q.violation)), ("reach", Json.Str(q.reach))])
+  }
+
+def exported(source: String, claims: String): Json =
+  for {
+    full = Str.concat(source, Str.concat("""
+""", claims))
+    defective = Str.replace(full, "if (n < 0) 0 else if (n >= 100) 100 else n + 1", "if (n == 9223372036854775807) n + 1 else if (n < 0) 0 else if (n >= 100) 100 else n + 1")
+  } yield Json.Obj([("source", Json.Str(full)), ("probe_files", graphJson(source, claims)), ("defect_probe_files", graphJson(Str.replace(source, "if (n < 0) 0 else if (n >= 100) 100 else n + 1", "if (n == 9223372036854775807) n + 1 else if (n < 0) 0 else if (n >= 100) 100 else n + 1"), claims)), ("source_sha256", Json.Str(Hash.sha256(full))), ("correct", resultJson(Proof.queries(full, "balance", "inputDomain", "boundaryTrigger"))), ("defective_source", Json.Str(defective)), ("defect", resultJson(Proof.queries(defective, "balance", "inputDomain", "boundaryTrigger"))), ("contradiction", resultJson(Proof.queries(full, "balance", "contradiction", "boundaryTrigger"))), ("impossible", resultJson(Proof.queries(full, "balance", "inputDomain", "impossible"))), ("unsupported", unsupported()), ("translation", translationCases())])
+
+def printJson(value: Json): IO[Unit] =
+  Json.stringify(value) match {
+    case Result.Ok(text) => IO.println(text)
+    case Result.Err(error) => IO.fail(error)
+  }
+
+def unsupportedSource(body: String): String =
+  Str.concat("""def inputDomain(n: Int): Bool = n == n
+def boundaryTrigger(n: Int): Bool = n == n
+""", body)
+
+def unsupportedCase(body: String): Json =
+  for {
+    source = unsupportedSource(body)
+  } yield Json.Obj([("source", Json.Str(source)), ("result", resultJson(Proof.queries(source, "balance", "inputDomain", "boundaryTrigger")))])
+
+def unsupported(): Json =
+  Json.Arr(List.map(["""oracle balance(n: Int): Bool = n / 1 == n
+""", """oracle balance(n: Int): Bool = n.require(x => x >= 0) == n
+""", """def loop(n: Int): Int = if (n == 0) 0 else loop(n - 1)
+oracle balance(n: Int): Bool = loop(n) == 0
+""", """oracle balance(n: Int where n >= 0): Bool = n >= 0
+""", """oracle balance(n: Int): Bool = Str.len(Str.fromInt(n)) >= 1
+""", """oracle balance(n: Int): Bool = (n match { case 0 => true case _ => false })
+"""], body => unsupportedCase(body)))
+
+def graphJson(source: String, claims: String): Json =
+  Json.Arr(List.map(Drive.fuzzFiles([("Amount", source), ("Main", """@main def main: IO[Unit] = IO.pure(())
+""")], [("balance", claims)], ""), pair => Json.Arr([Json.Str(pair._1), Json.Str(pair._2)])))
+
+def exportQueries(): IO[Unit] =
+  for {
+    source <- Fs.read("examples/proof/src/Amount.scuzz")
+    claims <- Fs.read("examples/proof/balance.scuzz_verify")
+    protocol <- Fs.read("examples/proof/src/Protocol.scuzz")
+    scenario <- Fs.read("examples/proof/protocol.scuzz_scenario")
+    rules <- Fs.read("examples/proof/protocol.scuzz_verify")
+    _ <- printJson(Json.Obj([("pure", exported(source, claims)), ("protocol", protocolJson(protocol, scenario, rules))]))
+  } yield ()
+
+def translationCase(name: String, body: String): Json =
+  for {
+    source = unsupportedSource(Str.concat("oracle balance(n: Int): Bool = ", Str.concat(body, """
+""")))
+    inputs = [-9223372036854775808, -9223372036854775807, -100, -1, 0, 1, 99, 100, 9223372036854775806, 9223372036854775807]
+    program = Eval.load([("Main", source)])
+  } yield Json.Obj([("name", Json.Str(name)), ("source", Json.Str(source)), ("queries", resultJson(Proof.queries(source, "balance", "inputDomain", "boundaryTrigger"))), ("values", Json.Arr(List.map(inputs, n => Json.Obj([("input", Json.Int(n)), ("result", Json.Str(Eval.show(Eval.callPure(program, "Main", "balance", [Eval.Value.VInt(n)]))))]))))])
+
+def translationCases(): Json =
+  Json.Arr([translationCase("wrap", "(n + 1) - 1 == n"), translationCase("multiply", "n * 2 < n"), translationCase("minimum", "n == -9223372036854775808"), translationCase("order", "(n < 0 || n > 100) && !(n >= 0 && n <= 100)"), translationCase("binding", "for { value = if (n < 0) 0 - n else n } yield value != n"), translationCase("negative", "-n > 0"), translationCase("bool", "if (n == 0) true else false")])
+
+def protocolGraph(protocol: String, scenario: String, rules: String): Json =
+  Json.Arr(List.map(Drive.fuzzFiles(Verify.applyScenarioFiles([("Protocol", protocol), ("Main", """@main def main: IO[Unit] = IO.pure(())
+""")], scenario), [("protocol", rules)], Verify.scenarioWrap(scenario)), pair => Json.Arr([Json.Str(pair._1), Json.Str(pair._2)])))
+
+def protocolJson(protocol: String, scenario: String, rules: String): Json =
+  for {
+    defect = Str.replace(protocol, "Ref.update(released, count => count + 1)", "Ref.update(released, count => count)")
+  } yield Json.Obj([("source", Json.Str(protocol)), ("scenario", Json.Str(scenario)), ("claims", Json.Str(rules)), ("files", protocolGraph(protocol, scenario, rules)), ("defective_source", Json.Str(defect)), ("defective_files", protocolGraph(defect, scenario, rules))])
+
+@main def main: IO[Unit] =
+  Sys.getenv("SCUZZ_PROOF_EXPORT").flatMap(mode => if (mode == "1") exportQueries() else IO.pure(()))

@@ -27,11 +27,11 @@ Complete one slice before starting the next slice.
 
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
 
-## Formal verification experiment
+## Formal verification methods
 
 Extend the seven correctness topics above with formal verification methods.
 These ideas are proposals. They are not shipped guarantees.
-Start with the experiment below before selecting a product implementation.
+Use the optional experiment to select small changes for demonstrated correctness gaps.
 Keep one compiler, one verification command, and the existing simulation runtime.
 Reference models remain optional. Current design locks remain in `philosophy.md`.
 
@@ -99,36 +99,21 @@ Do not silently replace an author claim with a weaker solver claim.
    State which compiler, runtime, foreign code, and operating system behavior remains trusted.
    Study [Alive2 translation validation](https://github.com/AliveToolkit/alive2).
 
-### First experiment and implementation gate
+### Product method gate
 
-Use one pure function and one small effect protocol in `examples/`.
-Select the smallest supported subset before adding syntax or solver dependencies.
-Put only this experiment in `plans.md` when work starts.
-
-- Prove one domain invariant for the pure function across its declared input domain.
-  Include signed integer boundaries and overflow behavior.
-  Keep external input validation active in evaluator and native runs.
-- Check the effect protocol exhaustively within explicit finite bounds.
-  Include normal completion, effect failure, cancellation, and interrupted writes.
-  Check preserved state and required release behavior.
-- Reuse the author property across testing and the new checking method.
-  Report unsupported claims and operations explicitly.
-- Reject deliberate defects with concrete counterexamples.
-  Replay those inputs and scheduler choices through evaluator and native execution.
-  Report a replay mismatch as a failure.
-- Check a contradictory assumption and an unreachable required trigger.
-  Keep unknown reach results separate from proof that a trigger is impossible.
-- Exercise solver timeout, missing solver support, and unsupported operations.
-  None of these cases can produce a proof result.
-- Record the trusted components, exact proof scope, bounds, and resource cost.
-  A finite check cannot produce an unbounded proof label.
-
-**Gate:** The experiment preserves existing claims, hermetic simulation, and replay.
-It supplies useful failures and exact evidence for successful checks.
-Its measured cost fits a stated author workflow and budget.
-If these criteria pass, select one small product slice and update `philosophy.md`.
-If a criterion fails, record the blocker and retain the working verification path.
-Do not add a general proof language, a second compiler, or a mandatory second app model.
+`examples/proof` supplies optional bit-vector and finite protocol checks.
+Run instructions and measured scope live in `developer-environment.md`.
+The default app path remains `scuzz fuzz`.
+Select a new product method only for a demonstrated application need.
+Keep its supported subset explicit before adding syntax or dependencies.
+Reuse the author rule. Preserve claims, hermetic simulation, and exact replay.
+Reject deliberate defects with ordinary counterexample workloads.
+Check assumptions and required trigger reach separately.
+Keep unsupported operations, unknown results, and unmet limits incomplete.
+Record exact input identities, platform scope, trusted components, and cost.
+Require a measured author workflow and budget.
+A finite check cannot produce an unbounded proof label.
+Do not add a general proof language, a second compiler, or a mandatory app model.
 
 ## Later arc: development through decisions
 
