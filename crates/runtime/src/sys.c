@@ -476,7 +476,8 @@ static void *sys_exec_start(void *env) {
     /* Drop the parent's fatal-signal handler before any syscall can run it. */
     sz_exec_child_signals();
     /* Keep the shell and its children in one cancellation group. */
-    if (setpgid(0, 0) != 0) {
+    if (getpgrp() != getpid() && setpgid(0, 0) != 0 &&
+        getpgrp() != getpid()) {
       const char msg[] = "setpgid failed\n";
       (void)write(err_fds[1], msg, sizeof msg - 1);
       _exit(127);
