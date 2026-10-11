@@ -49,4 +49,17 @@ The native lexer proof passes 100000 identifiers with an 8 MiB stack.
 The exact compiler fixed-point check passes.
 Shared CLI and language-server project checks pass.
 Live input validation, integer boundaries, and bounded native JSON checks pass.
+Kernel integration checks pass.
+Counter and Studio corpus checks pass.
+Editor replay passes 228 entries and the required idle workload.
+All 22 Editor claim drivers run.
+Three conditional labels and four UI triggers remain unreached.
+These reach gaps remain explicit in `gaps.md`.
+Live review and lifecycle controls pass with exact witness replay.
+Controlled generation interruption and timeout checks pass.
+These controls do not establish real model quality or human usefulness.
+Mutation status, recorded choices, input identity, author rule execution,
+workload status, and claim reach controls pass on both engines.
+Kernel, Scale, and formatter search and mutation campaigns pass.
+The independent compiler proof passes 54 cases and 12 module checks.
 Required PR integration remains open.
