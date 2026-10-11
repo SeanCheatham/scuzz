@@ -59,6 +59,8 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI `scuzz`; compiler pac
 
 ### Tooling
 
+A replay report covers one recorded input. Its verdict agrees with the command result. Retain its script, seeds, declared scheduler choices, and executed choices. Report author rule execution separately. A replay does not establish a complete campaign result. Replace previous success before checking or building starts.
+
 One CLI. One typer. One formatter. One linter. One compiler. One evaluator. One testing strategy. No second analyze frontend. No `*.g.scuzz` codegen. No `src/test` runner. No bolted-on mutation/fuzz/property ecosystems.
 
 - **Watch** rebuilds when sources or `scuzz.toml` change. `[ui]` `run --watch` is hot reload. See `scuzz docs gui`. IO-only `run --watch` kills and reruns.
