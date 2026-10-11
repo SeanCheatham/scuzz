@@ -42,5 +42,7 @@ Recorded choices and executed author rule names remain visible.
 The 20-second deadline reports incomplete and returns failure.
 The rebuilt product includes the manual report fields and limits.
 The compiler source check passes.
-The full verification integration and compiler fixed-point checks run.
+The compiler fixed-point check passes.
+The integration run passes the replay and deadline report checks.
+The remaining verification integration checks run.
 Live application IO, sanitizer mode, and campaign preservation remain open.
