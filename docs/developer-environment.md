@@ -209,7 +209,7 @@ The checking budget is 60 seconds after the experiment package build.
 One Linux sample uses 676 scheduler executions.
 It reaches at most four contention choices per run.
 Both engines reach at most 36 scheduler steps.
-Checking takes 59.95 seconds. The cached package build takes 3.41 seconds.
+Checking takes 9.68 seconds. The cached package build takes 3.60 seconds.
 The zero-, one-, and two-preemption protocol scopes contain 1, 3, and 5 distinct paths.
 Each path set matches the same bound applied to the complete protocol schedule set.
 These measurements apply to this finite experiment on this host.
@@ -234,6 +234,12 @@ Each source graph uses one evaluator server. Each request runs in an isolated ch
 The report records graph identities, startup cost, request counts, and request cost.
 Each path records native execution, evaluator execution, and comparison cost.
 The script stops all owned servers when it completes or fails.
+Sampled checks replay each distinct recorded path through the evaluator.
+Every native execution retains its author rules and complete scheduler record.
+Repeated paths must have equal rule records, scheduler traces, timelines, coverage, output, and errors.
+The report names the representative replay and its reused comparisons.
+Damaged observations cannot reuse a result.
+Source identity collection excludes build directories before traversal.
 The script selects exact function bodies from the editor recovery code and its helpers.
 It compiles these bodies with the existing compiler.
 It exports the evaluator graph through the existing compiler verification modules.
@@ -304,8 +310,8 @@ Both methods use a 60-second limit and a 2048-execution limit.
 The exhaustive method explores every permitted choice in this scope.
 The sampled method uses the existing PCT scheduler with seed 42.
 The checker requires each sampled path to occur in the completed exhaustive set.
-One Linux sample completes all 1286 exhaustive paths in 34.58 seconds.
-The sampled method runs 2048 executions in 49.21 seconds.
+One Linux sample completes all 1286 exhaustive paths in 34.85 seconds.
+The sampled method runs 2048 executions in 12.65 seconds.
 It reaches 112 distinct paths. All occur in the completed exhaustive set.
 Undo and other fault calls remain outside this completed scope.
 The report gives each rule its method, verdict, bounds, and open obligations.
@@ -324,11 +330,29 @@ Each sampled path must occur in the completed exhaustive Undo set.
 The missing-write and external-overwrite controls must fail in both methods.
 Direct defects alter the repeated Undo state and an unrelated file.
 Ordinary native replay must reproduce each named author rule rejection.
-One Linux sample completes all 1300 exhaustive Undo paths in 39.09 seconds.
-The sampled method runs 2048 executions in 56.19 seconds.
+One Linux sample completes all 1300 exhaustive Undo paths in 41.14 seconds.
+The sampled method runs 2048 executions in 14.14 seconds.
 Undo runs reach at most 373 native scheduler steps in this sample.
 The sampled method reaches 112 distinct paths. All occur in the exhaustive set.
 Other fault calls, concurrent external edits, and unbounded schedules remain open.
+
+The request comparison starts with accepted files and an empty journal.
+It calls the production Undo entry point.
+Inputs 0 and 1 cover normal requests and conflicts.
+Inputs 2 and 3 also interrupt the request worker.
+Two bounded restart attempts handle cancellation and one file fault.
+Each passing path checks restored files, external bytes, journal state, Undo state, and reversed writes.
+It also checks expected errors, second request rejection, and file preservation.
+Fault calls are 1 and 25. Call 25 reaches journal creation in the normal request.
+Recorded plans use `fault_seed="fs:fail:N"`, `fs:partial:N`, or `fs:after:N`.
+N is an integer from 1 through 2147483647.
+Setup does not consume the call index.
+The request uses the same preemption, scheduler step, execution, and time limits as the recovery comparisons.
+One Linux sample completes all 567 exhaustive request paths in 19.24 seconds.
+The sampled method runs 2048 executions in 12.43 seconds.
+Its 107 distinct paths occur in the completed exhaustive set.
+The corpus retains cancellation followed by a fault before journal creation.
+Ordinary replay retains the fault plan and every scheduler choice.
 
 The live recovery check uses the selected application functions on the host filesystem.
 It checks two conflict states and every file sync and directory sync in acceptance and Undo recovery.
@@ -346,15 +370,15 @@ These command costs do not measure human writing time or usefulness.
 
 One Linux sample checks 2048 native executions and exact replay paths.
 The 196 sequential paths pass. Cancellation paths reach 144 contention choices.
-Checking takes 58.08 seconds and reaches the execution limit.
+Checking takes 55.77 seconds and reaches the execution limit.
 117268 scheduler prefixes remain pending.
-The zero-preemption scope completes 392 paths in 10.33 seconds.
+The zero-preemption scope completes 392 paths in 10.27 seconds.
 It reaches all three file fault outcomes. It does not reach interruption during recovery.
 The one- and two-preemption scopes reach their execution limits.
 Both deliberate defects fail in all three scopes.
 These results do not establish cancellation safety for all executions.
-The 19 fault-free rule checks and exact engine comparisons take 0.58 seconds.
-Ordinary fuzzing takes 20.46 seconds. Its 20 required probes and 40 search probes pass.
+The 23 fault-free rule checks and exact engine comparisons take 0.77 seconds.
+Ordinary fuzzing takes 24.94 seconds. Its 25 required probes and 40 search probes pass.
 It detects 15 sampled mutations. Nine sampled mutations are inert.
 No sampled mutation survives or remains incomplete.
 These sampled mutations affect the fixture and selected application functions.
@@ -376,14 +400,17 @@ Two Undo checks change recovery after the journal is empty.
 One changes the Undo state. The repeated recovery rule rejects it.
 The other changes an unrelated file. The Undo file preservation rule rejects it.
 Both engines reject these defects. Ordinary native replay reproduces each failure.
+Three request checks remove journal creation, permit a repeated Undo, or retain incorrect reversed bytes.
+The request rules reject each defect in both engines.
+Ordinary native replay reproduces all three failures.
 Each direct check reports build, native check, evaluator comparison, and replay time.
 The duplicate workflow has 12 source lines and three author assertions.
 Two assertions check the duplicate result and preserved files.
 The third rejects unexpected recovery errors. Expected file faults leave recovery pending.
-Its defect build takes 4.50 seconds in this sample.
+Its defect build takes 4.57 seconds in this sample.
 Its native check takes less than 0.01 seconds.
-Its evaluator comparison takes 0.10 seconds.
-Its ordinary native replay takes 0.24 seconds.
+Its evaluator comparison takes 0.12 seconds.
+Its ordinary native replay takes 0.27 seconds.
 These times exclude human effort to write or understand the rules.
 One host sample does not establish a general cost bound.
 Both methods reject a missing-write defect and an external-overwrite defect.

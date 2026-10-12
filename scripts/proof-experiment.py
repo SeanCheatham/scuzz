@@ -28,6 +28,13 @@ UNDO_RULES = RECOVERY_RULES | {
     'repeated recovery preserves settled files', 'Undo recovery preserves unrelated files',
 }
 
+REQUEST_RULES = {
+    'Undo request preserves external bytes', 'Undo request restores accepted files',
+    'Undo request clears its journal', 'Undo request retains the correct state',
+    'Undo request records reversed writes', 'completed Undo rejects a second request',
+    'second Undo preserves all files', 'Undo request returns an expected error',
+}
+
 
 class IncompleteCheck(Exception):
     """A resource limit or missing evidence prevents a result."""
@@ -194,6 +201,17 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def source_files(directory):
+    files = []
+    for root, directories, names in os.walk(directory):
+        directories[:] = [name for name in directories if name != 'build']
+        for name in names:
+            path = Path(root) / name
+            if path.suffix in ('.scuzz', '.scuzz_verify', '.scuzz_scenario', '.toml') and path.is_file():
+                files.append(path)
+    return sorted(files)
+
+
 def solve(solver, query, seconds=5, extra=(), model=False):
     started = time.monotonic()
     text = query + '(check-sat)\n' + ('(get-value (p0))\n' if model else '')
@@ -345,8 +363,11 @@ def translation_checks(cli, solver, cases, package, logs):
             assert value['result'] == shown, ('independent evaluator mismatch', case['name'], value)
             query = case['queries']['violation'] + f'(assert (= p0 (_ bv{n % 2**64} 64)))\n'
             result = solve(solver, query)
+            if result['status'] == 'incomplete':
+                raise IncompleteCheck(f'translation solver {case["name"]} input {n}: {result["reason"]}')
             assert result['status'] == ('unsat' if want else 'sat'), (case['name'], n, result)
-            checked.append(dict(case=case['name'], input=n, expected=want, solver=result['status']))
+            checked.append(dict(case=case['name'], input=n, expected=want, solver=result['status'],
+                                solver_seconds=result['seconds'], query_sha256=result['query_sha256']))
             calls.append(f'    _ <- IO.println(Str.fromBool(Case{index}.balance({n})))')
             expected.append(shown)
     (package / 'src/Main.scuzz').write_text('@main def main: IO[Unit] =\n  for {\n'
@@ -755,9 +776,7 @@ def main():
         assert digest(data['source'].encode()) == data['source_sha256']
         report['identities']['sources'] = [dict(path=str(path.relative_to(ROOT)), sha256=digest(path.read_bytes()))
             for directory in ('examples/compiler', 'examples/syntax', 'examples/proof')
-            for path in sorted((ROOT / directory).rglob('*'))
-            if path.is_file() and 'build' not in path.relative_to(ROOT / directory).parts
-            and path.suffix in ('.scuzz', '.scuzz_verify', '.scuzz_scenario', '.toml')]
+            for path in source_files(ROOT / directory)]
         if solver is None:
             report['reason'] = 'missing solver support'
             save()
@@ -843,7 +862,7 @@ def recovery_sources():
     selected = {
         'examples/editor/src/Cards.scuzz': ['text', 'str', 'pairs', 'safePath', 'need', 'inside', 'storage',
             'setupStorage', 'propsOf', 'sourceWrites', 'matches', 'writeOne', 'recordPath', 'finish',
-            'readOptional', 'recover', 'undoOperation', 'undecided'],
+            'readOptional', 'recover', 'undoOperation', 'undecided', 'undo'],
         'examples/editor/generation/src/Proposal.scuzz': ['str', 'pairsJson', 'pairs', 'safePath',
             'relativePath', 'pathChars', 'checkInside', 'inside'],
         'examples/editor/generation/src/Models.scuzz': ['need'],
@@ -892,13 +911,15 @@ def recovery_package(cli, sources, output, variant):
         (package / 'src' / (name + '.scuzz')).write_text(source)
     setup = ['def setup(): IO[Unit] =', '  for {']
     before, after, addition, accepted, undone = recovery_documents()
-    for mode in (0, 1, 2, 3, 6, 7):
+    for mode in (0, 1, 2, 3, 6, 7, 10, 11):
         root = f'recovery-{mode}'
         storage = root + '/.scuzz/ide'
         for path in (root + '/src', storage + '/cards', storage + '/records'):
             setup.append(f'    _ <- Fs.mkdirs({json.dumps(path)})')
-        files = {root + '/src/Main.scuzz': 'external bytes' if mode % 4 in (1, 3) else after if mode in (0, 6) else before,
+        files = {root + '/src/Main.scuzz': 'external bytes' if mode % 4 in (1, 3) else after if mode in (0, 6, 10) else before,
                  storage + '/journal.json': json.dumps(accepted if mode < 2 else undone, separators=(',', ':'))}
+        if mode >= 10:
+            files[storage + '/journal.json'] = ''
         if mode >= 2:
             files[root + '/src/Other.scuzz'] = addition
             files[storage + '/last.json'] = json.dumps(accepted, separators=(',', ':'))
@@ -912,13 +933,15 @@ def recovery_package(cli, sources, output, variant):
         'def repeat(n: Int where n == 0 || n == 2): IO[Unit] = Recovery.repeat(n)\n\n'
         'def preserve(n: Int where n == 1 || n == 3 || n == 5 || n == 7): IO[Unit] = Recovery.preserve(n)\n\n'
         'def duplicate(): IO[Unit] = Recovery.duplicate()\n\n'
-        'def undo(n: Int where n == 2 || n == 3 || n == 6 || n == 7): IO[Unit] = Recovery.undo(n)\n')
+        'def undo(n: Int where n == 2 || n == 3 || n == 6 || n == 7): IO[Unit] = Recovery.undo(n)\n\n'
+        'def request(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.request(n)\n')
     (package / 'recovery.scuzz_verify').write_text(
         'def externalBytes(t: Timeline): Verdict =\n'
-        '  Verdict.every(t, i => !(Timeline.driveHas(t, i, "recover") || Timeline.driveHas(t, i, "undo")) || '
+        '  Verdict.every(t, i => !(Timeline.driveHas(t, i, "recover") || Timeline.driveHas(t, i, "undo") || Timeline.driveHas(t, i, "request")) || '
         'Timeline.fileTextIs(t, i, "recovery-1/src/Main.scuzz", "external bytes") && '
         'Timeline.fileTextIs(t, i, "recovery-3/src/Main.scuzz", "external bytes") && '
-        'Timeline.fileTextIs(t, i, "recovery-7/src/Main.scuzz", "external bytes"))\n')
+        'Timeline.fileTextIs(t, i, "recovery-7/src/Main.scuzz", "external bytes") && '
+        'Timeline.fileTextIs(t, i, "recovery-11/src/Main.scuzz", "external bytes"))\n')
     command(cli, ['fmt', package], output, variant + '-format')
     command(cli, ['fuzz', '--iterations', '0', package], output, variant + '-build')
     exported = command(cli, ['run', 'examples/proof'], output, variant + '-export',
@@ -942,8 +965,20 @@ def recovery_package(cli, sources, output, variant):
         (package / f'corpus/undo-{n}.toml').write_text(
             '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
             'events=' + json.dumps([f'drive undo {n}']) + '\n')
+    for n in range(4):
+        (package / f'corpus/request-{n}.toml').write_text(
+            '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive request {n}']) + '\n')
+    (package / 'corpus/request-restart-fault.toml').write_text(
+        '[fuzz]\nschedule_seed="0"\nfault_seed="fs:fail:25"\n'
+        'schedule_picks=["setup 1:-", "request 3:2,2"]\nevents=["drive request 2"]\n')
     (package / 'corpus/duplicate.toml').write_text('[fuzz]\nschedule_seed="0"\nfault_seed="0"\nevents=["drive duplicate"]\n')
     return package, package / 'build/recovery', probe
+
+
+def recovery_faults(calls):
+    return [0] + [base + 9 * (call - 1) if call <= 16 else f'fs:{mode}:{call}'
+                  for base, mode in ((1, 'fail'), (289, 'partial'), (577, 'after')) for call in calls]
 
 
 def recovery_finite(cli, package, executable, probe, output, defective=False, preemption_limit=None,
@@ -952,27 +987,28 @@ def recovery_finite(cli, package, executable, probe, output, defective=False, pr
     started = time.monotonic()
     rows, incomplete, unique = [], [], set()
     calls = list(range(1, 17)) if fault_calls is None else list(fault_calls)
-    faults = [0] + [base + 9 * (call - 1) for base in (1, 289, 577) for call in calls]
+    faults = recovery_faults(calls)
     bounds = dict(driver=driver, author_rules=sorted(required), inputs=list(range(8)) if inputs is None else list(inputs),
                   fault_calls=[min(calls), max(calls)], fault_call_indices=calls,
                   fault_modes=['fail', 'partial', 'after-replacement'],
                   contention_steps=1000, scheduler_steps=1000, executions=2048, seconds=60)
     if preemption_limit is not None:
         bounds['preemptions'] = preemption_limit
-    sequential_count = sum(n < 4 for n in bounds['inputs']) * len(faults)
+    sequential_inputs = [n for n in bounds['inputs'] if n < (2 if driver == 'request' else 4)]
+    sequential_count = len(sequential_inputs) * len(faults)
     def remaining():
         seconds = bounds['seconds'] - (time.monotonic() - started)
         if seconds <= 0:
             raise IncompleteCheck('checking budget')
         return seconds
     pending = deque((n, fault, prefix) for n in bounds['inputs'] for fault in faults
-                    for prefix in ([(), (2, 2)] if n >= 4 and preemption_limit is None else [()]))
+                    for prefix in ([(), (2, 2)] if n not in sequential_inputs and preemption_limit is None else [()]))
     queued = set(pending)
     covered = set()
     try:
         while pending:
             if time.monotonic() - started >= bounds['seconds'] or len(rows) >= bounds['executions']:
-                sequential = [row for row in rows if row['input'] < 4]
+                sequential = [row for row in rows if row['input'] in sequential_inputs]
                 reason = 'execution budget' if len(rows) >= bounds['executions'] else 'checking budget'
                 return dict(status='incomplete', reason=reason, bounds=bounds,
                             seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
@@ -980,7 +1016,7 @@ def recovery_finite(cli, package, executable, probe, output, defective=False, pr
                             sequential_scope=dict(status='passed' if len(sequential) == sequential_count
                                                   and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
                                                   else 'incomplete',
-                                                  inputs=[n for n in bounds['inputs'] if n < 4], workloads=len(sequential)))
+                                                  inputs=sequential_inputs, workloads=len(sequential)))
             n, fault, prefix = pending.popleft()
             if (n, fault, prefix) in covered:
                 continue
@@ -1020,7 +1056,8 @@ def recovery_finite(cli, package, executable, probe, output, defective=False, pr
                         'counterexample-replay', success=False, seconds=remaining())
                 return dict(status='failed', bounds=bounds, counterexample=row,
                             seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete)
-            assert required <= set(row['executed_properties']), 'recovery author rules do not execute'
+            missing = sorted(required - set(row['executed_properties']))
+            assert not missing, f'{driver} {n} fault {fault}: rules do not execute: {missing}; replay {row["workload"]}'
             for index, choice in enumerate(choices):
                 assert choice['step'] == index + 1 and path[index] in choice['ready']
                 for alternative in choice['ready']:
@@ -1029,22 +1066,22 @@ def recovery_finite(cli, package, executable, probe, output, defective=False, pr
                         queued.add((n, fault, branch))
                         pending.append((n, fault, branch))
     except (IncompleteCheck, subprocess.TimeoutExpired) as error:
-        sequential = [row for row in rows if row['input'] < 4]
+        sequential = [row for row in rows if row['input'] in sequential_inputs]
         return dict(status='incomplete', reason='checking budget' if isinstance(error, subprocess.TimeoutExpired) else str(error), bounds=bounds,
                     seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
                     distinct_replays=sum('parity' in row for row in rows), pending_prefixes=len(pending) + 1,
                     sequential_scope=dict(status='passed' if len(sequential) == sequential_count
                         and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
-                        else 'incomplete', inputs=[n for n in bounds['inputs'] if n < 4], workloads=len(sequential)))
+                        else 'incomplete', inputs=sequential_inputs, workloads=len(sequential)))
     reached = {name: any(name in (Path(row['workload']).parent / 'stdout').read_text()
                         for row in rows if 'parity' in row)
                for name in ('Fs: injected fault', 'Fs: partial write', 'Fs: error after replacement', 'fiber interrupted')}
     required_reach = reached if preemption_limit != 0 else {key: value for key, value in reached.items() if key != 'fiber interrupted'}
     assert all(required_reach.values()), ('required application paths do not execute', reached)
-    sequential = [row for row in rows if row['input'] < 4]
+    sequential = [row for row in rows if row['input'] in sequential_inputs]
     assert len(sequential) == sequential_count and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
     return dict(status='incomplete' if incomplete else 'passed', bounds=bounds, reached=reached,
-                sequential_scope=dict(status='passed', inputs=[n for n in bounds['inputs'] if n < 4], workloads=len(sequential)),
+                sequential_scope=dict(status='passed', inputs=sequential_inputs, workloads=len(sequential)),
                 seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
                 distinct_replays=len(unique))
 
@@ -1074,8 +1111,8 @@ def recovery_schedule_samples(cli, package, executable, probe, output, bounds, d
     required = set(bounds['author_rules'])
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    rows, paths = [], set()
-    faults = [0] + [base + 9 * (call - 1) for base in (1, 289, 577) for call in bounds['fault_call_indices']]
+    rows, paths, witnesses = [], set(), {}
+    faults = recovery_faults(bounds['fault_call_indices'])
     random = 42
     try:
         while len(rows) < bounds['executions']:
@@ -1098,14 +1135,30 @@ def recovery_schedule_samples(cli, package, executable, probe, output, bounds, d
                 raise IncompleteCheck('sampled recovery scheduler bound')
             row['executed_properties'] = executed_properties(directory / 'coverage.txt')
             if row['status'] == 'passed':
-                assert required <= set(row['executed_properties']), 'sampled recovery rules do not execute'
+                missing = sorted(required - set(row['executed_properties']))
+                assert not missing, f'{driver} {n} fault {fault}: sampled rules do not execute: {missing}; replay {row["workload"]}'
             remaining = bounds['seconds'] - (time.monotonic() - started)
             if remaining <= 0:
                 raise IncompleteCheck('sampled checking budget')
-            row['parity'] = protocol_parity(cli, probe, row, directory, output,
-                                           bounds['scheduler_steps'], seconds=remaining)
+            path = n, fault, tuple(row['schedule_picks'])
+            if path not in witnesses:
+                row['parity'] = protocol_parity(cli, probe, row, directory, output,
+                                               bounds['scheduler_steps'], seconds=remaining)
+                witnesses[path] = row
+            else:
+                compared = time.monotonic()
+                previous = witnesses[path]
+                for field in ('status', 'choices', 'runs', 'rejection', 'executed_properties'):
+                    assert row[field] == previous[field], 'repeated native path evidence differs: ' + field
+                previous_directory = Path(previous['workload']).parent
+                for filename in ('timeline.txt', 'claims.txt', 'coverage.txt', 'stdout', 'stderr'):
+                    assert (directory / filename).read_bytes() == (previous_directory / filename).read_bytes(), \
+                        'repeated native path observations differ: ' + filename
+                row['parity'] = dict(previous['parity'], workload=row['workload'],
+                    representative_workload=previous['workload'], reused=True, evaluator_seconds=0,
+                    comparison_seconds=time.monotonic() - compared)
             assert terminal['preemptions'] <= bounds['preemptions']
-            paths.add((n, fault, tuple(row['schedule_picks'])))
+            paths.add(path)
             if row['status'] == 'failed':
                 assert defective, ('sampled recovery rejects', row)
                 return dict(status='failed', method='sampled-simulation', bounds=bounds,
@@ -1117,7 +1170,8 @@ def recovery_schedule_samples(cli, package, executable, probe, output, bounds, d
                     distinct_replays=len(paths))
     return dict(status='passed', method='sampled-simulation', bounds=bounds,
                 seconds=time.monotonic() - started, workloads=rows, distinct_replays=len(paths),
-                seed=42, scope_complete=False)
+                seed=42, scope_complete=False, evaluator_replays=len(witnesses),
+                replay_reuse='Repeated native paths require exact observation agreement.')
 
 
 def recovery_rule_evidence(result, method):
@@ -1231,10 +1285,10 @@ def recovery_experiment(cli):
     destination = ROOT / 'examples/proof/build/recovery'
     destination.mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix='run-', dir=destination))
-    report = dict(status='incomplete', methods=['exhaustive-bounded-simulation', 'ordinary-fuzz'],
+    report = dict(status='incomplete', methods=['exhaustive-bounded-simulation', 'sampled-simulation', 'ordinary-fuzz'],
                   trusted=['source function selection', 'Scuzz compiler and evaluator', 'C runtime', 'host OS'],
-                  open_obligations=['fault calls after 16', 'multiple faults', 'external edits during recovery',
-                                    'live filesystem and process termination', 'other application paths'])
+                  open_obligations=['other filesystem fault call indices', 'multiple faults', 'external edits during recovery',
+                                    'other live filesystem and process termination cases', 'other application paths'])
     path = destination / 'summary.json'
     def save():
         path.write_text(json.dumps(report, indent=2) + '\n')
@@ -1254,10 +1308,10 @@ def recovery_experiment(cli):
         report['identities']['graph_exporter_source_sha256'] = digest((ROOT / 'examples/proof/src/Main.scuzz').read_bytes())
         report['identities']['python'] = platform.python_version()
         report['scope'] = dict(files=2, operations=['accept', 'undo'], external_edit='before recovery only',
-                              entry='resume one pending write, then recover twice',
+                              entry='resume a journal or request Undo from accepted files',
                               methods_budget_seconds=60, sampled_seed=42, sampled_iterations=64, required_recovery_inputs=list(range(8)),
                               required_repeat_inputs=[0, 2], required_preserve_inputs=[1, 3, 5, 7],
-                              required_undo_inputs=[2, 3, 6, 7],
+                              required_undo_inputs=[2, 3, 6, 7], required_request_inputs=list(range(4)),
                               observed_files=['two sources', 'journal', 'operation record', 'Undo state'],
                               ordinary_scope='the default search also includes repeated calls and persistent faults')
         report['live_recovery'] = live_recovery_checks(cli, sources, output)
@@ -1275,6 +1329,9 @@ def recovery_experiment(cli):
         anchor = '_ <- need(after || before, Str.concat("recovery conflict: ", str(w, "path")))'
         assert overwrite['Cards'].count(anchor) == 1
         overwrite['Cards'] = overwrite['Cards'].replace(anchor, '_ <- IO.pure(())')
+        anchor = '_ <- need(List.forall(checks, b => b), "undo conflict: preserve external edits")'
+        assert overwrite['Cards'].count(anchor) == 1
+        overwrite['Cards'] = overwrite['Cards'].replace(anchor, '_ <- IO.pure(())')
         variants['external-overwrite'] = overwrite
         report['variants'] = {}
         for variant, source in variants.items():
@@ -1283,9 +1340,7 @@ def recovery_experiment(cli):
             row = dict(build_seconds=time.monotonic() - started,
                        native_sha256=digest(executable.read_bytes()),
                        inputs=[dict(path=str(file.relative_to(package)), sha256=digest(file.read_bytes()))
-                               for file in sorted(package.rglob('*')) if file.is_file()
-                               and file.suffix in ('.scuzz', '.scuzz_scenario', '.scuzz_verify', '.toml')
-                               and 'build' not in file.relative_to(package).parts],
+                               for file in source_files(package)],
                        exporter_sha256=digest((ROOT / 'examples/proof/build/proof').read_bytes()))
             report['variants'][variant] = row
             print('Check recovery:', variant, flush=True)
@@ -1294,7 +1349,7 @@ def recovery_experiment(cli):
                 rules = []
                 inputs = [('recover', n) for n in range(8)] + [('repeat', 0), ('repeat', 2)]
                 inputs += [('preserve', n) for n in (1, 3, 5, 7)]
-                inputs += [('duplicate', None)] + [('undo', n) for n in (2, 3, 6, 7)]
+                inputs += [('duplicate', None)] + [('undo', n) for n in (2, 3, 6, 7)] + [('request', n) for n in range(4)]
                 for driver, n in inputs:
                     directory = package / f'rule-{driver}-{n}'
                     witness = protocol_probe(executable, directory, driver, n, 0)
@@ -1302,6 +1357,8 @@ def recovery_experiment(cli):
                     witness['executed_properties'] = executed_properties(directory / 'coverage.txt')
                     if driver == 'duplicate':
                         assert {'completed request rejects a duplicate', 'duplicate rejection preserves files'} <= set(witness['executed_properties'])
+                    elif driver == 'request':
+                        assert REQUEST_RULES <= set(witness['executed_properties'])
                     elif driver == 'undo':
                         assert UNDO_RULES <= set(witness['executed_properties'])
                     elif driver == 'repeat':
@@ -1328,15 +1385,16 @@ def recovery_experiment(cli):
                     cli, package, executable, probe, bounded_output, variant != 'correct', limit)
                 recovery_rule_evidence(row['preemption_scopes'][str(limit)], 'exhaustive-bounded-simulation')
                 save()
-            for scope, inputs, driver, rules in (
-                    ('acceptance', [0, 1, 4, 5], 'recover', RECOVERY_RULES),
-                    ('undo', [2, 3, 6, 7], 'undo', UNDO_RULES)):
+            for scope, inputs, driver, rules, calls in (
+                    ('acceptance', [0, 1, 4, 5], 'recover', RECOVERY_RULES, [1, 9]),
+                    ('undo', [2, 3, 6, 7], 'undo', UNDO_RULES, [1, 9]),
+                    ('request', [0, 1, 2, 3], 'request', REQUEST_RULES, [1, 25])):
                 sampled_scope = scope + '_sampled'
                 scoped_output = package / scope
                 scoped_output.mkdir()
                 row[scope] = recovery_finite(
                     cli, package, executable, probe, scoped_output, variant != 'correct',
-                    preemption_limit=1, inputs=inputs, fault_calls=[1, 9], driver=driver, rules=rules)
+                    preemption_limit=1, inputs=inputs, fault_calls=calls, driver=driver, rules=rules)
                 recovery_rule_evidence(row[scope], 'exhaustive-bounded-simulation')
                 save()
                 row[sampled_scope] = recovery_schedule_samples(
@@ -1390,6 +1448,16 @@ def recovery_experiment(cli):
              'if (Str.isEmpty(raw)) IO.pure(()) else finish(root, LspClient.parseJson(raw))',
              'if (Str.isEmpty(raw)) Fs.write("unrelated.txt", "unexpected bytes") else finish(root, LspClient.parseJson(raw))',
              'undo', 2, 'Undo recovery preserves unrelated files'),
+            ('request-journal', 'Cards',
+             '_ <- Fs.write(Fs.join(storage(root), "journal.json"), text(op))\n    _ <- finish(root, op)',
+             '_ <- IO.pure(())\n    _ <- finish(root, op)',
+             'request', 0, 'Undo request restores accepted files'),
+            ('request-repeat-guard', 'Cards',
+             '_ <- need(!Str.isEmpty(raw), "no accepted change to undo")',
+             '_ <- IO.pure(())', 'request', 0, 'completed Undo rejects a second request'),
+            ('request-reverse', 'Cards',
+             '("after", Diags.jsonField(w, "before"))',
+             '("after", Diags.jsonField(w, "after"))', 'request', 0, 'Undo request returns an expected error'),
             ('duplicate-guard', 'Cards',
              '_ <- need(choice == 0 && accepted == 0, "card is already decided")',
              '_ <- IO.pure(())', 'duplicate', None, 'completed request rejects a duplicate'),
@@ -1401,16 +1469,17 @@ def recovery_experiment(cli):
         ]
         for name, module, anchor, replacement, driver, n, rule in regressions:
             changed = dict(sources)
-            assert changed[module].count(anchor) == 1
+            assert changed[module].count(anchor) == 1, f'{name}: expected one source location in {module}'
             changed[module] = changed[module].replace(anchor, replacement)
             started = time.monotonic()
             package, executable, probe = recovery_package(cli, changed, output, 'mutation-' + name)
             build_seconds = time.monotonic() - started
             directory = package / 'witness'
             started = time.monotonic()
-            witness = protocol_probe(executable, directory, driver, n, 0)
+            witness = protocol_probe(executable, directory, driver, n, 'fs:fail:50' if name == 'request-journal' else 0)
             native_seconds = time.monotonic() - started
-            assert witness['status'] == 'failed' and rule in witness['rejection']
+            assert witness['status'] == 'failed' and rule in witness['rejection'], \
+                f'{name}: expected rule {rule}; got {witness["status"]}: {witness["rejection"]}; replay {witness["workload"]}'
             assert next(run for run in witness['runs'] if run['name'] == 'setup')['ok']
             started = time.monotonic()
             witness['parity'] = protocol_parity(cli, probe, witness, directory, package, 1000)
@@ -1441,14 +1510,14 @@ def recovery_experiment(cli):
             conclusion='Both methods reject the controls. General application benefit remains unproven.',
             limits=['finite exploration must complete within its checking budget',
                     'search scopes differ; timing does not establish a speed advantage'])
-        for scope in ('acceptance', 'undo'):
+        for scope in ('acceptance', 'undo', 'request'):
             report['comparison'][scope] = dict(
                 equal_scope=True, bounds=report['variants']['correct'][scope]['bounds'],
                 methods=['exhaustive-bounded-simulation', 'sampled-simulation'],
                 source_variants=list(variants), author_rules='the same source rules in both methods',
                 verdicts={name: dict(exhaustive=row[scope]['status'], sampled=row[scope + '_sampled']['status'])
                           for name, row in report['variants'].items()},
-                limits=['other application operations', 'fault calls other than 1 and 9', 'multiple faults', 'more than one preemption'],
+                limits=['other application operations', 'other fault calls', 'multiple faults', 'more than one preemption'],
                 conclusion='A completed finite scope supplies stronger evidence than passing sampled executions.')
         duplicate = re.search(r'^def duplicate\(\): IO\[Unit\] =\n.*?(?=^def |\Z)', sources['Recovery'], re.M | re.S)
         assert duplicate is not None
@@ -1465,7 +1534,7 @@ def recovery_experiment(cli):
             scope='one duplicate request rule; production request guard; fault-free input',
             limits=['command costs do not measure human writing time', 'human usefulness remains unproven'])
         correct = report['variants']['correct']
-        scopes = [correct[name] for name in ('finite', 'acceptance', 'acceptance_sampled', 'undo', 'undo_sampled')]
+        scopes = [correct[name] for name in ('finite', 'acceptance', 'acceptance_sampled', 'undo', 'undo_sampled', 'request', 'request_sampled')]
         scopes += list(correct['preemption_scopes'].values())
         scopes += [row['sampled'] for row in report['variants'].values()]
         report['status'] = 'incomplete' if any(scope['status'] == 'incomplete' for scope in scopes) else 'passed'

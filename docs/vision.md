@@ -31,6 +31,10 @@ Recovery rules compare all five operation files across a conflict and repeated r
 A deliberate conflict write passes the endpoint rules but fails the file comparison.
 Measure author effort on these application rules.
 Keep private constructor access and live path validation active.
+Preserve journal recovery scopes and exact request replay.
+Protect source and journals at invalid input boundaries.
+Formatting rejects invalid syntax before it changes files or buffers.
+Undo validates accepted records before it writes a journal.
 Extend application relations for another demonstrated correctness gap.
 Keep the wider exhaustive results and their incomplete limits explicit.
 Keep formal checking optional until its application benefit and cost meet the stated gate.
@@ -125,6 +129,11 @@ It covers normal acceptance and conflicts at fault calls 1 and 9.
 A separate one-preemption Undo scope checks completion and conflicts.
 It checks interruption, repeated recovery, and file preservation.
 Both scopes compare sampling with exhaustive exploration under equal bounds and rules.
+A complete Undo request scope starts with accepted files and an empty journal.
+It covers journal creation, interruption, restart, and repeated requests.
+Its 567 paths retain all eight request rules and exact replay.
+Recorded fault plans reach journal writes after the generated call range.
+The request scope also compares both methods under equal bounds and rules.
 The zero-preemption scope does not reach interruption during recovery.
 The wider scopes still exceed their execution limits.
 Resolve these limits before adding a public exhaustive application method.

@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -262,8 +263,31 @@ static void fault_arm_from_env(void) {
     g_fault_seed = 0;
     return;
   }
-  if (seed_s && seed_s[0])
+  if (seed_s && strncmp(seed_s, "fs:", 3) == 0) {
+    const char *plan = seed_s + 3;
+    char *end;
+    long call;
+    if (strncmp(plan, "fail:", 5) == 0) {
+      plan += 5;
+    } else if (strncmp(plan, "partial:", 8) == 0) {
+      g_fault_partial = 1;
+      plan += 8;
+    } else if (strncmp(plan, "after:", 6) == 0) {
+      g_fault_after = 1;
+      plan += 6;
+    } else {
+      sz_panic("invalid filesystem fault plan mode");
+    }
+    errno = 0;
+    call = strtol(plan, &end, 10);
+    if (errno || end == plan || *end || plan[0] < '0' || plan[0] > '9' || call < 1 || call > INT_MAX)
+      sz_panic("invalid filesystem fault plan call");
+    g_fault_kind = SZ_FAULT_FS;
+    g_fault_mode = SZ_FAULT_FAIL;
+    g_fault_n = (int)call;
+  } else if (seed_s && seed_s[0]) {
     fault_decode_seed(atoi(seed_s));
+  }
 }
 
 static int g_fault_hold;

@@ -14498,6 +14498,41 @@ int main(void) {
     }
   }
 
+  /* A recorded fault plan reaches a later file operation. */
+  {
+    const char *plans[] = {"fs:fail:25", "fs:partial:25", "fs:after:25"};
+    const char *errors[] = {"Fs: injected fault", "Fs: partial write", "Fs: error after replacement"};
+    for (int i = 0; i < 3; ++i) {
+      setenv("SCUZZ_TESTRT", "1", 1);
+      setenv("SCUZZ_FAULT_SEED", plans[i], 1);
+      sz_testrt_oracles_refresh();
+      sz_testrt_install();
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("late.txt"), sz_string_from_cstr("old")));
+      assert(r.ok);
+      sz_testrt_fault_release();
+      for (int call = 1; call < 25; ++call) {
+        r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("late.txt")));
+        assert(r.ok);
+        sz_release(r.value);
+      }
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("late.txt"), sz_string_from_cstr("new bytes")));
+      assert(!r.ok && r.error);
+      assert(strcmp(sz_string_cstr(r.error->message), errors[i]) == 0);
+      sz_error_free(r.error);
+      r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("late.txt")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), i == 2 ? "new bytes" : "old") == 0);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("late.txt"), sz_string_from_cstr("retry")));
+      assert(r.ok);
+      sz_testrt_reset();
+      unsetenv("SCUZZ_FAULT_SEED");
+      unsetenv("SCUZZ_TESTRT");
+      sz_testrt_oracles_refresh();
+    }
+  }
+
   /* Deadlock oracle: all fibers parked with no timer pending. */
   {
     SzQueue *q = sz_queue_make();
