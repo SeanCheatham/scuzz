@@ -286,6 +286,111 @@ slice_hello() {
   diff /tmp/hello.run.out /tmp/hello.eval.out
   "$SCUZZ" run examples/fmt | tee /tmp/fmt.out
   grep -q "fmt-ok" /tmp/fmt.out
+  prove_format_preservation
+}
+
+prove_format_preservation() {
+  python3 - "$SCUZZ" <<'PY_FORMAT'
+from pathlib import Path
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+cli = str(Path(sys.argv[1]).resolve())
+cases = [('src/Main.scuzz', source) for source in (
+    'def f(): Int = for { record = 1 } yield record',
+    '@main def main: IO[Unit] = for { record <- IO.pure(1) } yield ()',
+    'def f(): Int = for { n = } yield n',
+    'def f(): Int = 1 +',
+    'def f(): List[Int] = List.map([1], n => record)',
+    'def f(record: Int): Int = 1',
+    'record Item(record: Int)',
+    'record record(value: Int)',
+    'enum record:\n  case Good',
+    'trait record:\n  def f(): Int',
+    'type record = Int',
+    '@main def record: IO[Unit] = IO.println(1)',
+    'def f(x: Int = ): Int = 1',
+    'def f(x: Int where ): Int = 1',
+    'def f(): Int = 1 match { case n if => n }',
+    'def f(): Int = (1:)',
+    'def f(): Int = ((n:) => n)(1)',
+    'def f(): Int = ((record, n) => n)((1, 2))',
+    'trait Item:\n  def f(x: Int where ): Int',
+)] + [('case.scuzz_scenario', 'def drive(record: Int): IO[Unit] = IO.pure(())'),
+      ('case.scuzz_verify', 'oracle safe(): Bool = true &&')]
+with tempfile.TemporaryDirectory(prefix='scuzz-format-input-') as directory:
+    root = Path(directory)
+    for index, (name, source) in enumerate(cases):
+        package = root / str(index)
+        path = package / name
+        path.parent.mkdir(parents=True)
+        (package / 'src').mkdir(exist_ok=True)
+        (package / 'scuzz.toml').write_text('[package]\nname="format-input"\n')
+        path.write_text(source)
+        for flags in ([], ['--check']):
+            result = subprocess.run([cli, 'fmt', *flags, str(package)],
+                                    capture_output=True, text=True, timeout=30)
+            assert result.returncode != 0 and 'parse error' in result.stdout, (name, source, result)
+            assert path.read_bytes() == source.encode(), (name, source)
+    package = root / 'valid'
+    (package / 'src').mkdir(parents=True)
+    (package / 'scuzz.toml').write_text('[package]\nname="format-input"\n')
+    path = package / 'src/Main.scuzz'
+    path.write_text('def f(): Int = 1')
+    result = subprocess.run([cli, 'fmt', str(package)], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0 and path.read_text() == 'def f(): Int =\n  1\n\n', result
+print('Formatting preserves invalid source, scenario, and verification files. Valid source still formats.')
+with tempfile.TemporaryDirectory(prefix='scuzz-format-control-') as directory:
+    root = Path(directory)
+    shutil.copytree(Path('examples/syntax'), root / 'syntax',
+                    ignore=shutil.ignore_patterns('build', '.scuzz'))
+    package = root / 'app'
+    (package / 'src').mkdir(parents=True)
+    (package / 'scuzz.toml').write_text('[package]\nname="format-control"\n[dependencies]\nsyntax={path="../syntax"}\n')
+    (package / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = IO.pure(())\n')
+    source = Path('examples/cli/src/Cli.scuzz').read_text()
+    functions = [re.search(r'^def ' + name + r'\(.*?(?=^def |\Z)', source, re.M | re.S)[0]
+                 for name in ('fmtSrc', 'fmtParsed')]
+    (package / 'src/Cli.scuzz').write_text('import Parse.Prog\n\n' + '\n'.join(functions))
+    for module, names in (
+            ('Lsp', ('formatJson', 'formatValidJson', 'lineCount', 'lineCountGo')),
+            ('Check', ('jsonStr', '_esc', '_escCh', 'hex2', 'hexDigit'))):
+        source = (Path('examples/compiler/src') / (module + '.scuzz')).read_text()
+        functions = []
+        for name in names:
+            function = re.search(r'^def ' + name + r'\(.*?(?=^def |\Z)', source, re.M | re.S)
+            assert function is not None, (module, name)
+            functions.append(function[0])
+        (package / 'src' / (module + '.scuzz')).write_text('\n'.join(functions))
+    source = Path('examples/cli/cli.scuzz_verify').read_text()
+    rule = re.search(r'^oracle cliInvalidFormatting\(.*?(?=^oracle |\Z)', source, re.M | re.S)[0]
+    (package / 'input.scuzz_verify').write_text(rule)
+    result = subprocess.run([cli, 'fmt', str(package)], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    result = subprocess.run([cli, 'fuzz', '--iterations', '0', str(package)],
+                            capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    parser = root / 'syntax/src/Parse.scuzz'
+    source = parser.read_text()
+    body = re.search(r'^def parseErrorExpr\(.*?(?=^def |\Z)', source, re.M | re.S)
+    assert body is not None
+    parser.write_text(source[:body.start()] + 'def parseErrorExpr(e: Expr): Bool =\n  false\n\n' + source[body.end():])
+    result = subprocess.run([cli, 'fuzz', '--iterations', '0', str(package)],
+                            capture_output=True, text=True, timeout=180)
+    report = json.loads((package / 'build/fuzz/summary.json').read_text())
+    assert result.returncode != 0 and report['status'] == 'failed'
+    assert report['scope']['required']['incomplete'] == 0 and 'cliInvalidFormatting' in report['guards']['properties']
+    witness = package / 'failure.toml'
+    witness.write_text('[fuzz]\nschedule_seed="0"\nfault_seed="0"\nevents=["drive cliInvalidFormatting"]\n')
+    replay = subprocess.run([cli, 'fuzz', '--replay', str(witness), str(package)],
+                            capture_output=True, text=True, timeout=180)
+    assert replay.returncode != 0 and 'oracle cliInvalidFormatting rejected' in replay.stdout
+print('The installed formatting rule rejects a disabled parser guard. Native replay reproduces the failure.')
+PY_FORMAT
 }
 
 slice_tyck() {

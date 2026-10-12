@@ -96,6 +96,28 @@ def requestStart(mode: Int): IO[Unit] =
     case Result.Err(error) => Property.assert("Undo request returns an expected error", expectedError(error) || Str.startsWith(error, "undo conflict:")).flatMap(_ => IO.println(error))
   })
 
+def invalidRecords(): List[String] =
+  for {
+    valid = prepared(0)
+    ws = writes(0)
+    first = List.at(ws, 0)
+    wrongFields = List.map(["path", "before", "after", "before_exists", "after_exists"], field => text(Json.set(valid, "writes", Json.Arr(Json.set(first, field, Json.Int(3)) :: List.tail(ws)))))
+    wrongWrites = List.map([Json.Arr([]), Json.Arr([first, first]), Json.Arr(List.map(["src/A.scuzz", "src/B.scuzz", "src/C.scuzz", "src/D.scuzz"], path => Json.set(first, "path", Json.Str(path)))), Json.Str("writes"), Json.Arr([Json.set(first, "path", Json.Str("../Main.scuzz"))]), Json.Arr([Json.set(first, "before_exists", Json.Bool(false))]), Json.Arr([Json.set(first, "after_exists", Json.Bool(false))])], value => text(Json.set(valid, "writes", value)))
+  } yield List.concat(["{}", "null", "[]", "\"text\"", text(Json.set(valid, "decision", Json.Str("undo"))), text(Json.set(Json.set(valid, "card", Json.Str("bad")), "operation", Json.Str("accept-bad"))), text(Json.set(valid, "operation", Json.Str("accept-bad")))], List.concat(wrongFields, wrongWrites))
+
+def invalidRecord(n: Int): IO[Unit] =
+  (for {
+    _ <- Fs.write("recovery-12/.scuzz/ide/last.json", List.at(invalidRecords(), n))
+    before <- snapshot(12)
+    unrelated <- Fs.read("unrelated.txt")
+    result <- IO.attempt(Cards.undo(root(12)))
+    _ <- result match { case Result.Err(error) => if (expectedError(error)) IO.fail(error) else IO.pure(()) case Result.Ok(_) => IO.pure(()) }
+    after <- snapshot(12)
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("invalid accepted record preserves operation files", before == after && unrelated == retained)
+    _ <- Property.assert("invalid accepted record returns an error", result match { case Result.Err(error) => error == "invalid accepted record" case Result.Ok(_) => false })
+  } yield ()).handleErrorWith(error => if (expectedError(error)) IO.println("recovery remains pending") else IO.fail(error))
+
 def requestCanceled(mode: Int): IO[Unit] =
   for {
     entered <- Deferred.empty()

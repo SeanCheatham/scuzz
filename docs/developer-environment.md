@@ -209,7 +209,7 @@ The checking budget is 60 seconds after the experiment package build.
 One Linux sample uses 676 scheduler executions.
 It reaches at most four contention choices per run.
 Both engines reach at most 36 scheduler steps.
-Checking takes 9.68 seconds. The cached package build takes 3.60 seconds.
+Checking takes 11.95 seconds. The cached package build takes 4.38 seconds.
 The zero-, one-, and two-preemption protocol scopes contain 1, 3, and 5 distinct paths.
 Each path set matches the same bound applied to the complete protocol schedule set.
 These measurements apply to this finite experiment on this host.
@@ -230,7 +230,11 @@ python3 scripts/proof-experiment.py --recovery
 
 The report lives in `examples/proof/build/recovery/summary.json`.
 Each run uses a new scratch directory. It retains logs and replay workloads.
-Each source graph uses one evaluator server. Each request runs in an isolated child.
+Each source graph uses one evaluator server at a time. Each request runs in an isolated child.
+Closed server requests remain incomplete.
+Later checks can start a replacement server.
+Replacement servers retain previous evidence and use separate log files.
+An incomplete scope does not become complete when a later server starts.
 The report records graph identities, startup cost, request counts, and request cost.
 Each path records native execution, evaluator execution, and comparison cost.
 The script stops all owned servers when it completes or fails.
@@ -310,8 +314,8 @@ Both methods use a 60-second limit and a 2048-execution limit.
 The exhaustive method explores every permitted choice in this scope.
 The sampled method uses the existing PCT scheduler with seed 42.
 The checker requires each sampled path to occur in the completed exhaustive set.
-One Linux sample completes all 1286 exhaustive paths in 34.85 seconds.
-The sampled method runs 2048 executions in 12.65 seconds.
+One Linux sample completes all 1286 exhaustive paths in 37.09 seconds.
+The sampled method runs 2048 executions in 12.67 seconds.
 It reaches 112 distinct paths. All occur in the completed exhaustive set.
 Undo and other fault calls remain outside this completed scope.
 The report gives each rule its method, verdict, bounds, and open obligations.
@@ -330,8 +334,8 @@ Each sampled path must occur in the completed exhaustive Undo set.
 The missing-write and external-overwrite controls must fail in both methods.
 Direct defects alter the repeated Undo state and an unrelated file.
 Ordinary native replay must reproduce each named author rule rejection.
-One Linux sample completes all 1300 exhaustive Undo paths in 41.14 seconds.
-The sampled method runs 2048 executions in 14.14 seconds.
+One Linux sample completes all 1300 exhaustive Undo paths in 40.98 seconds.
+The sampled method runs 2048 executions in 13.22 seconds.
 Undo runs reach at most 373 native scheduler steps in this sample.
 The sampled method reaches 112 distinct paths. All occur in the exhaustive set.
 Other fault calls, concurrent external edits, and unbounded schedules remain open.
@@ -348,17 +352,26 @@ Recorded plans use `fault_seed="fs:fail:N"`, `fs:partial:N`, or `fs:after:N`.
 N is an integer from 1 through 2147483647.
 Setup does not consume the call index.
 The request uses the same preemption, scheduler step, execution, and time limits as the recovery comparisons.
-One Linux sample completes all 567 exhaustive request paths in 19.24 seconds.
-The sampled method runs 2048 executions in 12.43 seconds.
+One Linux sample completes all 567 exhaustive request paths in 19.99 seconds.
+The sampled method runs 2048 executions in 14.07 seconds.
 Its 107 distinct paths occur in the completed exhaustive set.
 The corpus retains cancellation followed by a fault before journal creation.
 Ordinary replay retains the fault plan and every scheduler choice.
+
+The malformed record scope uses a separate workspace with an empty journal.
+Its 19 inputs cover record identity, decision, field types, paths, duplicate writes, and file presence.
+Each input requires an explicit error and unchanged operation files.
+A required workload also runs a malformed record driver before a normal Undo request.
+Input from one driver does not replace another driver's accepted state.
 
 The live recovery check uses the selected application functions on the host filesystem.
 It checks two conflict states and every file sync and directory sync in acceptance and Undo recovery.
 Each boundary permits process termination or an error after replacement.
 Restart completes recovery. Repeated recovery preserves the five operation files.
 The live check completes 23 cases.
+It also completes 22 Undo request cases on the host filesystem.
+These cases include 19 malformed records, a complete request, a repeated request, and a conflict.
+Malformed records, repeated requests, and conflicts preserve every workspace file.
 The report retains source identities, native identities, logs, and file contents.
 Power loss, external edits during recovery, and temporary file cleanup remain open.
 This check does not run the complete IDE.
@@ -370,16 +383,16 @@ These command costs do not measure human writing time or usefulness.
 
 One Linux sample checks 2048 native executions and exact replay paths.
 The 196 sequential paths pass. Cancellation paths reach 144 contention choices.
-Checking takes 55.77 seconds and reaches the execution limit.
+Checking takes 57.85 seconds and reaches the execution limit.
 117268 scheduler prefixes remain pending.
-The zero-preemption scope completes 392 paths in 10.27 seconds.
+The zero-preemption scope completes 392 paths in 10.91 seconds.
 It reaches all three file fault outcomes. It does not reach interruption during recovery.
 The one- and two-preemption scopes reach their execution limits.
 Both deliberate defects fail in all three scopes.
 These results do not establish cancellation safety for all executions.
-The 23 fault-free rule checks and exact engine comparisons take 0.77 seconds.
-Ordinary fuzzing takes 24.94 seconds. Its 25 required probes and 40 search probes pass.
-It detects 15 sampled mutations. Nine sampled mutations are inert.
+The 42 fault-free rule checks and exact engine comparisons take 1.10 seconds.
+Ordinary fuzzing takes 23.67 seconds. Its 45 required probes and 40 search probes pass.
+It detects 21 sampled mutations. Three sampled mutations are inert.
 No sampled mutation survives or remains incomplete.
 These sampled mutations affect the fixture and selected application functions.
 Three direct mutation checks exercise application helpers.
@@ -403,17 +416,22 @@ Both engines reject these defects. Ordinary native replay reproduces each failur
 Three request checks remove journal creation, permit a repeated Undo, or retain incorrect reversed bytes.
 The request rules reject each defect in both engines.
 Ordinary native replay reproduces all three failures.
+One further check removes accepted record validation.
+The malformed record rule detects the changed journal in both engines.
+Ordinary native replay reproduces this failure.
 Each direct check reports build, native check, evaluator comparison, and replay time.
 The duplicate workflow has 12 source lines and three author assertions.
 Two assertions check the duplicate result and preserved files.
 The third rejects unexpected recovery errors. Expected file faults leave recovery pending.
-Its defect build takes 4.57 seconds in this sample.
+Its defect build takes 4.64 seconds in this sample.
 Its native check takes less than 0.01 seconds.
-Its evaluator comparison takes 0.12 seconds.
-Its ordinary native replay takes 0.27 seconds.
+Its evaluator comparison takes 0.13 seconds.
+Its ordinary native replay takes 0.28 seconds.
 These times exclude human effort to write or understand the rules.
 One host sample does not establish a general cost bound.
 Both methods reject a missing-write defect and an external-overwrite defect.
 Finite counterexamples also reproduce through ordinary native replay.
-The complete comparison returns exit status 2 because finite exploration remains incomplete.
+The complete comparison returns exit status 2 when finite exploration remains incomplete and no correct scope fails.
+A failure in a correct scope takes priority and returns exit status 1.
+Expected failures in deliberate defect controls do not count as failures in the correct application.
 These controls do not establish a new application defect or a general method advantage.

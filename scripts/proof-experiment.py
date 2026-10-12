@@ -18,6 +18,8 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 PROBE_SERVERS = {}
+PROBE_SERVER_HISTORY = []
+PROBE_SERVER_ATTEMPTS = {}
 RECOVERY_RULES = {
     'recovery preserves external bytes', 'recovery completes both source writes',
     'recovery retains a conflicting journal', 'recovery clears a completed journal',
@@ -35,6 +37,11 @@ REQUEST_RULES = {
     'second Undo preserves all files', 'Undo request returns an expected error',
 }
 
+INVALID_RECORD_RULES = {
+    'invalid accepted record returns an error',
+    'invalid accepted record preserves operation files',
+}
+
 
 class IncompleteCheck(Exception):
     """A resource limit or missing evidence prevents a result."""
@@ -43,12 +50,14 @@ class IncompleteCheck(Exception):
 class ProbeServer:
     """Run isolated evaluator requests for one source graph."""
 
-    def __init__(self, cli, probe, identity, seconds=30):
+    def __init__(self, cli, probe, identity, seconds=30, attempt=0):
         self.identity = identity
-        self.request = probe / f'server-{identity[:16]}.request'
-        self.stderr_path = probe / f'server-{identity[:16]}.stderr'
+        self.attempt = attempt
+        name = f'server-{identity[:16]}' + (f'-{attempt}' if attempt else '')
+        self.request = probe / (name + '.request')
+        self.stderr_path = probe / (name + '.stderr')
         self.stderr = self.stderr_path.open('w')
-        self.transcript = (probe / f'server-{identity[:16]}.stdout').open('w')
+        self.transcript = (probe / (name + '.stdout')).open('w')
         self.buffer = b''
         self.requests = 0
         self.probe_seconds = 0
@@ -92,13 +101,15 @@ class ProbeServer:
         return value
 
     def run(self, settings, seconds):
+        if self.closed:
+            raise IncompleteCheck('evaluator server is closed')
         self.request.write_text(''.join(f'{key}={value}\n' for key, value in settings.items()))
         started = time.monotonic()
         try:
             self.process.stdin.write(b'probe\n')
             self.process.stdin.flush()
             response = self.line(min(30, seconds))
-        except (BrokenPipeError, OSError, IncompleteCheck) as error:
+        except (BrokenPipeError, OSError, ValueError, IncompleteCheck) as error:
             self.close()
             raise IncompleteCheck('evaluator request does not complete: ' + str(error)) from error
         if not response.isdecimal():
@@ -112,7 +123,7 @@ class ProbeServer:
     def evidence(self):
         return dict(source_graph_sha256=self.identity, startup_seconds=self.startup_seconds,
                     requests=self.requests, probe_seconds=self.probe_seconds,
-                    stderr=str(self.stderr_path), pid=self.process.pid)
+                    stderr=str(self.stderr_path), pid=self.process.pid, attempt=self.attempt)
 
     def close(self):
         if self.closed:
@@ -128,7 +139,7 @@ class ProbeServer:
                 self.process.stdin.write(b'quit\n')
                 self.process.stdin.flush()
                 self.process.wait(timeout=2)
-            except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+            except (BrokenPipeError, OSError, ValueError, subprocess.TimeoutExpired):
                 try:
                     os.killpg(self.process.pid, signal.SIGKILL)
                 except ProcessLookupError:
@@ -151,8 +162,16 @@ def probe_server(cli, probe, seconds=30):
     identity = digest(json.dumps(graph).encode())
     compiler = cli.stat()
     key = str(cli), compiler.st_ino, compiler.st_mtime_ns, str(probe), identity
+    if key in PROBE_SERVERS:
+        previous = PROBE_SERVERS[key]
+        if previous.closed or previous.process.poll() is not None:
+            previous.close()
+            PROBE_SERVER_HISTORY.append(previous)
+            del PROBE_SERVERS[key]
     if key not in PROBE_SERVERS:
-        PROBE_SERVERS[key] = ProbeServer(cli, probe, identity, seconds)
+        attempt = PROBE_SERVER_ATTEMPTS.get(key, 0)
+        PROBE_SERVER_ATTEMPTS[key] = attempt + 1
+        PROBE_SERVERS[key] = ProbeServer(cli, probe, identity, seconds, attempt)
     return PROBE_SERVERS[key]
 
 
@@ -160,6 +179,8 @@ def stop_probe_servers():
     for server in PROBE_SERVERS.values():
         server.close()
     PROBE_SERVERS.clear()
+    PROBE_SERVER_HISTORY.clear()
+    PROBE_SERVER_ATTEMPTS.clear()
 
 
 def probe_server_failures(output):
@@ -182,6 +203,13 @@ def probe_server_failures(output):
             server.run({}, 0.01 if mode == 'deadline' else 1)
         except IncompleteCheck as error:
             rows.append(dict(case=mode, status='incomplete', reason=str(error)))
+            if server is not None:
+                try:
+                    server.run({}, 1)
+                except IncompleteCheck:
+                    rows[-1]['closed_retry'] = 'incomplete'
+                else:
+                    raise AssertionError('a closed evaluator server produces a result')
         else:
             raise AssertionError('a failed evaluator server produces a result: ' + mode)
         finally:
@@ -194,6 +222,31 @@ def probe_server_failures(output):
             pass
         else:
             raise AssertionError('a failed evaluator server remains active')
+    directory = output / 'cached'
+    directory.mkdir(exist_ok=True)
+    (directory / 'files.txt').write_text('')
+    executable = directory / 'server'
+    executable.write_text('#!/usr/bin/env python3\nimport sys\nprint("ready", flush=True)\n'
+                          'for line in sys.stdin:\n'
+                          '    if line.strip() == "quit": break\n'
+                          '    print("0", flush=True)\n')
+    executable.chmod(0o700)
+    first = probe_server(executable, directory, 1)
+    assert first.run({}, 1)[0] == 0
+    first.close()
+    second = probe_server(executable, directory, 1)
+    assert second is not first and second.attempt == first.attempt + 1
+    assert second.stderr_path != first.stderr_path and first in PROBE_SERVER_HISTORY
+    assert second.run({}, 1)[0] == 0
+    second.close()
+    for server in (first, second):
+        try:
+            os.kill(server.process.pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise AssertionError('a replaced evaluator server remains active')
+    rows.append(dict(case='cached-restart', status='passed', retained=first.evidence(), replacement=second.evidence()))
     return dict(status='passed', cases=rows)
 
 
@@ -844,7 +897,7 @@ def main():
             raise AssertionError('a truncated schedule check produces a result')
         report['evaluator_server_failures'] = probe_server_failures(output / 'server-failures')
         report['checking_seconds'] = time.monotonic() - started
-        report['evaluator_servers'] = [server.evidence() for server in PROBE_SERVERS.values()]
+        report['evaluator_servers'] = [server.evidence() for server in [*PROBE_SERVER_HISTORY, *PROBE_SERVERS.values()]]
         if report['checking_seconds'] > 60:
             raise IncompleteCheck('checking budget is incomplete')
         report['status'] = 'passed'
@@ -862,7 +915,7 @@ def recovery_sources():
     selected = {
         'examples/editor/src/Cards.scuzz': ['text', 'str', 'pairs', 'safePath', 'need', 'inside', 'storage',
             'setupStorage', 'propsOf', 'sourceWrites', 'matches', 'writeOne', 'recordPath', 'finish',
-            'readOptional', 'recover', 'undoOperation', 'undecided', 'undo'],
+            'readOptional', 'recover', 'undoOperation', 'undecided', 'undo', 'validAccepted'],
         'examples/editor/generation/src/Proposal.scuzz': ['str', 'pairsJson', 'pairs', 'safePath',
             'relativePath', 'pathChars', 'checkInside', 'inside'],
         'examples/editor/generation/src/Models.scuzz': ['need'],
@@ -911,12 +964,12 @@ def recovery_package(cli, sources, output, variant):
         (package / 'src' / (name + '.scuzz')).write_text(source)
     setup = ['def setup(): IO[Unit] =', '  for {']
     before, after, addition, accepted, undone = recovery_documents()
-    for mode in (0, 1, 2, 3, 6, 7, 10, 11):
+    for mode in (0, 1, 2, 3, 6, 7, 10, 11, 12):
         root = f'recovery-{mode}'
         storage = root + '/.scuzz/ide'
         for path in (root + '/src', storage + '/cards', storage + '/records'):
             setup.append(f'    _ <- Fs.mkdirs({json.dumps(path)})')
-        files = {root + '/src/Main.scuzz': 'external bytes' if mode % 4 in (1, 3) else after if mode in (0, 6, 10) else before,
+        files = {root + '/src/Main.scuzz': 'external bytes' if mode % 4 in (1, 3) else after if mode in (0, 6, 10, 12) else before,
                  storage + '/journal.json': json.dumps(accepted if mode < 2 else undone, separators=(',', ':'))}
         if mode >= 10:
             files[storage + '/journal.json'] = ''
@@ -934,7 +987,8 @@ def recovery_package(cli, sources, output, variant):
         'def preserve(n: Int where n == 1 || n == 3 || n == 5 || n == 7): IO[Unit] = Recovery.preserve(n)\n\n'
         'def duplicate(): IO[Unit] = Recovery.duplicate()\n\n'
         'def undo(n: Int where n == 2 || n == 3 || n == 6 || n == 7): IO[Unit] = Recovery.undo(n)\n\n'
-        'def request(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.request(n)\n')
+        'def request(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.request(n)\n\n'
+        'def invalidRecord(n: Int where n >= 0 && n < 19): IO[Unit] = Recovery.invalidRecord(n)\n')
     (package / 'recovery.scuzz_verify').write_text(
         'def externalBytes(t: Timeline): Verdict =\n'
         '  Verdict.every(t, i => !(Timeline.driveHas(t, i, "recover") || Timeline.driveHas(t, i, "undo") || Timeline.driveHas(t, i, "request")) || '
@@ -972,6 +1026,14 @@ def recovery_package(cli, sources, output, variant):
     (package / 'corpus/request-restart-fault.toml').write_text(
         '[fuzz]\nschedule_seed="0"\nfault_seed="fs:fail:25"\n'
         'schedule_picks=["setup 1:-", "request 3:2,2"]\nevents=["drive request 2"]\n')
+    (package / 'corpus/invalid-record-before-request.toml').write_text(
+        '[fuzz]\nschedule_seed="10"\nfault_seed="82"\n'
+        'schedule_picks=["setup 1:-", "invalidRecord 2:-", "request 3:-"]\n'
+        'events=["drive invalidRecord 0", "drive request 0"]\n')
+    for n in range(19):
+        (package / f'corpus/invalid-record-{n}.toml').write_text(
+            '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive invalidRecord {n}']) + '\n')
     (package / 'corpus/duplicate.toml').write_text('[fuzz]\nschedule_seed="0"\nfault_seed="0"\nevents=["drive duplicate"]\n')
     return package, package / 'build/recovery', probe
 
@@ -1202,7 +1264,15 @@ def live_recovery_checks(cli, sources, output):
     for name, source in sources.items():
         if name != 'Main':
             (package / 'src' / (name + '.scuzz')).write_text(source)
-    (package / 'src/Main.scuzz').write_text(f'@main def main: IO[Unit] = Cards.recover({json.dumps(str(root))})\n')
+    (package / 'src/Main.scuzz').write_text(
+        '@main def main: IO[Unit] =\n'
+        '  for {\n'
+        '    request <- Sys.getenv("SCUZZ_LIVE_REQUEST")\n'
+        '    _ <- if (request == "inputs") '
+        'IO.println(Recovery.text(Json.Arr(List.map(Recovery.invalidRecords(), value => Json.Str(value)))))\n'
+        f'    else if (request == "undo") Cards.undo({json.dumps(str(root))})\n'
+        f'    else Cards.recover({json.dumps(str(root))})\n'
+        '  } yield ()\n')
     before, after, addition, accepted, undone = recovery_documents()
     def encoded(document):
         return json.dumps(document, separators=(',', ':'))
@@ -1234,8 +1304,10 @@ def live_recovery_checks(cli, sources, output):
     hooks = live_write_outcomes(cli, output / 'live-write-outcomes', output)
     mac = platform.system() == 'Darwin'
     runs = []
-    def run(mode, point, label):
+    def run(mode, point, label, request=None):
         env = {key: value for key, value in os.environ.items() if not key.startswith('SCUZZ_')}
+        if request is not None:
+            env['SCUZZ_LIVE_REQUEST'] = request
         if mode:
             env.update(SCUZZ_WRITE_OUTCOME=mode, SCUZZ_WRITE_POINT=str(point))
             env['DYLD_INSERT_LIBRARIES' if mac else 'LD_PRELOAD'] = hooks['library']
@@ -1274,7 +1346,52 @@ def live_recovery_checks(cli, sources, output):
                 runs.append(dict(journal=mode, kind=outcome, write=point, status='passed',
                                  interrupted_exit=exit_code, interrupted_contents=partial,
                                  settled_contents=settled))
+    inputs = run(None, 0, 'live-invalid-inputs', 'inputs')
+    assert inputs.returncode == 0, inputs
+    records = json.loads(inputs.stdout)
+    assert len(records) == 19 and all(isinstance(value, str) for value in records)
+    requests = []
+    def all_files():
+        return {str(path.relative_to(root)): path.read_bytes().hex()
+                for path in sorted(root.rglob('*')) if path.is_file()}
+    def accepted_files(raw):
+        prepare(2)
+        (root / 'src/Main.scuzz').write_text(after)
+        (root / '.scuzz/ide/journal.json').write_text('')
+        (root / '.scuzz/ide/last.json').write_text(raw)
+        (root / 'unrelated.txt').write_text('unrelated bytes')
+    for n, raw in enumerate(records):
+        accepted_files(raw)
+        initial = all_files()
+        result = run(None, 0, f'live-invalid-record-{n}', 'undo')
+        assert result.returncode != 0 and 'invalid accepted record' in result.stderr, (n, result)
+        assert all_files() == initial, ('invalid accepted record changes live files', n)
+        requests.append(dict(kind='invalid-record', input=n, status='passed', contents=initial))
+    accepted_files(encoded(accepted))
+    result = run(None, 0, 'live-undo-request', 'undo')
+    assert result.returncode == 0, result
+    completed = json.loads((root / files(2)[3]).read_text())
+    assert (root / 'src/Main.scuzz').read_text() == before and not (root / 'src/Other.scuzz').exists()
+    assert (root / '.scuzz/ide/journal.json').read_text() == (root / '.scuzz/ide/last.json').read_text() == ''
+    assert all(completed[key] == undone[key] for key in ('operation', 'card', 'decision', 'writes'))
+    assert type(completed['time']) is int and completed['time'] >= 0
+    assert (root / 'unrelated.txt').read_text() == 'unrelated bytes'
+    settled = all_files()
+    requests.append(dict(kind='complete', status='passed', contents=settled))
+    repeated = run(None, 0, 'live-undo-request-repeat', 'undo')
+    assert repeated.returncode != 0 and 'no accepted change to undo' in repeated.stderr
+    assert all_files() == settled
+    requests.append(dict(kind='repeat', status='passed', contents=settled))
+    accepted_files(encoded(accepted))
+    (root / 'src/Main.scuzz').write_text('external bytes')
+    initial = all_files()
+    conflict = run(None, 0, 'live-undo-request-conflict', 'undo')
+    assert conflict.returncode != 0 and 'undo conflict:' in conflict.stderr
+    assert all_files() == initial
+    requests.append(dict(kind='conflict', status='passed', contents=initial))
     return dict(status='passed', workloads=runs, file_outcomes=hooks,
+                requests=dict(status='passed', workloads=requests,
+                              scope='19 malformed records; one complete request, one repeated request, and one conflict'),
                 native_sha256=digest(executable.read_bytes()),
                 scope='acceptance and Undo recovery; every file and directory sync; two conflict states',
                 open_obligations=['power loss', 'external edits during recovery',
@@ -1312,6 +1429,7 @@ def recovery_experiment(cli):
                               methods_budget_seconds=60, sampled_seed=42, sampled_iterations=64, required_recovery_inputs=list(range(8)),
                               required_repeat_inputs=[0, 2], required_preserve_inputs=[1, 3, 5, 7],
                               required_undo_inputs=[2, 3, 6, 7], required_request_inputs=list(range(4)),
+                              required_invalid_record_inputs=list(range(19)),
                               observed_files=['two sources', 'journal', 'operation record', 'Undo state'],
                               ordinary_scope='the default search also includes repeated calls and persistent faults')
         report['live_recovery'] = live_recovery_checks(cli, sources, output)
@@ -1350,6 +1468,7 @@ def recovery_experiment(cli):
                 inputs = [('recover', n) for n in range(8)] + [('repeat', 0), ('repeat', 2)]
                 inputs += [('preserve', n) for n in (1, 3, 5, 7)]
                 inputs += [('duplicate', None)] + [('undo', n) for n in (2, 3, 6, 7)] + [('request', n) for n in range(4)]
+                inputs += [('invalidRecord', n) for n in range(19)]
                 for driver, n in inputs:
                     directory = package / f'rule-{driver}-{n}'
                     witness = protocol_probe(executable, directory, driver, n, 0)
@@ -1359,6 +1478,8 @@ def recovery_experiment(cli):
                         assert {'completed request rejects a duplicate', 'duplicate rejection preserves files'} <= set(witness['executed_properties'])
                     elif driver == 'request':
                         assert REQUEST_RULES <= set(witness['executed_properties'])
+                    elif driver == 'invalidRecord':
+                        assert INVALID_RECORD_RULES <= set(witness['executed_properties'])
                     elif driver == 'undo':
                         assert UNDO_RULES <= set(witness['executed_properties'])
                     elif driver == 'repeat':
@@ -1425,6 +1546,9 @@ def recovery_experiment(cli):
                 assert row['sampled']['search_status'] == 'failed', 'ordinary search does not reject the deliberate defect'
         report['mutation_regressions'] = {}
         regressions = [
+            ('accepted-record-guard', 'Cards',
+             '_ <- need(validAccepted(prior), "invalid accepted record")',
+             '_ <- IO.pure(())', 'invalidRecord', 0, 'invalid accepted record preserves operation files'),
             ('field-lookup', 'Diags', 'p._1 == key', 'p._1 != key', 'recover', 0,
              'recovery returns an expected error'),
             ('path-guard', 'Models', 'if (ok) IO.pure(()) else IO.fail(why)',
@@ -1536,12 +1660,14 @@ def recovery_experiment(cli):
         correct = report['variants']['correct']
         scopes = [correct[name] for name in ('finite', 'acceptance', 'acceptance_sampled', 'undo', 'undo_sampled', 'request', 'request_sampled')]
         scopes += list(correct['preemption_scopes'].values())
-        scopes += [row['sampled'] for row in report['variants'].values()]
-        report['status'] = 'incomplete' if any(scope['status'] == 'incomplete' for scope in scopes) else 'passed'
-        report['evaluator_servers'] = [server.evidence() for server in PROBE_SERVERS.values()]
+        scopes += [correct['sampled']]
+        controls = [row['sampled'] for name, row in report['variants'].items() if name != 'correct']
+        report['status'] = ('failed' if any(scope['status'] == 'failed' for scope in scopes) else
+                            'incomplete' if any(scope['status'] == 'incomplete' for scope in scopes + controls) else 'passed')
+        report['evaluator_servers'] = [server.evidence() for server in [*PROBE_SERVER_HISTORY, *PROBE_SERVERS.values()]]
         save()
         print('Recovery experiment:', report['status'], 'Report:', path)
-        return 2 if report['status'] == 'incomplete' else 0
+        return 2 if report['status'] == 'incomplete' else 1 if report['status'] == 'failed' else 0
     except Exception as error:
         report.update(status='incomplete' if isinstance(error, (IncompleteCheck, subprocess.TimeoutExpired, FileNotFoundError)) else 'failed',
                       reason=str(error))

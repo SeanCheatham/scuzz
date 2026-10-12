@@ -418,6 +418,7 @@ def undo(root: String): IO[Unit] =
     raw <- readOptional(Fs.join(storage(root), "last.json"))
     _ <- need(!Str.isEmpty(raw), "no accepted change to undo")
     prior = LspClient.parseJson(raw)
+    _ <- need(validAccepted(prior), "invalid accepted record")
     ws = Json.arr(Diags.jsonField(prior, "writes"))
     checks <- IO.foreach(ws, w => matches(root, w, "after"))
     _ <- need(List.forall(checks, b => b), "undo conflict: preserve external edits")
@@ -426,6 +427,12 @@ def undo(root: String): IO[Unit] =
     _ <- Fs.write(Fs.join(storage(root), "journal.json"), text(op))
     _ <- finish(root, op)
   } yield ()
+
+def validAccepted(prior: Json): Bool =
+  for {
+    card = str(prior, "card")
+    ws = Json.arr(Diags.jsonField(prior, "writes"))
+  } yield str(prior, "decision") == "accept" && Str.matches(card, "^[a-f0-9]{64}$") && str(prior, "operation") == Str.concat("accept-", card) && List.nonEmpty(ws) && List.len(ws) <= 3 && List.len(List.distinct(List.map(ws, w => str(w, "path")))) == List.len(ws) && List.forall(ws, w => safePath(str(w, "path")) && Json.isStr(Diags.jsonField(w, "before")) && Json.isStr(Diags.jsonField(w, "after")) && Json.isBool(Diags.jsonField(w, "before_exists")) && Json.isBool(Diags.jsonField(w, "after_exists")) && (Json.getBool(w, "before_exists", false) || str(w, "before") == "") && (Json.getBool(w, "after_exists", false) || str(w, "after") == ""))
 
 def undoOperation(prior: Json, now: Int): Json =
   for {

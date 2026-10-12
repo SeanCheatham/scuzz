@@ -32,9 +32,9 @@ A deliberate conflict write passes the endpoint rules but fails the file compari
 Measure author effort on these application rules.
 Keep private constructor access and live path validation active.
 Preserve journal recovery scopes and exact request replay.
-Protect source and journals at invalid input boundaries.
-Formatting rejects invalid syntax before it changes files or buffers.
-Undo validates accepted records before it writes a journal.
+Keep live input validation and source preservation checks active.
+Extend concurrent external edit checks under stated ownership limits.
+Check specification strength with controlled bad behavior.
 Extend application relations for another demonstrated correctness gap.
 Keep the wider exhaustive results and their incomplete limits explicit.
 Keep formal checking optional until its application benefit and cost meet the stated gate.

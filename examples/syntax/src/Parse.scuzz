@@ -206,7 +206,7 @@ def parseTypeArrow(toks: Toks, p: (String, Int)): (String, Int) =
 
 def parseTypeArrow2(left: String, p: (String, Int)): (String, Int) =
   p match {
-    case (right, j) => (Str.concat(left, Str.concat(" => ", right)), j)
+    case (right, j) => (if (left == "" || right == "") "" else Str.concat(left, Str.concat(" => ", right)), j)
   }
 
 def parseExpr(toks: Toks, i: Int): (Expr, Int) =
@@ -496,18 +496,18 @@ def parseOneLam(e: Expr, toks: Toks, j: Int): (Expr, Int) =
 
 def parseLamFromAsc(e: Expr, q: (Expr, Int)): (Expr, Int) =
   e match {
-    case Expr.EAscribe(inner, ty, _) => parseLamFrom(inner, ty, q)
+    case Expr.EAscribe(inner, ty, off) => parseLamFrom(if (ty == "") Expr.EVar("", off) else inner, ty, q)
     case _ => parseLamFrom(e, "", q)
   }
 
 def parseOneLamTy(e: Expr, p: (String, Int), toks: Toks): (Expr, Int) =
   p match {
-    case (ty, j) => if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFrom(e, ty, parseExpr(toks, j + 2)) else parseOneLam(e, toks, j)
+    case (ty, j) => if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFrom(if (ty == "") Expr.EVar("", spanOff(e, 0)) else e, ty, parseExpr(toks, j + 2)) else parseOneLam(e, toks, j)
   }
 
 def parseLamFrom(e: Expr, ty: String, q: (Expr, Int)): (Expr, Int) =
   q match {
-    case (b, k) => e match {
+    case (b, k) => if (parseErrorExpr(e)) (Expr.EVar("", spanOff(e, 0)), k) else e match {
   case Expr.EVar(s, _) => (Expr.ELam(s, ty, b), k)
   case _ => (Expr.ELam("__p", ty, Expr.EMatch(Expr.EVar("__p", 0), Arm(pretty0(e), "", b) :: [], 0)), k)
 }
@@ -526,7 +526,7 @@ def parseTupleLam(p: (Expr, Int), toks: Toks): (Expr, Int) =
 
 def parseTupLamBody(patE: Expr, q: (Expr, Int)): (Expr, Int) =
   q match {
-    case (b, k) => (Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", 0), Arm(tupPat(patE), "", b) :: [], 0)), k)
+    case (b, k) => if (parseErrorExpr(patE)) (Expr.EVar("", spanOff(patE, 0)), k) else (Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", 0), Arm(tupPat(patE), "", b) :: [], 0)), k)
   }
 
 def tupPat(e: Expr): String =
@@ -655,7 +655,7 @@ def parseMatchArm2(p: (String, Int), toks: Toks): (Arm, Int) =
 
 def parseMatchArmG(pat: String, p: (Expr, Int), toks: Toks): (Arm, Int) =
   p match {
-    case (g, j) => parseMatchArm3(pat, pretty0(g), parseExpr(toks, j + 1))
+    case (g, j) => parseMatchArm3(pat, if (parseErrorExpr(g)) "#parse" else pretty0(g), parseExpr(toks, j + 1))
   }
 
 def parseMatchArm3(pat: String, g: String, p: (Expr, Int)): (Arm, Int) =
@@ -809,7 +809,7 @@ def parseOneParam3(name: String, ty: String, toks: Toks, j: Int): (Param, Int) =
 
 def parseOneParamW(name: String, ty: String, p: (Expr, Int), toks: Toks): (Param, Int) =
   p match {
-    case (e, k) => parseOneParamD(name, ty, pretty0(e), toks, k)
+    case (e, k) => parseOneParamD(if (parseErrorExpr(e)) "#parse" else name, ty, pretty0(e), toks, k)
   }
 
 def parseOneParamD(name: String, ty: String, w: String, toks: Toks, j: Int): (Param, Int) =
@@ -817,7 +817,7 @@ def parseOneParamD(name: String, ty: String, w: String, toks: Toks, j: Int): (Pa
 
 def parseOneParamD2(name: String, ty: String, w: String, p: (Expr, Int)): (Param, Int) =
   p match {
-    case (e, k) => (Param(name, ty, w, pretty0(e)), k)
+    case (e, k) => (Param(if (parseErrorExpr(e)) "#parse" else name, ty, w, pretty0(e)), k)
   }
 
 def parseParamListNext(p: (Param, Int), toks: Toks, acc: List[Param]): (List[Param], Int) =
@@ -861,7 +861,7 @@ def parseMain2(name: String, p: (String, Int), toks: Toks): (String, Expr, Int) 
 
 def parseMain3(name: String, p: (Expr, Int)): (String, Expr, Int) =
   p match {
-    case (body, j) => (name, body, j)
+    case (body, j) => (if (name == "") "#parse" else name, body, j)
   }
 
 def parseTParams(toks: Toks, i: Int): (List[String], Int) =
@@ -1420,14 +1420,38 @@ def parseFiles3(f: (String, String), rest: List[(String, String)], acc: Prog): P
   }
 
 def hasParseError(p: Prog): Bool =
-  parseErrorDefs(p.defs)
+  parseErrorDefs(p.defs) || List.exists(p.impls, im => parseErrorDefs(im.methods)) || List.exists(p.enums, en => en.name == "" || List.exists(en.cases, c => c.name == "" || List.exists(c.fields, p => parseErrorParam(p)))) || List.exists(p.aliases, alias => alias.name == "" || alias.target == "") || List.exists(p.traits, tr => tr.name == "" || List.exists(tr.methods, m => m.name == "" || List.exists(m.params, p => parseErrorParam(p)))) || p.main == "#parse" || p.main != "" && parseErrorExpr(p.body)
 
 def parseErrorDefs(defs: List[Fun]): Bool =
   if (List.isEmpty(defs)) false else parseErrorDef(List.at(defs, 0)) || parseErrorDefs(List.tail(defs))
 
 def parseErrorDef(d: Fun): Bool =
   d match {
-    case Fun(_, _, name, _, _, _, _, _, _) => name == "#parse"
+    case Fun(_, _, name, _, _, _, _, _, _) => name == "#parse" || name == "" || List.exists(d.params, p => parseErrorParam(p)) || parseErrorExpr(d.body)
+  }
+
+def parseErrorParam(p: Param): Bool =
+  p.name == "" || p.name == "#parse" || p.ty == ""
+
+def parseErrorExpr(e: Expr): Bool =
+  e match {
+    case Expr.EVar(name, _) => name == ""
+    case Expr.EPrint(value, _) => parseErrorExpr(value)
+    case Expr.ECall(name, args, _) => name == "" || List.exists(args, arg => parseErrorExpr(arg))
+    case Expr.EMethod(recv, name, args, _) => name == "" || parseErrorExpr(recv) || List.exists(args, arg => parseErrorExpr(arg))
+    case Expr.EField(recv, name, _) => name == "" || parseErrorExpr(recv)
+    case Expr.EBin(_, left, right, _) => parseErrorExpr(left) || parseErrorExpr(right)
+    case Expr.EUn(_, value, _) => parseErrorExpr(value)
+    case Expr.ELam(_, _, body) => parseErrorExpr(body)
+    case Expr.EIf(cond, yes, no, _) => parseErrorExpr(cond) || parseErrorExpr(yes) || parseErrorExpr(no)
+    case Expr.EMatch(value, arms, _) => parseErrorExpr(value) || List.exists(arms, arm => arm.pat == "" || arm.g == "#parse" || parseErrorExpr(arm.body))
+    case Expr.EFor(binds, body, _) => List.exists(binds, bind => bind.name == "" || parseErrorExpr(bind.value)) || parseErrorExpr(body)
+    case Expr.EInterp(_, parts, _) => List.exists(parts, part => parseErrorExpr(part))
+    case Expr.EList(values) => List.exists(values, value => parseErrorExpr(value))
+    case Expr.ETuple(values) => List.exists(values, value => parseErrorExpr(value))
+    case Expr.ENamed(name, value) => name == "" || parseErrorExpr(value)
+    case Expr.EAscribe(value, ty, _) => ty == "" || parseErrorExpr(value)
+    case _ => false
   }
 
 def pretty(p: Prog): String =

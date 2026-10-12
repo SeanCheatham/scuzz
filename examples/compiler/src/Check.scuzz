@@ -2961,7 +2961,10 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   }
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
-  checkSourceProg(p, stems, Resolve.sourceError(p))
+  checkParsedProg(p, checkSourceProg(p, stems, Resolve.sourceError(p)))
+
+def checkParsedProg(p: Prog, checked: Out): Out =
+  if (hasErr(checked) || !Parse.hasParseError(p)) checked else bad("unexpected token", noSpan())
 
 def checkSourceProg(p: Prog, stems: List[String], err: String): Out =
   if (err != "") bad(err, noSpan()) else checkResolvedProg(Resolve.prog(p), stems)
@@ -3638,7 +3641,15 @@ def srcOfStemHd(h: (String, String), rest: List[(String, String)], stem: String)
   }
 
 def diagJson(files: List[(String, String)], o: Out): String =
-  diagJsonSp(files, o, o.span)
+  diagJsonSp(files, o, parseErrorSourceSpan(files, o))
+
+def parseErrorSourceSpan(files: List[(String, String)], o: Out): (String, Int) =
+  if (o.err == "unexpected token" && o.span == noSpan()) parseErrorFileSpan(files) else o.span
+
+def parseErrorFileSpan(files: List[(String, String)]): (String, Int) =
+  if (List.isEmpty(files)) noSpan() else List.at(files, 0) match {
+  case (stem, source) => if (Parse.hasParseError(Parse.parse(Lexer.lex(source)))) (stem, 0) else parseErrorFileSpan(List.tail(files))
+}
 
 def diagJsonSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
   sp match {
@@ -3749,7 +3760,7 @@ def afterKind(item: String): String =
   if (Str.startsWith(item, "def ")) Str.slice(item, 4, Str.len(item)) else if (Str.startsWith(item, "signal ")) Str.slice(item, 7, Str.len(item)) else if (Str.startsWith(item, "control ")) Str.slice(item, 8, Str.len(item)) else item
 
 def humanLine(files: List[(String, String)], o: Out): String =
-  humanLineSp(files, o, o.span)
+  humanLineSp(files, o, parseErrorSourceSpan(files, o))
 
 def humanLineSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
   sp match {
