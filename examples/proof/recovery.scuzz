@@ -64,6 +64,19 @@ def preserve(n: Int): IO[Unit] =
     _ <- Property.assert("recovery conflict preserves all operation files", before == after)
   } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else IO.fail(error))
 
+def undo(n: Int): IO[Unit] =
+  (for {
+    mode = n % 4 + 4
+    _ <- if (n < 4) resume(mode) else canceled(mode)
+    _ <- attempt(root(mode))
+    _ <- attempt(root(mode))
+    _ <- settled(mode)
+    unrelated <- Fs.read("unrelated.txt")
+    _ <- repeated(mode)
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("Undo recovery preserves unrelated files", unrelated == "unrelated bytes" && retained == unrelated)
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else if (Str.startsWith(error, "oracle ")) IO.fail(error) else Property.assert("recovery returns an expected error", false))
+
 def duplicate(): IO[Unit] =
   (for {
     _ <- Cards.recover(root(0))
@@ -85,7 +98,7 @@ def attempt(path: String): IO[Unit] =
 
 def resume(mode: Int): IO[Unit] =
   for {
-    index = if (mode == 1 || mode == 3) 0 else 1
+    index = if (mode >= 4 || mode == 1 || mode == 3) 0 else 1
     write = List.at(writes(mode), index)
     _ <- Cards.writeOne(root(mode), write).handleErrorWith(error => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false))
     _ <- attempt(root(mode))
@@ -100,7 +113,7 @@ def settled(mode: Int): IO[Unit] =
     journal <- Fs.read(Fs.join(Fs.join(path, ".scuzz/ide"), "journal.json"))
     completed <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide/records"), Str.concat(Json.getStr(prepared(mode), "operation", ""), ".json")))
     last <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide"), "last.json"))
-    conflict = mode == 1 || mode == 3
+    conflict = mode % 4 == 1 || mode % 4 == 3
     _ <- Property.assert("recovery preserves external bytes", !conflict || main == "external bytes")
     _ <- Property.assert("recovery completes both source writes", conflict || (if (mode == 0) main == after() && otherExists != 0 && other == addition() else main == before() && otherExists == 0))
     _ <- Property.assert("recovery retains a conflicting journal", !conflict || journal == text(prepared(mode)))

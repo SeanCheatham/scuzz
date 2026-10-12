@@ -122,7 +122,9 @@ Independent setup and recovery corpus inputs support the mutation checks.
 Ordinary search rejects the deliberate defects.
 A one-preemption acceptance scope completes and reaches interruption during recovery.
 It covers normal acceptance and conflicts at fault calls 1 and 9.
-Undo remains outside this completed scope.
+A separate one-preemption Undo scope checks completion and conflicts.
+It checks interruption, repeated recovery, and file preservation.
+Both scopes compare sampling with exhaustive exploration under equal bounds and rules.
 The zero-preemption scope does not reach interruption during recovery.
 The wider scopes still exceed their execution limits.
 Resolve these limits before adding a public exhaustive application method.
