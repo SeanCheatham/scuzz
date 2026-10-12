@@ -1,3 +1,5 @@
+record RelativePath private(value: String)
+
 def text(j: Json): String =
   Models.text(j)
 
@@ -31,11 +33,25 @@ def safePath(path: String): Bool =
 def sourceSetOk(files: List[(String, String)]): Bool =
   List.nonEmpty(files) && List.len(files) <= 3 && List.len(List.distinct(List.map(files, f => f._1))) == List.len(files) && List.forall(files, f => safePath(f._1)) && List.foldLeft(files, 0, p => p._1 + Str.byteLen(p._2._2)) <= 65536
 
-def inside(root: String, path: String): IO[Unit] =
+def relativePath(path: String): Result[String, RelativePath] =
+  if (Str.len(path) > 0 && pathChars(path, 0) && List.forall(Str.split(path, "/"), part => part != "" && part != "." && part != "..")) Result.Ok(RelativePath(path)) else Result.Err(Str.concat("invalid relative path: ", path))
+
+private def pathChars(path: String, i: Int): Bool =
+  if (i == Str.len(path)) true else for {
+  c = Str.charAt(path, i)
+} yield c >= 32 && c != 127 && c != 92 && c != 58 && pathChars(path, i + 1)
+
+def checkInside(root: String, path: String): IO[Unit] =
+  relativePath(path) match {
+    case Result.Ok(value) => inside(root, value)
+    case Result.Err(error) => IO.fail(error)
+  }
+
+def inside(root: String, path: RelativePath): IO[Unit] =
   for {
     base <- Fs.canonicalize(root)
-    resolved <- Fs.canonicalize(Fs.join(root, path)).handleErrorWith(_ => Fs.canonicalize(Fs.dirname(Fs.join(root, path))).map(p => Fs.join(p, Fs.basename(path))))
-    _ <- Models.need(resolved == Fs.join(base, path), Str.concat("unsafe resolved path: ", path))
+    resolved <- Fs.canonicalize(Fs.join(root, path.value)).handleErrorWith(_ => Fs.canonicalize(Fs.dirname(Fs.join(root, path.value))).map(p => Fs.join(p, Fs.basename(path.value))))
+    _ <- Models.need(resolved == Fs.join(base, path.value), Str.concat("unsafe resolved path: ", path.value))
   } yield ()
 
 def own(root: String): IO[List[(String, String)]] =
@@ -123,7 +139,7 @@ def validate(root: String, j: Json, compiler: String): IO[Unit] =
     allow = Json.arr(field(j, "allowed"))
     paths = List.map(allow, p => Json.strOr(p, ""))
     _ <- Models.need(List.nonEmpty(paths) && List.forall(allow, p => stringValue(p) && safePath(Json.strOr(p, ""))) && List.len(List.distinct(paths)) == List.len(paths), "invalid allowed source paths")
-    _ <- IO.foreachDiscard(paths, p => inside(root, p))
+    _ <- IO.foreachDiscard(paths, p => checkInside(root, p))
     disk <- own(root)
     inputs <- packageInputs(root, "package", [])
     _ <- Models.need(str(j, "baseline") == setHash(disk) && text(field(j, "sources")) == text(pairsJson(List.filter(disk, f => List.contains(paths, f._1)))) && str(j, "inputs") == setHash(inputs) && text(field(j, "checks")) == text(pairsJson(checkInputs(inputs))), "stale request baseline or inputs")
@@ -145,7 +161,7 @@ def metadata(request: String, baseline: String, generator: String, files: List[(
 
 def importFrom(root: String, dir: String, request: Json): IO[List[(String, String)]] =
   for {
-    _ <- inside(dir, "proposal.json")
+    _ <- checkInside(dir, "proposal.json")
     raw <- Fs.read(Fs.join(dir, "proposal.json"))
     j <- parse(raw, 131072)
     _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "generator", "files"]), "invalid publication fields")
@@ -153,8 +169,8 @@ def importFrom(root: String, dir: String, request: Json): IO[List[(String, Strin
     _ <- Models.need(List.nonEmpty(fs) && List.len(fs) <= 3 && List.forall(fs, f => keys(f, ["path", "sha256"]) && safePath(str(f, "path")) && Str.matches(str(f, "sha256"), "^[a-f0-9]{64}$")), "invalid publication source set")
     files <- IO.foreach(fs, f => for {
   path = str(f, "path")
-  _ <- inside(dir, path)
-  _ <- inside(root, path)
+  _ <- checkInside(dir, path)
+  _ <- checkInside(root, path)
   src <- Fs.read(Fs.join(dir, path))
   _ <- Models.need(Hash.sha256(src) == str(f, "sha256"), "incomplete proposal publication")
 } yield (path, src))

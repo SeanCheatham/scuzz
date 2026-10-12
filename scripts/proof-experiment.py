@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import selectors
 import shutil
 import signal
 import subprocess
@@ -16,10 +17,173 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+PROBE_SERVERS = {}
+RECOVERY_RULES = {
+    'recovery preserves external bytes', 'recovery completes both source writes',
+    'recovery retains a conflicting journal', 'recovery clears a completed journal',
+    'recovery records completed writes', 'recovery retains the Undo state',
+}
 
 
 class IncompleteCheck(Exception):
     """A resource limit or missing evidence prevents a result."""
+
+
+class ProbeServer:
+    """Run isolated evaluator requests for one source graph."""
+
+    def __init__(self, cli, probe, identity, seconds=30):
+        self.identity = identity
+        self.request = probe / f'server-{identity[:16]}.request'
+        self.stderr_path = probe / f'server-{identity[:16]}.stderr'
+        self.stderr = self.stderr_path.open('w')
+        self.transcript = (probe / f'server-{identity[:16]}.stdout').open('w')
+        self.buffer = b''
+        self.requests = 0
+        self.probe_seconds = 0
+        self.selector = selectors.DefaultSelector()
+        self.closed = False
+        self.process = None
+        env = {key: value for key, value in os.environ.items() if not key.startswith('SCUZZ_')}
+        env['SCUZZ_EV_REQUEST'] = str(self.request)
+        started = time.monotonic()
+        try:
+            self.process = subprocess.Popen([str(cli), 'eval', '--probe', str(probe)],
+                                            env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                            stderr=self.stderr, start_new_session=True)
+            self.selector.register(self.process.stdout, selectors.EVENT_READ)
+            if self.line(min(30, seconds)) != 'ready':
+                raise IncompleteCheck('evaluator server does not report readiness')
+        except BaseException:
+            self.close()
+            raise
+        self.startup_seconds = time.monotonic() - started
+
+    def line(self, seconds):
+        deadline = time.monotonic() + seconds
+        while b'\n' not in self.buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self.selector.select(remaining):
+                raise IncompleteCheck('evaluator server deadline')
+            chunk = os.read(self.process.stdout.fileno(), 4096)
+            if not chunk:
+                raise IncompleteCheck('evaluator server stops before its response')
+            self.buffer += chunk
+            if len(self.buffer) > 4096:
+                raise IncompleteCheck('evaluator server response exceeds its limit')
+        line, self.buffer = self.buffer.split(b'\n', 1)
+        try:
+            value = line.decode()
+        except UnicodeDecodeError as error:
+            raise IncompleteCheck('evaluator server response is not UTF-8') from error
+        self.transcript.write(value + '\n')
+        self.transcript.flush()
+        return value
+
+    def run(self, settings, seconds):
+        self.request.write_text(''.join(f'{key}={value}\n' for key, value in settings.items()))
+        started = time.monotonic()
+        try:
+            self.process.stdin.write(b'probe\n')
+            self.process.stdin.flush()
+            response = self.line(min(30, seconds))
+        except (BrokenPipeError, OSError, IncompleteCheck) as error:
+            self.close()
+            raise IncompleteCheck('evaluator request does not complete: ' + str(error)) from error
+        if not response.isdecimal():
+            self.close()
+            raise IncompleteCheck('evaluator server response is invalid: ' + response)
+        elapsed = time.monotonic() - started
+        self.requests += 1
+        self.probe_seconds += elapsed
+        return int(response), elapsed
+
+    def evidence(self):
+        return dict(source_graph_sha256=self.identity, startup_seconds=self.startup_seconds,
+                    requests=self.requests, probe_seconds=self.probe_seconds,
+                    stderr=str(self.stderr_path), pid=self.process.pid)
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        if self.process is None:
+            self.selector.close()
+            self.stderr.close()
+            self.transcript.close()
+            return
+        if self.process.poll() is None:
+            try:
+                self.process.stdin.write(b'quit\n')
+                self.process.stdin.flush()
+                self.process.wait(timeout=2)
+            except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.process.wait(timeout=5)
+        try:
+            os.killpg(self.process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        self.selector.close()
+        self.process.stdin.close()
+        self.process.stdout.close()
+        self.stderr.close()
+        self.transcript.close()
+
+
+def probe_server(cli, probe, seconds=30):
+    graph = [(path.name, digest(path.read_bytes()))
+             for path in sorted(probe.iterdir()) if path.suffix == '.scuzz' or path.name == 'files.txt']
+    identity = digest(json.dumps(graph).encode())
+    compiler = cli.stat()
+    key = str(cli), compiler.st_ino, compiler.st_mtime_ns, str(probe), identity
+    if key not in PROBE_SERVERS:
+        PROBE_SERVERS[key] = ProbeServer(cli, probe, identity, seconds)
+    return PROBE_SERVERS[key]
+
+
+def stop_probe_servers():
+    for server in PROBE_SERVERS.values():
+        server.close()
+    PROBE_SERVERS.clear()
+
+
+def probe_server_failures(output):
+    output.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for mode in ('startup', 'closed', 'invalid', 'deadline'):
+        executable = output / mode
+        pid_path = output / f'{mode}.pid'
+        executable.write_text('#!/usr/bin/env python3\nimport os, pathlib, sys, time\n'
+                              f'pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid()))\n'
+                              + ('print("invalid", flush=True)\n' if mode == 'startup'
+                                 else 'print("ready", flush=True)\n')
+                              + ('sys.stdin.readline()\n' if mode != 'startup' else '')
+                              + ('print("invalid", flush=True)\n' if mode == 'invalid' else '')
+                              + ('time.sleep(1)\n' if mode in ('startup', 'deadline') else ''))
+        executable.chmod(0o700)
+        server = None
+        try:
+            server = ProbeServer(executable, output, digest(mode.encode()))
+            server.run({}, 0.01 if mode == 'deadline' else 1)
+        except IncompleteCheck as error:
+            rows.append(dict(case=mode, status='incomplete', reason=str(error)))
+        else:
+            raise AssertionError('a failed evaluator server produces a result: ' + mode)
+        finally:
+            if server is not None:
+                server.close()
+        pid = int(pid_path.read_text())
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise AssertionError('a failed evaluator server remains active')
+    return dict(status='passed', cases=rows)
 
 
 def digest(data):
@@ -191,6 +355,86 @@ def translation_checks(cli, solver, cases, package, logs):
                 expected_results='independent host arithmetic with signed 64-bit wrapping')
 
 
+def live_write_outcomes(cli, package, logs):
+    (package / 'src').mkdir(parents=True, exist_ok=True)
+    (package / 'scuzz.toml').write_text('[package]\nname="write-outcomes"\n')
+    target = package / 'note.txt'
+    source = ('@main def main: IO[Unit] =\n  for {\n'
+              f'    result <- IO.attempt(Fs.write({json.dumps(str(target))}, "new bytes"))\n'
+              '    _ <- result match {\n'
+              '      case Result.Ok(_) => IO.println("ok")\n'
+              '      case Result.Err(_) => IO.println("error")\n    }\n'
+              f'    bytes <- Fs.read({json.dumps(str(target))})\n'
+              '    _ <- IO.println(bytes)\n  } yield ()\n')
+    (package / 'src/Main.scuzz').write_text(source)
+    command(cli, ['fmt', package], logs, 'write-outcomes-format')
+    target.write_text('old bytes')
+    command(cli, ['run', package], logs, 'write-outcomes-build')
+    executable = package / 'build/write-outcomes'
+    shim = package / 'outcomes.c'
+    shim.write_text('''#define _POSIX_C_SOURCE 200809L
+#include <dlfcn.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
+int fsync(int fd) {
+  static int point;
+  int (*actual)(int) = (int (*)(int))dlsym(RTLD_NEXT, "fsync");
+  struct stat state;
+  const char *mode = getenv("SCUZZ_WRITE_OUTCOME");
+  const char *wanted = getenv("SCUZZ_WRITE_POINT");
+  int selected = wanted ? atoi(wanted) : 1;
+  if (!actual) _exit(91);
+  if (mode && fstat(fd, &state) == 0) {
+    if (!S_ISDIR(state.st_mode)) point++;
+    if (mode[0] == 't') fprintf(stderr, "sync %d %s\\n", point, S_ISDIR(state.st_mode) ? "directory" : "file");
+    if (point == selected && !S_ISDIR(state.st_mode) && mode[0] == 'b') _exit(92);
+    if (point == selected && S_ISDIR(state.st_mode) && mode[0] == 'a') _exit(93);
+    if (point == selected && S_ISDIR(state.st_mode) && mode[0] == 'e') {
+      errno = EIO;
+      return -1;
+    }
+  }
+  return actual(fd);
+}
+''')
+    mac = platform.system() == 'Darwin'
+    library = package / ('outcomes.dylib' if mac else 'outcomes.so')
+    subprocess.run(['clang', '-dynamiclib' if mac else '-shared', '-fPIC', str(shim),
+                    '-o', str(library), *([] if mac else ['-ldl'])],
+                   check=True, capture_output=True, timeout=20)
+    outcomes = []
+    for mode, code, expected, output in (('normal', 0, 'new bytes', 'ok\nnew bytes\n'),
+                                       ('error', 0, 'new bytes', 'error\nnew bytes\n'),
+                                       ('before', 92, 'old bytes', ''),
+                                       ('after', 93, 'new bytes', '')):
+        target.write_text('old bytes')
+        env = dict(os.environ)
+        for key in list(env):
+            if key.startswith('SCUZZ_'):
+                del env[key]
+        if mode != 'normal':
+            env.update(SCUZZ_WRITE_OUTCOME=mode)
+            env['DYLD_INSERT_LIBRARIES' if mac else 'LD_PRELOAD'] = str(library)
+            if mac:
+                env['DYLD_FORCE_FLAT_NAMESPACE'] = '1'
+        run = subprocess.run([str(executable)], env=env, capture_output=True,
+                             text=True, timeout=20)
+        (logs / f'write-outcome-{mode}.stdout').write_text(run.stdout)
+        (logs / f'write-outcome-{mode}.stderr').write_text(run.stderr)
+        assert run.returncode == code and run.stdout == output, (mode, run)
+        assert target.read_text() == expected, (mode, target.read_text())
+        outcomes.append(dict(mode=mode, exit=code, contents=expected, stdout=run.stdout))
+    return dict(status='passed', outcomes=outcomes,
+                library=str(library),
+                native_sha256=digest(executable.read_bytes()),
+                shim_sha256=digest(library.read_bytes()), source_sha256=digest(source.encode()),
+                scope='one live file; error or process termination at file and directory sync',
+                open_obligations=['power loss', 'other filesystems', 'application journal boundaries'])
+
+
 def protocol_package(cli, data, package, logs, defective=False):
     (package / 'src').mkdir(parents=True, exist_ok=True)
     (package / 'scuzz.toml').write_text('[package]\nname="protocol"\n')
@@ -213,25 +457,29 @@ def protocol_package(cli, data, package, logs, defective=False):
     return package / 'build/protocol', probe
 
 
-def protocol_probe(executable, directory, driver, n, fault, prefix=(), recorded=None, seconds=20):
+def protocol_probe(executable, directory, driver, n, fault, prefix=(), recorded=None, seconds=20,
+                   preemption_limit=None, schedule_seed=0):
     directory.mkdir(parents=True, exist_ok=True)
-    script = f'drive {driver} {n}\n'
+    script = f'drive {driver}' + ('' if n is None else f' {n}') + '\n'
     drive = directory / 'drive.json'
-    drive.write_text(json.dumps(dict(v=1, kind='inject', events=[dict(op='drive', name=driver, args=[str(n)])])))
+    drive.write_text(json.dumps(dict(v=1, kind='inject', events=[dict(op='drive', name=driver, args=[] if n is None else [str(n)])])))
     picks = ';'.join(recorded) if recorded is not None else (f'{driver} 0:' + ','.join(map(str, prefix)) if prefix else '')
-    settings = dict(TESTRT='1', DRIVE_SCRIPT=str(drive), SCHED_SEED='0', FAULT_SEED=str(fault),
+    settings = dict(TESTRT='1', DRIVE_SCRIPT=str(drive), SCHED_SEED=str(schedule_seed), FAULT_SEED=str(fault),
+                    PREEMPT_LIMIT='' if preemption_limit is None else str(preemption_limit),
                     RAND_SEED='0', SCHED_PICKS=picks, SCHED_PICKS_DUMP=str(directory / 'picks.txt'),
                     SCHED_CHOICES_DUMP=str(directory / 'choices.txt'),
                     REJECTION_DUMP=str(directory / 'rejection.txt'), CLAIM_DUMP=str(directory / 'claims.txt'),
                     TIMELINE_DUMP=str(directory / 'timeline.txt'), COVERAGE_DUMP=str(directory / 'coverage.txt'))
-    for filename in ('rejection.txt', 'claims.txt', 'timeline.txt', 'coverage.txt'):
+    for filename in ('rejection.txt', 'claims.txt', 'timeline.txt', 'coverage.txt', 'picks.txt', 'choices.txt'):
         (directory / filename).write_text('')
     env = dict(os.environ)
     for key in list(env):
         if key.startswith('SCUZZ_'):
             del env[key]
     env.update({'SCUZZ_' + key: value for key, value in settings.items()})
+    started = time.monotonic()
     run = subprocess.run([str(executable)], env=env, text=True, capture_output=True, timeout=seconds)
+    native_seconds = time.monotonic() - started
     (directory / 'stdout').write_text(run.stdout)
     (directory / 'stderr').write_text(run.stderr)
     rejection = (directory / 'rejection.txt').read_text()
@@ -246,16 +494,33 @@ def protocol_probe(executable, directory, driver, n, fault, prefix=(), recorded=
             assert len(fields) == 7, fields
             ends.append(dict(name=fields[1], contention=int(fields[2]), steps=int(fields[3]),
                              fibers=int(fields[4]), ok=bool(int(fields[5])), bounded=bool(int(fields[6]))))
+        elif fields[0] == 'preempt':
+            assert len(fields) == 6 and choices[-1]['name'] == fields[1] and choices[-1]['step'] == int(fields[2])
+            choices[-1].update(previous=int(fields[3]), preemptions=int(fields[4]), preemption_limit=int(fields[5]))
+        elif fields[0] == 'preempt-end':
+            assert len(fields) == 4 and ends[-1]['name'] == fields[1]
+            ends[-1].update(preemptions=int(fields[2]), preemption_limit=int(fields[3]))
         else:
             raise AssertionError('unsupported scheduler evidence: ' + line)
     executed = (directory / 'picks.txt').read_text().splitlines()
+    if status != 'incomplete':
+        terminal = next(run for run in ends if run['name'] == driver)
+        picks = next(line for line in executed if line.startswith(driver + ' ')).split(':')[1]
+        selected = tuple(map(int, picks.split(','))) if picks != '-' else ()
+        driver_choices = [choice for choice in choices if choice['name'] == driver]
+        assert len(driver_choices) == len(selected)
+        count = 0
+        for choice, pick in zip(driver_choices, selected):
+            assert choice['preemptions'] == count and pick in choice['ready']
+            count += int(choice['previous'] != 0 and choice['previous'] != pick)
+        assert terminal['preemptions'] == count
     workload = directory / 'replay.toml'
-    workload.write_text('[fuzz]\nschedule_seed="0"\nfault_seed="' + str(fault) + '"\n'
+    workload.write_text('[fuzz]\nschedule_seed="' + str(schedule_seed) + '"\nfault_seed="' + str(fault) + '"\n'
                         + 'schedule_picks=' + json.dumps(executed) + '\n'
                         + 'events=' + json.dumps([script.strip()]) + '\n')
     return dict(status=status, script=script, fault=fault, input=n, driver=driver, prefix=list(prefix),
                 schedule_picks=executed, choices=choices, runs=ends, rejection=rejection,
-                workload=str(workload), settings=settings)
+                workload=str(workload), settings=settings, native_seconds=native_seconds)
 
 
 def executed_properties(path):
@@ -263,6 +528,7 @@ def executed_properties(path):
 
 
 def protocol_parity(cli, probe, row, directory, logs, step_limit, seconds=180):
+    started = time.monotonic()
     request = directory / 'request.txt'
     settings = dict(row['settings'], PROBE_LOG=str(directory / 'evaluator.log'),
                     SCHED_PICKS=';'.join(row['schedule_picks']),
@@ -274,11 +540,14 @@ def protocol_parity(cli, probe, row, directory, logs, step_limit, seconds=180):
     for name in ('evaluator.rejection', 'evaluator.claims', 'evaluator.timeline', 'evaluator.coverage'):
         (directory / name).write_text('')
     request.write_text(''.join(f'{key}={value}\n' for key, value in settings.items()))
-    run = command(cli, ['eval', '--probe', probe], logs, directory.name + '-evaluator',
-                  env=dict(os.environ, SCUZZ_EV_REQUEST=str(request)), stdin='probe\nquit\n', seconds=seconds)
-    lines = run.stdout.splitlines()
-    assert len(lines) == 2 and lines[0] == 'ready', lines
-    assert (lines[1] == '0') == (row['status'] == 'passed'), ('protocol replay mismatch', row, lines)
+    server = probe_server(cli, probe, seconds)
+    remaining = seconds - (time.monotonic() - started)
+    if remaining <= 0:
+        raise IncompleteCheck('evaluator replay budget')
+    code, evaluator_seconds = server.run(settings, remaining)
+    (logs / (directory.name + '-evaluator.stdout')).write_text(f'{code}\n')
+    assert (code == 0) == (row['status'] == 'passed'), ('protocol replay mismatch', row, code)
+    compared = time.monotonic()
     for native, evaluator in (('picks.txt', 'evaluator.picks'), ('rejection.txt', 'evaluator.rejection'),
                               ('claims.txt', 'evaluator.claims'), ('timeline.txt', 'evaluator.timeline')):
         assert (directory / native).read_bytes() == (directory / evaluator).read_bytes(), ('protocol replay mismatch', native, row)
@@ -288,6 +557,8 @@ def protocol_parity(cli, probe, row, directory, logs, step_limit, seconds=180):
     evaluator_trace = (directory / 'evaluator.choices').read_text().splitlines()
     assert [line for line in native_trace if line.startswith('choice ' + name + ' ')] == [
         line for line in evaluator_trace if line.startswith('choice ' + name + ' ')], 'protocol permitted choice mismatch'
+    assert [line for line in native_trace if line.startswith(('preempt ' + name + ' ', 'preempt-end ' + name + ' '))] == [
+        line for line in evaluator_trace if line.startswith(('preempt ' + name + ' ', 'preempt-end ' + name + ' '))], 'protocol preemption evidence mismatch'
     native_end = [line.split()[2:] for line in native_trace if line.startswith('end ' + name + ' ')]
     evaluator_end = [line.split()[2:] for line in evaluator_trace if line.startswith('end ' + name + ' ')]
     assert len(native_end) == len(evaluator_end) == 1, 'protocol terminal scheduler evidence is missing'
@@ -295,14 +566,16 @@ def protocol_parity(cli, probe, row, directory, logs, step_limit, seconds=180):
     assert len(a) == len(b) == 5 and a[0] == b[0] and a[2:] == b[2:], 'protocol terminal scheduler mismatch'
     if int(b[1]) > step_limit:
         raise IncompleteCheck('evaluator scheduler step bound is incomplete')
-    return dict(status='passed', evaluator_exit=int(lines[1]), evaluator_steps=int(b[1]), workload=row['workload'])
+    return dict(status='passed', evaluator_exit=code, evaluator_steps=int(b[1]), workload=row['workload'],
+                evaluator_seconds=evaluator_seconds, comparison_seconds=time.monotonic() - compared,
+                server_source_sha256=server.identity, server_pid=server.process.pid)
 
 
 def protocol_checks(cli, data, output, contention_limit=16):
     executable, probe = protocol_package(cli, data, output / 'protocol', output)
     bounds = dict(inputs=[1, 2], requests=2, cancellation=[False, True],
-                  faults=[0, 1, 10, 19, 28, 289, 298, 307, 316],
-                  fault_scope='no fault or one filesystem failure or interrupted write at calls 1 through 4',
+                  faults=[0, 1, 10, 19, 28, 289, 298, 307, 316, 577, 586, 595, 604],
+                  fault_scope='no fault or one filesystem failure, interrupted write, or error after replacement at calls 1 through 4',
                   schedules='every ready fiber at each contention', contention_steps=contention_limit,
                   scheduler_steps=128, executions=1024)
     rows = []
@@ -352,7 +625,7 @@ def protocol_checks(cli, data, output, contention_limit=16):
                         row['parity'] = protocol_parity(cli, probe, row, directory, output, bounds['scheduler_steps'])
                         assert 'checked\tfilesRemainValid' in (directory / 'claims.txt').read_text()
                         assert 'checked\tcancellationPreserves' in (directory / 'claims.txt').read_text()
-    observed = {'normal': False, 'failure': False, 'cancellation': False, 'interrupted_write': False}
+    observed = {'normal': False, 'failure': False, 'cancellation': False, 'interrupted_write': False, 'after_replacement': False}
     for row in rows:
         directory = Path(row['workload']).parent
         transcript = (directory / 'stdout').read_text()
@@ -360,8 +633,9 @@ def protocol_checks(cli, data, output, contention_limit=16):
         observed['failure'] |= 'Fs: injected fault' in transcript
         observed['cancellation'] |= row['driver'] == 'cancel' and 'request stops:' in transcript
         observed['interrupted_write'] |= 'Fs: partial write' in transcript
-        if 'Fs: partial write' in transcript:
-            assert 'failed write preserves the file' in row['executed_properties'], 'interrupted write preservation is not checked'
+        observed['after_replacement'] |= 'Fs: error after replacement' in transcript
+        if 'Fs: partial write' in transcript or 'Fs: error after replacement' in transcript:
+            assert 'write error retains complete bytes' in row['executed_properties'], 'interrupted write preservation is not checked'
     assert all(observed.values()), ('required protocol paths are not reached', observed)
     defective, defect_probe = protocol_package(cli, data, output / 'protocol-defect', output, defective=True)
     directory = output / 'protocol-defect-witness'
@@ -380,6 +654,55 @@ def protocol_checks(cli, data, output, contention_limit=16):
                 fairness='none; every permitted finite scheduler choice is checked',
                 progress='all explored runs complete within the stated step bounds',
                 open_obligations=['unbounded completion', 'other inputs and fault combinations', 'live filesystem and OS cancellation'])
+
+
+def protocol_preemption_checks(cli, report, output):
+    executable = output / 'protocol/build/protocol'
+    probe = output / 'protocol/evaluator'
+    full = [row for row in report['workloads'] if row['driver'] == 'cancel' and row['input'] == 1 and row['fault'] == 0]
+    def recorded_path(row):
+        picks = next(line for line in row['schedule_picks'] if line.startswith('cancel ')).split(':')[1]
+        return tuple(map(int, picks.split(','))) if picks != '-' else ()
+    results = {}
+    for limit in (0, 1, 2):
+        expected = {recorded_path(row) for row in full
+                    if next(run for run in row['runs'] if run['name'] == 'cancel')['preemptions'] <= limit}
+        pending, queued, found, rows = [()], {()}, set(), []
+        while pending:
+            prefix = pending.pop()
+            directory = output / f'preemption-{limit}-{len(rows)}'
+            row = protocol_probe(executable, directory, 'cancel', 1, 0, prefix, preemption_limit=limit)
+            assert row['status'] == 'passed', row
+            terminal = next(run for run in row['runs'] if run['name'] == 'cancel')
+            assert terminal['preemption_limit'] == limit and terminal['preemptions'] <= limit
+            selected = recorded_path(row)
+            assert selected[:len(prefix)] == prefix
+            found.add(selected)
+            row['parity'] = protocol_parity(cli, probe, row, directory, output, 128)
+            rows.append(row)
+            choices = [choice for choice in row['choices'] if choice['name'] == 'cancel']
+            for index, choice in enumerate(choices):
+                assert selected[index] in choice['ready']
+                for alternative in choice['ready']:
+                    branch = selected[:index] + (alternative,)
+                    if alternative != selected[index] and branch not in queued:
+                        queued.add(branch)
+                        pending.append(branch)
+        assert found == expected, ('bounded paths differ from exhaustive paths', limit, found, expected)
+        results[str(limit)] = dict(status='passed', distinct_paths=len(found), workloads=rows)
+    outside = next(row for row in full
+                   if next(run for run in row['runs'] if run['name'] == 'cancel')['preemptions'] > 0)
+    rejected = protocol_probe(executable, output / 'preemption-drift', 'cancel', 1, 0,
+                              recorded=outside['schedule_picks'], preemption_limit=0)
+    assert rejected['status'] != 'passed', 'replay ignores the preemption bound'
+    assert 'schedule drift' in (output / 'preemption-drift/stderr').read_text()
+    invalid = protocol_probe(executable, output / 'preemption-invalid', 'cancel', 1, 0,
+                             preemption_limit=-1)
+    assert invalid['status'] == 'incomplete'
+    assert 'invalid simulation preemption bound' in (output / 'preemption-invalid/stderr').read_text()
+    return dict(status='passed', scopes=results, rejected_replay=rejected,
+                invalid_bound=invalid,
+                reference='all schedules of the same protocol input without a preemption bound')
 
 
 def main():
@@ -487,14 +810,18 @@ def main():
         else:
             raise AssertionError('replay mismatch is not rejected')
         report['live_validation'] = live_validation(cli, pure, output / 'validation', output)
+        report['live_write_outcomes'] = live_write_outcomes(cli, output / 'write-outcomes', output)
         report['protocol'] = protocol_checks(cli, experiment['protocol'], output)
+        report['preemption_checks'] = protocol_preemption_checks(cli, report['protocol'], output)
         try:
             protocol_checks(cli, experiment['protocol'], output / 'truncated', contention_limit=0)
         except IncompleteCheck as error:
             report['protocol_bound_check'] = dict(status='incomplete', reason=str(error))
         else:
             raise AssertionError('a truncated schedule check produces a result')
+        report['evaluator_server_failures'] = probe_server_failures(output / 'server-failures')
         report['checking_seconds'] = time.monotonic() - started
+        report['evaluator_servers'] = [server.evidence() for server in PROBE_SERVERS.values()]
         if report['checking_seconds'] > 60:
             raise IncompleteCheck('checking budget is incomplete')
         report['status'] = 'passed'
@@ -512,8 +839,9 @@ def recovery_sources():
     selected = {
         'examples/editor/src/Cards.scuzz': ['text', 'str', 'pairs', 'safePath', 'need', 'inside', 'storage',
             'setupStorage', 'propsOf', 'sourceWrites', 'matches', 'writeOne', 'recordPath', 'finish',
-            'readOptional', 'recover', 'undoOperation'],
-        'examples/editor/generation/src/Proposal.scuzz': ['str', 'pairsJson', 'pairs', 'safePath', 'inside'],
+            'readOptional', 'recover', 'undoOperation', 'undecided'],
+        'examples/editor/generation/src/Proposal.scuzz': ['str', 'pairsJson', 'pairs', 'safePath',
+            'relativePath', 'pathChars', 'checkInside', 'inside'],
         'examples/editor/generation/src/Models.scuzz': ['need'],
         'examples/editor/src/Diags.scuzz': ['jsonField'],
         'examples/editor/src/LspClient.scuzz': ['parseJson'],
@@ -521,11 +849,15 @@ def recovery_sources():
     sources, identities = {}, []
     for name, functions in selected.items():
         source = (ROOT / name).read_text()
-        starts = list(re.finditer(r'^def ([A-Za-z_][A-Za-z0-9_]*)\(', source, re.M))
+        starts = list(re.finditer(r'^(?:private )?def ([A-Za-z_][A-Za-z0-9_]*)\(', source, re.M))
         bodies = {match[1]: source[match.start():starts[i + 1].start() if i + 1 < len(starts) else len(source)]
                   for i, match in enumerate(starts)}
         assert set(functions) <= bodies.keys(), ('production function is missing', name)
         subset = ''.join(bodies[function] for function in functions)
+        if Path(name).stem == 'Proposal':
+            declaration = re.search(r'^record RelativePath private\(value: String\)\n', source, re.M)
+            assert declaration is not None, 'validated path declaration is missing'
+            subset = declaration[0] + '\n' + subset
         sources[Path(name).stem] = subset
         identities.append(dict(path=name, sha256=digest(source.encode()), functions=functions,
                                selected_sha256=digest(subset.encode())))
@@ -534,13 +866,7 @@ def recovery_sources():
     return sources, identities
 
 
-def recovery_package(cli, sources, output, variant):
-    package = output / variant
-    (package / 'src').mkdir(parents=True, exist_ok=True)
-    (package / 'scuzz.toml').write_text('[package]\nname="recovery"\n')
-    for name, source in sources.items():
-        (package / 'src' / (name + '.scuzz')).write_text(source)
-    setup = ['def setup(): IO[Unit] =', '  for {']
+def recovery_documents():
     before = '@main def main: IO[Unit] =\n  IO.println(1)\n'
     after = '@main def main: IO[Unit] =\n  IO.println(2)\n'
     addition = 'def other(): Int =\n  3\n'
@@ -551,6 +877,17 @@ def recovery_package(cli, sources, output, variant):
     undone = dict(operation='undo-' + identity, card=identity, decision='undo',
                   writes=[dict(path=w['path'], before=w['after'], before_exists=w['after_exists'],
                                after=w['before'], after_exists=w['before_exists']) for w in writes], time=2)
+    return before, after, addition, accepted, undone
+
+
+def recovery_package(cli, sources, output, variant):
+    package = output / variant
+    (package / 'src').mkdir(parents=True, exist_ok=True)
+    (package / 'scuzz.toml').write_text('[package]\nname="recovery"\n')
+    for name, source in sources.items():
+        (package / 'src' / (name + '.scuzz')).write_text(source)
+    setup = ['def setup(): IO[Unit] =', '  for {']
+    before, after, addition, accepted, undone = recovery_documents()
     for mode in range(4):
         root = f'recovery-{mode}'
         storage = root + '/.scuzz/ide'
@@ -563,12 +900,14 @@ def recovery_package(cli, sources, output, variant):
             files[storage + '/last.json'] = json.dumps(accepted, separators=(',', ':'))
         for path, content in files.items():
             setup.append(f'    _ <- Fs.write({json.dumps(path)}, {json.dumps(content)})')
+    setup.append('    _ <- Fs.write("unrelated.txt", "unrelated bytes")')
     setup.append('  } yield ()')
     (package / 'recovery.scuzz_scenario').write_text('\n'.join(setup) + '\n\n'
         'def faults(): List[String] = ["fs:fail"]\n\n'
         'def recover(n: Int where n >= 0 && n <= 7): IO[Unit] = Recovery.run(n)\n\n'
         'def repeat(n: Int where n == 0 || n == 2): IO[Unit] = Recovery.repeat(n)\n\n'
-        'def preserve(n: Int where n == 1 || n == 3 || n == 5 || n == 7): IO[Unit] = Recovery.preserve(n)\n')
+        'def preserve(n: Int where n == 1 || n == 3 || n == 5 || n == 7): IO[Unit] = Recovery.preserve(n)\n\n'
+        'def duplicate(): IO[Unit] = Recovery.duplicate()\n')
     (package / 'recovery.scuzz_verify').write_text(
         'def externalBytes(t: Timeline): Verdict =\n'
         '  Verdict.every(t, i => !Timeline.driveHas(t, i, "recover") || '
@@ -593,48 +932,60 @@ def recovery_package(cli, sources, output, variant):
         (package / f'corpus/{driver}-{n}.toml').write_text(
             '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
             'events=' + json.dumps([f'drive {driver} {n}']) + '\n')
+    (package / 'corpus/duplicate.toml').write_text('[fuzz]\nschedule_seed="0"\nfault_seed="0"\nevents=["drive duplicate"]\n')
     return package, package / 'build/recovery', probe
 
 
-def recovery_finite(cli, package, executable, probe, output, defective=False):
+def recovery_finite(cli, package, executable, probe, output, defective=False, preemption_limit=None,
+                    inputs=None, fault_calls=None):
     started = time.monotonic()
     rows, incomplete, unique = [], [], set()
-    faults = [0] + [1 + 9 * i for i in range(16)] + [289 + 9 * i for i in range(16)]
-    bounds = dict(inputs=list(range(8)), fault_calls=[1, 16], fault_modes=['fail', 'partial'],
+    calls = list(range(1, 17)) if fault_calls is None else list(fault_calls)
+    faults = [0] + [base + 9 * (call - 1) for base in (1, 289, 577) for call in calls]
+    bounds = dict(inputs=list(range(8)) if inputs is None else list(inputs),
+                  fault_calls=[min(calls), max(calls)], fault_call_indices=calls,
+                  fault_modes=['fail', 'partial', 'after-replacement'],
                   contention_steps=1000, scheduler_steps=1000, executions=2048, seconds=60)
-    required = {'recovery preserves external bytes', 'recovery completes both source writes',
-                'recovery retains a conflicting journal', 'recovery clears a completed journal',
-                'recovery records completed writes', 'recovery retains the Undo state'}
+    if preemption_limit is not None:
+        bounds['preemptions'] = preemption_limit
+    sequential_count = sum(n < 4 for n in bounds['inputs']) * len(faults)
+    required = RECOVERY_RULES
     def remaining():
         seconds = bounds['seconds'] - (time.monotonic() - started)
         if seconds <= 0:
             raise IncompleteCheck('checking budget')
         return seconds
     pending = deque((n, fault, prefix) for n in bounds['inputs'] for fault in faults
-                    for prefix in ([(), (2, 2)] if n >= 4 else [()]))
+                    for prefix in ([(), (2, 2)] if n >= 4 and preemption_limit is None else [()]))
     queued = set(pending)
     covered = set()
     try:
         while pending:
             if time.monotonic() - started >= bounds['seconds'] or len(rows) >= bounds['executions']:
                 sequential = [row for row in rows if row['input'] < 4]
-                return dict(status='incomplete', reason='checking budget', bounds=bounds,
+                reason = 'execution budget' if len(rows) >= bounds['executions'] else 'checking budget'
+                return dict(status='incomplete', reason=reason, bounds=bounds,
                             seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
                             distinct_replays=len(unique), pending_prefixes=len(pending),
-                            sequential_scope=dict(status='passed' if len(sequential) == 132 else 'incomplete',
-                                                  inputs=[0, 1, 2, 3], workloads=len(sequential)))
+                            sequential_scope=dict(status='passed' if len(sequential) == sequential_count
+                                                  and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
+                                                  else 'incomplete',
+                                                  inputs=[n for n in bounds['inputs'] if n < 4], workloads=len(sequential)))
             n, fault, prefix = pending.popleft()
             if (n, fault, prefix) in covered:
                 continue
             directory = output / f'finite-{len(rows)}'
             row = protocol_probe(executable, directory, 'recover', n, fault, prefix,
-                                 seconds=min(20, remaining()))
+                                 seconds=min(20, remaining()), preemption_limit=preemption_limit)
             rows.append(row)
             row['executed_properties'] = executed_properties(directory / 'coverage.txt')
             terminals = [run for run in row['runs'] if run['name'] == 'recover']
             if len(terminals) != 1:
                 raise IncompleteCheck('terminal scheduler evidence is missing')
             terminal = terminals[0]
+            assert terminal['preemption_limit'] == (-1 if preemption_limit is None else preemption_limit)
+            if preemption_limit is not None:
+                assert terminal['preemptions'] <= preemption_limit
             choices = [choice for choice in row['choices'] if choice['name'] == 'recover']
             if terminal['contention'] > bounds['contention_steps'] or terminal['steps'] > bounds['scheduler_steps'] or row['status'] == 'incomplete':
                 row['scope_status'] = 'incomplete'
@@ -672,17 +1023,18 @@ def recovery_finite(cli, package, executable, probe, output, defective=False):
         return dict(status='incomplete', reason='checking budget' if isinstance(error, subprocess.TimeoutExpired) else str(error), bounds=bounds,
                     seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
                     distinct_replays=sum('parity' in row for row in rows), pending_prefixes=len(pending) + 1,
-                    sequential_scope=dict(status='passed' if len(sequential) == 132
+                    sequential_scope=dict(status='passed' if len(sequential) == sequential_count
                         and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
-                        else 'incomplete', inputs=[0, 1, 2, 3], workloads=len(sequential)))
+                        else 'incomplete', inputs=[n for n in bounds['inputs'] if n < 4], workloads=len(sequential)))
     reached = {name: any(name in (Path(row['workload']).parent / 'stdout').read_text()
                         for row in rows if 'parity' in row)
-               for name in ('Fs: injected fault', 'Fs: partial write', 'fiber interrupted')}
-    assert all(reached.values()), ('required application paths do not execute', reached)
+               for name in ('Fs: injected fault', 'Fs: partial write', 'Fs: error after replacement', 'fiber interrupted')}
+    required_reach = reached if preemption_limit != 0 else {key: value for key, value in reached.items() if key != 'fiber interrupted'}
+    assert all(required_reach.values()), ('required application paths do not execute', reached)
     sequential = [row for row in rows if row['input'] < 4]
-    assert len(sequential) == 132 and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
+    assert len(sequential) == sequential_count and all(row['status'] == 'passed' and 'parity' in row for row in sequential)
     return dict(status='incomplete' if incomplete else 'passed', bounds=bounds, reached=reached,
-                sequential_scope=dict(status='passed', inputs=[0, 1, 2, 3], workloads=len(sequential)),
+                sequential_scope=dict(status='passed', inputs=[n for n in bounds['inputs'] if n < 4], workloads=len(sequential)),
                 seconds=time.monotonic() - started, workloads=rows, incomplete=incomplete,
                 distinct_replays=len(unique))
 
@@ -705,6 +1057,162 @@ def recovery_sampled(cli, package, output):
         (output / 'sampled.stderr').write_text(stderr)
         return dict(status='incomplete', reason='checking budget', seconds=time.monotonic() - started,
                     seconds_budget=60, requested_iterations=64)
+
+
+def recovery_schedule_samples(cli, package, executable, probe, output, bounds, defective=False):
+    output.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    rows, paths = [], set()
+    faults = [0] + [base + 9 * (call - 1) for base in (1, 289, 577) for call in bounds['fault_call_indices']]
+    random = 42
+    try:
+        while len(rows) < bounds['executions']:
+            remaining = bounds['seconds'] - (time.monotonic() - started)
+            if remaining <= 0:
+                raise IncompleteCheck('sampled checking budget')
+            random = random * 48271 % 2147483647
+            n = bounds['inputs'][random % len(bounds['inputs'])]
+            random = random * 48271 % 2147483647
+            fault = faults[random % len(faults)]
+            random = random * 48271 % 2147483647
+            directory = output / f'run-{len(rows)}'
+            row = protocol_probe(executable, directory, 'recover', n, fault, seconds=min(20, remaining),
+                                 preemption_limit=bounds['preemptions'], schedule_seed=random)
+            rows.append(row)
+            if row['status'] == 'incomplete':
+                raise IncompleteCheck('sampled recovery does not complete')
+            terminal = next(run for run in row['runs'] if run['name'] == 'recover')
+            if not terminal['bounded'] or terminal['steps'] > bounds['scheduler_steps'] or terminal['contention'] > bounds['contention_steps']:
+                raise IncompleteCheck('sampled recovery scheduler bound')
+            row['executed_properties'] = executed_properties(directory / 'coverage.txt')
+            if row['status'] == 'passed':
+                assert RECOVERY_RULES <= set(row['executed_properties']), 'sampled recovery rules do not execute'
+            remaining = bounds['seconds'] - (time.monotonic() - started)
+            if remaining <= 0:
+                raise IncompleteCheck('sampled checking budget')
+            row['parity'] = protocol_parity(cli, probe, row, directory, output,
+                                           bounds['scheduler_steps'], seconds=remaining)
+            assert terminal['preemptions'] <= bounds['preemptions']
+            paths.add((n, fault, tuple(row['schedule_picks'])))
+            if row['status'] == 'failed':
+                assert defective, ('sampled recovery rejects', row)
+                return dict(status='failed', method='sampled-simulation', bounds=bounds,
+                            seconds=time.monotonic() - started, workloads=rows,
+                            distinct_replays=len(paths), counterexample=row)
+    except (IncompleteCheck, subprocess.TimeoutExpired) as error:
+        return dict(status='incomplete', method='sampled-simulation', bounds=bounds,
+                    reason=str(error), seconds=time.monotonic() - started, workloads=rows,
+                    distinct_replays=len(paths))
+    return dict(status='passed', method='sampled-simulation', bounds=bounds,
+                seconds=time.monotonic() - started, workloads=rows, distinct_replays=len(paths),
+                seed=42, scope_complete=False)
+
+
+def recovery_rule_evidence(result, method):
+    result['method'] = method
+    complete = method == 'exhaustive-bounded-simulation' and result['status'] == 'passed'
+    result['scope_complete'] = complete
+    checked = [row for row in result.get('workloads', []) if 'parity' in row]
+    evidence = []
+    for name in sorted(RECOVERY_RULES):
+        executed = [row for row in checked if name in row.get('executed_properties', [])]
+        rejected = [row['workload'] for row in checked if name in row['rejection']]
+        verdict = ('failed' if rejected else 'unguarded' if not executed else
+                   'passed' if result['status'] == 'passed' else 'incomplete')
+        evidence.append(dict(rule=name, method=method, verdict=verdict,
+                             completed_scope=complete, bounds=result['bounds'],
+                             executions=len(executed), rejection_workloads=rejected,
+                             open_obligations=['other inputs and fault outcomes', 'live application behavior',
+                                               'unbounded executions', 'specification completeness']))
+    result['guarantees'] = evidence
+    return result
+
+
+def live_recovery_checks(cli, sources, output):
+    package = output / 'live-recovery'
+    (package / 'src').mkdir(parents=True, exist_ok=True)
+    (package / 'scuzz.toml').write_text('[package]\nname="live-recovery"\n')
+    root = package / 'workspace'
+    for name, source in sources.items():
+        if name != 'Main':
+            (package / 'src' / (name + '.scuzz')).write_text(source)
+    (package / 'src/Main.scuzz').write_text(f'@main def main: IO[Unit] = Cards.recover({json.dumps(str(root))})\n')
+    before, after, addition, accepted, undone = recovery_documents()
+    def encoded(document):
+        return json.dumps(document, separators=(',', ':'))
+    def files(mode):
+        op = accepted if mode < 2 else undone
+        return ['src/Main.scuzz', 'src/Other.scuzz', '.scuzz/ide/journal.json',
+                '.scuzz/ide/records/' + op['operation'] + '.json', '.scuzz/ide/last.json']
+    def snapshot(mode):
+        return {name: (root / name).read_text() if (root / name).is_file() else None for name in files(mode)}
+    def prepare(mode):
+        if root.exists():
+            shutil.rmtree(root)
+        for path in ('src', '.scuzz/ide/cards', '.scuzz/ide/records'):
+            (root / path).mkdir(parents=True, exist_ok=True)
+        (root / 'src/Main.scuzz').write_text('external bytes' if mode in (1, 3) else after if mode == 0 else before)
+        (root / '.scuzz/ide/journal.json').write_text(encoded(accepted if mode < 2 else undone))
+        if mode >= 2:
+            (root / 'src/Other.scuzz').write_text(addition)
+            (root / '.scuzz/ide/last.json').write_text(encoded(accepted))
+    def expected(mode):
+        op = accepted if mode == 0 else undone
+        main, other, journal, record, last = files(mode)
+        return {main: after if mode == 0 else before, other: addition if mode == 0 else None,
+                journal: '', record: encoded(op), last: encoded(op) if mode == 0 else ''}
+    prepare(0)
+    command(cli, ['fmt', package], output, 'live-recovery-format')
+    command(cli, ['run', package], output, 'live-recovery-build')
+    executable = package / 'build/live-recovery'
+    hooks = live_write_outcomes(cli, output / 'live-write-outcomes', output)
+    mac = platform.system() == 'Darwin'
+    runs = []
+    def run(mode, point, label):
+        env = {key: value for key, value in os.environ.items() if not key.startswith('SCUZZ_')}
+        if mode:
+            env.update(SCUZZ_WRITE_OUTCOME=mode, SCUZZ_WRITE_POINT=str(point))
+            env['DYLD_INSERT_LIBRARIES' if mac else 'LD_PRELOAD'] = hooks['library']
+            if mac:
+                env['DYLD_FORCE_FLAT_NAMESPACE'] = '1'
+        result = subprocess.run([str(executable)], env=env, capture_output=True, text=True, timeout=20)
+        (output / (label + '.stdout')).write_text(result.stdout)
+        (output / (label + '.stderr')).write_text(result.stderr)
+        return result
+    for mode in range(4):
+        prepare(mode)
+        initial = snapshot(mode)
+        baseline = run('trace', 0, f'live-{mode}-baseline')
+        if mode in (1, 3):
+            assert baseline.returncode != 0 and 'recovery conflict:' in baseline.stderr
+            assert snapshot(mode) == initial, 'live conflict changes an operation file'
+            runs.append(dict(journal=mode, kind='conflict', contents=initial, status='passed'))
+            continue
+        assert baseline.returncode == 0 and snapshot(mode) == expected(mode), (mode, baseline, snapshot(mode))
+        points = [int(match[1]) for match in re.finditer(r'^sync (\d+) file$', baseline.stderr, re.M)]
+        assert points == list(range(1, len(points) + 1)) and points, baseline.stderr
+        for outcome, exit_code in (('before', 92), ('after', 93), ('error', 1)):
+            for point in points:
+                prepare(mode)
+                label = f'live-{mode}-{outcome}-{point}'
+                interrupted = run(outcome, point, label)
+                assert interrupted.returncode == exit_code, (label, interrupted)
+                if outcome == 'error':
+                    assert 'Fs.write: cannot replace' in interrupted.stderr, interrupted
+                partial = snapshot(mode)
+                resumed = run(None, 0, label + '-resume')
+                assert resumed.returncode == 0 and snapshot(mode) == expected(mode), (label, resumed, snapshot(mode))
+                settled = snapshot(mode)
+                repeated = run(None, 0, label + '-repeat')
+                assert repeated.returncode == 0 and snapshot(mode) == settled, (label, repeated)
+                runs.append(dict(journal=mode, kind=outcome, write=point, status='passed',
+                                 interrupted_exit=exit_code, interrupted_contents=partial,
+                                 settled_contents=settled))
+    return dict(status='passed', workloads=runs, file_outcomes=hooks,
+                native_sha256=digest(executable.read_bytes()),
+                scope='acceptance and Undo recovery; every file and directory sync; two conflict states',
+                open_obligations=['power loss', 'external edits during recovery',
+                                  'other application operations', 'staged temporary file cleanup'])
 
 
 def recovery_experiment(cli):
@@ -739,6 +1247,8 @@ def recovery_experiment(cli):
                               required_repeat_inputs=[0, 2], required_preserve_inputs=[1, 3, 5, 7],
                               observed_files=['two sources', 'journal', 'operation record', 'Undo state'],
                               ordinary_scope='the default search also includes repeated calls and persistent faults')
+        report['live_recovery'] = live_recovery_checks(cli, sources, output)
+        save()
         variants = {'correct': sources}
         skip = dict(sources)
         anchor = '_ <- IO.foreachDiscard(ws, w => writeOne(root, w))'
@@ -771,12 +1281,15 @@ def recovery_experiment(cli):
                 rules = []
                 inputs = [('recover', n) for n in range(8)] + [('repeat', 0), ('repeat', 2)]
                 inputs += [('preserve', n) for n in (1, 3, 5, 7)]
+                inputs += [('duplicate', None)]
                 for driver, n in inputs:
                     directory = package / f'rule-{driver}-{n}'
                     witness = protocol_probe(executable, directory, driver, n, 0)
                     assert witness['status'] == 'passed', ('recovery rule check rejects', witness)
                     witness['executed_properties'] = executed_properties(directory / 'coverage.txt')
-                    if driver == 'repeat':
+                    if driver == 'duplicate':
+                        assert {'completed request rejects a duplicate', 'duplicate rejection preserves files'} <= set(witness['executed_properties'])
+                    elif driver == 'repeat':
                         assert 'repeated recovery preserves settled files' in witness['executed_properties']
                     elif driver == 'preserve':
                         assert 'recovery conflict preserves all operation files' in witness['executed_properties']
@@ -790,6 +1303,40 @@ def recovery_experiment(cli):
                                             seconds=time.monotonic() - checked)
                 save()
             row['finite'] = recovery_finite(cli, package, executable, probe, package, variant != 'correct')
+            recovery_rule_evidence(row['finite'], 'exhaustive-bounded-simulation')
+            save()
+            row['preemption_scopes'] = {}
+            for limit in (0, 1, 2):
+                bounded_output = package / f'preemptions-{limit}'
+                bounded_output.mkdir()
+                row['preemption_scopes'][str(limit)] = recovery_finite(
+                    cli, package, executable, probe, bounded_output, variant != 'correct', limit)
+                recovery_rule_evidence(row['preemption_scopes'][str(limit)], 'exhaustive-bounded-simulation')
+                save()
+            acceptance_output = package / 'acceptance'
+            acceptance_output.mkdir()
+            row['acceptance'] = recovery_finite(
+                cli, package, executable, probe, acceptance_output, variant != 'correct',
+                preemption_limit=1, inputs=[0, 1, 4, 5], fault_calls=[1, 9])
+            recovery_rule_evidence(row['acceptance'], 'exhaustive-bounded-simulation')
+            save()
+            row['acceptance_sampled'] = recovery_schedule_samples(
+                cli, package, executable, probe, package / 'acceptance-sampled',
+                row['acceptance']['bounds'], variant != 'correct')
+            recovery_rule_evidence(row['acceptance_sampled'], 'sampled-simulation')
+            assert row['acceptance']['bounds'] == row['acceptance_sampled']['bounds']
+            if row['acceptance']['status'] == 'passed':
+                exhaustive_paths = {(work['input'], work['fault'], tuple(work['schedule_picks']))
+                                    for work in row['acceptance']['workloads']}
+                sampled_paths = {(work['input'], work['fault'], tuple(work['schedule_picks']))
+                                 for work in row['acceptance_sampled']['workloads'] if 'parity' in work}
+                assert sampled_paths <= exhaustive_paths, 'sampled schedules leave the exhaustive scope'
+                row['acceptance_sampled']['exhaustive_path_count'] = len(exhaustive_paths)
+            if variant != 'correct':
+                assert row['acceptance']['status'] == row['acceptance_sampled']['status'] == 'failed'
+                witness = row['acceptance_sampled']['counterexample']
+                command(cli, ['fuzz', '--replay', witness['workload'], package], output,
+                        variant + '-sampled-scope-replay', success=False)
             save()
             row['sampled'] = recovery_sampled(cli, package, package)
             search = row['sampled'].get('report', {}).get('scope', {}).get('search', {})
@@ -805,8 +1352,8 @@ def recovery_experiment(cli):
              'recovery returns an expected error'),
             ('path-guard', 'Models', 'if (ok) IO.pure(()) else IO.fail(why)',
              'if (ok) IO.fail(why) else IO.pure(())', 'recover', 0, 'recovery returns an expected error'),
-            ('resolved-path', 'Proposal', 'resolved == Fs.join(base, path)',
-             'resolved != Fs.join(base, path)', 'recover', 0, 'recovery returns an expected error'),
+            ('resolved-path', 'Proposal', 'resolved == Fs.join(base, path.value)',
+             'resolved != Fs.join(base, path.value)', 'recover', 0, 'recovery returns an expected error'),
             ('conflict-write', 'Cards',
              '_ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")',
              '_ <- if (List.forall(checks, b => b)) IO.pure(()) else Fs.write(Fs.join(root, "src/Other.scuzz"), "unexpected bytes")\n'
@@ -816,6 +1363,14 @@ def recovery_experiment(cli):
              'if (Str.isEmpty(raw)) IO.pure(()) else finish(root, LspClient.parseJson(raw))',
              'if (Str.isEmpty(raw)) Fs.write(Fs.join(storage(root), "last.json"), "") else finish(root, LspClient.parseJson(raw))',
              'repeat', 0, 'repeated recovery preserves settled files'),
+            ('duplicate-guard', 'Cards',
+             '_ <- need(choice == 0 && accepted == 0, "card is already decided")',
+             '_ <- IO.pure(())', 'duplicate', None, 'completed request rejects a duplicate'),
+            ('duplicate-write', 'Cards',
+             '_ <- need(choice == 0 && accepted == 0, "card is already decided")',
+             '_ <- Fs.write("unrelated.txt", "unexpected bytes")\n'
+             '    _ <- need(choice == 0 && accepted == 0, "card is already decided")',
+             'duplicate', None, 'duplicate rejection preserves files'),
         ]
         for name, module, anchor, replacement, driver, n, rule in regressions:
             changed = dict(sources)
@@ -859,7 +1414,30 @@ def recovery_experiment(cli):
             conclusion='Both methods reject the controls. General application benefit remains unproven.',
             limits=['finite exploration must complete within its checking budget',
                     'search scopes differ; timing does not establish a speed advantage'])
+        report['comparison']['acceptance'] = dict(
+            equal_scope=True, bounds=report['variants']['correct']['acceptance']['bounds'],
+            methods=['exhaustive-bounded-simulation', 'sampled-simulation'],
+            source_variants=list(variants), author_rules='the same source rules in both methods',
+            verdicts={name: dict(exhaustive=row['acceptance']['status'], sampled=row['acceptance_sampled']['status'])
+                      for name, row in report['variants'].items()},
+            limits=['Undo', 'fault calls other than 1 and 9', 'multiple faults', 'more than one preemption'],
+            conclusion='A completed finite scope supplies stronger evidence than passing sampled executions.')
+        duplicate = re.search(r'^def duplicate\(\): IO\[Unit\] =\n.*?(?=^def |\Z)', sources['Recovery'], re.M | re.S)
+        assert duplicate is not None
+        workflow = report['mutation_regressions']['duplicate-guard']
+        report['author_workflow'] = dict(
+            rule_source=duplicate[0], rule_source_sha256=digest(duplicate[0].encode()),
+            rule_lines=len(duplicate[0].strip().splitlines()), author_properties=3,
+            driver_source='def duplicate(): IO[Unit] = Recovery.duplicate()',
+            counterexample=workflow['counterexample']['workload'],
+            build_seconds=workflow['build_seconds'], native_check_seconds=workflow['native_check_seconds'],
+            evaluator_check_seconds=workflow['parity_seconds'], replay_seconds=workflow['replay_seconds'],
+            commands=['scuzz fmt PACKAGE', 'scuzz fuzz --iterations 0 PACKAGE',
+                      'scuzz fuzz --replay WORKLOAD PACKAGE'],
+            scope='one duplicate request rule; production request guard; fault-free input',
+            limits=['command costs do not measure human writing time', 'human usefulness remains unproven'])
         report['status'] = 'incomplete' if report['variants']['correct']['finite']['status'] == 'incomplete' else 'passed'
+        report['evaluator_servers'] = [server.evidence() for server in PROBE_SERVERS.values()]
         if any(row['sampled']['status'] == 'incomplete' for row in report['variants'].values()):
             report['status'] = 'incomplete'
         save()
@@ -873,4 +1451,7 @@ def recovery_experiment(cli):
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    finally:
+        stop_probe_servers()

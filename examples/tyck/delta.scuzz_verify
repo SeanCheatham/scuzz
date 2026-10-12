@@ -9,7 +9,7 @@ effects:
 fibers:
 live=1 ready=1 parked=0 done=0
 fault:
-kind=none n=0 mode=fail seed=0 storm=0 partial=0
+kind=none n=0 mode=fail seed=0 storm=0 partial=0 after=0
 files:
 """))))))))))
 

@@ -73,3 +73,12 @@ oracle resultListBindings(): Bool =
 oracle resultLiveUse(): Bool =
   Main.resultLiveUse()
 
+oracle privateRecords(): Bool =
+  Main.privateRecords()
+
+oracle recordCopyTypes(): Bool =
+  Main.recordCopyTypes()
+
+oracle enumCaseNames(): Bool =
+  Main.enumCaseNames()
+

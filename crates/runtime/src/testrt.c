@@ -146,15 +146,16 @@ static SzIo *unwrap_box(void *value, void *env) {
  * phase=(k-1)/144, base=(k-1)%144, kind=(base%3)+1,
  * mode=((base/3)%3), n=(((base/3)/3)%16)+1.
  * Phase bit 0 faults every later call. Phase bit 1 discards an Fs.write
- * and keeps the previous file. Seeds 1..144 stay one call.
- * SCUZZ_FAULT_STORM=1 and SCUZZ_FAULT_PARTIAL=1 set those bits when
- * SCUZZ_FAULT_KIND is set. */
+ * and keeps the previous file. Phase bit 2 reports an error after replacement.
+ * Seeds 1..144 stay one call. SCUZZ_FAULT_STORM, SCUZZ_FAULT_PARTIAL,
+ * and SCUZZ_FAULT_AFTER set these bits for an explicit fault kind. */
 static int g_fault_kind;
 static int g_fault_mode;
 static int g_fault_n;
 static int g_fault_seed;
 static int g_fault_storm;
 static int g_fault_partial;
+static int g_fault_after;
 static int g_fault_count_fs;
 static int g_fault_count_net;
 static int g_fault_count_queue;
@@ -207,6 +208,7 @@ static void fault_decode_seed(int seed) {
   int phase;
   g_fault_storm = 0;
   g_fault_partial = 0;
+  g_fault_after = 0;
   if (seed <= 0) {
     g_fault_kind = 0;
     g_fault_mode = SZ_FAULT_FAIL;
@@ -224,6 +226,7 @@ static void fault_decode_seed(int seed) {
   g_fault_n = (rest / 3) % 16 + 1;
   g_fault_storm = (phase % 2) == 1;
   g_fault_partial = ((phase / 2) % 2) == 1;
+  g_fault_after = ((phase / 4) % 2) == 1;
 }
 
 static void fault_arm_from_env(void) {
@@ -236,6 +239,7 @@ static void fault_arm_from_env(void) {
   g_fault_seed = 0;
   g_fault_storm = 0;
   g_fault_partial = 0;
+  g_fault_after = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -254,6 +258,7 @@ static void fault_arm_from_env(void) {
     g_fault_mode = fault_mode_from_name(getenv("SCUZZ_FAULT_MODE"));
     g_fault_storm = env_is_1("SCUZZ_FAULT_STORM");
     g_fault_partial = env_is_1("SCUZZ_FAULT_PARTIAL");
+    g_fault_after = env_is_1("SCUZZ_FAULT_AFTER");
     g_fault_seed = 0;
     return;
   }
@@ -537,9 +542,12 @@ static void *mem_write(void *env) {
   char parent[1024];
   MemNode *n;
   SzString *c = contents ? contents : NULL;
+  int after = 0;
   sz_timeline_log_cstr("Fs.write", path_s ? sz_string_cstr(path_s) : "");
   if (sz_testrt_fault_tick(SZ_FAULT_FS)) {
-    if (g_fault_partial) {
+    if (g_fault_after) {
+      after = 1;
+    } else if (g_fault_partial) {
       size_t full = contents && contents->len > 0 ? contents->len : 0;
       size_t keep = full / 2;
       char *prefix = (char *)sz_alloc(keep + 1);
@@ -551,10 +559,11 @@ static void *mem_write(void *env) {
       r->is_err = 1;
       r->as.err = sz_error_new(2, "Fs: partial write");
       return r;
+    } else {
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, "Fs: injected fault");
+      return r;
     }
-    r->is_err = 1;
-    r->as.err = sz_error_new(2, "Fs: injected fault");
-    return r;
   }
   path = norm_path(sz_string_cstr(path_s));
   if (!path) {
@@ -614,6 +623,12 @@ static void *mem_write(void *env) {
   if (c->len)
     memcpy(n->data, c->data, c->len);
   n->data[c->len] = '\0';
+  if (after) {
+    sz_timeline_log_cstr("Fs.after", sz_string_cstr(path_s));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs: error after replacement");
+    goto done;
+  }
   r->is_err = 0;
   r->as.ok = NULL;
 done:
@@ -2849,6 +2864,7 @@ void sz_testrt_reset(void) {
   g_fault_seed = 0;
   g_fault_storm = 0;
   g_fault_partial = 0;
+  g_fault_after = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -3537,10 +3553,10 @@ static void tl_fmt_fibers(char *buf, size_t cap) {
 }
 
 static void tl_fmt_fault(char *buf, size_t cap) {
-  snprintf(buf, cap, "kind=%s n=%d mode=%s seed=%d storm=%d partial=%d",
+  snprintf(buf, cap, "kind=%s n=%d mode=%s seed=%d storm=%d partial=%d after=%d",
            tl_fault_kind_name(g_fault_kind), g_fault_n,
            tl_fault_mode_name(g_fault_mode), g_fault_seed, g_fault_storm ? 1 : 0,
-           g_fault_partial ? 1 : 0);
+           g_fault_partial ? 1 : 0, g_fault_after ? 1 : 0);
 }
 
 static int tl_checkpoint_interval(void) {

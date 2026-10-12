@@ -14439,6 +14439,65 @@ int main(void) {
     sz_testrt_oracles_refresh();
   }
 
+  /* An error after replacement retains complete bytes. */
+  {
+    const int seeds[] = {577, 721};
+    for (int i = 0; i < 3; ++i) {
+      char seed[16];
+      setenv("SCUZZ_TESTRT", "1", 1);
+      sz_testrt_oracles_refresh();
+      if (i == 2) {
+        setenv("SCUZZ_FAULT_KIND", "fs", 1);
+        setenv("SCUZZ_FAULT_N", "1", 1);
+        setenv("SCUZZ_FAULT_AFTER", "1", 1);
+      } else {
+        snprintf(seed, sizeof seed, "%d", seeds[i]);
+        setenv("SCUZZ_FAULT_SEED", seed, 1);
+      }
+      sz_testrt_install();
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("written.txt"),
+                                     sz_string_from_cstr("old")));
+      assert(r.ok);
+      sz_testrt_fault_release();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("written.txt"),
+                                     sz_string_from_cstr("new bytes")));
+      assert(!r.ok && r.error);
+      assert(strcmp(sz_string_cstr(r.error->message),
+                    "Fs: error after replacement") == 0);
+      sz_error_free(r.error);
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("written.txt")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "new bytes") == 0);
+      sz_release(r.value);
+      sz_testrt_fault_release();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("created.txt"),
+                                     sz_string_from_cstr("complete")));
+      assert(r.ok == (i != 1));
+      if (!r.ok)
+        sz_error_free(r.error);
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("created.txt")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "complete") == 0);
+      sz_release(r.value);
+      sz_testrt_fault_release();
+      sz_testrt_reset();
+      unsetenv("SCUZZ_FAULT_SEED");
+      unsetenv("SCUZZ_FAULT_KIND");
+      unsetenv("SCUZZ_FAULT_N");
+      unsetenv("SCUZZ_FAULT_AFTER");
+      sz_testrt_install();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("reset.txt"),
+                                     sz_string_from_cstr("plain")));
+      assert(r.ok);
+      sz_testrt_reset();
+      unsetenv("SCUZZ_TESTRT");
+      sz_testrt_oracles_refresh();
+    }
+  }
+
   /* Deadlock oracle: all fibers parked with no timer pending. */
   {
     SzQueue *q = sz_queue_make();

@@ -558,6 +558,7 @@ for case in cases[:6]:
                 source = source.replace('A.', 'Z.').replace('B.', 'A.').replace('shadow(A: Holder)', 'shadow(Z: Holder)')
             (modules / f'src/{stem}.scuzz').write_text(source)
         module_claims = '\n'.join([
+            'oracle domainValues(): Bool =\n  Main.privateValues() == 0\n',
             'oracle fromA(c: A.Choice[String]): Bool =\n  c match { case A.Choice.Wrap(A.Box(text)) => A.read(c) == Str.len(text) case A.Choice.End => A.read(c) == 0 }\n',
             'oracle fromB(c: B.Choice[Int]): Bool =\n  c match { case B.Choice.Wrap(marker, B.Box(_, value)) => B.read(c) == marker + value case B.Choice.End => B.read(c) == 0 }\n',
         ])
@@ -572,6 +573,19 @@ for case in cases[:6]:
         command(['fuzz', '--iterations', '6', '--seed', '41', modules], label + '-campaign')
         module_summary = json.loads((modules / 'build/fuzz/summary.json').read_text())
         assert module_summary['fuzz']['ok'] and module_summary['fuzz']['search'] > 0
+        original_main = (modules / 'src/Main.scuzz').read_text()
+        owner = 'Z' if reverse else 'A'
+        for bad, rule in [
+            (f'def bad(): {owner}.Positive = {owner}.Positive(-1)', 'private record constructor'),
+            (f'def bad(p: {owner}.Positive): {owner}.Positive = p.copy(value = -1)', 'private record copy'),
+            (f'record Wrapped(value: {owner}.Positive)\ndef bad(p: {owner}.Positive): {owner}.Positive = Wrapped(p).copy(value = -1).value', 'expected'),
+            (f'def bad(): {owner}.PrivateBox[String] = {owner}.PrivateBox("bad")', 'private record constructor'),
+        ]:
+            (modules / 'src/Main.scuzz').write_text(original_main + '\n' + bad + '\n')
+            command(['fmt', modules], label + '-private-format')
+            rejected = command(['check', modules], label + '-private-check', success=False)
+            assert rule in rejected.stdout, (label, bad, rejected.stdout)
+        (modules / 'src/Main.scuzz').write_text(original_main)
 
 command(['fuzz', '--iterations', '16', '--seed', '41', package], 'valid-campaign')
 summary = json.loads((package / 'build/fuzz/summary.json').read_text())

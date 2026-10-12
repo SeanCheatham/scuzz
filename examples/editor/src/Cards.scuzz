@@ -32,7 +32,7 @@ def own(root: String): IO[List[(String, String)]] =
   Proposal.own(root)
 
 def inside(root: String, path: String): IO[Unit] =
-  Proposal.inside(root, path)
+  Proposal.checkInside(root, path)
 
 def dirtyHits(root: String, props: List[(String, String)], dirties: List[String]): IO[List[String]] =
   for {

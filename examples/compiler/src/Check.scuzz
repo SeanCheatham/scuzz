@@ -419,7 +419,7 @@ def tyEqEn(a: String, b: String, ens: List[En]): Bool =
   tyEq(Type.parse(a), Type.parse(b), ens)
 
 def pinEns(ens: List[En], ts: List[String]): List[En] =
-  if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase(), "") :: ens
+  if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase(), "", false) :: ens
 
 def noCase(): List[EnCase] =
   []
@@ -552,7 +552,36 @@ def resolveInstKit2(f: String, ty: Ty, args: List[Expr], env: List[(String, Ty)]
   if (isKit(q, funs)) resolveKit(q, args, env, funs, ens, span) else resolveInstCopy(f, ty, args, env, funs, ens, span)
 
 def resolveInstCopy(f: String, ty: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (f == ".copy") resolveInstArgs(List.tail(args), env, funs, ens, ok(Type.show(ty))) else resolveInstNamed(f, Type.show(ty), args, env, funs, ens, span, ftabGet(funs.tab, Str.slice(f, 1, Str.len(f))))
+  if (f == ".copy" && privateCtorOutside(tyHead(ty), env, ens)) bad(Str.concat("private record copy: ", tyHead(ty)), span) else if (f == ".copy") checkCopy(ty, List.tail(args), env, funs, ens, span) else resolveInstNamed(f, Type.show(ty), args, env, funs, ens, span, ftabGet(funs.tab, Str.slice(f, 1, Str.len(f))))
+
+def privateCtorOutside(name: String, env: List[(String, Ty)], ens: List[En]): Bool =
+  List.exists(ens, en => en.name == name && en.privateCtor && en.mod != modFile(env))
+
+def checkCopy(ty: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (!recordNamed(ens, tyHead(ty))) bad("copy needs a record", span) else checkCopySplit(ty, constructorFields(specializeEnums(ens, Type.show(ty)), tyHead(ty)), alignSplit(args, [], [], false), env, funs, ens, span)
+
+def checkCopySplit(ty: Ty, ps: List[Param], split: (List[Expr], List[Expr], String), env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  split match {
+    case (pos, named, error) => if (error != "") bad(error, span) else if (List.len(pos) > List.len(ps)) bad("too many copy arguments", span) else checkCopyNames(ty, ps, pos, named, alignUnknown(named, ps), env, funs, ens, span)
+  }
+
+def checkCopyNames(ty: Ty, ps: List[Param], pos: List[Expr], named: List[Expr], error: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (error != "") bad(error, span) else for {
+  names = List.map(named, expr => expr match {
+  case Expr.ENamed(name, _) => name
+  case _ => ""
+})
+} yield if (List.len(List.distinct(names)) != List.len(names)) bad("duplicate copy argument", span) else checkCopyFields(ty, ps, pos, named, env, funs, ens, span)
+
+def checkCopyFields(ty: Ty, ps: List[Param], pos: List[Expr], named: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(ps)) okTy(ty) else for {
+  p = List.at(ps, 0)
+} yield if (!List.isEmpty(pos) && namedHas(p.name, named)) bad(Str.concat("duplicate argument ", p.name), span) else if (!List.isEmpty(pos)) checkCopyNext(ty, p, List.at(pos, 0), List.tail(ps), List.tail(pos), named, env, funs, ens, span) else if (namedHas(p.name, named)) checkCopyNext(ty, p, namedLookup(p.name, named), List.tail(ps), pos, named, env, funs, ens, span) else checkCopyFields(ty, List.tail(ps), pos, named, env, funs, ens, span)
+
+def checkCopyNext(ty: Ty, p: Param, arg: Expr, ps: List[Param], pos: List[Expr], named: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  for {
+    result = zipCheck("copy", [Type.parse(p.ty)], [arg], env, funs, ens, spanPick(exprSpan(env, arg), span), Type.tNamed(""))
+  } yield if (hasErr(result)) result else andBinds(result, checkCopyFields(ty, ps, pos, named, env, funs, ens, span))
 
 def resolveInstNamed(f: String, ty: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), hit: List[Fun]): Out =
   if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveInstHit(f, ty, args, env, funs, ens, span, List.at(hit, 0))
@@ -3335,7 +3364,7 @@ def expandEnums(ens: List[En], als: List[Alias]): List[En] =
   if (List.isEmpty(als)) ens else List.map(ens, en => expandEnum(en, List.filter(als, a => !List.contains(en.tparams, a.name))))
 
 def expandEnum(en: En, als: List[Alias]): En =
-  En(en.isRec, en.name, en.tparams, List.map(en.cases, c => EnCase(c.name, expandParams(c.fields, als))), en.mod)
+  En(en.isRec, en.name, en.tparams, List.map(en.cases, c => EnCase(c.name, expandParams(c.fields, als))), en.mod, en.privateCtor)
 
 def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
   if (List.isEmpty(als)) defs else List.reverse(expandDefsGo(defs, als, []))
@@ -3758,7 +3787,7 @@ def specializeEnumsGo(ens: List[En], ty: String): List[En] =
 
 def specializeEnum(en: En, ty: String): En =
   en match {
-    case En(priv, name, tps, cases) => if (!List.isEmpty(tps) && Str.startsWith(ty, Str.concat(name, "["))) En(priv, name, tps, specializeCases(cases, tps, Type.appArgs(Type.parse(ty))), en.mod) else en
+    case En(priv, name, tps, cases) => if (!List.isEmpty(tps) && Str.startsWith(ty, Str.concat(name, "["))) En(priv, name, tps, specializeCases(cases, tps, Type.appArgs(Type.parse(ty))), en.mod, en.privateCtor) else en
   }
 
 def specializeCases(cs: List[EnCase], tps: List[String], args: List[Ty]): List[EnCase] =
@@ -3781,7 +3810,7 @@ def specializeType(ty: String, tps: List[String], args: List[Ty]): String =
   if (List.isEmpty(tps) || List.isEmpty(args)) ty else specializeType(substTy(ty, List.at(tps, 0), Type.show(List.at(args, 0))), List.tail(tps), List.tail(args))
 
 def inferBareCtor(en: String, ctor: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  inferBareCtorFields(en, ctor, env, funs, ens, span, bareCtorFields(ens, en, ctor))
+  if (privateCtorOutside(en, env, ens)) bad(Str.concat("private record constructor: ", en), span) else inferBareCtorFields(en, ctor, env, funs, ens, span, bareCtorFields(ens, en, ctor))
 
 def inferBareCtorFields(en: String, ctor: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), count: Int): Out =
   if (count < 0) bad(Str.concat("unknown constructor ", ctor), span) else if (count > 0) bad(Str.concat(ctor, Str.concat(" expects ", Str.concat(Str.fromInt(count), " args, got 0"))), span) else inferNamedCtor(en, ctor, [], env, funs, ens, span, ens)
@@ -3803,7 +3832,7 @@ def inferNamedCtor(en: String, ctor: String, args: List[Expr], env: List[(String
 
 def inferNamedCtorEn(head: En, rest: List[En], en: String, ctor: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   head match {
-    case En(_, name, tps, cases) => if (name != en) inferNamedCtor(en, ctor, args, env, funs, ens, span, rest) else if (List.isEmpty(tps)) inferPlainCtor(en, ctor, cases, args, env, funs, ens, span) else inferGenericCtor(en, ctor, tps, cases, args, env, funs, ens, span)
+    case En(_, name, tps, cases) => if (name != en) inferNamedCtor(en, ctor, args, env, funs, ens, span, rest) else if (privateCtorOutside(name, env, ens)) bad(Str.concat("private record constructor: ", name), span) else if (List.isEmpty(tps)) inferPlainCtor(en, ctor, cases, args, env, funs, ens, span) else inferGenericCtor(en, ctor, tps, cases, args, env, funs, ens, span)
   }
 
 def inferPlainCtor(en: String, ctor: String, cases: List[EnCase], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =

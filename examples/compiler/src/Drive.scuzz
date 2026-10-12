@@ -1776,7 +1776,7 @@ def fuzzFaultOf(job: FuzzJob, i: Int): String =
   if (i <= 0 || List.isEmpty(job.faults)) "" else fuzzFaultAt(job, i)
 
 def fuzzFaultAt(job: FuzzJob, i: Int): String =
-  Verify.faultSeedPhase(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1, (i - 1) / (List.len(job.faults) * 16) % 4)
+  Verify.faultSeedPhase(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1, (i - 1) / (List.len(job.faults) * 16) % 6)
 
 def fuzzSearch(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc): IO[FuzzAcc] =
   fuzzJobEngine(job).flatMap(current => fuzzSearchCurrent(current, script, runs, defs, acc))

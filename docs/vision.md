@@ -29,7 +29,10 @@ For each topic, inspect existing behavior before changing it. Preserve working g
 
 Recovery rules compare all five operation files across a conflict and repeated recovery.
 A deliberate conflict write passes the endpoint rules but fails the file comparison.
-Select the next slice from another demonstrated application rule gap.
+Measure author effort on these application rules.
+Keep private constructor access and live path validation active.
+Extend application relations for another demonstrated correctness gap.
+Keep the wider exhaustive results and their incomplete limits explicit.
 Keep formal checking optional until its application benefit and cost meet the stated gate.
 
 ## Formal verification methods
@@ -52,7 +55,11 @@ Do not silently replace an author claim with a weaker solver claim.
 
 ### Seven proposals
 
-1. **Types that carry proof.** Add refinement types with predicates on values.
+1. **Types that carry proof.** Start with validated domain types.
+   A live constructor checks input and returns Result.
+   Prevent other code from constructing an invalid value.
+   Select one demonstrated application need before adding solver checks.
+   General refinement types with predicates remain later work.
    Examples include positive amounts, valid list indices, and sorted collections.
    Prove that each constructor and function preserves the predicate.
    Check external input in live code before it enters the type.
@@ -113,8 +120,12 @@ The application recovery check uses the editor journal functions.
 Long cancellation paths replay exactly in both engines.
 Independent setup and recovery corpus inputs support the mutation checks.
 Ordinary search rejects the deliberate defects.
-The exhaustive application search still exceeds its checking budget.
-Resolve this cost limit before adding a public exhaustive application method.
+A one-preemption acceptance scope completes and reaches interruption during recovery.
+It covers normal acceptance and conflicts at fault calls 1 and 9.
+Undo remains outside this completed scope.
+The zero-preemption scope does not reach interruption during recovery.
+The wider scopes still exceed their execution limits.
+Resolve these limits before adding a public exhaustive application method.
 Select a new product method only for a demonstrated application need.
 Keep its supported subset explicit before adding syntax or dependencies.
 Reuse the author rule. Preserve claims, hermetic simulation, and exact replay.
@@ -123,6 +134,12 @@ Check assumptions and required trigger reach separately.
 Keep unsupported operations, unknown results, and unmet limits incomplete.
 Record exact input identities, platform scope, trusted components, and cost.
 Require a measured author workflow and budget.
+Compare methods with equal inputs, schedules, faults, rules, and budgets.
+Measure author work, counterexample latency, completed scope, and edit cost.
+Keep method, verdict, scope, and open obligations separate for each rule.
+A completed finite scope can add value when both methods detect the same defect.
+Use small optional reference models when they make an application rule clearer.
+Keep reductions out of the search until they preserve all claim observations.
 A finite check cannot produce an unbounded proof label.
 Do not add a general proof language, a second compiler, or a mandatory app model.
 

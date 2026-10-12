@@ -54,7 +54,7 @@ def repeated(mode: Int): IO[Unit] =
   } yield ()
 
 def repeat(mode: Int): IO[Unit] =
-  Cards.recover(root(mode)).flatMap(_ => repeated(mode)).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+  Cards.recover(root(mode)).flatMap(_ => repeated(mode)).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else IO.fail(error))
 
 def preserve(n: Int): IO[Unit] =
   (for {
@@ -62,10 +62,23 @@ def preserve(n: Int): IO[Unit] =
     _ <- run(n)
     after <- snapshot(n % 4)
     _ <- Property.assert("recovery conflict preserves all operation files", before == after)
-  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else IO.fail(error))
+
+def duplicate(): IO[Unit] =
+  (for {
+    _ <- Cards.recover(root(0))
+    before <- snapshot(0)
+    unrelated <- Fs.read("unrelated.txt")
+    result <- IO.attempt(Cards.undecided(root(0), Hash.sha256("finite recovery")))
+    _ <- result match { case Result.Err(error) => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.fail(error) else IO.pure(()) case Result.Ok(_) => IO.pure(()) }
+    _ <- Property.assert("completed request rejects a duplicate", result match { case Result.Err(error) => error == "card is already decided" case Result.Ok(_) => false })
+    after <- snapshot(0)
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("duplicate rejection preserves files", before == after && unrelated == retained)
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else if (Str.startsWith(error, "oracle ")) IO.fail(error) else Property.assert("recovery returns an expected error", false))
 
 def expectedError(error: String): Bool =
-  error == "Fs: injected fault" || error == "Fs: partial write" || error == "fiber interrupted" || Str.startsWith(error, "recovery conflict:")
+  error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement" || error == "fiber interrupted" || Str.startsWith(error, "recovery conflict:")
 
 def attempt(path: String): IO[Unit] =
   Cards.recover(path).handleErrorWith(error => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false))
@@ -103,7 +116,7 @@ def run(n: Int): IO[Unit] =
   _ <- attempt(root(mode))
   _ <- attempt(root(mode))
   _ <- settled(mode)
-} yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+} yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else IO.fail(error))
 
 def canceled(mode: Int): IO[Unit] =
   for {

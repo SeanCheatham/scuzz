@@ -1051,6 +1051,36 @@ grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
 fuzz --iterations 16 examples/kernel
 fuzz --iterations 8 examples/scale
 fuzz --iterations 8 examples/fmt
+
+# A backward parser step rejects the formatter rule without a deadline.
+python3 - <<'PY_ENUM_STEP'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-enum-step-') as directory:
+    root = Path(directory)
+    for name in ('fmt', 'syntax'):
+        shutil.copytree(Path('examples') / name, root / name,
+                        ignore=shutil.ignore_patterns('build', '.scuzz'))
+    source = root / 'syntax/src/Parse.scuzz'
+    text = source.read_text()
+    for anchor in ('parseEnumCasesNext(parseEnumCase(toks, i + 1), name, ts, toks, acc, i)',
+                   'parseEnumCase2(_identOf(_at(toks, i)), toks, i + 1)'):
+        assert text.count(anchor) == 1
+        source.write_text(text.replace(anchor, anchor.replace('i + 1', 'i - 1')))
+        result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(root / 'fmt')],
+                                capture_output=True, text=True, timeout=180)
+        report = json.loads((root / 'fmt/build/fuzz/summary.json').read_text())
+        assert result.returncode != 0 and report['status'] == 'failed', (result.stdout, result.stderr)
+        assert report['scope']['required']['failed'] > 0 and report['scope']['required']['incomplete'] == 0
+        assert 'fmtEnum' in report['guards']['properties'] and 'oracle fmtEnum rejected' in result.stdout + result.stderr
+print('Enum parser progress: a backward step has terminal formatter rejection evidence')
+PY_ENUM_STEP
 # Generated compiler checks run in the regular verification path.
 "$ROOT/scripts/ci.sh" compiler-cases
 # Compiler corpus replays run in separate CI slices. Full campaigns use source copies.
@@ -1944,6 +1974,12 @@ def replaceOnce(): IO[Unit] =
 
 def replaceTwice(): IO[Unit] =
   Fs.write("report.txt", "after-complete").handleErrorWith(_ => Fs.write("report.txt", "second-write").handleErrorWith(_ => IO.pure(())))
+
+def afterOnce(): IO[Unit] =
+  Fs.write("report.txt", "after-complete").handleErrorWith(error => IO.println(error))
+
+def afterTwice(): IO[Unit] =
+  Fs.write("report.txt", "after-complete").handleErrorWith(_ => Fs.write("report.txt", "second-write").handleErrorWith(error => IO.println(error)))
 SCENARIO
 cat > "$fault_dir/files.scuzz_verify" <<'CLAIMS'
 private def okTwice(t: Timeline, i: Int): Bool =
@@ -1953,7 +1989,7 @@ private def okOnce(t: Timeline, i: Int): Bool =
   !Timeline.driveHas(t, i, "replaceOnce") || (Timeline.effectHas(t, i, "Fs.partial") && Timeline.fileTextIs(t, i, "report.txt", "before"))
 
 def whole(t: Timeline): Verdict =
-  Verdict.stepEvery(t, pair => okTwice(t, pair._2) && okOnce(t, pair._2))
+  Verdict.stepEvery(t, pair => okTwice(t, pair._2) && okOnce(t, pair._2) && (!Timeline.driveHas(t, pair._2, "afterOnce") || Timeline.effectHas(t, pair._2, "Fs.after") && Timeline.fileTextIs(t, pair._2, "report.txt", "after-complete")) && (!Timeline.driveHas(t, pair._2, "afterTwice") || Timeline.effectHas(t, pair._2, "Fs.after") && Timeline.fileTextIs(t, pair._2, "report.txt", "second-write")))
 CLAIMS
 cat > "$fault_dir/corpus/storm.toml" <<'CORPUS'
 [fuzz]
@@ -1964,6 +2000,16 @@ cat > "$fault_dir/corpus/partial.toml" <<'CORPUS'
 [fuzz]
 fault_seed = "289"
 events = ["drive replaceOnce"]
+CORPUS
+cat > "$fault_dir/corpus/after.toml" <<'CORPUS'
+[fuzz]
+fault_seed = "577"
+events = ["drive afterOnce"]
+CORPUS
+cat > "$fault_dir/corpus/after-storm.toml" <<'CORPUS'
+[fuzz]
+fault_seed = "721"
+events = ["drive afterTwice"]
 CORPUS
 fuzz --iterations 0 "$fault_dir"
 
@@ -2004,6 +2050,15 @@ if fuzz --iterations 64 "$partial_dir" > /tmp/scuzz-fault-partial.log 2>&1; then
   exit 1
 fi
 grep -q 'fault_seed = "289"' "$partial_dir/build/fuzz/repro.toml"
+cat > "$partial_dir/files.scuzz_verify" <<'CLAIMS'
+def noAfter(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => !Timeline.effectHas(t, pair._2, "Fs.after"))
+CLAIMS
+if fuzz --iterations 128 "$partial_dir" > /tmp/scuzz-fault-after.log 2>&1; then
+  echo "search must reach an error after replacement" >&2
+  exit 1
+fi
+grep -q 'fault_seed = "577"' "$partial_dir/build/fuzz/repro.toml"
 rm -rf "$fault_dir" "$partial_dir"
 # Resource rules reject changes to release, cancellation, and timeout.
 python3 - <<'PY_RESOURCE'

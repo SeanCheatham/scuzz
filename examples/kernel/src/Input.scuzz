@@ -1,4 +1,4 @@
-record Quantity(value: Int)
+record Quantity private(value: Int)
 
 record Read[A](result: Result[String, A], count: Int)
 

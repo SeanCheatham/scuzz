@@ -185,14 +185,15 @@ The effect protocol starts two requests in sequence.
 The first request runs in a worker fiber. Its caller can cancel it.
 The second request starts after the first request settles.
 The checker examines every ready fiber choice for inputs 1 and 2.
-It checks no fault, one file failure, or one interrupted write.
+It checks no fault, one file failure, one interrupted write, or one error after replacement.
 The fault call bound is 1 through 4. Setup does not consume this bound.
 The scheduler bounds are 16 contention choices and 128 steps per driver run.
 The execution budget is 1024. An unmet bound leaves the check incomplete.
 Each request must release its resource once.
 The checker requires one release after the first join and two after both requests.
 A request waits at least one clock unit before its write.
-A failed write must preserve the previous file.
+An error before replacement must preserve the previous file.
+An error after replacement must retain the complete new bytes.
 Each write payload has seven bytes. An interrupted write stages three bytes.
 Cancellation must preserve the first request file.
 The same live assertions and timeline claims run in ordinary fuzzing.
@@ -205,12 +206,18 @@ It rejects a release defect with a concrete replay workload.
 These finite schedules do not prove eventual completion for all executions.
 The report records queries, source identities, tool identities, trust, and cost.
 The checking budget is 60 seconds after the experiment package build.
-One Linux sample uses 468 scheduler executions and 252 distinct replay paths.
+One Linux sample uses 676 scheduler executions.
 It reaches at most four contention choices per run.
-Native runs reach at most 39 scheduler steps. Evaluator runs reach at most 41.
-Checking takes 17.97 seconds. The cached package build takes 4.58 seconds.
-A cold package build takes 35.91 seconds.
+Both engines reach at most 36 scheduler steps.
+Checking takes 32.47 seconds. The cached package build takes 3.32 seconds.
+The zero-, one-, and two-preemption protocol scopes contain 1, 3, and 5 distinct paths.
+Each path set matches the same bound applied to the complete protocol schedule set.
 These measurements apply to this finite experiment on this host.
+The live file check injects a directory sync error after replacement.
+The file retains the complete new bytes when the operation returns an error.
+Separate process termination checks stop at file sync and directory sync.
+They retain the previous file or the complete new file, respectively.
+These checks do not establish power-loss behavior or application journal recovery.
 These results do not establish an inductive proof or correctness for other programs.
 
 ### Application recovery comparison
@@ -223,6 +230,10 @@ python3 scripts/proof-experiment.py --recovery
 
 The report lives in `examples/proof/build/recovery/summary.json`.
 Each run uses a new scratch directory. It retains logs and replay workloads.
+Each source graph uses one evaluator server. Each request runs in an isolated child.
+The report records graph identities, startup cost, request counts, and request cost.
+Each path records native execution, evaluator execution, and comparison cost.
+The script stops all owned servers when it completes or fails.
 The script selects exact function bodies from the editor recovery code and its helpers.
 It compiles these bodies with the existing compiler.
 It exports the evaluator graph through the existing compiler verification modules.
@@ -235,9 +246,10 @@ One pending source write runs before journal recovery.
 Two further recovery attempts check completion and repeated recovery.
 Four more inputs cancel this operation in a worker fiber.
 The caller waits for worker entry before cancellation.
-External edits during recovery and live process termination remain unchecked.
+External edits during recovery remain unchecked.
+Separate live checks stop the process at recovery write boundaries.
 
-Faults cover no fault or one file failure or interrupted write at calls 1 through 16.
+Faults cover no fault or one file failure, interrupted write, or error after replacement at calls 1 through 16.
 Setup does not consume the fault bound.
 The execution limit is 2048. Each driver has a 1000-step limit.
 The replay record retains every contention choice.
@@ -246,14 +258,25 @@ Replay rejects missing, additional, or unavailable recorded choices.
 The 16-point schedule sampling policy stays separate from replay storage.
 Bounded paths compare exact scheduler choices, timelines, claims, and author rule execution.
 They also compare evaluator and native terminal verdicts.
-The sequential sub-scope covers 132 executions.
-The complete application result stays incomplete when the checking budget ends.
+The sequential sub-scope covers 196 executions.
+The complete application result stays incomplete when the time or execution budget ends.
+The checker also explores separate scopes with zero, one, and two preemptions.
+A preemption selects another fiber when the preceding fiber remains runnable.
+A switch after blocking does not consume this bound.
+Each scope has its own 60-second and 2048-execution limits.
+The report keeps each verdict and its exact bounds separate.
+The wider exhaustive scope remains required and can remain incomplete.
+Each replay rejects a choice outside its declared preemption bound.
+The small protocol compares bounded paths with its complete schedule set.
 The report retains the number of pending scheduler prefixes.
 
-Both methods use the same author rules and a 60-second checking limit per source variant.
+The default fuzz and wider finite methods use the same author rules.
+Each method has a 60-second checking limit per source variant.
 Build time stays separate. Ordinary fuzzing uses 64 iterations and seed 42.
 Eight corpus inputs exercise acceptance, Undo, conflict, and cancellation.
 Six more corpus inputs check repeated recovery and conflict preservation.
+A duplicate workload checks the completed request guard.
+It compares all five operation files and an unrelated file before and after rejection.
 The comparisons read two sources, the journal, the operation record, and the Undo state.
 They compare file presence and contents. A missing file differs from an empty file.
 Separate drivers keep observation reads out of the existing recovery fault paths.
@@ -265,15 +288,52 @@ Unexpected recovery errors reject an author rule. Tool failures stay incomplete.
 Its default search also includes repeated drives and persistent faults.
 The driver retains a pending operation when file access remains unavailable.
 The finite checker requires all six live assertions on each passing bounded path.
-The methods have different search scopes. Their elapsed times do not establish a speed advantage.
+The default fuzz and wider finite methods have different search scopes.
+Their elapsed times do not establish a speed advantage.
 
-One Linux sample checks 705 native executions and 705 exact replay paths.
-The 132 sequential paths pass. Cancellation paths reach 144 contention choices.
-The 60-second budget ends with more than 35000 scheduler prefixes pending.
-The 14 fault-free rule checks and exact engine comparisons take 1.21 seconds.
-Ordinary fuzzing takes 6.49 seconds. Its 15 required probes and 40 search probes pass.
-It detects all 24 sampled mutations. No sampled mutation remains incomplete.
-These sampled mutations affect fixture functions.
+The acceptance comparison uses the same source graph and rules in both methods.
+It uses inputs 0, 1, 4, and 5. They cover acceptance and conflicts, with optional interruption.
+Fault calls are exactly 1 and 9. Fault modes are fail, partial, and after replacement.
+Both methods permit at most one preemption and 1000 scheduler steps.
+Both methods use a 60-second limit and a 2048-execution limit.
+The exhaustive method explores every permitted choice in this scope.
+The sampled method uses the existing PCT scheduler with seed 42.
+The checker requires each sampled path to occur in the completed exhaustive set.
+One Linux sample completes all 1286 exhaustive paths in 33.44 seconds.
+The sampled method runs 2048 executions in 48.22 seconds.
+It reaches 112 distinct paths. All occur in the completed exhaustive set.
+Undo and other fault calls remain outside this completed scope.
+The report gives each rule its method, verdict, bounds, and open obligations.
+An executed rule does not establish specification completeness.
+
+The live recovery check uses the selected application functions on the host filesystem.
+It checks two conflict states and every file sync and directory sync in acceptance and Undo recovery.
+Each boundary permits process termination or an error after replacement.
+Restart completes recovery. Repeated recovery preserves the five operation files.
+The live check completes 23 cases.
+The report retains source identities, native identities, logs, and file contents.
+Power loss, external edits during recovery, and temporary file cleanup remain open.
+This check does not run the complete IDE.
+
+The duplicate rule workflow records its exact source and one scenario driver.
+A guard defect produces an ordinary replay workload.
+The report records build, native check, evaluator comparison, and replay costs.
+These command costs do not measure human writing time or usefulness.
+
+One Linux sample checks 2048 native executions and exact replay paths.
+The 196 sequential paths pass. Cancellation paths reach 144 contention choices.
+Checking takes 53.42 seconds and reaches the execution limit.
+117268 scheduler prefixes remain pending.
+The zero-preemption scope completes 392 paths in 9.77 seconds.
+It reaches all three file fault outcomes. It does not reach interruption during recovery.
+The one- and two-preemption scopes reach their execution limits.
+Both deliberate defects fail in all three scopes.
+These results do not establish cancellation safety for all executions.
+The 15 fault-free rule checks and exact engine comparisons take 0.47 seconds.
+Ordinary fuzzing takes 16.38 seconds. Its 16 required probes and 40 search probes pass.
+It detects 15 sampled mutations. Nine sampled mutations are inert.
+No sampled mutation survives or remains incomplete.
+These sampled mutations affect the fixture and selected application functions.
 Three direct mutation checks exercise application helpers.
 They corrupt field lookup and path guards.
 Their setup passes. Each check rejects the recovery error in both engines.
@@ -284,11 +344,18 @@ The endpoint rules pass this defect. The file comparison rejects it in both engi
 The other clears the Undo state when the journal is empty.
 The repeated recovery rule rejects it in both engines.
 Ordinary native replay reproduces both author rule failures.
+Two further direct checks alter the completed request guard.
+One permits a duplicate request. The duplicate rejection rule rejects it.
+The other changes an unrelated file before rejection. The file comparison rejects it.
+Both engines reject each defect. Ordinary native replay reproduces each failure.
 Each direct check reports build, native check, evaluator comparison, and replay time.
-The two added defect builds take 4.34 and 4.38 seconds in this sample.
-Their native checks take less than 0.01 seconds each.
-Their evaluator comparisons take 0.08 seconds each.
-Their ordinary native replays take 0.22 and 0.21 seconds.
+The duplicate workflow has 12 source lines and three author assertions.
+Two assertions check the duplicate result and preserved files.
+The third rejects unexpected recovery errors. Expected file faults leave recovery pending.
+Its defect build takes 4.24 seconds in this sample.
+Its native check takes less than 0.01 seconds.
+Its evaluator comparison takes 0.09 seconds.
+Its ordinary native replay takes 0.22 seconds.
 These times exclude human effort to write or understand the rules.
 One host sample does not establish a general cost bound.
 Both methods reject a missing-write defect and an external-overwrite defect.

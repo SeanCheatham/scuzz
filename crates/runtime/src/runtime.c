@@ -5,6 +5,7 @@
 #include "rt_util.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <poll.h>
 #include <pthread.h>
@@ -3048,6 +3049,7 @@ typedef struct Sched {
   Fiber *pollers;
   Fiber *root;
   Fiber *current;
+  Fiber *previous;
   Fiber *forked_live;
   Fiber *all_fibers;
   int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
@@ -3056,6 +3058,8 @@ typedef struct Sched {
   int pct_k;         /* change-points used (0..7) */
   int32_t pct_low;   /* next demotion priority (0, -1, -2, ...) */
   int pct_contention; /* 1-based count of ready_count>1 picks */
+  int preemptions;
+  int preemption_limit;
   int pct_change[SZ_PCT_K_MAX];
   int32_t *replay; /* recorded picks for this run */
   int replay_n;         /* recorded pick count; 0 = no replay */
@@ -3240,6 +3244,7 @@ static void pct_init_changes(Sched *s) {
 
 static void sched_arm_from_env(Sched *s) {
   const char *env = getenv("SCUZZ_SCHED_SEED");
+  const char *limit = getenv("SCUZZ_PREEMPT_LIMIT");
   const char *d_s;
   const char *k_s;
   int d;
@@ -3252,6 +3257,18 @@ static void sched_arm_from_env(Sched *s) {
   s->pct_k = 0;
   s->pct_low = 0;
   s->pct_contention = 0;
+  s->preemption_limit = -1;
+  if (limit && limit[0]) {
+    char *end;
+    long value;
+    errno = 0;
+    value = strtol(limit, &end, 10);
+    if (!s->bounded || errno || end == limit || *end || value < 0 || value > INT_MAX)
+      sz_panic("invalid simulation preemption bound");
+    s->preemption_limit = (int)value;
+    if (!env)
+      env = "0";
+  }
   if (!env)
     return;
   /* Present (including "0") arms PCT; absent keeps FIFO. */
@@ -3601,6 +3618,14 @@ static Fiber *ready_find_ordinal(Sched *s, int32_t ord) {
   return NULL;
 }
 
+static Fiber *ready_previous(const Sched *s) {
+  Fiber *f;
+  for (f = s->ready_head; f; f = f->ready_next)
+    if (f == s->previous)
+      return f;
+  return NULL;
+}
+
 /* Record every permitted choice before the scheduler removes a fiber. */
 static void sched_choices(const Sched *s, int end, int steps, int ok) {
   const char *path = getenv("SCUZZ_SCHED_CHOICES_DUMP");
@@ -3615,12 +3640,22 @@ static void sched_choices(const Sched *s, int end, int steps, int ok) {
     fprintf(out, "end %s %d %d %d %d %d\n",
             s->pick_name[0] ? s->pick_name : "-", s->pct_contention,
             steps, (int)g_fiber_ordinal, ok, s->bounded);
+    fprintf(out, "preempt-end %s %d %d\n",
+            s->pick_name[0] ? s->pick_name : "-", s->preemptions,
+            s->preemption_limit);
   } else {
+    Fiber *previous = ready_previous(s);
     fprintf(out, "choice %s %d", s->pick_name[0] ? s->pick_name : "-",
             s->pct_contention);
     for (f = s->ready_head; f; f = f->ready_next)
-      fprintf(out, " %d", (int)f->ordinal);
+      if (!previous || s->preemption_limit < 0 ||
+          s->preemptions < s->preemption_limit || f == previous)
+        fprintf(out, " %d", (int)f->ordinal);
     fputc('\n', out);
+    fprintf(out, "preempt %s %d %d %d %d\n",
+            s->pick_name[0] ? s->pick_name : "-", s->pct_contention,
+            previous ? (int)previous->ordinal : 0, s->preemptions,
+            s->preemption_limit);
   }
   if (ferror(out)) {
     fclose(out);
@@ -3636,6 +3671,7 @@ static void sched_choices(const Sched *s, int end, int steps, int ok) {
  * fiber that is not ready marks drift. */
 static Fiber *ready_dequeue(Sched *s) {
   Fiber *f;
+  Fiber *previous;
   int n;
   if (!s->ready_head)
     return NULL;
@@ -3645,6 +3681,7 @@ static Fiber *ready_dequeue(Sched *s) {
   if (n <= 1)
     return ready_dequeue_fifo(s);
   s->pct_contention++;
+  previous = ready_previous(s);
   sched_choices(s, 0, 0, 0);
   if (pct_is_change(s, s->pct_contention)) {
     f = ready_highest(s);
@@ -3656,14 +3693,20 @@ static Fiber *ready_dequeue(Sched *s) {
   if (s->pct_contention <= s->replay_n) {
     int32_t want = s->replay[s->pct_contention - 1];
     f = ready_find_ordinal(s, want);
-    if (!f) {
+    if (!f || (previous && s->preemption_limit >= 0 &&
+               s->preemptions >= s->preemption_limit && f != previous)) {
       s->drift_step = s->pct_contention;
       s->drift_want = want;
       return NULL;
     }
+  } else if (previous && s->preemption_limit >= 0 &&
+             s->preemptions >= s->preemption_limit) {
+    f = previous;
   } else {
     f = ready_highest(s);
   }
+  if (previous && f != previous)
+    s->preemptions++;
   const char *dump = getenv("SCUZZ_SCHED_PICKS_DUMP");
   if (dump && dump[0]) {
     if (s->pick_n == s->pick_cap) {
@@ -4989,6 +5032,7 @@ static SzIoResult run_io(SzIo *root) {
 
   memset(&sched, 0, sizeof(sched));
   snprintf(sched.pick_name, sizeof sched.pick_name, "%s", g_pick_run_name);
+  sched.bounded = bounded;
   sched_arm_from_env(&sched);
   g_sched = &sched;
   sched.bounded = bounded;
@@ -5018,6 +5062,7 @@ static SzIoResult run_io(SzIo *root) {
           sz_panic("simulation exceeds 1000000 scheduler steps");
         sched.current = f;
         step_fiber(&sched, f);
+        sched.previous = f->state == FIB_READY ? f : NULL;
         sched.current = NULL;
         /* Drain ready (including cancel finalizers) before exiting on root done. */
         continue;

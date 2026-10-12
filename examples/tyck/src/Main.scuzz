@@ -1765,7 +1765,7 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  resultBindings() && resultFieldBindings() && resultListBindings() && resultLiveUse() && totalBindingPatterns() && effectBindingTypes() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
+  enumCaseNames() && privateRecords() && recordCopyTypes() && resultBindings() && resultFieldBindings() && resultListBindings() && resultLiveUse() && totalBindingPatterns() && effectBindingTypes() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
 
 def closedMatchCoverage(): Bool =
   List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()
@@ -2343,7 +2343,7 @@ def factsTier(): Bool =
 """), Verify.noEn(), 0) == ""
 
 def floatFieldDriveGuard(): Bool =
-  !Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])], "")]) && !Verify.friendlyTy("Outer", [En(true, "Outer", [], [EnCase("Outer", [Param("inner", "Box", "", "")])], ""), En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])], "")]) && !Verify.friendlyTy("Box[Float]", [En(true, "Box", ["T"], [EnCase("Box", [Param("value", "T", "", "")])], "")]) && Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Int", "", "")])], "")]) && Verify.friendlyTy("Term", [En(false, "Term", [], [EnCase("N", [Param("n", "Int", "", "")]), EnCase("Add", [Param("left", "Term", "", ""), Param("right", "Term", "", "")])], "")])
+  !Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])], "", false)]) && !Verify.friendlyTy("Outer", [En(true, "Outer", [], [EnCase("Outer", [Param("inner", "Box", "", "")])], "", false), En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])], "", false)]) && !Verify.friendlyTy("Box[Float]", [En(true, "Box", ["T"], [EnCase("Box", [Param("value", "T", "", "")])], "", false)]) && Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Int", "", "")])], "", false)]) && Verify.friendlyTy("Term", [En(false, "Term", [], [EnCase("N", [Param("n", "Int", "", "")]), EnCase("Add", [Param("left", "Term", "", ""), Param("right", "Term", "", "")])], "", false)])
 
 def factsSearch(seed: Int): Bool =
   Str.startsWith(Verify.generatedDrive(Verify.parseVerify(factsSrc()), Verify.noEn(), seed), "drive gen ")
@@ -2413,6 +2413,39 @@ def moduleRejected(reverse: Bool): Bool =
     defs = List.take(Cases.moduleFiles(0, reverse), 2)
   } yield Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(): A.Box[String] = B.Box(\"b\", \"a\")"))), "does not match declared A.Box[String]") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(x: Box[String]): Int = 1"))), "ambiguous name Box") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(): Int = A.read(B.make())"))), "expected A.Choice[String]") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(c: A.Choice[String]): Int = c match { case B.Choice.End => 1 case _ => 0 }"))), "does not belong to A.Choice") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(c: B.Choice[Int]): Int = c match { case B.Choice.End => 0 }"))), "non-exhaustive match on B.Choice[Int]") && Str.contains(Check.checkFiles(List.append(defs, ("Main", """def accept(x: Any): Int = 1
 def wrong(): Int = accept(A.Marker())"""))), "expected Any")
+
+def privateRecordDomain(): String =
+  "record Amount private(value: Int)\nrecord Box[A] private(item: A)\nrecord Empty private()\nrecord Plain(value: Int, label: String = \"Amount(\")\ntype PublicAmount = Amount\ndef make(n: Int): Result[String, Amount] = if (n > 0) Result.Ok(Amount(n)) else Result.Err(\"invalid amount\")\ndef box[A](item: A): Box[A] = Box(item)\ndef empty(): Empty = Empty()\ndef preserve(value: Amount): Amount = value.copy(value = value.value)\n"
+
+def privateRecords(): Bool =
+  for {
+    domain = privateRecordDomain()
+    valid = """import Domain.Amount as Quantity
+def value(amount: Quantity): Int = amount match { case Quantity(n) => n }
+def generic[A](box: Domain.Box[A]): A = box.item
+def public(): Domain.Plain = Domain.Plain(1).copy(value = 2)
+"""
+    invalid = ["def bad(): Domain.Amount = Domain.Amount(-1)", """import Domain.Amount as Quantity
+def bad(): Quantity = Quantity(-1)""", "def bad(): Domain.PublicAmount = Domain.Amount(-1)", "def bad(): Domain.Box[Int] = Domain.Box(-1)", "def bad(): Domain.Empty = Domain.Empty()", "def bad(): Domain.Empty = Domain.Empty", "def bad(a: Domain.Amount): Domain.Amount = a.copy(value = -1)", "def bad(a: Domain.Box[Int]): Domain.Box[Int] = a.copy(item = -1)", "def bad(a: Domain.PublicAmount): Domain.PublicAmount = a.copy(value = -1)"]
+    formatted = Parse.pretty(Parse.parse(Lexer.lex(domain)))
+  } yield Check.checkFiles([("Domain", domain), ("Main", valid)]) == "[]" && List.forall(invalid, source => Str.contains(Check.checkFiles([("Domain", domain), ("Main", source)]), "private record")) && Str.contains(formatted, "record Amount private(") && Str.contains(formatted, "\"Amount(\"") && Parse.pretty(Parse.parse(Lexer.lex(formatted))) == formatted && !Verify.friendlyTy("Amount", Parse.parse(Lexer.lex(domain)).enums)
+
+def enumCaseNames(): Bool =
+  List.forall(["""enum E:
+  case""", """enum E:
+  case 1""", """enum E:
+  case case"""], source => Str.contains(Check.check(source), "unexpected token")) && Check.check("""enum E:
+  case First
+  case Second""") == "[]"
+
+def recordCopyTypes(): Bool =
+  for {
+    schema = """record Pair[A](item: A, count: Int)
+"""
+    valid = ["def copy(p: Pair[String]): Pair[String] = p.copy(count = 2)", "def copy(p: Pair[String]): Pair[String] = p.copy(\"ok\", count = 2)", "def copy(p: Pair[String]): Pair[String] = p.copy()"]
+    invalid = ["def copy(p: Pair[String]): Pair[String] = p.copy(item = 2)", "def copy(p: Pair[String]): Pair[String] = p.copy(count = \"bad\")", "def copy(p: Pair[String]): Pair[String] = p.copy(missing = 1)", "def copy(p: Pair[String]): Pair[String] = p.copy(count = 1, count = 2)", "def copy(p: Pair[String]): Pair[String] = p.copy(\"a\", item = \"b\")", "def copy(p: Pair[String]): Pair[String] = p.copy(\"a\", 1, 2)", "def copy(p: Pair[String]): Pair[String] = p.copy(count = 1, \"a\")"]
+  } yield List.forall(valid, source => Check.check(Str.concat(schema, source)) == "[]") && List.forall(invalid, source => Check.check(Str.concat(schema, source)) != "[]") && Str.contains(Check.checkFiles([("Domain", privateRecordDomain()), ("Main", """record Wrapper(value: Domain.Amount)
+def bad(a: Domain.Amount): Domain.Amount = Wrapper(a).copy(value = -1).value""")]), "expected Domain.Amount")
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else Str.concat("tyck-bad ", dumpFail()))
