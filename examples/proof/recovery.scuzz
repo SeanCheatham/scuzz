@@ -93,7 +93,7 @@ def duplicate(): IO[Unit] =
 def requestStart(mode: Int): IO[Unit] =
   IO.attempt(Cards.undo(root(mode))).flatMap(result => result match {
     case Result.Ok(_) => Property.assert("Undo request returns an expected error", true)
-    case Result.Err(error) => Property.assert("Undo request returns an expected error", expectedError(error) || Str.startsWith(error, "undo conflict:")).flatMap(_ => IO.println(error))
+    case Result.Err(error) => Property.assert("Undo request returns an expected error", expectedError(error) || error == "no accepted change to undo" || Str.startsWith(error, "undo conflict:")).flatMap(_ => IO.println(error))
   })
 
 def invalidRecords(): List[String] =
@@ -116,6 +116,29 @@ def invalidRecord(n: Int): IO[Unit] =
     retained <- Fs.read("unrelated.txt")
     _ <- Property.assert("invalid accepted record preserves operation files", before == after && unrelated == retained)
     _ <- Property.assert("invalid accepted record returns an error", result match { case Result.Err(error) => error == "invalid accepted record" case Result.Ok(_) => false })
+  } yield ()).handleErrorWith(error => if (expectedError(error)) IO.println("recovery remains pending") else IO.fail(error))
+
+def invalidJournals(): List[String] =
+  List.concat(invalidRecords(), [text(Json.set(prepared(0), "card", Json.Str(Hash.sha256("another card")))), text(Json.set(prepared(0), "decision", Json.Str("baseline")))])
+
+def journalSnapshot(): IO[String] =
+  for {
+    entries <- Fs.walk(root(14))
+    paths = List.sort(List.map(List.filter(entries, entry => !entry._2), entry => entry._1))
+    files <- IO.foreach(paths, path => Fs.read(Fs.join(root(14), path)).map(contents => Json.Obj([("path", Json.Str(path)), ("contents", Json.Str(contents))])))
+  } yield text(Json.Arr(files))
+
+def invalidJournal(n: Int): IO[Unit] =
+  (for {
+    _ <- Fs.write("recovery-14/.scuzz/ide/journal.json", List.at(invalidJournals(), n))
+    before <- journalSnapshot()
+    unrelated <- Fs.read("unrelated.txt")
+    result <- IO.attempt(Cards.recover(root(14)))
+    _ <- result match { case Result.Err(error) => if (expectedError(error)) IO.fail(error) else IO.pure(()) case Result.Ok(_) => IO.pure(()) }
+    after <- journalSnapshot()
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("invalid journal preserves operation files", before == after && unrelated == retained)
+    _ <- Property.assert("invalid journal returns an error", result match { case Result.Err(error) => error == "invalid recovery journal" case Result.Ok(_) => false })
   } yield ()).handleErrorWith(error => if (expectedError(error)) IO.println("recovery remains pending") else IO.fail(error))
 
 def requestCanceled(mode: Int): IO[Unit] =

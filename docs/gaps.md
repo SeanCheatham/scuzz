@@ -76,6 +76,9 @@ Undo validates the accepted record before journal creation.
 The check covers record identity, decision, write field types, paths, and file presence.
 With an empty journal, 19 malformed records preserve every operation file.
 The live check also compares all workspace files.
+Recovery uses the same operation shape check.
+The operation identity must match its card and decision before recovery changes files.
+The malformed journal scope compares all files in its separate workspace.
 
 ### Formal verification
 
@@ -83,7 +86,7 @@ The live check also compares all workspace files.
 
 **Evidence.** The optional [formal checks](vision.md#formal-verification-methods) reuse author rules. One pure invariant covers all signed 64-bit inputs. A finite effect protocol checks cancellation and interrupted writes. Both engines replay the concrete counterexamples. The application recovery check uses exact editor function bodies. Its sequential scope passes. Both finite exploration and ordinary search reject two deliberate defects. Long cancellation paths retain exact replay records. Fixed setup inputs keep helper mutations out of setup. Recovery corpus inputs exercise the mutation checks. The zero-preemption recovery scope completes 392 paths. It does not reach interruption during recovery. Wider application scopes still exceed their execution budgets. Shared evaluator servers remove repeated startup. The expanded fault scope includes errors after file replacement. Separate live file checks cover directory sync errors and process termination before and after replacement. Live recovery checks stop the process or report a directory sync error at each recovery write boundary. Restart completes acceptance and Undo recovery. Conflicts preserve operation files. Power-loss behavior and concurrent external edits remain open. Run instructions and measured limits live in `developer-environment.md`.
 
-The acceptance scope completes all 1286 paths. The prepared Undo scope completes all 1300 paths. The complete Undo request scope completes all 567 paths. These scopes reach interruption and all three file fault outcomes. The sampled methods use the same bounds and rules. Their distinct paths occur in the completed exhaustive sets. Both methods reject both deliberate defects in each scope. All 13 direct defect checks produce named author rule failures and native replay evidence. The duplicate workflow records its exact source, identities, and command costs.
+The acceptance scope completes all 1286 paths. The prepared Undo scope completes all 1300 paths. The complete Undo request scope completes all 567 paths. These scopes reach interruption and all three file fault outcomes. The sampled methods use the same bounds and rules. Their distinct paths occur in the completed exhaustive sets. Both methods reject both deliberate defects in each scope. All 14 direct defect checks produce named author rule failures and native replay evidence. The duplicate workflow records its exact source, identities, and command costs.
 
 The separate Undo scope completes 1300 paths. It uses accepted files and conflict states, with optional interruption. Each passing path executes all six recovery rules. It also checks repeated recovery across five operation files and preserves an unrelated file. Both methods use the same bounds and author rules. The sampled paths occur in the completed exhaustive set. Both methods reject missing writes and external overwrites. Two direct Undo defects produce named rule failures in both engines and ordinary native replay.
 

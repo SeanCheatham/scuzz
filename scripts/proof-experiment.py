@@ -42,6 +42,11 @@ INVALID_RECORD_RULES = {
     'invalid accepted record preserves operation files',
 }
 
+INVALID_JOURNAL_RULES = {
+    'invalid journal returns an error',
+    'invalid journal preserves operation files',
+}
+
 
 class IncompleteCheck(Exception):
     """A resource limit or missing evidence prevents a result."""
@@ -915,7 +920,7 @@ def recovery_sources():
     selected = {
         'examples/editor/src/Cards.scuzz': ['text', 'str', 'pairs', 'safePath', 'need', 'inside', 'storage',
             'setupStorage', 'propsOf', 'sourceWrites', 'matches', 'writeOne', 'recordPath', 'finish',
-            'readOptional', 'recover', 'undoOperation', 'undecided', 'undo', 'validAccepted'],
+            'readOptional', 'recover', 'undoOperation', 'undecided', 'undo', 'validAccepted', 'validOperation'],
         'examples/editor/generation/src/Proposal.scuzz': ['str', 'pairsJson', 'pairs', 'safePath',
             'relativePath', 'pathChars', 'checkInside', 'inside'],
         'examples/editor/generation/src/Models.scuzz': ['need'],
@@ -964,7 +969,7 @@ def recovery_package(cli, sources, output, variant):
         (package / 'src' / (name + '.scuzz')).write_text(source)
     setup = ['def setup(): IO[Unit] =', '  for {']
     before, after, addition, accepted, undone = recovery_documents()
-    for mode in (0, 1, 2, 3, 6, 7, 10, 11, 12):
+    for mode in (0, 1, 2, 3, 6, 7, 10, 11, 12, 14):
         root = f'recovery-{mode}'
         storage = root + '/.scuzz/ide'
         for path in (root + '/src', storage + '/cards', storage + '/records'):
@@ -988,7 +993,8 @@ def recovery_package(cli, sources, output, variant):
         'def duplicate(): IO[Unit] = Recovery.duplicate()\n\n'
         'def undo(n: Int where n == 2 || n == 3 || n == 6 || n == 7): IO[Unit] = Recovery.undo(n)\n\n'
         'def request(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.request(n)\n\n'
-        'def invalidRecord(n: Int where n >= 0 && n < 19): IO[Unit] = Recovery.invalidRecord(n)\n')
+        'def invalidRecord(n: Int where n >= 0 && n < 19): IO[Unit] = Recovery.invalidRecord(n)\n\n'
+        'def invalidJournal(n: Int where n >= 0 && n < 21): IO[Unit] = Recovery.invalidJournal(n)\n')
     (package / 'recovery.scuzz_verify').write_text(
         'def externalBytes(t: Timeline): Verdict =\n'
         '  Verdict.every(t, i => !(Timeline.driveHas(t, i, "recover") || Timeline.driveHas(t, i, "undo") || Timeline.driveHas(t, i, "request")) || '
@@ -1030,10 +1036,18 @@ def recovery_package(cli, sources, output, variant):
         '[fuzz]\nschedule_seed="10"\nfault_seed="82"\n'
         'schedule_picks=["setup 1:-", "invalidRecord 2:-", "request 3:-"]\n'
         'events=["drive invalidRecord 0", "drive request 0"]\n')
+    (package / 'corpus/repeated-request-fault.toml').write_text(
+        '[fuzz]\nschedule_seed="14"\nfault_seed="118"\n'
+        'schedule_picks=["setup 1:-", "request 2:-", "request 3:-"]\n'
+        'events=["drive request 0", "drive request 0"]\n')
     for n in range(19):
         (package / f'corpus/invalid-record-{n}.toml').write_text(
             '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
             'events=' + json.dumps([f'drive invalidRecord {n}']) + '\n')
+    for n in range(21):
+        (package / f'corpus/invalid-journal-{n}.toml').write_text(
+            '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive invalidJournal {n}']) + '\n')
     (package / 'corpus/duplicate.toml').write_text('[fuzz]\nschedule_seed="0"\nfault_seed="0"\nevents=["drive duplicate"]\n')
     return package, package / 'build/recovery', probe
 
@@ -1270,6 +1284,8 @@ def live_recovery_checks(cli, sources, output):
         '    request <- Sys.getenv("SCUZZ_LIVE_REQUEST")\n'
         '    _ <- if (request == "inputs") '
         'IO.println(Recovery.text(Json.Arr(List.map(Recovery.invalidRecords(), value => Json.Str(value)))))\n'
+        '    else if (request == "journals") '
+        'IO.println(Recovery.text(Json.Arr(List.map(Recovery.invalidJournals(), value => Json.Str(value)))))\n'
         f'    else if (request == "undo") Cards.undo({json.dumps(str(root))})\n'
         f'    else Cards.recover({json.dumps(str(root))})\n'
         '  } yield ()\n')
@@ -1389,7 +1405,24 @@ def live_recovery_checks(cli, sources, output):
     assert conflict.returncode != 0 and 'undo conflict:' in conflict.stderr
     assert all_files() == initial
     requests.append(dict(kind='conflict', status='passed', contents=initial))
+    inputs = run(None, 0, 'live-invalid-journals', 'journals')
+    assert inputs.returncode == 0, inputs
+    documents = json.loads(inputs.stdout)
+    assert len(documents) == 21 and all(isinstance(value, str) for value in documents)
+    journals = []
+    for n, raw in enumerate(documents):
+        prepare(0)
+        (root / '.scuzz/ide/journal.json').write_text(raw)
+        (root / '.scuzz/ide/last.json').write_text(encoded(accepted))
+        (root / 'unrelated.txt').write_text('unrelated bytes')
+        initial = all_files()
+        result = run(None, 0, f'live-invalid-journal-{n}')
+        assert result.returncode != 0 and 'invalid recovery journal' in result.stderr, (n, result)
+        assert all_files() == initial, ('invalid recovery journal changes live files', n)
+        journals.append(dict(input=n, status='passed', contents=initial))
     return dict(status='passed', workloads=runs, file_outcomes=hooks,
+                journals=dict(status='passed', workloads=journals,
+                              scope='21 malformed journals; acceptance files and an existing accepted Undo state'),
                 requests=dict(status='passed', workloads=requests,
                               scope='19 malformed records; one complete request, one repeated request, and one conflict'),
                 native_sha256=digest(executable.read_bytes()),
@@ -1430,6 +1463,7 @@ def recovery_experiment(cli):
                               required_repeat_inputs=[0, 2], required_preserve_inputs=[1, 3, 5, 7],
                               required_undo_inputs=[2, 3, 6, 7], required_request_inputs=list(range(4)),
                               required_invalid_record_inputs=list(range(19)),
+                              required_invalid_journal_inputs=list(range(21)),
                               observed_files=['two sources', 'journal', 'operation record', 'Undo state'],
                               ordinary_scope='the default search also includes repeated calls and persistent faults')
         report['live_recovery'] = live_recovery_checks(cli, sources, output)
@@ -1469,6 +1503,7 @@ def recovery_experiment(cli):
                 inputs += [('preserve', n) for n in (1, 3, 5, 7)]
                 inputs += [('duplicate', None)] + [('undo', n) for n in (2, 3, 6, 7)] + [('request', n) for n in range(4)]
                 inputs += [('invalidRecord', n) for n in range(19)]
+                inputs += [('invalidJournal', n) for n in range(21)]
                 for driver, n in inputs:
                     directory = package / f'rule-{driver}-{n}'
                     witness = protocol_probe(executable, directory, driver, n, 0)
@@ -1480,6 +1515,8 @@ def recovery_experiment(cli):
                         assert REQUEST_RULES <= set(witness['executed_properties'])
                     elif driver == 'invalidRecord':
                         assert INVALID_RECORD_RULES <= set(witness['executed_properties'])
+                    elif driver == 'invalidJournal':
+                        assert INVALID_JOURNAL_RULES <= set(witness['executed_properties'])
                     elif driver == 'undo':
                         assert UNDO_RULES <= set(witness['executed_properties'])
                     elif driver == 'repeat':
@@ -1546,6 +1583,9 @@ def recovery_experiment(cli):
                 assert row['sampled']['search_status'] == 'failed', 'ordinary search does not reject the deliberate defect'
         report['mutation_regressions'] = {}
         regressions = [
+            ('journal-identity-guard', 'Cards',
+             '_ <- need(validOperation(op), "invalid recovery journal")',
+             '_ <- IO.pure(())', 'invalidJournal', 4, 'invalid journal preserves operation files'),
             ('accepted-record-guard', 'Cards',
              '_ <- need(validAccepted(prior), "invalid accepted record")',
              '_ <- IO.pure(())', 'invalidRecord', 0, 'invalid accepted record preserves operation files'),
