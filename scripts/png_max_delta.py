@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print the max per-channel delta between two RGBA PNGs.
+"""Print the maximum channel difference between two static RGBA PNGs.
 
 Exit 1 when the delta exceeds the bound. Exit 2 on a bad argument or a bad PNG.
 """
@@ -22,55 +22,86 @@ def paeth(a, b, c):
 
 
 def read_png(path):
-    data = open(path, "rb").read()
+    with open(path, "rb") as source:
+        data = source.read()
     if data[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError("not a png: " + path)
+        raise ValueError("not a PNG: " + str(path))
     pos = 8
-    width = 0
-    height = 0
-    idat = b""
-    while pos + 8 <= len(data):
-        length = struct.unpack(">I", data[pos : pos + 4])[0]
-        kind = data[pos + 4 : pos + 8]
-        chunk = data[pos + 8 : pos + 8 + length]
-        pos += 12 + length
+    header = None
+    idat = []
+    idat_closed = False
+    palette = False
+    ended = False
+    while pos < len(data):
+        if pos + 12 > len(data):
+            raise ValueError("truncated PNG chunk")
+        length, kind = struct.unpack(">I4s", data[pos : pos + 8])
+        end = pos + 12 + length
+        if length > 0x7FFFFFFF or end > len(data):
+            raise ValueError("invalid PNG chunk length")
+        chunk = data[pos + 8 : end - 4]
+        crc = struct.unpack(">I", data[end - 4 : end])[0]
+        if not kind.isalpha() or kind[2] & 32:
+            raise ValueError("invalid PNG chunk type")
+        if zlib.crc32(kind + chunk) != crc:
+            raise ValueError("invalid PNG chunk checksum")
+        pos = end
+        if header is None and kind != b"IHDR":
+            raise ValueError("PNG header must be first")
         if kind == b"IHDR":
-            width, height = struct.unpack(">II", chunk[:8])
-            if chunk[8] != 8 or chunk[9] != 6:
-                raise ValueError("png is not 8-bit rgba: " + path)
+            if header is not None or length != 13:
+                raise ValueError("invalid PNG header")
+            header = struct.unpack(">IIBBBBB", chunk)
+            width, height, depth, color, compression, filtering, interlace = header
+            if not (0 < width <= 0x7FFFFFFF and 0 < height <= 0x7FFFFFFF):
+                raise ValueError("invalid PNG dimensions")
+            if (depth, color, compression, filtering, interlace) != (8, 6, 0, 0, 0):
+                raise ValueError("PNG must use 8-bit RGBA without interlacing")
         elif kind == b"IDAT":
-            idat += chunk
+            if idat_closed:
+                raise ValueError("PNG image chunks must be consecutive")
+            idat.append(chunk)
         elif kind == b"IEND":
+            if length or not idat:
+                raise ValueError("invalid PNG end chunk")
+            ended = True
             break
-    raw = zlib.decompress(idat)
+        elif kind == b"PLTE":
+            if palette or idat or not length or length > 768 or length % 3:
+                raise ValueError("invalid PNG palette")
+            palette = True
+        elif kind in (b"acTL", b"fcTL", b"fdAT", b"tRNS") or not kind[0] & 32:
+            raise ValueError("unsupported PNG chunk: " + kind.decode("ascii"))
+        if kind != b"IDAT" and idat:
+            idat_closed = True
+    if not ended or pos != len(data):
+        raise ValueError("missing PNG end or data after the end")
+    inflater = zlib.decompressobj()
+    raw = inflater.decompress(b"".join(idat))
     stride = width * 4
+    if not inflater.eof or len(raw) != height * (stride + 1):
+        raise ValueError("invalid PNG image data length")
+    # PNG permits unused bytes after the complete zlib stream.
     rows = []
-    index = 0
     prev = bytearray(stride)
-    for _y in range(height):
+    for index in range(0, len(raw), stride + 1):
         filt = raw[index]
-        index += 1
-        row = bytearray(raw[index : index + stride])
-        index += stride
-        if filt == 1:
+        if filt > 4:
+            raise ValueError("invalid PNG filter")
+        row = bytearray(raw[index + 1 : index + 1 + stride])
+        if filt:
             for x in range(stride):
                 left = row[x - 4] if x >= 4 else 0
-                row[x] = (row[x] + left) & 255
-        elif filt == 2:
-            for x in range(stride):
-                row[x] = (row[x] + prev[x]) & 255
-        elif filt == 3:
-            for x in range(stride):
-                left = row[x - 4] if x >= 4 else 0
-                row[x] = (row[x] + ((left + prev[x]) // 2)) & 255
-        elif filt == 4:
-            for x in range(stride):
-                left = row[x - 4] if x >= 4 else 0
-                up = prev[x]
-                ul = prev[x - 4] if x >= 4 else 0
-                row[x] = (row[x] + paeth(left, up, ul)) & 255
-        elif filt != 0:
-            raise ValueError("bad png filter")
+                if filt == 1:
+                    predictor = left
+                elif filt == 2:
+                    predictor = prev[x]
+                elif filt == 3:
+                    predictor = (left + prev[x]) // 2
+                else:
+                    upper_left = prev[x - 4] if x >= 4 else 0
+                    predictor = paeth(left, prev[x], upper_left)
+                row[x] = (row[x] + predictor) & 255
         rows.append(bytes(row))
         prev = row
     return width, height, b"".join(rows)
@@ -81,12 +112,7 @@ def delta(path_a, path_b):
     wb, hb, pb = read_png(path_b)
     if wa != wb or ha != hb or len(pa) != len(pb):
         raise ValueError("png size differs")
-    worst = 0
-    for a, b in zip(pa, pb):
-        d = abs(a - b)
-        if d > worst:
-            worst = d
-    return worst
+    return max(abs(a - b) for a, b in zip(pa, pb))
 
 
 def main():
@@ -95,6 +121,8 @@ def main():
         return 2
     try:
         bound = int(sys.argv[1])
+        if bound < 0:
+            raise ValueError("tolerance cannot be negative")
         worst = delta(sys.argv[2], sys.argv[3])
     except (OSError, ValueError, zlib.error) as err:
         sys.stderr.write(str(err) + "\n")

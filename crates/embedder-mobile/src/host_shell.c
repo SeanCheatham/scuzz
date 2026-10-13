@@ -37,7 +37,7 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   return 0;
 }
 
-/* Host shell stays a single-frame smoke; Ui.run exits the live Mobile loop. */
+/* The host shell exits the Mobile loop after one frame. */
 int sz_mobile_alive(void) { return 0; }
 
 void sz_mobile_set_keyboard(int visible) {
@@ -76,23 +76,10 @@ void sz_mobile_shutdown(void) {
     fprintf(stderr, "scuzz mobile: shutdown\n");
 }
 
-static char *clip_dup(const char *s) {
-  size_t n;
-  char *out;
-  if (!s)
-    return NULL;
-  n = strlen(s);
-  out = (char *)malloc(n + 1);
-  if (!out)
-    return NULL;
-  memcpy(out, s, n + 1);
-  return out;
-}
-
 int sz_mobile_clipboard_set(const char *text) {
   free(g_clip);
-  g_clip = clip_dup(text ? text : "");
+  g_clip = strdup(text ? text : "");
   return g_clip ? 1 : 0;
 }
 
-char *sz_mobile_clipboard_get(void) { return g_clip ? clip_dup(g_clip) : NULL; }
+char *sz_mobile_clipboard_get(void) { return g_clip ? strdup(g_clip) : NULL; }

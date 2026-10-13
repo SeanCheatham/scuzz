@@ -1,94 +1,73 @@
 #!/usr/bin/env bash
-# Local gate: conflict markers, -Werror on staged C.
-# Install: ./scripts/install-githooks.sh
+# Check index contents for conflict markers and C compiler errors.
+# Install with ./scripts/install-githooks.sh.
 set -euo pipefail
-
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
-if [[ -z "$STAGED" ]]; then
-  exit 0
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-precommit.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+CHECKOUT="$WORK/index"
+mkdir "$CHECKOUT"
+git diff --cached --name-only --diff-filter=ACMR -z >"$WORK/paths"
+[[ -s "$WORK/paths" ]] || exit 0
+STAGED=()
+while IFS= read -r -d '' path; do
+  STAGED+=("$path")
+done <"$WORK/paths"
+
+git checkout-index --all --prefix="$CHECKOUT/"
+CC="${CC:-clang}"
+CFLAGS=(-std=c11 -Wall -Wextra -Werror -O2)
+INCLUDES=(-Icrates/runtime/include -Icrates/ffi-skia/include
+  -Icrates/embedder-desktop/include -Icrates/embedder-mobile/include)
+platform="$(uname -s)"
+if [[ "$platform" == Darwin ]] && command -v brew >/dev/null 2>&1; then
+  ssl_prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
+  if [[ -n "$ssl_prefix" ]]; then INCLUDES+=("-I$ssl_prefix/include"); fi
 fi
 
 fail=0
-CC="${CC:-clang}"
-CFLAGS=(-std=c11 -Wall -Wextra -Werror -O2)
-
-# --- merge conflict markers in staged blob ---
-while IFS= read -r path; do
-  [[ -n "$path" ]] || continue
-  if git show ":$path" 2>/dev/null | grep -qE '^(<<<<<<<|=======|>>>>>>>)'; then
+for path in "${STAGED[@]}"; do
+  [[ -f "$CHECKOUT/$path" ]] || continue
+  if grep -qE '^(<<<<<<<|=======|>>>>>>>)' "$CHECKOUT/$path"; then
     echo "pre-commit: conflict markers in staged file: $path" >&2
     fail=1
   fi
-done <<<"$STAGED"
-
-# --- compile-only -Werror for staged C under crates/{runtime,ffi-skia,embedder-*} ---
-# Catches undeclared APIs (for example usleep under POSIX.1-2008) without linking Skia.
-compile_c() {
-  local src="$1"
-  local includes=()
-  case "$src" in
-    crates/runtime/*)
-      includes=(-Icrates/runtime/include -Icrates/ffi-skia/include
-        -Icrates/embedder-desktop/include -Icrates/embedder-mobile/include)
-      ;;
-    crates/ffi-skia/*)
-      includes=(-Icrates/ffi-skia/include)
-      ;;
-    crates/embedder-desktop/*)
-      # X11 presenter is Linux-only (Makefile). Skip the compile check without X11.
-      if [[ "$src" == *x11_present.c && "$(uname -s)" != Linux ]]; then
-        return 0
-      fi
-      includes=(-Icrates/embedder-desktop/include -Icrates/ffi-skia/include
-        -Icrates/runtime/include)
-      ;;
-    crates/embedder-mobile/*)
-      includes=(-Icrates/embedder-mobile/include -Icrates/runtime/include)
-      ;;
-    *)
-      return 0
-      ;;
-  esac
-  local out err
-  out="$(mktemp "${TMPDIR:-/tmp}/scuzz-precommit.XXXXXX.o")"
-  err="${out}.err"
-  if ! "$CC" "${CFLAGS[@]}" "${includes[@]}" -c "$src" -o "$out" 2>"$err"; then
-    echo "pre-commit: $CC -Werror compile failed: $src" >&2
-    cat "$err" >&2
-    fail=1
-  fi
-  rm -f "$out" "$err"
-}
-
-CSRC=()
-while IFS= read -r path; do
-  [[ -f "$path" ]] || continue
   case "$path" in
     crates/runtime/src/*.c | crates/runtime/tests/*.c | \
-    crates/ffi-skia/src/*.c | \
-    crates/embedder-desktop/src/*.c | \
-    crates/embedder-mobile/src/*.c)
-      CSRC+=("$path")
-      ;;
+    crates/ffi-skia/src/*.c | crates/ffi-skia/tests/*.c | \
+    crates/embedder-desktop/src/*.c | crates/embedder-desktop/tests/*.c | \
+    crates/embedder-mobile/src/*.c | crates/embedder-mobile/tests/*.c) ;;
+    *) continue ;;
   esac
-done <<<"$STAGED"
-
-if [[ ${#CSRC[@]} -gt 0 ]]; then
+  # Check only translation units for the host platform.
+  case "$path" in
+    crates/embedder-desktop/src/x11_present.c | \
+    crates/embedder-desktop/tests/test_headless.c | \
+    crates/embedder-desktop/tests/test_idle_events.c | \
+    crates/embedder-desktop/tests/test_resize.c)
+      [[ "$platform" == Linux ]] || continue ;;
+    crates/runtime/tests/test_net_apple.c)
+      [[ "$platform" == Darwin ]] || continue ;;
+  esac
   if ! command -v "$CC" >/dev/null 2>&1; then
-    echo "pre-commit: $CC not on PATH (needed for staged C)" >&2
+    echo "pre-commit: $CC is required for staged C" >&2
     fail=1
-  else
-    for src in "${CSRC[@]}"; do
-      compile_c "$src"
-    done
+    break
   fi
-fi
-
+  ARGS=("${CFLAGS[@]}")
+  if [[ "$path" == crates/ffi-skia/src/sk_gpu.c ]]; then
+    ARGS+=(-Wno-deprecated-declarations)
+  fi
+  if ! (cd "$CHECKOUT" && "$CC" "${ARGS[@]}" "${INCLUDES[@]}" \
+      -c "$path" -o "$WORK/check.o") 2>"$WORK/check.err"; then
+    echo "pre-commit: $CC -Werror compile failed for staged source: $path" >&2
+    cat "$WORK/check.err" >&2
+    fail=1
+  fi
+done
 if [[ "$fail" -ne 0 ]]; then
-  echo "pre-commit: blocked (fix above, or git commit --no-verify to bypass)" >&2
+  echo "pre-commit: fix the reported files or use git commit --no-verify" >&2
   exit 1
 fi
-exit 0

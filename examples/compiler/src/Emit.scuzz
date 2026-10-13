@@ -140,14 +140,8 @@ def panicLoc2(file: String, loc: (Int, Int, Int, Int)): String =
     case (line, col, _, _) => Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.fromInt(col)))))
   }
 
-def panicLocExpr(files: List[(String, String)], e: Expr): String =
-  panicLocExprAt(files, fileIndex(files), e)
-
 def panicLocExprAt(files: List[(String, String)], lidx: Map[String, LineIndex], e: Expr): String =
   panicLocExpr2At(files, lidx, Parse.spanOf(e))
-
-def panicLocExpr2(files: List[(String, String)], sp: (String, Int)): String =
-  panicLocExpr2At(files, fileIndex(files), sp)
 
 def panicLocExpr2At(files: List[(String, String)], lidx: Map[String, LineIndex], sp: (String, Int)): String =
   sp match {
@@ -4351,9 +4345,6 @@ def emitTag(prefix: String, i: Int, scrut: String, tag: Int): String =
 def emitTagBr(prefix: String, i: Int, last: Bool): String =
   line(Str.concat("br i1 ", Str.concat(pct(ppre(prefix, i), Str.concat("eq", sid(i))), Str.concat(", label %", Str.concat(ppre(prefix, i), Str.concat("_m", Str.concat(sid(i), Str.concat(", label %", nextLab(prefix, i, last)))))))))
 
-def emitMatchedPat(pat: String, prefix: String, i: Int, scrut: String, ens: List[En]): String =
-  join(lab(Str.concat(ppre(prefix, i), Str.concat("_m", sid(i)))), join(emitPayload(pat, prefix, i, scrut, ens), emitMatchedEnd(pat, prefix, i)))
-
 def emitLiteralMatchedPat(pat: String, prefix: String, i: Int, scrut: String, ens: List[En], strs: Strs, last: Bool): String =
   join(lab(Str.concat(ppre(prefix, i), Str.concat("_m", sid(i)))), join(emitPayload(pat, prefix, i, scrut, ens), emitLiteralFields(splitPat(patBind(pat)), pat, prefix, i, ens, strs, last, 0)))
 
@@ -4401,12 +4392,6 @@ def literalFieldTestTo(pat: String, value: String, prefix: String, i: Int, tag: 
 
 def literalFieldValue(pat: String, field: String, prefix: String, i: Int, k: Int, ens: List[En]): String =
   if (hasComma(patBind(pat)) || namedMulti(pat, ens)) Str.concat("%", fieldStem(prefix, i, fieldIdx(field, k, payloadNames(ens, patCore(pat))), slotInt(payloadTys(ens, patCore(pat)), fieldIdx(field, k, payloadNames(ens, patCore(pat)))))) else Str.concat("%", bindStem(prefix, i, bindIsInt(pat, ens)))
-
-def emitLiteralField(pat: String, value: String, prefix: String, i: Int, k: Int, strs: Strs, last: Bool): String =
-  if (isStrPat(pat) || isIntPat(pat) || isBoolPat(pat)) literalFieldTestTo(pat, value, prefix, i, Str.concat("lit", Str.fromInt(k)), strs, nextLab(prefix, i, last)) else ""
-
-def literalFieldTest(pat: String, value: String, prefix: String, i: Int, tag: String, strs: Strs, last: Bool): String =
-  literalFieldTestTo(pat, value, prefix, i, tag, strs, nextLab(prefix, i, last))
 
 def literalFieldCompare(pat: String, value: String, prefix: String, i: Int, tag: String, strs: Strs): String =
   if (isStrPat(pat)) literalStringCompare(unquote(pat), value, prefix, i, tag, strs) else line(Str.concat(tmp(ppre(prefix, i), Str.concat("seq", Str.concat(sid(i), tag))), Str.concat("icmp eq i64 ", Str.concat(value, Str.concat(", ", if (isBoolPat(pat)) boolPatLit(pat) else pat)))))
@@ -4673,9 +4658,6 @@ def trimPat(s: String): String =
 
 def trimPat2(s: String, a: Int, b: Int): String =
   if (a >= b) "" else if (Str.charAt(s, a) == 32) trimPat2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trimPat2(s, a, b - 1) else Str.slice(s, a, b)
-
-def emitOkSlotBind(bind: String, isInt: Bool, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, fid: Int, borrow: Bool): Slot =
-  if (isAsPat(bind)) emitOkSlotBind(asName(bind), isInt, body, prefix, strs, defs, ens, ps, loc, i, fid, borrow) else emitOkPatternBody(if (bind == "") body else rewriteBind(body, bind, bindStem(prefix, i, isInt)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps, loc, fid, borrow)
 
 def emitOkNestedBind(bind: String, stem: String, ty: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, fid: Int, borrow: Bool): Slot =
   emitOkPatternBody(rewriteNested(bind, stem, ty, ens, body), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, nestBps(bind, stem, ty, ens, ps), loc, fid, borrow)
@@ -5112,9 +5094,6 @@ def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: Strs, defs:
   s match {
     case Slot(c, v, o) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, bps, loc, i + 1, join(code, c), List.concat(vals, tcoMarkArg(v, o, keep) :: noStr()), keep)
   }
-
-def tcoMark(v: String, o: Bool): String =
-  tcoMarkArg(v, o, false)
 
 def tcoMarkArg(v: String, o: Bool, keep: Bool): String =
   if (o) Str.concat("~", v) else if (keep) Str.concat("!", v) else v

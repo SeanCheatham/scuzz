@@ -28,14 +28,11 @@ lib: build/libscuzz_embedder.a
 build/libscuzz_embedder.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-build/test_headless: tests/test_headless.c build/libscuzz_embedder.a | build
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_headless.c -Lbuild -lscuzz_embedder -lX11 -o $@
+# Keep assertions active when the library uses release flags.
+build/test_idle_events build/test_resize: tests/x11_test.h
 
-build/test_idle_events: tests/test_idle_events.c build/libscuzz_embedder.a | build
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_idle_events.c -Lbuild -lscuzz_embedder -lX11 -o $@
-
-build/test_resize: tests/test_resize.c build/libscuzz_embedder.a | build
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_resize.c -Lbuild -lscuzz_embedder -lX11 -o $@
+build/test_%: tests/test_%.c build/libscuzz_embedder.a | build
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $< -Lbuild -lscuzz_embedder -lX11 -o $@
 
 test: lib build/test_headless build/test_idle_events build/test_resize
 	env -u DISPLAY ./build/test_headless
@@ -53,7 +50,7 @@ build/%.o: src/%.m include/scuzz_embedder.h | build
 	$(CC) $(OBJCFLAGS) $(INCLUDES) -c $< -o $@
 
 build/test_macos_events: tests/test_macos_events.m build/libscuzz_embedder.a | build
-	$(CC) $(OBJCFLAGS) $(INCLUDES) tests/test_macos_events.m -Lbuild \
+	$(CC) $(OBJCFLAGS) -UNDEBUG $(INCLUDES) tests/test_macos_events.m -Lbuild \
 		-lscuzz_embedder -framework Cocoa -framework CoreGraphics -o $@
 
 lib: build/libscuzz_embedder.a

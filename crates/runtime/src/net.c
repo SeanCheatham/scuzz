@@ -21,7 +21,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 
-/* Blessed Net HTTP/1.0 client and serve. HTTPS uses OpenSSL.
+/* Built-in Net HTTP/1.0 client and serve. HTTPS uses OpenSSL.
  * DNS, connect, TLS, write, and read each wait at most 1000ms by default.
  * Prefer: wait=N sets a bounded response wait. A response
  * is (status, headers, body). HEAD finishes at the header. Bodies cap at

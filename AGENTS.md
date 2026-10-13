@@ -8,7 +8,7 @@
 | [`docs/philosophy.md`](docs/philosophy.md) | Product intent, design locks, language direction |
 | [`docs/vision.md`](docs/vision.md) | Long-term planning arcs: open work, risks |
 | [`docs/gaps.md`](docs/gaps.md) | Unknowns and known gaps, ranked by risk |
-| [`docs/plans.md`](docs/plans.md) | Next short-term slice only, while a slice is in progress. Delete the file when the slice is done. Do not keep history. |
+| `docs/plans.md` | Next short-term slice only, while a slice is in progress. Delete the file when the slice is done. Do not keep history. |
 | [`docs/optimization.md`](docs/optimization.md) | Later empirical pre-optimization (`*.scuzz_tune`). Not current work. |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep or cut vs Scala and effect libraries. Platforms. Toolchain. |
 | `scuzz docs start` | App author path from install to run |
@@ -49,20 +49,10 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 3. Add the smallest slice that proves the behavior (a test or `examples/` when it applies).
 4. Update `philosophy.md` or `vision.md`. If `compatibility.md` owns the topic, update that file instead. App author prose lives in `scuzz docs`.
 
-## Cursor Cloud specific instructions
+## Host checks
 
-Host setup and prove-host commands: [`docs/developer-environment.md`](docs/developer-environment.md). CI slices: `./scripts/ci.sh` (same steps as `.github/workflows/ci.yml`).
-
-No long-running app daemons. Develop with `make` + `clang`. Rebuild the product CLI with `./scripts/bootstrap.sh` (newest GitHub `v*` release, or `SCUZZ_BOOTSTRAP_TAG`). Default UI path is headless (`scuzz run --target headless`); it does not need `DISPLAY` or `X11`.
-
-**Install script** does not install host packages. Required host packages (`clang`, `make`, `zlib1g-dev`, `libbz2-dev`, `libssl-dev`) and optional CI slices (ASan `libclang-rt-18-dev`, Desktop `libx11-dev` + `xvfb`, GPU `libegl1-mesa-dev` `libgles2-mesa-dev` `libgl1-mesa-dri`) live in the cloud VM snapshot, not in the install script. Optional slice commands: `make -C crates/runtime test-asan CC=clang`; `xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu ...`; `xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 ./examples/cli/build/cli run ...`.
-
-**Skia link gotcha:** on this Ubuntu image, clang fails with `cannot find -lstdc++` unless gcc's lib dir is on `LIBRARY_PATH`. Export before any link that pulls Skia (runtime tests, product `scuzz run`):
-
-```bash
-export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13${LIBRARY_PATH:+:$LIBRARY_PATH}
-```
-
-The cloud VM `~/.bashrc` already sets this. New shells pick it up; non-login one-shot commands may need the export.
-
-Skia CPU prebuilt downloads on first `make -C crates/ffi-skia lib` / runtime test into `third_party/skia/prebuilt/` (gitignored). `scripts/fetch_skia.sh` retries HTTP 502, 503, and 504, and a truncated gzip. The ffi-skia include fetch uses `fetch_skia.sh --download`.
+Read [`docs/developer-environment.md`](docs/developer-environment.md) for host packages, link settings, and proof commands.
+Use `make` and `clang`. Rebuild the product CLI with `./scripts/bootstrap.sh`.
+Use Headless for the default UI path. It needs no display server.
+Do not start persistent application daemons.
+Run CI slices with `./scripts/ci.sh`. The slices match `.github/workflows/ci.yml`.

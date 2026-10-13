@@ -1,4 +1,4 @@
-#include "scuzz_rt.h"
+#include "rt_util.h"
 
 SzQueue *sz_queue_make(void) {
   SzQueue *q = (SzQueue *)sz_rc_alloc(sizeof(SzQueue), SZ_RC_QUEUE);
@@ -70,12 +70,7 @@ static void *queue_offer_thunk(void *env) {
 SzIo *sz_queue_offer(SzQueue *q, void *value) {
   if (!q)
     sz_panic("sz_queue_offer(null)");
-  {
-    SzPair *p = sz_pair_new(q, value);
-    SzIo *io = sz_io_delay(queue_offer_thunk, p);
-    sz_release(p);
-    return io;
-  }
+  return delay_pair(queue_offer_thunk, q, value);
 }
 
 static SzIo *queue_offer_drop(SzQueue *q, void *value) {

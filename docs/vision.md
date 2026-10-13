@@ -118,24 +118,11 @@ Do not silently replace an author claim with a weaker solver claim.
 ### Product method gate
 
 `examples/proof` supplies optional bit-vector and finite protocol checks.
-Run instructions and measured scope live in `developer-environment.md`.
+Run instructions and scope definitions live in
+[`developer-environment.md`](developer-environment.md#formal-verification-experiment).
+Measured results and open limits live in [`gaps.md`](gaps.md#formal-verification).
 The default app path remains `scuzz fuzz`.
-The application recovery check uses the editor journal functions.
-Long cancellation paths replay exactly in both engines.
-Independent setup and recovery corpus inputs support the mutation checks.
-Ordinary search rejects the deliberate defects.
-A one-preemption acceptance scope completes and reaches interruption during recovery.
-It covers normal acceptance and conflicts at fault calls 1 and 9.
-A separate one-preemption Undo scope checks completion and conflicts.
-It checks interruption, repeated recovery, and file preservation.
-Both scopes compare sampling with exhaustive exploration under equal bounds and rules.
-A complete Undo request scope starts with accepted files and an empty journal.
-It covers journal creation, interruption, restart, and repeated requests.
-Its 567 paths retain all eight request rules and exact replay.
-Recorded fault plans reach journal writes after the generated call range.
-The request scope also compares both methods under equal bounds and rules.
-The zero-preemption scope does not reach interruption during recovery.
-The wider scopes still exceed their execution limits.
+The wider recovery scopes still exceed their execution limits.
 Resolve these limits before adding a public exhaustive application method.
 Select a new product method only for a demonstrated application need.
 Keep its supported subset explicit before adding syntax or dependencies.

@@ -6,7 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Blessed Random. Live seeds once from /dev/urandom. TestRuntime seeds from
+/* Built-in Random. Live seeds once from /dev/urandom. TestRuntime seeds from
  * a caller value. Both paths run xoshiro256**. Bounded ints use Lemire 2019
  * multiply-shift with rejection, so every value in [0, bound) is uniform. */
 

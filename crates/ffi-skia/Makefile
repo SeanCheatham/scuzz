@@ -159,27 +159,15 @@ lib-skia: build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o $(SHIM_OBJS)
 	fi; \
 	echo skia > build/sk_capi_backend
 
-build/test_skia: tests/test_skia.c lib
+# Test the selected paint archive. Keep assertions active.
+build/test_%: tests/test_%.c lib
 	@extra=""; \
 	if [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend; then \
 	  extra="$(SKIA_LIBS)"; \
 	elif [ -f build/sk_capi_backend ] && grep -qx gpu build/sk_capi_backend; then \
 	  extra="$(GPU_LIBS)"; \
 	fi; \
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi $$extra -lpthread -o $@
-
-# Clip / RGBA / UTF-8 against the archive `lib` actually built.
-build/test_sk_clip: tests/test_sk_clip.c lib
-	@extra=""; \
-	if [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend; then \
-	  extra="$(SKIA_LIBS)"; \
-	elif [ -f build/sk_capi_backend ] && grep -qx gpu build/sk_capi_backend; then \
-	  extra="$(GPU_LIBS)"; \
-	fi; \
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_sk_clip.c -Lbuild -lsk_capi $$extra -lpthread -o $@
-
-build/test_sk_gpu: tests/test_sk_gpu.c lib
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_sk_gpu.c -Lbuild -lsk_capi $(GPU_LIBS) -lpthread -o $@
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $< -Lbuild -lsk_capi $$extra -lpthread -o $@
 
 test: build/test_skia build/test_sk_clip
 	./build/test_skia

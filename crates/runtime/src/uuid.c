@@ -3,8 +3,8 @@
 
 #include <stddef.h>
 
-/* RFC 4122 UUID version 4 as lowercase hex with hyphens. Uses the blessed
-   Random stream so TestRuntime stays hermetic. No OpenSSL. No parse. */
+/* Format an RFC 4122 UUID with version 4, lowercase hex, and hyphens.
+ * Use built-in Random so TestRuntime stays hermetic. */
 
 static void fmt_uuid(const unsigned char b[16], char out[37]) {
   static const char lut[] = "0123456789abcdef";

@@ -28,15 +28,39 @@ The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with
 
 **Compiler scope proof.** Inline bindings use names from their expression scopes. Renaming includes local function calls. Nested matches use the checked scalar result type. Generated compiler proofs check repeated names in separate match arms, nested expressions, closure captures, aliases, and heap results. The generated proofs also check generic record access and wildcard fields with heap values. These finite checks do not prove all binding scopes correct.
 
-**Function lookup cost.** The evaluator uses an index by module and function name. A fixed source snapshot runs `irGenerated 7` and `evGenerated 7`. Three warm probes take 7.71 to 7.82 s with the index. The same source takes 8.17 to 8.26 s when the resolver filters a list of function names. The median decreases by about 4 percent. Timelines and claims are equal. These samples run in sequence on the same Linux host. They do not establish a general speed bound. The CLI SHA-256 for the index is `5f926ad12f7487c2715456bb30ea1a7ce47e0efac01f357d3dd88ca0a75aa3c5`.
+**Implementation samples.** The comparisons run sequentially on one Linux host.
+Recorded timelines and claims agree in each comparison.
+Each row identifies the measured compiler. Refresh these measurements after changes to the relevant paths.
+These finite samples do not establish a general speed bound.
 
-**Map cost.** Evaluator maps use an immutable balanced tree. A fixed workload inserts 5,000 keys in ascending order and reads each key. Three warm probes take 0.201 to 0.210 s. The same source takes 7.724 to 7.850 s with a sorted list. The median decreases by about 97 percent. Timelines and claims are equal. The implementations run in sequence on the same Linux host. These samples do not establish a general speed bound. The CLI SHA-256 for the tree is `a946738eaa3423673593d0e3ef061631f0db29e6495353cbce0f8ba96749689b`. CI compares three sequences of 192 operations against native maps. It checks balance, key order, lookup, deletion, and prior values. An API proof checks callback order, integer, float, and Boolean values, compound keys, NaN order, and positive and negative zero. The selected map timelines and claims are equal.
+| Implementation | Workload | Measured probes | Baseline probes | Median decrease | Compiler SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| Module and function index | `irGenerated 7` and `evGenerated 7` | 3 warm probes, 7.71–7.82 s | 8.17–8.26 s; function-name list | About 4% | `5f926ad12f7487c2715456bb30ea1a7ce47e0efac01f357d3dd88ca0a75aa3c5` |
+| Immutable balanced map | Insert and read 5,000 ascending keys | 3 warm probes, 0.201–0.210 s | 7.724–7.850 s; sorted list | About 97% | `a946738eaa3423673593d0e3ef061631f0db29e6495353cbce0f8ba96749689b` |
+| Selected record fields and integer source offsets | `irGenerated 7` and `evGenerated 7` | 3 warm probes, 7.147–7.187 s | 9 probes, 8.538–8.680 s | About 16.5% | `9b669e84f10cec6b46295df28e0768ae366c9ae8d3278c1d5087eb3b1924eb6d` |
+| Completed evaluator values | `irGenerated 7` and `evGenerated 7` | 6 warm probes, 6.993–7.091 s | 6 probes, 7.202–7.259 s | About 2.5% | `179dfbb8b6c7b711151fc634078c793dec00b6005814a223d73f18ccf3ed7dd6` |
 
-**Record field cost.** The compiler reads only selected record fields. It skips wildcard payload fields. Source-offset lookup returns an integer without a tuple allocation. A fixed source snapshot runs `irGenerated 7` and `evGenerated 7`. Three warm probes take 7.147 to 7.187 s. Nine baseline probes take 8.538 to 8.680 s. Baseline groups run before and after the changed compiler. The median decreases by about 16.5 percent. Timelines and claims are equal in all three comparisons. The probes run in sequence on the same Linux host. It uses Linux 7.0.0-38-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. Each server has a separate startup wait. These samples do not establish a general speed bound. The CLI SHA-256 is `9b669e84f10cec6b46295df28e0768ae366c9ae8d3278c1d5087eb3b1924eb6d`.
+The record-field and completed-value samples use Linux 7.0.0-38-generic,
+an Intel Core i7-10875H at 2.30 GHz, and about 31 GiB of memory.
+Their baseline groups run before and after changed probes.
+The completed-value baseline groups surround the first changed group.
+Each record-field server has a separate startup wait.
+Record access reads selected fields and skips wildcard payloads.
+Source-offset lookup returns an integer without a tuple allocation.
+Completed values avoid temporary expressions, environments, and variable lookups.
+Native dispatch uses a tail-call loop.
+A proof checks string and list results after 20,000 tail calls.
 
-CPU samples from two type-checker idle probes place about 11 percent of probe CPU time in list indexing. Stack samples show these reads in kit lookup and trace checks. Generated LLVM for a kit lookup has one payload read instead of 18. Allocation samples identify coverage-key construction and evaluator steps as large sources of allocations. Allocation counts do not measure CPU time. These samples do not establish a general CPU cost bound.
+CI compares three sequences of 192 map operations with native maps.
+It checks balance, key order, lookup, deletion, and prior values.
+The API proof checks callback order, integer, float, and Boolean values, compound keys, NaN order, and both signs of zero.
+Selected map timelines and claims agree.
 
-**Completed-value cost.** Evaluator steps distinguish an expression from a completed value. A completed value does not need a temporary expression, environment, or variable lookup. A fixed source snapshot runs `irGenerated 7` and `evGenerated 7`. Six warm probes take 6.993 to 7.091 s. Six baseline probes take 7.202 to 7.259 s. Baseline groups run before and after the first changed group. The median decreases by about 2.5 percent. Timelines and claims are equal in all six changed probes. The probes run in sequence on the same Linux host as the record-field samples. These samples do not establish a general speed bound. The CLI SHA-256 is `179dfbb8b6c7b711151fc634078c793dec00b6005814a223d73f18ccf3ed7dd6`. Native dispatch uses a tail-call loop. A proof checks string and list results after 20,000 tail calls.
+Two type-checker idle CPU samples place about 11% of probe CPU time in list indexing.
+Stack samples locate these reads in kit lookup and trace checks.
+Generated LLVM for a kit lookup has one payload read instead of 18.
+Allocation samples identify coverage-key construction and evaluator steps as large allocation sources.
+Allocation counts do not measure CPU time. These samples do not establish a general CPU cost bound.
 
 **Known cost.** The fixed-source type-checker, code-generation, and CLI idle probes exceed their evaluator deadlines in sequential validation. Each server reports readiness before two probe requests. Type-checker startup takes 8.710 s. Its probes take 20.740 s and 20.739 s. Code-generation startup takes 8.219 s. Its two probes take 20.738 s and 20.737 s. CLI startup takes 8.155 s. Its two probes take 20.716 s and 20.729 s. Each completed request reports deadline status `124`. Startup has a separate 30 s wait. Each response has its own 30 s wait. A failed source check reports its error before a request. These are sequential samples on one Linux host. Comparison distances use a hash lookup. Function lookup uses an index by module and name. Maps use a balanced tree. Record access reads only selected fields. Source-offset lookup avoids a tuple allocation. Completed values avoid temporary expressions and environments. These changes do not bring the idle probes below the deadline. Their campaigns run compiled. They do not prove evaluator parity. View signals use the native handle form in dumps. This form does not describe pixels. Do not hide other parity failures with a successful card.
 
@@ -88,8 +112,6 @@ The malformed journal scope compares all files in its separate workspace.
 
 The acceptance scope completes all 1286 paths. The prepared Undo scope completes all 1300 paths. The complete Undo request scope completes all 567 paths. These scopes reach interruption and all three file fault outcomes. The sampled methods use the same bounds and rules. Their distinct paths occur in the completed exhaustive sets. Both methods reject both deliberate defects in each scope. All 14 direct defect checks produce named author rule failures and native replay evidence. The duplicate workflow records its exact source, identities, and command costs.
 
-The separate Undo scope completes 1300 paths. It uses accepted files and conflict states, with optional interruption. Each passing path executes all six recovery rules. It also checks repeated recovery across five operation files and preserves an unrelated file. Both methods use the same bounds and author rules. The sampled paths occur in the completed exhaustive set. Both methods reject missing writes and external overwrites. Two direct Undo defects produce named rule failures in both engines and ordinary native replay.
-
 **Next gate.** Measure human writing time, rule comprehension, and usefulness in one author session. Preserve wider incomplete results. Keep power loss, concurrent external edits, and other application operations open. Do not infer a general method advantage from one application scope.
 
 **Limits.** Refinement types, static effect protocols, inductive proofs, and compilation validation remain proposals. Existing finite campaigns do not establish these guarantees. A proof establishes a stated property under its assumptions. It does not establish that the specification matches all product needs.
@@ -112,4 +134,4 @@ The pinned Qwen3.5 9B model runs on macOS ARM64 Metal. It produces a message inp
 
 Do not add user FFI, `extern`, plugins, library publishing, git or registry dependencies, or `scuzz add`. Do not start a provider framework, remote generator service, telemetry, or model training. Limits and exclusions for the current arc live in `vision.md`.
 
-Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. General model browsing. Metal and Vulkan performance measurements. Gated-model login. Model conversion. Automatic oracle mining. Semantic timeline alignment. Divergence attribution to source defs. Pixel previews. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
+Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. General model browsing. Metal and Vulkan performance measurements. Gated-model login. Model conversion. Automatic oracle mining. Semantic timeline alignment. Divergence attribution to source defs. Pixel previews. Emit scalar fallbacks. Project IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.

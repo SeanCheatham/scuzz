@@ -2607,9 +2607,6 @@ def sigTagsCase(all: List[En], en: String, c: EnCase, rest: List[EnCase], acc: S
 """)))))))
   }
 
-def newRef(v: Value): Ref[Value] =
-  Property.force(Ref.of(v))
-
 def probeProg(p: EvProg, ctx: Ref[Value]): IO[Unit] =
   probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Fuzz.probe(IO.pure(()).flatMap(_ => probeMain(p)))))
 

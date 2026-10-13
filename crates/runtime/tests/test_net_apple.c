@@ -26,6 +26,7 @@ static SzIo *request(const char *base, const char *path, const char *method, SzM
              !strcmp(method, "HEAD") ? sz_net_http_head(url, headers) : sz_net_http_get(url, headers);
   sz_release(url); sz_release(body); return io;
 }
+/* Consume the graph. The caller owns the result. */
 static SzIoResult run(SzIo *io) {
   return sz_io_unsafe_run(io);
 }
@@ -111,7 +112,7 @@ int scuzz_net_apple_proof(void) {
   r = run(request(base, "/forbidden", "GET", bad)); check(!r.ok, "reject case duplicate header"); drop(r); sz_release(bad);
   r = run(request("http://bad host", "/", "GET", NULL)); check(!r.ok, "reject invalid URL"); drop(r);
   SzIo *reused = request(base, "/echo", "GET", headers);
-  for (int i = 0; i < 3; i++) { sz_retain(reused); r = sz_io_unsafe_run(reused); check(status(r, 200), "reuse request IO"); drop(r); }
+  for (int i = 0; i < 3; i++) { sz_retain(reused); r = run(reused); check(status(r, 200), "reuse request IO"); drop(r); }
   sz_release(reused); sz_release(headers);
   int before = descriptors();
   for (int i = 0; i < 16; i++) {

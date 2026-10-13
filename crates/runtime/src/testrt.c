@@ -519,10 +519,7 @@ static int fs_fault(BoxResult *r) {
 }
 
 static SzIo *testrt_fs_bind(SzString *path, SzThunk thunk) {
-  SzPair *pack = sz_pair_new(path, NULL);
-  SzIo *io = fm_drop(sz_io_delay(thunk, pack), unwrap_box, NULL);
-  sz_release(pack);
-  return io;
+  return fm_drop(delay_pair(thunk, path, NULL), unwrap_box, NULL);
 }
 
 static void *mem_read(void *env) {
@@ -662,10 +659,7 @@ done:
 }
 
 SzIo *sz_testrt_fs_write(SzString *path, SzString *contents) {
-  SzPair *pack = sz_pair_new(path, contents);
-  SzIo *io = fm_drop(sz_io_delay(mem_write, pack), unwrap_box, NULL);
-  sz_release(pack);
-  return io;
+  return fm_drop(delay_pair(mem_write, path, contents), unwrap_box, NULL);
 }
 
 static int is_direct_child(const char *dir, const char *child) {
@@ -932,10 +926,7 @@ done:
 }
 
 SzIo *sz_testrt_fs_rename(SzString *from, SzString *to) {
-  SzPair *pack = sz_pair_new(from, to);
-  SzIo *io = fm_drop(sz_io_delay(mem_rename, pack), unwrap_box, NULL);
-  sz_release(pack);
-  return io;
+  return fm_drop(delay_pair(mem_rename, from, to), unwrap_box, NULL);
 }
 
 static void *mem_walk(void *env) {

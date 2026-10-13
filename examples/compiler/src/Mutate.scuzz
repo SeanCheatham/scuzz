@@ -106,9 +106,6 @@ def keptSrcHd(h: (String, String, Prog), rest: List[(String, String, Prog)]): Li
     case (stem, src, _) => (stem, src) :: keptSrc(rest)
   }
 
-def siteLoc(files: List[(String, String)], site: Int, o: Bool): String =
-  siteLocKept(parseLive(files), site, o)
-
 def siteLocKept(kept: List[(String, String, Prog)], site: Int, o: Bool): String =
   siteLocKeptGo(kept, site, 0, o)
 

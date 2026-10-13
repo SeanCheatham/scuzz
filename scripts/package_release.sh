@@ -52,7 +52,7 @@ copy_crate() {
 }
 
 copy_crate runtime include src Makefile
-copy_crate ffi-skia include src Makefile README.md
+copy_crate ffi-skia include src Makefile
 copy_crate embedder-web build.sh sdk.py web.c web.h index.html
 copy_crate embedder-desktop include src Makefile package_macos.py run_watch.sh
 copy_crate embedder-mobile include src Makefile shells
@@ -65,7 +65,6 @@ chmod +x "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh" "$OUT/script
 # Skia pin + prebuilt for UI text (default backend). Opt out: SCUZZ_SKIA=sk_sw.
 # fetch_skia.sh substitutes {triple} so Linux/macOS releases get the matching asset.
 mkdir -p "$OUT/third_party/skia"
-cp -f "$ROOT/third_party/skia/README.md" "$OUT/third_party/skia/README.md"
 cp -f "$ROOT/third_party/skia/PIN" "$OUT/third_party/skia/PIN"
 if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
   echo "==> SCUZZ_SKIA=sk_sw - release keeps in-tree sk_sw only"

@@ -159,9 +159,6 @@ def elem(t: Ty): Ty =
 def elemOf(ps: List[Ty]): Ty =
   if (List.isEmpty(ps)) tParam("A") else List.at(ps, 0)
 
-def mapValOf(ps: List[Ty]): Ty =
-  if (List.isEmpty(ps) || List.isEmpty(List.tail(ps))) tParam("A") else List.at(ps, 1)
-
 def headName(t: Ty): String =
   t match {
     case Ty.Named(n) => n
@@ -380,14 +377,8 @@ def eqPinned(a: String, b: String, names: List[String]): Bool =
 def eqPinGotTy(want: Ty, got: Ty, names: List[String]): Bool =
   eq(want, pin(got, names))
 
-def eqPinGot(want: String, got: String, names: List[String]): Bool =
-  eqPinGotTy(parse(want), parse(got), names)
-
 def preferPinnedTy(a: Ty, b: Ty, names: List[String]): Ty =
   prefer(pin(a, names), pin(b, names))
-
-def preferPinned(a: String, b: String, names: List[String]): String =
-  show(preferPinnedTy(parse(a), parse(b), names))
 
 def preferStr(a: String, b: String): String =
   show(prefer(parse(a), parse(b)))
@@ -464,17 +455,11 @@ def commaAtC(s: String, i: Int, pd: Int, bd: Int, c: Int): Int =
 def splitCommaAt(s: String, c: Int): List[String] =
   if (c < 0) if (trim(s) == "") [] else trim(s) :: [] else trim(Str.slice(s, 0, c)) :: splitComma(Str.slice(s, c + 1, Str.len(s)))
 
-def parenDepth(s: String, i: Int, end: Int): Int =
-  if (i >= end) 0 else parenDepthCh(s, i, end, 0)
-
 def parenDepthCh(s: String, i: Int, end: Int, d: Int): Int =
   if (i >= end) d else parenDepthHit(s, i, end, d, Str.charAt(s, i))
 
 def parenDepthHit(s: String, i: Int, end: Int, d: Int, c: Int): Int =
   if (c == 40) parenDepthCh(s, i + 1, end, d + 1) else if (c == 41) parenDepthCh(s, i + 1, end, if (d > 0) d - 1 else 0) else parenDepthCh(s, i + 1, end, d)
-
-def brackDepth(s: String, i: Int, end: Int): Int =
-  if (i >= end) 0 else brackDepthCh(s, i, end, 0)
 
 def brackDepthCh(s: String, i: Int, end: Int, d: Int): Int =
   if (i >= end) d else brackDepthHit(s, i, end, d, Str.charAt(s, i))

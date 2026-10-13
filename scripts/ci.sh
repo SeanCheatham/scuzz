@@ -223,6 +223,7 @@ PY
 )
 
 slice_install_dry() {
+  python3 scripts/test_pre_commit.py
   ./scripts/install.sh --help
   SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-dry.out
   grep -q 'source=github SeanCheatham/scuzz latest' /tmp/install-dry.out
@@ -246,6 +247,34 @@ slice_install_dry() {
   printf '%s' '[{"tag_name":"skia-cpu-v0.1"},{"tag_name":"v0.1.0-rc.1"},{"tag_name":"v9.9.9"}]' > /tmp/releases-compact.json
   SCUZZ_RELEASES_JSON=/tmp/releases-compact.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-compact.out
   grep -q 'tag=v9.9.9' /tmp/install-compact.out
+  python3 - "$ROOT" <<'PY_LOCAL_INSTALL'
+import os, pathlib, shutil, subprocess, sys, tempfile
+
+repo = pathlib.Path(sys.argv[1])
+with tempfile.TemporaryDirectory(prefix='scuzz-local-install-') as directory:
+    root = pathlib.Path(directory) / 'checkout with spaces'
+    (root / 'scripts').mkdir(parents=True)
+    shutil.copy2(repo / 'scripts/install-local.sh', root / 'scripts/install-local.sh')
+    (root / 'examples/cli/build').mkdir(parents=True)
+    binary = root / 'examples/cli/build/cli'
+    binary.write_text('#!/bin/sh\nexit 99\n')
+    binary.chmod(0o755)
+    for name, body in [('bootstrap.sh', 'printf "%s\\n" "${SCUZZ_BOOTSTRAP:-latest}" >> "$INSTALL_TRACE"'),
+                       ('package_release.sh', 'exit 0'),
+                       ('install.sh', 'printf "%s\\n" "$1" >> "$INSTALL_TRACE"')]:
+        script = root / 'scripts' / name
+        script.write_text('#!/bin/sh\n' + body + '\n')
+        script.chmod(0o755)
+    trace = root / 'trace'
+    env = dict(os.environ, INSTALL_TRACE=str(trace))
+    env.pop('SCUZZ_BOOTSTRAP', None)
+    for override in [None, 'explicit-bootstrap']:
+        if override:
+            env['SCUZZ_BOOTSTRAP'] = override
+        subprocess.run([str(root / 'scripts/install-local.sh'), '--dry-run'], env=env, check=True)
+    assert trace.read_text().splitlines() == ['latest', '--dry-run', 'explicit-bootstrap', '--dry-run']
+print('Local install: release bootstrap default, explicit override, and arguments pass')
+PY_LOCAL_INSTALL
   prove_fetch_skia_retry
 }
 
@@ -2105,7 +2134,6 @@ slice_gpu() {
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
   xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu make -C crates/ffi-skia test -j"$JOBS" CC=clang
   xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu "$SCUZZ" fuzz --iterations 0 examples/counter
-  make -C crates/ffi-skia clean
   make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
 
@@ -2113,8 +2141,8 @@ slice_differential() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
   need_cmd python3 "sudo apt-get install -y python3"
+  python3 scripts/test_png_max_delta.py
   xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 "$SCUZZ" fuzz --differential --iterations 0 examples/counter
-  make -C crates/ffi-skia clean
   make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
 

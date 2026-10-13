@@ -11,29 +11,28 @@ extern "C" {
 /* --- panic / alloc ------------------------------------------------------- */
 
 void sz_panic(const char *msg) __attribute__((noreturn));
-/* Panic exits 134 instead of abort. A forked probe child sets this: the
- * abort signal path invokes the host core handler, which costs a second. */
+/* Set panic exit status to 134. Forked probes use this to avoid the host
+ * core handler. */
 void sz_panic_exit(void);
 void sz_panic_push_src(const char *loc);
 void sz_panic_pop_src(void);
 /* Integer division rounds toward zero. Zero divisors panic. */
 int64_t sz_int_div(int64_t a, int64_t b);
 int64_t sz_int_rem(int64_t a, int64_t b);
-/* Record one coverage hit (def entry or branch arm) when SCUZZ_COVERAGE_DUMP
- * is set. Cheap no-op otherwise. The path is read once; tests call
- * sz_coverage_env_refresh after a setenv. */
+/* Record a function entry or branch when SCUZZ_COVERAGE_DUMP is set.
+ * Read the path once. Call sz_coverage_env_refresh after an environment change. */
 void sz_coverage_hit(const char *loc);
 void sz_coverage_env_refresh(void);
-/* Stop this binary's own def and branch hits. The evaluator probe sets this
- * so only `sz_fuzz_hit` keys of the evaluated program reach the dump. */
+/* Disable native program coverage. Evaluator probes use sz_fuzz_hit keys
+ * for the evaluated program. */
 void sz_coverage_own_off(void);
-void sz_coverage_hit_key(const char *loc); /* records under own_off */
+void sz_coverage_hit_key(const char *loc); /* Key hits stay active after sz_coverage_own_off. */
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
 /* Free every remaining live block. Panic uses this before abort. */
 void sz_alloc_sweep(void);
-/* Visit each live block. The callback must not alloc or free. */
+/* Visit each live block. The callback must not allocate or free tracked blocks. */
 void sz_alloc_walk(void (*fn)(void *ptr, uint32_t kind, size_t bytes,
                               uint32_t rc, void *ctx),
                    void *ctx);
@@ -48,11 +47,9 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg);
 void sz_alloc_set_panic_dump(const char *path);
 /* Registered path, or `SCUZZ_PANIC_DUMP`, or NULL. */
 const char *sz_alloc_panic_dump_path(void);
-/* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
- * streams, resources, errors, Ref / Queue / Deferred, Either, pair,
- * Builder, Net sockets, views). List cells retain heads and shared tails.
- * IO constructors take child IO nodes. A view starts at one. Non-RC
- * sz_alloc pointers no-op. */
+/* Reference-counted objects retain owned fields. List cells retain heads
+ * and shared tails. IO constructors retain child IO nodes. A new View has
+ * reference count one. Retain and release ignore raw sz_alloc pointers. */
 enum {
   SZ_RC_RAW = 0,
   SZ_RC_STRING = 1,
@@ -76,8 +73,8 @@ enum {
   SZ_RC_KIND_COUNT = 19
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
-/* view.c installs this on the first view. A program with no views links
- * no view code. The last release of a view calls `fn`, then retires the block. */
+/* view.c registers this callback on the first View. A program without Views
+ * does not link View code. The last release calls fn, then frees the block. */
 void sz_rc_set_view_drop(void (*fn)(void *ptr));
 void sz_retain(void *ptr);
 void sz_release(void *ptr);
@@ -285,7 +282,7 @@ SzAdt *sz_adt_new(int32_t tag, void *payload);
 int32_t sz_adt_tag(const SzAdt *adt);
 void *sz_adt_payload(const SzAdt *adt);
 
-/* --- IO fiber skeleton + blessed kit ------------------------------------ */
+/* --- IO scheduler and standard kits ------------------------------------- */
 
 typedef struct SzIo SzIo;
 typedef struct SzLangResource SzLangResource;
@@ -488,6 +485,7 @@ struct SzRef {
 SzRef *sz_ref_make(void *initial);
 /* Release the current value, then free the cell. */
 void sz_ref_free(SzRef *r);
+/* Consume the initial value. The IO result owns the cell. */
 SzIo *sz_ref_of(void *initial);          /* IO[Ref] */
 SzIo *sz_ref_of_cstr(const char *initial);
 /* Get retains the current value. Caller drops the run result. */
@@ -1002,7 +1000,7 @@ SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running; spawn pids tracked, 
 SzIo *sz_sys_kill(int64_t pid);    /* IO[Unit] SIGTERM; waitpid WNOHANG; slot stays until reaped */
 SzIo *sz_sys_getenv(SzString *key);
 
-/* Blessed Clock / Random / Net (impurity boundary) */
+/* Standard Clock, Random, and Net effects. */
 SzIo *sz_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, UI); TestRuntime fake clock */
@@ -1022,8 +1020,8 @@ SzString *sz_base64_decode(const SzString *s); /* Bytes from Base64. Bad length,
 SzString *sz_bytes_from_str(const SzString *s); /* Copy UTF-8 / raw bytes. Caller owns. `Bytes.len` is `sz_string_len`. */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
-void sz_random_fill(unsigned char *buf, size_t n); /* Blessed Random bytes. Live or TestRuntime. */
-SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Uses blessed Random. */
+void sz_random_fill(unsigned char *buf, size_t n); /* Built-in Random bytes. Use live or TestRuntime state. */
+SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Use built-in Random. */
 
 SzIo *sz_net_http_get(SzString *url, SzMap *headers); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
 SzIo *sz_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path); /* IO[(Int, Map, Int)]; stream response body to file */
@@ -1243,11 +1241,11 @@ SzVerdict *sz_verdict_step_every(void *tl, void *fnp, void *envp);
 void sz_verify_register(const char *name, SzVerdict *(*fn)(void *));
 /* Relation claim: (Timeline, Timeline) => Verdict over a pair of dumps. */
 void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *));
-/* Parse a v1 or v2 timeline dump (SCUZZ_TIMELINE_DUMP output). NULL on error.
- * Writer emits v=2 (effects / fibers / fault). v=1 loads with those empty. */
+/* Load the current SCUZZ_TIMELINE_DUMP format. Return NULL on a parse error.
+ * Omitted observation blocks are empty. */
 void *sz_timeline_load(const char *path);
 void sz_timeline_free(void *tl);
-/* Record a blessed kit op. Never stores a payload: size plus FNV-1a hash. */
+/* Record a standard kit operation. Store its size and FNV-1a hash, not its payload. */
 void sz_timeline_log_bytes(const char *op, const void *p, size_t n);
 void sz_timeline_log_cstr(const char *op, const char *s);
 /* Judge mode: spec is "<a.txt>,<b.txt>"; runs every registered relation

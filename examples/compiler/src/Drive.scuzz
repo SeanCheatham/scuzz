@@ -2177,11 +2177,6 @@ def fuzzClaimPath(outDir: String): String =
 def fuzzSchedPicksPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "schedule.picks")
 
-def fuzzProbeCode(r: (Int, String, String)): Int =
-  r match {
-    case (code, _out, _err) => if (code == 0) 0 else 1
-  }
-
 def fuzzProbeCodeIo(r: (Int, String, String)): IO[Int] =
   r match {
     case (code, _out, err) => if (code > 0 && Str.contains(err, "schedule drift")) IO.println(Verify.driftLine(err)).flatMap(_ => IO.pure(code)) else if (code == 77) IO.println(err).flatMap(_ => IO.pure(code)) else if (code != 0 && Str.contains(err, "Sanitizer")) IO.println(err).flatMap(_ => IO.pure(code)) else if (code != 0 && err != "") IO.println(firstLine(err)).flatMap(_ => IO.pure(code)) else IO.pure(code)

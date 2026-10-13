@@ -82,27 +82,26 @@ $(BUILDDIR)/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | $(BUIL
 $(BUILDDIR)/reload_bad.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -DRELOAD_SCHEMA='"counter:string"' -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
 
-$(BUILDDIR)/test_io: tests/test_io.c $(BUILDDIR)/libscuzz_rt.a | $(BUILDDIR) ffi-skia
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+# Relink tests after paint selection so they use the selected archive.
+$(BUILDDIR)/test_io: tests/test_io.c $(BUILDDIR)/libscuzz_rt.a ffi-skia | $(BUILDDIR)
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) tests/test_io.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
+		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
-$(BUILDDIR)/test_ui: tests/test_ui.c $(BUILDDIR)/libscuzz_rt.a $(BUILDDIR)/reload_a.$(RELOAD_EXT) $(BUILDDIR)/reload_b.$(RELOAD_EXT) $(BUILDDIR)/reload_bad.$(RELOAD_EXT) | $(BUILDDIR) ffi-skia
-	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+$(BUILDDIR)/test_ui: tests/test_ui.c $(BUILDDIR)/libscuzz_rt.a $(BUILDDIR)/reload_a.$(RELOAD_EXT) $(BUILDDIR)/reload_b.$(RELOAD_EXT) $(BUILDDIR)/reload_bad.$(RELOAD_EXT) ffi-skia | $(BUILDDIR)
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
+		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
 test: $(BUILDDIR)/test_io $(BUILDDIR)/test_ui
 	"$(abspath $(BUILDDIR))/test_io"
 	"$(abspath $(BUILDDIR))/test_ui"
 
-# Optional ASan. Not part of default `make test` (slow / host-dependent).
-# Skip if -fsanitize=address cannot link. Exit-time leaks in the C tests
-# stay known. LSan stays off so ASan still catches UAF/OOB without failing
-# the optional CI step on leftover allocs. Compiled corpus replay uses
-# `lib-asan` and `scuzz fuzz --asan`, which keep leak detection on.
+# ASan C tests keep leak detection off. Compiled corpus replay uses
+# lib-asan with leak detection on. Keep each build separate.
 ASAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address -fno-omit-frame-pointer
 lib-asan:
-	@if echo 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o /tmp/scuzz_asan_probe 2>/dev/null; then \
-		rm -f /tmp/scuzz_asan_probe; \
+	@asan_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/scuzz-asan.XXXXXX") || exit 1; \
+	trap 'rm -rf "$$asan_dir"' 0; \
+	if printf '%s\n' 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o "$$asan_dir/probe" 2>/dev/null; then \
 		$(MAKE) lib BUILDDIR=build/asan CFLAGS='$(ASAN_CFLAGS)'; \
 	else \
 		echo "lib-asan: AddressSanitizer not supported by $(CC) on this host" >&2; \
@@ -110,14 +109,21 @@ lib-asan:
 	fi
 
 test-asan:
-	@if echo 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o /tmp/scuzz_asan_probe 2>/dev/null; then \
-		rm -f /tmp/scuzz_asan_probe; \
-		$(MAKE) clean && \
-		ASAN_OPTIONS=detect_leaks=0 $(MAKE) test CFLAGS='$(ASAN_CFLAGS)' && \
-		$(MAKE) clean; \
-	else \
-		echo "test-asan: AddressSanitizer not supported by $(CC) on this host; skipping"; \
-	fi
+	@asan_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/scuzz-asan.XXXXXX") || exit 1; \
+	trap 'rm -rf "$$asan_dir"' 0; \
+	if ! printf '%s\n' '#include <stdlib.h>' 'int main(void){volatile char *p=malloc(1);p[1]=0;free((void *)p);return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o "$$asan_dir/probe" 2>/dev/null; then \
+		echo "test-asan: AddressSanitizer not supported by $(CC) on this host; skipping"; exit 0; \
+	fi; \
+	if ASAN_OPTIONS=detect_leaks=0:symbolize=0 "$$asan_dir/probe" >"$$asan_dir/output" 2>&1; then \
+		echo "test-asan: the known buffer overflow does not fail" >&2; exit 1; \
+	fi; \
+	if ! grep -q 'AddressSanitizer: heap-buffer-overflow' "$$asan_dir/output"; then \
+		cat "$$asan_dir/output" >&2; \
+		echo "test-asan: the buffer overflow probe has no ASan evidence" >&2; exit 1; \
+	fi; \
+	echo "ASan rejects the known buffer overflow."; \
+	$(MAKE) BUILDDIR=build/asan-tests/build CFLAGS='$(ASAN_CFLAGS)' build/asan-tests/build/test_io build/asan-tests/build/test_ui && \
+	(cd build/asan-tests && ASAN_OPTIONS=detect_leaks=0 ./build/test_io && ASAN_OPTIONS=detect_leaks=0 ./build/test_ui)
 
 # Keep UBSan binaries and file fixtures separate from the normal build.
 UBSAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer

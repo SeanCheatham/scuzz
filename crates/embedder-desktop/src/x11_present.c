@@ -1048,16 +1048,15 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
   /* Do not probe DISPLAY after the connection is open. */
   if (!(g_dpy || ensure_window(title, width, height)))
     return 0;
-  /* Catch events that landed since the pump drained. A user resize in
-   * flight must win over this frame. */
+  /* Read events that arrive after the last pump. A pending user resize
+   * takes priority over this frame. */
   x11_drain_pending();
   if (!g_dpy || !g_ready)
     return 0; /* shutdown ran during the drain */
   if (!ensure_frame(width, height))
     return 0;
-  /* App-driven size change (inject `resize`): move the window to the
-   * frame. A queued resize event means the WM is resizing; the next
-   * present catches up. Never fight the WM. */
+  /* Resize the window for an injected frame size. A queued window manager
+   * resize takes priority. The next frame uses that size. */
   if ((g_win_w != width || g_win_h != height) && !resize_queued())
     XResizeWindow(g_dpy, g_win, (unsigned)width, (unsigned)height);
 

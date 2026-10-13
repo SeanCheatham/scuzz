@@ -38,6 +38,61 @@ static SzIo *pure_drop(void *value);
 static SzIo *repeat_n_drop(int64_t n, SzIo *inner);
 static SzIo *both_drop(SzIo *left, SzIo *right);
 
+static void complete_deferred(SzDeferred *d, int mode, const char *text) {
+  void *value = mode < 2 ? (void *)sz_string_from_cstr(text)
+                         : (void *)sz_error_new(7, text);
+  SzIo *io = NULL;
+  switch (mode) {
+  case 0:
+    sz_deferred_complete_now(d, value);
+    break;
+  case 1:
+    io = sz_deferred_complete(d, value);
+    break;
+  case 2:
+    sz_deferred_fail_now(d, value);
+    break;
+  case 3:
+    io = sz_deferred_fail(d, value);
+    break;
+  }
+  sz_release(value);
+  if (io) {
+    SzIoResult result = sz_io_unsafe_run(io);
+    assert(result.ok);
+  }
+}
+
+static void test_deferred_completion(void) {
+  size_t base_bytes, base_count, live_bytes, live_count;
+  sz_alloc_stats(&base_bytes, &base_count);
+  /* The first completion wins across immediate and IO operations.
+   * Repeated reads retain the result. Each cell releases its payload. */
+  for (int first = 0; first < 4; first++) {
+    for (int later = 0; later < 4; later++) {
+      SzDeferred *d = sz_deferred_make();
+      complete_deferred(d, first, "first");
+      complete_deferred(d, later, "later");
+      for (int read = 0; read < 2; read++) {
+        SzIo *io = sz_deferred_get(d);
+        SzIoResult result = sz_io_unsafe_run(io);
+        assert(result.ok == (first < 2));
+        if (result.ok) {
+          assert(!strcmp(sz_string_cstr(result.value), "first"));
+          sz_release(result.value);
+        } else {
+          assert(result.error && result.error->code == 7);
+          assert(!strcmp(sz_string_cstr(result.error->message), "first"));
+          sz_release(result.error);
+        }
+      }
+      sz_release(d);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_bytes == base_bytes && live_count == base_count);
+    }
+  }
+}
+
 static void *nested_pick_name(void *env) {
   char name[] = "inner";
   SzIo *io;
@@ -47,7 +102,6 @@ static void *nested_pick_name(void *env) {
   memset(name, 'x', sizeof name - 1);
   io = sz_io_pure(NULL);
   result = sz_io_unsafe_run(io);
-  sz_release(io);
   assert(result.ok);
   return NULL;
 }
@@ -65,7 +119,6 @@ static void test_pick_names(void) {
   memset(name, 'x', sizeof name - 1);
   io = sz_io_delay(nested_pick_name, NULL);
   result = sz_io_unsafe_run(io);
-  sz_release(io);
   assert(result.ok);
   file = fopen(path, "r");
   assert(file);
@@ -15210,7 +15263,7 @@ int main(void) {
     remove(path);
   }
 
-  /* Loader parses v=2 signal arrays; bad headers are rejected. */
+  /* The loader reads signal arrays and rejects unsupported timeline headers. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_sig.dump";
     void *tl;
@@ -15407,7 +15460,7 @@ int main(void) {
     remove(b);
   }
 
-  /* Optional effects/fibers/fault sections. Handwritten v=1 without them still loads. */
+  /* Omitted effects, fibers, and fault blocks mean empty observations. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_obs.dump";
     void *tl;
@@ -15602,6 +15655,7 @@ int main(void) {
     free(aliases);
   }
 
+  test_deferred_completion();
   test_pick_names();
   test_long_replay();
   test_long_probe_request();

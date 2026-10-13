@@ -2556,12 +2556,6 @@ def paramTyOf(p: Param): String =
 def hasComma(s: String): Bool =
   commaAt(s, 0) >= 0
 
-def recFieldTys(ens: List[En], core: String): List[String] =
-  recFieldTys2(dotAt(core, 0), core, ens)
-
-def recFieldTys2(dot: Int, core: String, ens: List[En]): List[String] =
-  if (dot < 0) enFieldTys(ens, core) else caseFieldTys(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
-
 def enFieldTys(ens: List[En], name: String): List[String] =
   if (List.isEmpty(ens)) noStr() else enFieldTys1(List.at(ens, 0), List.tail(ens), name)
 

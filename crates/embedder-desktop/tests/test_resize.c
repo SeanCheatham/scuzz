@@ -1,66 +1,25 @@
-/* A WM resize must reach the session as SZ_INPUT_RESIZE, and the next
- * present must blit at the new size without recreating the window.
- * This test resizes the window from a second connection (the WM role),
- * polls for the event, then presents at the new size. */
+/* A resize event reaches the session as SZ_INPUT_RESIZE. The next frame
+ * uses the new size and the same window. */
 #define _POSIX_C_SOURCE 199309L
 
 #include "scuzz_embedder.h"
+#include "x11_test.h"
 
 #include <X11/Xatom.h>
-#include <X11/Xlib.h>
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <time.h>
 
 #define TITLE "scuzz-resize-test"
 #define W 32
 #define H 32
 #define W2 96
 #define H2 64
-/* A WM may pick its own size. The frame buffer covers any plausible one. */
+/* A window manager can select another size. Reserve a larger frame. */
 #define MAXW 1024
 #define MAXH 1024
 
-static int failures;
-
-static void check(int ok, const char *name) {
-  if (ok) {
-    printf("ok: %s\n", name);
-    return;
-  }
-  fprintf(stderr, "FAIL: %s\n", name);
-  failures++;
-}
-
-static Window find_named(Display *dpy, Window w, const char *want) {
-  Window root = 0;
-  Window parent = 0;
-  Window *kids = NULL;
-  unsigned n = 0;
-  unsigned i;
-  char *name = NULL;
-  Window hit = 0;
-
-  if (XFetchName(dpy, w, &name)) {
-    if (name && strcmp(name, want) == 0) {
-      XFree(name);
-      return w;
-    }
-    if (name)
-      XFree(name);
-  }
-  if (!XQueryTree(dpy, w, &root, &parent, &kids, &n) || !kids)
-    return 0;
-  for (i = 0; i < n && !hit; i++)
-    hit = find_named(dpy, kids[i], want);
-  XFree(kids);
-  return hit;
-}
-
-/* A WM may redirect or rewrite a client resize request. Without a WM the
- * server resizes exactly. */
+/* A window manager can change a resize request. Without one, the server
+ * uses the requested size. */
 static int have_wm(Display *dpy) {
   Atom atom;
   Atom type = None;
@@ -110,8 +69,11 @@ int main(void) {
     sz_embedder_shutdown();
     return 1;
   }
-  for (i = 0; i < 1000 && !win; i++)
+  for (i = 0; i < 1000 && !win; i++) {
     win = find_named(inj, DefaultRootWindow(inj), TITLE);
+    if (!win)
+      wait_for_events();
+  }
   check(win != 0, "find window");
   if (!win) {
     XCloseDisplay(inj);
@@ -119,13 +81,12 @@ int main(void) {
     return 1;
   }
 
-  /* The WM role: resize the window. */
+  /* Resize the window through a separate connection. */
   wm = have_wm(inj);
   XResizeWindow(inj, win, W2, H2);
   XSync(inj, False);
   for (i = 0; i < 1000 && !got_resize; i++) {
     SzInputEvent ev;
-    struct timespec ts;
     memset(&ev, 0, sizeof ev);
     while (sz_embedder_poll_event(&ev)) {
       if (ev.kind == SZ_INPUT_RESIZE && ev.width > 0 && ev.height > 0 &&
@@ -135,9 +96,8 @@ int main(void) {
         got_h = ev.height;
       }
     }
-    ts.tv_sec = 0;
-    ts.tv_nsec = 1000000L; /* 1 ms */
-    nanosleep(&ts, NULL);
+    if (!got_resize)
+      wait_for_events();
   }
   check(got_resize, "poll receives resize without present");
   if (!got_resize) {
@@ -155,7 +115,7 @@ int main(void) {
     return failures ? 1 : 0;
   }
 
-  /* The session side: paint lands at the new size on the same window. */
+  /* Present the new frame in the same window. */
   check(sz_embedder_present(TITLE, got_w, got_h, got_w, got_h, px,
                             (size_t)got_w * got_h * 4) == 1,
         "present at new size");

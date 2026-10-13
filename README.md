@@ -1,6 +1,6 @@
 # Scuzz Lang
 
-Scuzz is a functional programming language for native applications. It takes inspiration from Scala's concise syntax and Flutter's approach to user interfaces.
+Scuzz is a functional programming language for native applications. Its syntax takes ideas from Scala. Its UI design takes ideas from Flutter.
 
 Scuzz includes a compiler, a UI toolkit, and command-line tools to build, run, format, and verify apps. It targets command-line tools, servers, desktop apps, and mobile apps. GUI apps can also run in a browser through WebAssembly.
 
@@ -56,7 +56,9 @@ cd myapp
 scuzz run --target headless --exec ""
 ```
 
-Headless mode runs the interface without a window. `--exec ""` plays no ops and exits after the first paint. Drop `--exec` to keep the session live, then drive it with `scuzz exec`. To open a desktop window, set `default_runtime = "desktop"` in the `[ui]` section of `scuzz.toml`, then run `scuzz run`. Linux desktop apps need X11 and its development libraries. Close the window to exit.
+Headless mode runs the interface without a window. `--exec ""` sends no input events and exits after the first paint. Omit `--exec` to keep the session active. Send input with `scuzz exec`.
+
+To open a desktop window, set `default_runtime = "desktop"` in the `[ui]` section of `scuzz.toml`. Then run `scuzz run`. Linux desktop apps need X11 and its development libraries. Close the window to exit.
 
 For a command-line app, omit `--ui` when you create the project, then use `scuzz run`.
 

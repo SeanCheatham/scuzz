@@ -1,19 +1,19 @@
 # Compatibility matrix
 
-What we keep vs cut. Product locks and language direction: [`philosophy.md`](philosophy.md).
+Supported features and exclusions. Product decisions and language direction: [`philosophy.md`](philosophy.md).
 
 ## Language
 
-| Feature | Stance |
+| Feature | Decision |
 | --- | --- |
-| Scala-like defs, ADTs, pattern matching | Keep |
-| Local `val` / blocks | Cut - use `for` with `=` / `<-` ([philosophy](philosophy.md#language-direction)) |
-| Traits-as-interfaces, `Option`/`Either`-style enums | Keep |
-| Local type inference, generics | Keep (monomorphize early) |
+| Scala-inspired definitions, algebraic data types, and pattern matching | Keep |
+| Local `val` / blocks | Cut. Use `for` with `=` or `<-` ([philosophy](philosophy.md#language-direction)) |
+| Traits as interfaces; `Option` and `Either` forms as enums | Keep |
+| Local type inference, generics | Keep. Specialize generics early |
 | Higher-kinded types | Only where effects need them (`IO`) |
-| `var` | Cut. UI state uses `Signal` / blessed cells |
-| Built-in `IO` / fibers / `Resource` | Keep (blessed) |
-| Null | Null-free surface. Explicit null only at FFI |
+| `var` | Cut. UI state uses `Signal` or built-in cells |
+| Built-in `IO` / fibers / `Resource` | Keep |
+| Null | No null in application code. Explicit null only at the foreign interface |
 | Scala 3 metaprogramming / given-using | Cut |
 | Implicit conversions | Cut |
 | Java interop / Scala.js / JVM backends | Cut |
@@ -22,19 +22,37 @@ What we keep vs cut. Product locks and language direction: [`philosophy.md`](phi
 
 ## Runtime and tooling
 
-| Area | Compatible with | Not compatible with |
+| Area | Supported | Excluded |
 | --- | --- | --- |
-| Binary format | Native ELF/Mach-O/PE through LLVM | JVM classfiles / JARs |
-| Dependencies | `scuzz.toml` path deps (data only; no plugin DSL) | Maven Central / Ivy; git or registry deps; `scuzz add`; library publishing; sbt/Gradle/`pubspec` plugins |
-| Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO-as-library, Future-as-default |
-| Test interpreters | Built-in verification: hermetic TestRuntime (`SCUZZ_TESTRT=1`; no live sockets; stubs and virtual loopback); `*.scuzz_verify` + `.require` + one `*.scuzz_scenario` world; `scuzz fuzz --iterations` (live-graph probe + search + mutation; `corpus/` replay; `--iterations 0` corpus-only; `--differential` live dumps, repeated pixel snapshots of one Skia backend, and a gpu-to-sk_sw channel tolerance; `--session` replays URLSession certificate checks and TLS errors on loopback) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks; live network beyond stubs and virtual loopback under sim; dump-fixture goldens |
-| Deterministic campaign (Antithesis-shaped) | Generator-independent `corpus/*.toml` event lists; file/env observation (`sometimes.reached`, scripts, dumps) so an external conductor can drive the same binary; `Property.sometimes` as campaign aggregation (a name must occur at least once) | Antithesis SDK JSONL; a second conductor-specific wire protocol |
-| UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
-| Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui] run --watch` is hot reload (stamp-reload Views) | Flutter DevTools / VM patching |
-| Diagnostics | `scuzz check` is the linter (`--message-format=json`); `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `lint` subcommand; `*.g.scuzz` codegen |
-| Dogfood IDE | `scuzz ide` launches the bundled `[ui]` package. Develop, Verify, and Run are app-bar tabs. Review shows two comparison lanes. Each lane scrolls its content and keeps its choice button visible. Code and Session open from the objective row. More evidence opens diagnostic controls. The app calls shared compiler modules. Probes use the existing evaluator server and forked children. The UI host forwards editor caret and marker effects to the native runtime. The IO compiler does not link the UI renderer. Headless is a peer. Target proposal review uses one objective, blind lane selection, frozen evidence, recovery, and bounded generation. Built-in generation manages pinned llama.cpp Metal and Vulkan builds with CPU fallback and a fixed list of single-file GGUF models. The list has a Qwen3.5 4B default and a Qwen3.5 9B option. Generation has explicit resource limits and cancellation. Downloads use the native streaming HTTP client and a Scuzz model cache. Target `scuzz models list` and `scuzz models download <model-id>` share the same catalog and cache operations. External tools publish complete proposal directories. Both inputs use the same validation and review path. The target finite `scuzz ide generate-suggestion` command shares local generation and publishes one candidate without source writes. Design: [`philosophy.md`](philosophy.md#proposal-review). Implementation gaps: [`gaps.md`](gaps.md) | A second typer or evaluator; Desktop-only editor; a file-tree clone; numbered Docs chapter chrome; a `scuzz-ide` binary; provider SDKs; credentials UI; a remote generator service; configurable remote inference endpoints; arbitrary model selection; model conversion; telemetry; model training |
-| Self-hosting | Product CLI is Scuzz ([`philosophy.md`](philosophy.md#self-hosting)); `VERSION` names the product; `bootstrap.sh` fetches the newest GitHub `v*` release; `package_release.sh` uses the product CLI from the checkout compiler | Big-bang rewrite; dual shipped product CLIs; cargo as the product compiler |
-| Packaging | macOS UI `.app` through `scuzz package --target macos`; Android debug APK through `scuzz package --target android` (installs when adb lists a device); iOS simulator `.app` through `scuzz package --target ios`; local iOS run and hot reload through `scuzz run --target ios --watch` | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
+| Binary format | Native ELF, Mach-O, and PE through LLVM | JVM class files, JARs, and a JavaScript language backend |
+| Dependencies | Path dependencies in `scuzz.toml` | Maven, Ivy, git or registry dependencies, library publishing, and build plugins |
+| Effects | Built-in `IO`, fibers, `Resource`, and the standard kits | cats-effect, a ZIO library port, and Future as the default effect |
+| Verification | Hermetic TestRuntime, claims, live assertions, simulation, search, mutation, and corpus replay | App unit-test trees, third-party verification frameworks, live external networks in simulation, and expected dump fixtures |
+| External campaigns | `corpus/*.toml`, recorded events, environment and file observations, and `Property.sometimes` | A second conductor protocol or an Antithesis SDK adapter |
+| UI | `View`, `Ui`, and the Skia C interface | Swing, JavaFX, Compose Multiplatform, Flutter widgets, SwiftUI, UIKit widgets, WinUI wrappers, and platform channels |
+| Watch | Source rebuilds; restart for IO apps; View reload for UI apps | Flutter DevTools and VM patching |
+| Diagnostics | `scuzz check`, JSON diagnostics, and `scuzz lsp` | A second checker, a separate `lint` command, and generated `*.g.scuzz` sources |
+| IDE | One bundled UI app with shared compiler modules and evaluator probes | A separate `scuzz-ide` binary, Desktop-only editor behavior, and a second evaluator |
+| Generation | Pinned local llama.cpp, a fixed GGUF catalog, explicit limits, and complete external proposal directories | Provider SDKs, remote inference configuration, arbitrary models, conversion, telemetry, and training |
+| Self-hosting | One Scuzz product CLI; newest GitHub `v*` release for bootstrap; product version in `VERSION` | A second shipped toolchain or cargo as the product compiler |
+| Packaging | macOS app bundles, Android debug APKs, iOS simulator apps, and WebAssembly GUI apps | Gradle or CocoaPods as Scuzz APIs |
+
+Verification uses one scenario world, `*.scuzz_verify`, and assertions in live bodies.
+`scuzz fuzz --iterations 0` replays the corpus.
+`--differential` compares live dumps, repeated pixel snapshots, and GPU-to-software channel differences.
+`--session` checks URLSession certificate and TLS behavior on loopback.
+A `Property.sometimes` label must occur at least once in a campaign.
+Commands and file formats: run `scuzz docs verify`.
+
+The IDE keeps Headless as a peer runtime.
+Its UI host supplies native editor effects. The IO compiler does not link a UI renderer.
+Local generation and external import use the same validation and review path.
+Model management and finite CLI generation use the same catalog and cache as the IDE.
+IDE behavior, generation limits, and exclusions are defined in
+[`philosophy.md`](philosophy.md#proposal-review).
+Current proof limits live in [`gaps.md`](gaps.md).
+Run `scuzz docs ide` for controls and commands.
+Run `scuzz docs packages`, `scuzz docs android`, or `scuzz docs ios` for app packaging.
 
 ## Platforms (Headless first)
 
@@ -44,13 +62,35 @@ What we keep vs cut. Product locks and language direction: [`philosophy.md`](phi
 | Linux desktop | Yes | X11 | `embedder-desktop` when `DISPLAY` is set |
 | Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCUZZ_MOBILE_SHELL=1` |
 | macOS desktop | Yes | Cocoa blit | UI host packages are signed `.app` bundles. Non-system libraries are included. Finder launch uses Desktop. AppKit handles window borders before it sends content input to the shared UI. Content input uses top-left coordinates. |
-| Windows desktop | Yes | Secondary | Later (same session protocol) |
+| Windows desktop | Later | Later | Shared session design. No supported host build |
 | iOS / Android | Shared app code | Packaging shells | iOS simulator run needs Xcode on Apple Silicon. Android needs the NDK. iOS HTTP clients use platform trust. Physical device proof stays open |
 | Web / browser | WebAssembly GUI | Canvas presentation | `scuzz package --target web`; cached Emscripten 4.0.23; Python 3 on the build host |
 
 ## Toolchain
 
-Host build, run, and package commands support file paths with spaces. Host and iOS simulator hot reload need one direct `Ui.run` factory. Reload checks captured binding names, order, and types. It also checks record and enum layouts. An incompatible reload preserves the app and requires a restart. Failed builds preserve the app. Code remains loaded until the session ends so active IO handlers can finish. Captured values retain their current values. Enter r to rebuild and restart a watched UI app. Enter q to stop. The app stops when its CLI session ends. iOS stops the console launch process before it stops the app process on the selected simulator. The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` uses the newest GitHub `v*` release to build a temporary checkout compiler. That compiler builds `examples/cli` ([philosophy.md](philosophy.md#self-hosting)). Kernel surface: [philosophy.md](philosophy.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. CLI and server HTTPS link OpenSSL (`libssl` / `libcrypto`). iOS and macOS GUI clients use URLSession with platform certificate trust. Both transports use the same Net API and hermetic simulation dispatch. iOS supports Net HTTP clients and TCP/UDP. It does not support Net HTTP servers. GUI clients verify loopback certificates. App Transport Security allows local networking. Use HTTPS for remote services.
+The compiler and CLI are Scuzz (`examples/compiler` and `examples/cli`).
+Bootstrap uses the newest GitHub `v*` release to build a temporary checkout compiler.
+That compiler builds the product CLI.
+See [`philosophy.md`](philosophy.md#self-hosting) for bootstrap constraints.
+Use one formatter, one checker, and one verification strategy.
+Host build, run, and package commands support paths with spaces.
+
+Host and iOS simulator reload need one direct `Ui.run` factory.
+Reload checks captured binding names, order, and types, plus record and enum layouts.
+An incompatible reload or a failed build preserves the running app.
+An incompatible reload needs a restart.
+Captured values retain their current state.
+Code stays loaded until the session ends so active IO handlers can finish.
+Enter `r` to rebuild and restart. Enter `q` to stop.
+The app stops when its CLI session ends.
+iOS stops the console launch process before the selected simulator app.
+
+CLI and server HTTPS use OpenSSL.
+iOS and macOS GUI clients use URLSession with platform certificate trust.
+GUI clients verify loopback certificates.
+Both transports use the same Net API and hermetic simulation dispatch.
+iOS supports HTTP clients and TCP/UDP. It does not support HTTP servers.
+App Transport Security permits local networking. Use HTTPS for remote services.
 
 ## Browser target
 
@@ -68,7 +108,7 @@ cross-origin isolation headers.
 
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
 and resize events. Wheel and canvas touch listeners that cancel the event
-register as non-passive. The HTTP client and the HTTP servers fail loud at
+register as non-passive. The HTTP client and the HTTP servers fail at
 the call (`Net: not available on web`); a process effect fails at `fork`
 (`Sys.exec: fork failed`). The web build links every def in the package and its path
 dependencies; the linker drops the defs `@main` does not reach. Files use Emscripten memory storage. They do not persist across page reloads.

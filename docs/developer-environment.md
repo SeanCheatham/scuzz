@@ -12,7 +12,7 @@ Fail on the first missing tool with one install line.
 | `make` | `crates/runtime`, `ffi-skia`, embedders |
 | `curl` | fetch tagged bootstrap `scuzz` (`scripts/bootstrap.sh`; newest GitHub `v*` release) |
 | `zlib` + `bzip2` | Linux Skia CPU prebuilt |
-| OpenSSL | Live `https://` on the blessed HTTP kit |
+| OpenSSL | Live `https://` on the built-in HTTP kit |
 
 ```bash
 # Debian/Ubuntu
@@ -25,7 +25,7 @@ brew install openssl@3
 If `clang` cannot find libstdc++ when it links Skia:
 
 ```bash
-export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13
+export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13${LIBRARY_PATH:+:$LIBRARY_PATH}
 ```
 
 ## Optional CI slices
@@ -37,7 +37,13 @@ export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13
 | GPU (`SCUZZ_SKIA=gpu`) | `libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri xvfb` |
 | Desktop X11 | `libx11-dev xvfb` |
 
-ASan skips when the ASan runtime cannot link. GPU needs `LIBGL_ALWAYS_SOFTWARE=1` when the host has no GPU.
+ASan skips when the ASan runtime cannot link.
+The target first checks that ASan rejects a known heap buffer overflow.
+It keeps test binaries and file fixtures in `crates/runtime/build/asan-tests/`.
+It preserves the normal build and the `lib-asan` archive.
+C tests disable leak detection. They still check invalid memory access.
+Compiled corpus replay uses `lib-asan` and `scuzz fuzz --asan` with leak detection.
+GPU needs `LIBGL_ALWAYS_SOFTWARE=1` when the host has no GPU.
 
 UBSan fails when compile or link support is unavailable.
 The target rejects a known signed overflow before the runtime checks.
@@ -55,7 +61,10 @@ These checks do not establish that all runtime behavior is correct.
 ./scripts/install-githooks.sh
 ```
 
-A pre-commit hook checks conflict markers. When you stage runtime, ffi-skia, or embedder `.c`, it compiles with `-Werror`. Bypass with `git commit --no-verify`.
+The pre-commit hook checks the index snapshot for conflict markers.
+It compiles staged host C sources with `-Werror` against headers from that snapshot.
+An unstaged edit cannot change the result.
+Bypass the hook with `git commit --no-verify`.
 
 ## Prove the host
 
@@ -75,14 +84,70 @@ Same slices as GitHub. List them, then run the required PR path:
 ```
 
 `pr` runs macos-smoke, oracles, kernel, ui, fuzz, and delta. The Darwin smoke includes the relocated UI app bundle and source reload proof. A local run removes example `build/` directories except `examples/cli/build`. This gives the checks a clean start. GitHub sets `CI=true` and skips this removal. Each output directory has its own live and verification cache stamps. Each stamp includes the executing compiler identity. Jobs that fetch the Skia CPU prebuilt restore `third_party/skia/prebuilt` from a cache keyed by OS, arch, and `third_party/skia/PIN`. `scripts/fetch_skia.sh` retries HTTP 502, 503, and 504, and a truncated gzip. The ffi-skia include fetch uses the same download retry.
+The fixed-point check uses one temporary directory per run.
+A successful run removes it. A failed run prints its path and retains its IR and logs.
+Renderer changes select the required archive without deleting the Skia header cache.
 
 Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI builds the product CLI once. Eight check jobs use that artifact in separate checkouts. The `linux-headless` check requires all eight jobs and the build to pass. Each slice prints its elapsed time. A new PR update cancels its older CI run. Apt install and artifact upload stay in `.github/workflows/ci.yml`.
 
-| Env | Paint |
+## Native libraries and paint
+
+`crates/runtime` supplies the C runtime, IO scheduler, simulation, and UI sessions.
+Its public interfaces are `include/scuzz_rt.h` and `include/scuzz_ui.h`.
+`crates/ffi-skia/include/sk_capi.h` defines the paint interface.
+Callers do not need Skia headers.
+The Desktop and Mobile interfaces are in their crate `include/` directories.
+Headless remains a peer runtime.
+
+| Environment | Paint |
 | --- | --- |
-| unset | Skia CPU prebuilt |
-| `SCUZZ_SKIA=sk_sw` | in-tree software |
-| `SCUZZ_SKIA=gpu` | OpenGL raster. No CPU paint pass |
+| unset | Pinned Skia CPU archive |
+| `SCUZZ_SKIA=sk_sw` | In-tree software renderer |
+| `SCUZZ_SKIA=gpu` | OpenGL renderer. Pixel reads use the framebuffer |
+
+```bash
+make -C crates/ffi-skia test
+SCUZZ_SKIA=sk_sw make -C crates/ffi-skia test
+SCUZZ_SKIA=gpu make -C crates/ffi-skia test
+make -C crates/embedder-desktop test
+make -C crates/embedder-mobile test
+```
+
+The GPU and Desktop checks need the host packages in [Optional CI slices](#optional-ci-slices).
+C test builds keep assertions active, including when `CFLAGS` defines `NDEBUG`.
+Runtime tests relink after paint selection. They use the archive selected for that run.
+The test link includes the math library for each renderer.
+The differential CI slice also runs `python3 scripts/test_png_max_delta.py`.
+It checks all five PNG filters, chunk integrity, incomplete image rejection, and comparator exit codes.
+The comparator reads static RGBA images with eight bits per channel and no interlacing.
+Run normal, ASan, and UBSan runtime tests in sequence.
+Their network checks use the same local ports.
+
+`scripts/fetch_skia.sh` reads `third_party/skia/PIN`.
+The `url` field selects the CPU archive. The `hdr_url` field selects its headers.
+`{triple}` becomes the host triple from `scripts/skia_triple.sh`.
+Use `SCUZZ_SKIA_TRIPLE` to select another triple.
+Use `SCUZZ_SKIA_URL` to select another archive URL.
+The fetch fails if it cannot obtain the archive.
+It installs `third_party/skia/prebuilt/<triple>/libsk_capi.a`.
+The ffi-skia build replaces the archive's interface objects with the local implementation.
+It records the selected renderer in `build/sk_capi_backend`.
+No Skia source tree is stored in the repository.
+
+The CPU archive contains Skia objects and embedded fonts.
+Linux links C++, math, zlib, and bzip2 libraries.
+macOS also links CoreFoundation, CoreGraphics, CoreText, Foundation, and Carbon.
+The archive build disables WOFF2 and rejects undefined Brotli symbols.
+`scripts/package_release.sh` includes the pinned host archive unless `SCUZZ_SKIA=sk_sw`.
+
+Desktop uses X11 on Linux and Cocoa on macOS.
+AppKit runs on the process main thread. The IO worker sends work to that thread.
+The Mobile host shell writes frame and keyboard records to stderr when `SCUZZ_MOBILE_SHELL=1`.
+It has no input queue and exits after one frame. Pixels remain offscreen.
+Link the Mobile archive with `--whole-archive` on Linux or `-force_load` on macOS.
+These options select its implementation instead of the runtime's weak symbols.
+Android and iOS shells live in `crates/embedder-mobile/shells/`.
+App instructions: run `scuzz docs gui`, `scuzz docs android`, or `scuzz docs ios`.
 
 ## Web build tools
 

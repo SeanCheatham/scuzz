@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Build a sk_capi-shaped Skia CPU prebuilt tarball (as-needed; not every Scuzz release).
-#
-# Produces: dist/skia-<triple>-cpu.tar.gz containing libsk_capi.a (+ fonts/ copy).
-# Also: dist/skia-include.tar.gz, the Skia include/ tree of the branch. The
-# ffi-skia shim relink needs those headers; the release carries them so app
-# builds never fetch from skia.googlesource (the +archive endpoint 503s).
+# Build the Skia CPU archive and its matching headers.
+# Write dist/skia-<triple>-cpu.tar.gz with libsk_capi.a and fonts.
+# Write dist/skia-include.tar.gz with the selected branch's include tree.
+# The ffi-skia build uses these headers from the release asset.
 #
 # Env:
 #   SCUZZ_SKIA_BRANCH   Skia git branch/tag (default chrome/m131)
@@ -99,7 +97,7 @@ rm -rf "${PKG}"
 mkdir -p "${PKG}/fonts" "${PKG}/obj"
 cp -f "${FONT_TTF}" "${PKG}/fonts/DejaVuSans.ttf"
 
-echo "==> compile sk_capi shim + bridge + embedded font"
+echo "==> compile paint interface, bridge, and embedded font"
 c++ -std=c++17 -O2 -fPIC -c "${SHIM}" -o "${PKG}/obj/sk_capi_skia.o" \
   -I"${SKIA}" \
   -DSK_RELEASE \
@@ -185,7 +183,6 @@ tar -C "${PKG}" -czf "${OUT_DIR}/${ASSET}" libsk_capi.a fonts VERSION
 echo "build_skia_prebuilt: wrote ${OUT_DIR}/${ASSET}"
 ls -lh "${OUT_DIR}/${ASSET}"
 
-# Headers for the ffi-skia shim relink. Same shape as the gitiles
-# +archive/<branch>/include.tar.gz: paths rooted at include/.
+# Store header paths relative to the Skia include directory.
 tar -C "${SKIA}/include" -czf "${OUT_DIR}/skia-include.tar.gz" .
 echo "build_skia_prebuilt: wrote ${OUT_DIR}/skia-include.tar.gz"
