@@ -3,8 +3,8 @@
 
 #include <stddef.h>
 
-/* RFC 4648 Base64 of UTF-8 bytes, and the reverse. Software so web and mobile
-   compile without OpenSSL. No URL-safe alphabet. No UUID. */
+/* Encode and decode bytes with the RFC 4648 Base64 alphabet.
+ * The implementation needs no OpenSSL. */
 
 static const char alphabet[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

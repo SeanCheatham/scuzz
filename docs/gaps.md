@@ -108,9 +108,90 @@ The malformed journal scope compares all files in its separate workspace.
 
 **Unproven.** The supported subset and resource cost fit an ordinary application author workflow. Formal methods add useful defect detection beyond ordinary fuzzing. General solver translation and compilation correctness remain unproven.
 
-**Evidence.** The optional [formal checks](vision.md#formal-verification-methods) reuse author rules. One pure invariant covers all signed 64-bit inputs. A finite effect protocol checks cancellation and interrupted writes. Both engines replay the concrete counterexamples. The application recovery check uses exact editor function bodies. Its sequential scope passes. Both finite exploration and ordinary search reject two deliberate defects. Long cancellation paths retain exact replay records. Fixed setup inputs keep helper mutations out of setup. Recovery corpus inputs exercise the mutation checks. The zero-preemption recovery scope completes 392 paths. It does not reach interruption during recovery. Wider application scopes still exceed their execution budgets. Shared evaluator servers remove repeated startup. The expanded fault scope includes errors after file replacement. Separate live file checks cover directory sync errors and process termination before and after replacement. Live recovery checks stop the process or report a directory sync error at each recovery write boundary. Restart completes acceptance and Undo recovery. Conflicts preserve operation files. Power-loss behavior and concurrent external edits remain open. Run instructions and measured limits live in `developer-environment.md`.
+**Evidence.** The optional [formal checks](vision.md#formal-verification-methods)
+reuse author rules. Commands and report paths live in
+[`developer-environment.md`](developer-environment.md#formal-verification-experiment).
+The reports retain exact inputs, tool identities, bounds, trusted components,
+and command costs. These costs exclude human writing time.
 
-The acceptance scope completes all 1286 paths. The prepared Undo scope completes all 1300 paths. The complete Undo request scope completes all 567 paths. These scopes reach interruption and all three file fault outcomes. The sampled methods use the same bounds and rules. Their distinct paths occur in the completed exhaustive sets. Both methods reject both deliberate defects in each scope. All 14 direct defect checks produce named author rule failures and native replay evidence. The duplicate workflow records its exact source, identities, and command costs.
+The pure expression check translates checked Int and Bool expressions.
+It uses signed 64-bit comparisons and arithmetic modulo 2^64.
+It rejects effects, recursion, implicit assumptions, and unsupported expressions.
+One balance oracle supplies both fuzz checks and solver queries.
+The check covers all signed 64-bit inputs for this invariant.
+It checks assumption consistency and required trigger reach separately.
+It compares 70 expression results with independent host arithmetic.
+It checks live input validation and replays minimum Int and an overflow defect
+at maximum Int through both engines. Ordinary fuzzing uses 16 iterations.
+
+The finite protocol runs two requests in sequence.
+The caller can cancel the first worker before the second request starts.
+Each request releases its resource once and waits before its seven-byte write.
+Errors before replacement preserve previous bytes.
+Errors after replacement retain complete new bytes.
+Cancellation preserves the first request file.
+The checker rejects a release defect with an ordinary replay workload.
+
+| Scope | Inputs and faults | Limits | One Linux sample |
+| --- | --- | --- | --- |
+| Protocol | Inputs 1 and 2; no fault or one fail, partial, or after-replacement fault at calls 1–4 | 16 contention choices; 128 steps; 1024 executions; 60 s after build | 676 executions; at most 4 choices and 36 steps; 12.80 s checking; 4.67 s cached build |
+| Recovery | Four journal states and four cancellation inputs; fault calls 1–16 | 1000 steps and contention choices; 2048 executions; 60 s | 196 sequential paths pass; wider scope reaches the execution limit in 56.37 s; 117268 prefixes remain |
+| Recovery with no preemption | Same recovery inputs and faults | Separate 2048-execution and 60 s limits | All 392 paths pass in 10.74 s; no interruption during recovery |
+| Acceptance comparison | Inputs 0, 1, 4, 5; fault calls 1 and 9; all three fault modes | At most one preemption; 1000 steps; 2048 executions; 60 s per method | All 1286 exhaustive paths pass in 38.56 s; 2048 sampled runs take 11.89 s and reach 112 distinct paths |
+| Prepared Undo comparison | Inputs 2, 3, 6, 7; fault calls 1 and 9; all three fault modes | Same comparison limits | All 1300 exhaustive paths pass in 43.25 s; 2048 sampled runs take 12.45 s and reach 112 distinct paths |
+| Undo request comparison | Inputs 0–3; fault calls 1 and 25; all three fault modes | Same comparison limits | All 567 exhaustive paths pass in 21.27 s; 2048 sampled runs take 13.19 s and reach 107 distinct paths |
+
+Setup does not consume fault bounds.
+A preemption selects another fiber while the previous fiber remains runnable.
+A switch after blocking does not consume this bound.
+Each sampled path occurs in its completed exhaustive comparison set.
+The sampled method uses the existing PCT scheduler with seed 42.
+Each comparison uses the same source graph, rules, faults, and budgets.
+The one- and two-preemption recovery scopes remain incomplete.
+Their separate limits do not replace the wider required scope.
+The protocol checks its bounded path sets against its complete schedule set.
+Zero, one, and two preemptions produce 1, 3, and 5 distinct protocol paths.
+
+Recovery uses exact editor function bodies with fixed fixture inputs.
+Source selection remains trusted. The check does not run the complete IDE.
+Two source files, the journal, the operation record, and the Undo state
+supply five operation files for comparison.
+Missing and empty files differ. Conflict and repeated recovery rules compare
+presence and contents. Duplicate rejection also preserves an unrelated file.
+Separate observation drivers keep reads out of existing fault paths.
+Expected file faults retain a pending operation. Unexpected errors fail a rule.
+
+Ordinary recovery fuzzing uses 64 iterations, seed 42, and a 60 s checking limit.
+Its corpus covers acceptance, Undo, conflicts, cancellation, repeated recovery,
+duplicate requests, and malformed records and journals.
+One sample passes 67 required probes and 40 search probes in 30.88 s.
+It detects 22 sampled mutations. Two are inert. None survives or stays incomplete.
+These mutations affect the fixture and selected application functions.
+The 63 fault-free rule checks and exact engine comparisons take 1.39 s.
+Both methods reject missing-write and external-overwrite controls.
+All 14 direct defect checks produce named author rule failures in both engines.
+Ordinary native replay reproduces each rejection.
+A conflict-write defect passes endpoint rules but fails the file comparison.
+Other controls change guards, paths, fields, Undo state, journals, or unrelated files.
+The duplicate workflow has 12 source lines and three author assertions.
+Its sample costs are 6.75 s for the defect build, below 0.01 s for native checking,
+0.19 s for evaluator comparison, and 0.40 s for ordinary native replay.
+
+Live file checks cover directory sync errors and process termination
+before and after replacement. Previous or complete new bytes remain present.
+The live recovery check completes 23 acceptance and Undo recovery cases.
+Restart completes recovery. Repeated recovery preserves all five operation files.
+The live Undo request check completes 22 cases, including 19 malformed records.
+A further 21 malformed journal cases preserve all workspace files and Undo state.
+These checks retain source and native identities, logs, and file contents.
+
+**Open scope.** Power loss, external edits during recovery, temporary file cleanup,
+other fault calls, other application operations, and unbounded schedules remain open.
+Cancellation paths can reach 144 contention choices.
+The 16-point sampling policy does not limit stored replay choices.
+Finite schedules do not prove eventual completion or inductive safety.
+An executed rule does not establish specification completeness.
+One host sample does not establish a general cost bound or method advantage.
 
 **Next gate.** Measure human writing time, rule comprehension, and usefulness in one author session. Preserve wider incomplete results. Keep power loss, concurrent external edits, and other application operations open. Do not infer a general method advantage from one application scope.
 

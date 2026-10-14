@@ -2311,7 +2311,7 @@ def limit():
     if sys.platform.startswith('linux'):
         resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
 
-def replay(package, executable, label, events, ui=False):
+def replay(package, executable, label, events, ui=False, auto_tap=True, expected_error=None):
     build = package / 'build'
     source = build / 'fuzz/ev'
     out = build / 'fuzz/parity' / label
@@ -2323,8 +2323,9 @@ def replay(package, executable, label, events, ui=False):
         script.write_text(json.dumps({'v': 1, 'kind': 'inject', 'events': events}))
         request['UI_SCRIPT' if ui else 'DRIVE_SCRIPT'] = str(script)
     if ui:
-        request.update(UI_RUNTIME='headless', UI_WIDTH='960', UI_HEIGHT='560',
-                       UI_SCALE='1.0', UI_TAP='1')
+        request.update(UI_RUNTIME='headless', UI_WIDTH='960', UI_HEIGHT='560', UI_SCALE='1.0')
+        if auto_tap:
+            request['UI_TAP'] = '1'
     for engine in ['eval', 'native']:
         work = out / 'work'
         shutil.rmtree(work, ignore_errors=True)
@@ -2356,15 +2357,44 @@ def replay(package, executable, label, events, ui=False):
         detail = result.stdout + result.stderr
         if engine == 'eval' and (out / 'probe.log').exists():
             detail += (out / 'probe.log').read_text()
-        assert result.returncode == 0, (name, label, engine, detail)
-        if engine == 'eval':
-            assert result.stdout == 'ready\n0\n', (name, label, detail)
+        if expected_error is not None:
+            assert expected_error in detail, (name, label, engine, detail)
+            if engine == 'eval':
+                assert result.returncode == 0 and result.stdout == 'ready\n1\n', (name, label, detail)
+            else:
+                assert result.returncode != 0, (name, label, engine, detail)
+        else:
+            assert result.returncode == 0, (name, label, engine, detail)
+            if engine == 'eval':
+                assert result.stdout == 'ready\n0\n', (name, label, detail)
         print(f'{name} {label} {engine}: {time.monotonic() - started:.2f} s', flush=True)
+    if expected_error is not None:
+        print(f'{name} {label}: evaluator and native reject {expected_error}', flush=True)
+        return out
     for suffix in ['timeline', 'claims']:
         assert (out / f'eval.{suffix}').read_bytes() == (out / f'native.{suffix}').read_bytes(), (
             name, label, suffix, str(out))
     print(f'{name} {label}: exact evaluator and compiled timelines and claims', flush=True)
     return out
+
+def ui_fixture(fixture_name, source_text):
+    target = build / 'fuzz/parity' / fixture_name
+    shutil.rmtree(target, ignore_errors=True)
+    (target / 'src').mkdir(parents=True)
+    (target / 'work').mkdir()
+    (target / 'scuzz.toml').write_text(
+        f'[package]\nname="{fixture_name}"\n[ui]\ndefault_runtime="headless"\n'
+        'headless_size=[960, 560]\nheadless_scale=1.0\n')
+    (target / 'src/Main.scuzz').write_text(source_text)
+    subprocess.run([str(cli), 'fmt', str(target)], env=base_env, check=True,
+                   capture_output=True, text=True, timeout=30)
+    result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(target)],
+                            env=base_env, cwd=target / 'work', capture_output=True,
+                            text=True, timeout=180)
+    (target / 'campaign.log').write_text(result.stdout + result.stderr)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (target / 'build/fuzz/ev/files.txt').is_file(), result.stdout + result.stderr
+    return target
 
 for label, events in cases:
     replay(package, name, label, events, ui)
@@ -2468,6 +2498,44 @@ if name == 'codegen':
         ('view', '<handle>'), ('views', ['<handle>']),
         ('nested', ['<handle>', ['<handle>']])], signals
     print('View signals: direct, list, and nested tuple values match native handles', flush=True)
+
+    target = ui_fixture('mount-each', '''@main def main: IO[Unit] =
+  for {
+    count = Signal.makeN("count", 0)
+    rows = Signal.makeN("rows", ["a"])
+    _ <- Ui.run(_ => View.column(
+      View.button("grow", _ => for {
+        _ = Signal.set(count, Signal.get(count) + 1)
+        _ = Signal.set(rows, List.append(Signal.get(rows), "b"))
+      } yield ()),
+      View.button("fail", _ => 1 / 0),
+      View.each(rows, row => View.bindText(Signal.map(count, n => s"$row:$n")))
+    ))
+  } yield ()
+''')
+    out = replay(target, 'mount-each', 'grow', [{'op': 'tap', 'id': 'button:grow'}],
+                 ui=True, auto_tap=False)
+    dump = json.loads((out / 'eval.json').read_text())
+    assert 'text:a:1' in dump['views'] and 'text:b:1' in dump['views'], dump['views']
+    print('Shared View mount: row insertion and nested mapped signals match native output', flush=True)
+    replay(target, 'mount-each', 'tap-error', [{'op': 'tap', 'id': 'button:fail'}],
+           ui=True, auto_tap=False, expected_error="division by zero")
+
+    target = ui_fixture('mount-wrappers', '''@main def main: IO[Unit] =
+  Ui.run(_ => View.column(
+    View.stretch(View.clip(View.align(1, 1, View.border(2, Color.rgb(0, 0, 0),
+      View.radius(4, View.opacity(80, View.gap(3, View.maxLines(2, View.ellipsis(View.text("wrapped")))))))))),
+    View.ignorePointer(View.text("ignored")),
+    View.absorbPointer(View.text("absorbed")),
+    View.excludeSemantics(View.text("hidden")),
+    View.list()
+  ))
+''')
+    out = replay(target, 'mount-wrappers', 'wrappers', None, ui=True, auto_tap=False)
+    dump = json.loads((out / 'eval.json').read_text())
+    assert {'text:wrapped', 'text:ignored', 'text:absorbed', 'list:list'} <= set(dump['views']), dump['views']
+    assert 'text:hidden' not in dump['views'], dump['views']
+    print('Shared View mount: all wrapper cases match native structure and semantics', flush=True)
 
 if name == 'tyck':
     target = build / 'fuzz/parity/signals'

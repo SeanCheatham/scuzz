@@ -492,9 +492,9 @@ int sz_ui_session_cut(SzUiSession *session);
  * caret) with `text`. NULL `text` uses the session clipboard, after a
  * Desktop/Mobile OS pull. */
 int sz_ui_session_paste(SzUiSession *session, const char *text);
-/* Insert UTF-8 at the caret, or chop one UTF-8 code point before the caret
- * when backspace != 0. A selection is replaced or deleted. Targets the focused
- * TextField or editor (else the first field, else the first editor). */
+/* Insert UTF-8 at the caret. If backspace is nonzero, delete the preceding code point.
+ * Replace or delete an active selection.
+ * Use the focused TextField or editor, then the first field, then the first editor. */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 /* Named key on the focused TextField or editor, or on a focused focus-group
  * row. Backspace / Delete / arrows / Home / End use the caret. Shift+arrows /
@@ -687,46 +687,13 @@ void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env
  * then replace_root. Missing file snapshots as empty. Headless, Desktop, and
  * Mobile share this path. */
 int sz_ui_session_watch(SzUiSession *session, const char *path);
-/* Live structural dump rewritten on dirty pumps, stamp reload, and
- * IO-bridge flushes. Agents read the file. The document is typed session
- * schema v=2 (`{"v":2,"kind":"dump",...}`) at any path:
- * signals (typed value / list payloads), views (a11y preorder lines), a11y
- * (the same preorder as a JSON forest; toggle kinds carry "on", numeric kinds
- * carry "value"), taps (inject indices for `tap N`, scan order, cap 64),
- * fields (TextFields in a11y order; "target" marks the text/type/backspace/key
- * target, focused else first; caret and sel are byte offsets `[A, C)`),
- * editors (`View.editor` nodes: caret, sel, scroll pan, line count, 1-based
- * line:severity diags, LSP token / inlay / fold counts, preedit, value),
- * splits, overlays ("top" is the topmost open overlay), scrolls (hittable
- * Scrolls in scan order; `scroll N dy` pans index N, `scroll 40` stays the
- * first). `last_hit` / `hover` / `last_secondary` appear after a TAP, a
- * pointer MOVE with no button, or a button-3 click in this session.
- * `text N s` / `type N s` / `backspace N k` / `caret N b` / `select N a c`
- * target dump index N. One-token forms still use the starred field, or the
- * focused editor when that is the edit target.
- * `key <name>[+shift|+ctrl|+cmd|+alt|+repeat] [text]` uses the starred field
- * or focused editor. `+repeat` is a held-key auto-repeat (same insert / move /
- * delete as a discrete key). Shift+arrows extend the selection. Live OS keys
- * record as `key`, not `type`. Desktop maps X11 auto-repeat and Cocoa
- * `isARepeat` into `+repeat`. `compose <text>` sets IME preedit (underlined
- * preview; not in the committed buffer). `compose` with no text, or `commit`,
- * inserts the preedit at the caret. `key Escape` cancels preedit.
- * `caret <n>` sets the starred-field or focused-editor caret. `select <a> <c>`
- * sets that selection. Click-to-caret uses TAP / `xy` on the field or editor.
- * Pointer drag extends the selection. `copy` / `cut` / `paste` / `paste <s>`
- * are the clipboard verbs. Headless `paste` uses the session clipboard.
- * Desktop/Mobile pull the OS pasteboard on paste when present. Live OS
- * copy/cut/paste and Shift+arrows record those verbs. `drag x1 y1 x2 y2` is
- * pointer-drag select. `hover x y` is pointer MOVE with no button.
- * `secondary N` / `secondary x y` is button 3. Live OS hover and right-click
- * record those verbs. Button-3 also runs `View.onSecondary` on that hit.
- * Only the live debug dump includes `session` (runtime, size, title, focus,
- * lifecycle, keyboard, pump count), `heap` (live stats, delta since the last
- * live dump or `resetpeak`, per-kind counts), and `live` (remaining blocks,
- * capped at 32). Fuzz / golden dumps omit them. */
+/* Write schema v=2 at any path. Dirty pumps, reload, and IO bridge work
+ * update the live dump. Only live dumps include session, heap, and live rows.
+ * Live rows have a limit of 32. Fuzz dumps omit these sections.
+ * Read scuzz docs commands for the input and dump schemas. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
-/* Rewrite the live debug dump now, including `session` and `heap`. No path is a no-op. */
+/* Write the live debug dump. Return 0 when no dump path is set. */
 int sz_ui_session_dump_now(SzUiSession *session);
 /* Watch an inject document (schema v=1, kind `inject`).
  * Next pump that sees new contents plays the whole document.

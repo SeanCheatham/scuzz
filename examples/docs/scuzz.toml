@@ -9,3 +9,4 @@ headless_scale = 1.0
 
 [dependencies]
 compiler = { path = "../compiler" }
+mount = { path = "../ui-host/mount" }

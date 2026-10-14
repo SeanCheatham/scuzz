@@ -184,7 +184,7 @@ int64_t sz_string_contains(const SzString *s, const SzString *needle);
 /* POSIX ERE. Full-string match on UTF-8 bytes. 1 or 0. A bad pattern is 0.
  * Empty pattern matches only the empty string. */
 int64_t sz_string_matches(const SzString *s, const SzString *pat);
-/* Whole-string base-10 parse. Leading space is allowed. Junk or overflow uses `dflt`. */
+/* Whole-string base-10 parse. Leading space is allowed. Invalid text or overflow returns `dflt`. */
 int64_t sz_string_to_int(const SzString *s, int64_t dflt);
 /* Strict decimal input returns Result[String, Int]. */
 struct SzAdt *sz_string_parse_int(const SzString *s);
@@ -380,10 +380,11 @@ struct SzIo {
  * takes ok/err and drops the box. Run retains so last-use of the result does
  * not free the node slot. */
 SzIo *sz_io_pure(void *value);
-/* Callee retains a RC env. Caller drops after the call. Last sz_release of
- * the delay node drops leftover RC env or a leftover sz_alloc env. It does
- * not load an RC header from a string literal or a small integer. Run steals
- * env so the thunk owns it. */
+/* Retain an RC environment. The caller releases its reference after the call.
+ * The node owns a raw sz_alloc environment. It does not own literals or integers.
+ * The thunk borrows the environment. A unique delay releases it after the thunk,
+ * except for an SZ_RC_BOX environment. Shared delays and boxes keep it on the node.
+ * The final node release calls sz_release or sz_free for any remaining environment. */
 SzIo *sz_io_delay(SzThunk thunk, void *env);
 SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env);
 /* Callee retains the error. Caller drops after the call. Last sz_release of
@@ -920,7 +921,7 @@ int64_t sz_set_is_subset(SzMap *a, SzMap *b);
 /* 1 when `a` and `b` share no key. Empty is disjoint. */
 int64_t sz_set_is_disjoint(SzMap *a, SzMap *b);
 
-/* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */
+/* Filesystem IO selects the live or simulated implementation when it runs. */
 SzIo *sz_fs_read(SzString *path);
 SzIo *sz_fs_write(SzString *path, SzString *contents);
 SzIo *sz_fs_list(SzString *path);
@@ -1047,7 +1048,7 @@ typedef struct SzNetSock {
   int fake_id;
   int64_t port;
 } SzNetSock;
-/* Blessed TCP. Listen is localhost. Connect takes IPv4/IPv6 literals or localhost. */
+/* TCP listens on localhost. Connect accepts IPv4, IPv6, or localhost. */
 SzIo *sz_net_tcp_connect(SzString *host, int64_t port); /* IO[SzNetSock] */
 SzIo *sz_net_tcp_listen(int64_t port);                  /* IO[SzNetSock] */
 SzIo *sz_net_tcp_accept(SzNetSock *listener);           /* IO[SzNetSock] */
@@ -1055,8 +1056,8 @@ SzIo *sz_net_tcp_accept(SzNetSock *listener);           /* IO[SzNetSock] */
 SzIo *sz_net_tcp_read(SzNetSock *conn, int64_t n); /* IO[String] */
 SzIo *sz_net_tcp_write(SzNetSock *conn, SzString *s);   /* IO[Unit] */
 SzIo *sz_net_tcp_close(SzNetSock *sock);                /* IO[Unit] */
-/* Blessed UDP. Bind is IPv4 localhost. Bind 0 picks an ephemeral port.
- * Recv is (host, port, data). An IPv6 send host fails. */
+/* UDP binds on IPv4 localhost. Port 0 selects an available port.
+ * Receive returns (host, port, data). An IPv6 destination fails. */
 SzIo *sz_net_udp_bind(int64_t port); /* IO[SzNetSock] */
 SzIo *sz_net_udp_send(SzNetSock *sock, SzString *host, int64_t port,
                      SzString *data);

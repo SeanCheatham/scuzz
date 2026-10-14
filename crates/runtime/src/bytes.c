@@ -3,8 +3,7 @@
 
 #include <stddef.h>
 
-/* Copy UTF-8 / raw bytes from a String into a Bytes value. Software so web
-   and mobile compile without OpenSSL. */
+/* Copy string bytes into an independent Bytes value. */
 
 SzString *sz_bytes_from_str(const SzString *s) {
   const char *data = s && s->data ? s->data : "";

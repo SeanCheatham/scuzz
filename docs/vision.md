@@ -6,11 +6,19 @@ Edit this file when the order changes. Remove completed work. Keep only the next
 
 ## First: language and verification guarantees
 
-Improve the ability to write correct applications before local choice feedback. Keep external input errors explicit with `Result`. Strict integer parsing and required JSON fields supply the first boundary operations. Extend this path only for a demonstrated input need. Keep domain validation active in live applications. Verification assumptions do not validate live input. Result bindings and selected Result fields retain each result for explicit use. Next, improve compiler checks that prevent invalid application states. Improve observable behavior rules and their diagnostics. Check relationships between executions when a rule needs them. Defer reference models. They are optional and are not the default verification path.
+Prioritize application correctness before local choice feedback.
+Select each slice from a demonstrated gap in the seven topics below.
+Use `Result` for external input errors. Keep domain validation active in live code.
+Verification assumptions do not validate live input.
 
-Keep one compiler, one verification command, and the existing simulation runtime. Preserve exact evaluator and native replay. Keep probe deadlines, claims, corpus entries, and search scope. General compiler speed work follows only from a demonstrated application or proof blocker.
+Keep one compiler, one verification command, and the existing simulation runtime.
+Preserve exact evaluator and native replay, probe deadlines, claims, corpus entries, and search scope.
+General compiler speed work needs a demonstrated application or proof blocker.
+Reference models remain optional. They are not the default verification path.
 
-Keep current work on language, standard kits, and verification tooling. Select each next slice from a demonstrated application correctness gap. The decision loop gates below remain later work. Keep useful generation and human review results unproven until a real application session measures them.
+Keep current work on language, standard kits, and verification tooling.
+The decision loop gates below remain later work.
+Generation usefulness and review efficiency need evidence from a real application session.
 
 ### Improvement work order
 
@@ -27,17 +35,11 @@ Complete one slice before starting the next slice.
 
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
 
-Recovery rules compare all five operation files across a conflict and repeated recovery.
-A deliberate conflict write passes the endpoint rules but fails the file comparison.
-Measure author effort on these application rules.
-Keep private constructor access and live path validation active.
-Preserve journal recovery scopes and exact request replay.
-Keep live input validation and source preservation checks active.
-Extend concurrent external edit checks under stated ownership limits.
-Check specification strength with controlled bad behavior.
-Extend application relations for another demonstrated correctness gap.
-Keep the wider exhaustive results and their incomplete limits explicit.
-Keep formal checking optional until its application benefit and cost meet the stated gate.
+Use the [recovery comparison](gaps.md#formal-verification) to measure author effort.
+Extend checks for external writes during recovery under the stated ownership limits.
+Select further relation checks from demonstrated application gaps.
+Keep wider incomplete scopes explicit.
+Keep formal methods optional until they pass the product method gate.
 
 ## Formal verification methods
 
@@ -118,9 +120,9 @@ Do not silently replace an author claim with a weaker solver claim.
 ### Product method gate
 
 `examples/proof` supplies optional bit-vector and finite protocol checks.
-Run instructions and scope definitions live in
+Run instructions live in
 [`developer-environment.md`](developer-environment.md#formal-verification-experiment).
-Measured results and open limits live in [`gaps.md`](gaps.md#formal-verification).
+Proof scopes, measured results, and open limits live in [`gaps.md`](gaps.md#formal-verification).
 The default app path remains `scuzz fuzz`.
 The wider recovery scopes still exceed their execution limits.
 Resolve these limits before adding a public exhaustive application method.

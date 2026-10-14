@@ -3499,8 +3499,8 @@ static SzIo *drain_ensure_finalizers(ContFrame *stack) {
   return acc;
 }
 
-/* Steal unstepped ENSURE finalizers from cur (inner-most first). Nested
- * ENSURE nodes fold the same way. */
+/* Transfer unstarted ENSURE finalizers from cur, starting with the innermost.
+ * Nested ENSURE nodes use the same order. */
 static SzIo *take_unstepped_ensure(SzIo *cur) {
   SzIo *inner;
   SzIo *fin;
@@ -4424,9 +4424,9 @@ static int step_node(Sched *s, Fiber *f) {
   case SZ_IO_DELAY: {
     void *env = cur->as.delay.env;
     int steal = 0;
-    /* Thunks borrow env. Unique delay (not BOX) steals so the runner drops
-     * env after the thunk. Shared delay leaves env so a loop can rerun.
-     * BOX packs stay on the node so last-use drops them. */
+    /* The thunk borrows env. A unique delay transfers a non-box environment
+     * to the runner, which releases it after the thunk. Shared delays and
+     * box environments keep it on the node. */
     if (!(sz_is_rc(cur) && sz_rc_hdr(cur)->rc > 1) &&
         !(sz_is_rc(env) && sz_rc_hdr(env)->kind == SZ_RC_BOX)) {
       cur->as.delay.env = NULL;

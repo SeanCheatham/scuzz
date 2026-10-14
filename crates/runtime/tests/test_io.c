@@ -12,6 +12,7 @@
 #include <openssl/x509v3.h>
 #include "scuzz_rt.h"
 #include "../src/net_transport.h"
+#include "../src/rt_util.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -34,7 +35,6 @@
 #include <time.h>
 #include <unistd.h>
 
-static SzIo *pure_drop(void *value);
 static SzIo *repeat_n_drop(int64_t n, SzIo *inner);
 static SzIo *both_drop(SzIo *left, SzIo *right);
 
@@ -541,12 +541,6 @@ static SzIo *ensure_drop(SzIo *inner, SzIo *finalizer) {
   sz_release(finalizer);
   return io;
 }
-static SzIo *race_drop(SzIo *left, SzIo *right) {
-  SzIo *io = sz_io_race(left, right);
-  sz_release(left);
-  sz_release(right);
-  return io;
-}
 static SzIo *both_drop(SzIo *left, SzIo *right) {
   SzIo *io = sz_io_both(left, right);
   sz_release(left);
@@ -567,11 +561,6 @@ static SzIo *handle_drop(SzIo *inner, SzErrorHandler handler, void *env) {
   return io;
 }
 
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
 
 /* A finalizer that takes several scheduler steps. */
 static SzIo *slow_inc(void) {
@@ -580,17 +569,7 @@ static SzIo *slow_inc(void) {
 }
 
 
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
 
-static SzIo *fail_drop(SzError *err) {
-  SzIo *io = sz_io_fail(err);
-  sz_release(err);
-  return io;
-}
 
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
@@ -3281,6 +3260,117 @@ static void check_next_link(const char *base, const char *header, const char *ex
     assert(0);
   }
   sz_release(r); sz_release(b); sz_release(h);
+}
+
+static void check_string_bytes(const SzString *got, const char *want, size_t n) {
+  assert(got && got->len == n);
+  assert(memcmp(got->data, want, n) == 0);
+}
+
+static void check_encoding(SzString *(*encode)(const SzString *),
+                           SzString *(*decode)(const SzString *),
+                           const char *raw, size_t n, const char *text) {
+  SzString *input = sz_string_from_bytes(raw, n);
+  SzString *encoded = encode(input);
+  SzString *decoded = decode(encoded);
+  check_string_bytes(encoded, text, strlen(text));
+  check_string_bytes(decoded, raw, n);
+  sz_release(decoded);
+  sz_release(encoded);
+  sz_release(input);
+}
+
+static void test_encodings(void) {
+  static const struct { const char *raw, *text; } base64[] = {
+      {"", ""}, {"f", "Zg=="}, {"fo", "Zm8="}, {"foo", "Zm9v"},
+      {"foob", "Zm9vYg=="}, {"fooba", "Zm9vYmE="}, {"foobar", "Zm9vYmFy"},
+      {"abc", "YWJj"}};
+  static const char *bad_hex[] = {"z0", "0z", "abc", " 0", "00 ", "0x00"};
+  static const char *bad_base64[] = {
+      "Y", "YQ", "YQ=", "!!!!", "=AAA", "A=AA", "AA=A", "====",
+      "Zg==AAAA", "Zm8=AAAA", "Z g=", "Zg==\n", "____", "----"};
+  static const struct { const char *raw, *digest; } sha256[] = {
+      {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+      {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+       "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"}};
+  size_t base_bytes, base_count, live_bytes, live_count;
+  unsigned char bytes[256];
+  char hex[513];
+  sz_alloc_stats(&base_bytes, &base_count);
+
+  /* Fixed vectors check the encoded bytes independently of the decoder. */
+  for (size_t i = 0; i < sizeof base64 / sizeof base64[0]; i++)
+    check_encoding(sz_base64_encode, sz_base64_decode,
+                   base64[i].raw, strlen(base64[i].raw), base64[i].text);
+  check_encoding(sz_base64_encode, sz_base64_decode, "\0\xff", 2, "AP8=");
+  check_encoding(sz_hex_encode, sz_hex_decode, "abc", 3, "616263");
+  check_encoding(sz_hex_encode, sz_hex_decode, "", 0, "");
+  check_encoding(sz_hex_encode, sz_hex_decode, "\0\xff", 2, "00ff");
+  {
+    SzString *input = sz_string_from_cstr("4D616E");
+    SzString *decoded = sz_hex_decode(input);
+    check_string_bytes(decoded, "Man", 3);
+    sz_release(decoded);
+    sz_release(input);
+  }
+
+  /* Each prefix checks binary bytes, embedded NUL, and all padding lengths. */
+  for (size_t i = 0; i < sizeof bytes; i++) {
+    bytes[i] = (unsigned char)i;
+    snprintf(hex + i * 2, 3, "%02x", bytes[i]);
+  }
+  for (size_t n = 0; n <= sizeof bytes; n++) {
+    SzString *input = sz_string_from_bytes((const char *)bytes, n);
+    SzString *encoded = sz_hex_encode(input);
+    SzString *decoded = sz_hex_decode(encoded);
+    SzString *copy = sz_bytes_from_str(input);
+    check_string_bytes(encoded, hex, n * 2);
+    check_string_bytes(decoded, (const char *)bytes, n);
+    check_string_bytes(copy, (const char *)bytes, n);
+    assert(copy != input);
+    sz_release(decoded);
+    sz_release(encoded);
+    encoded = sz_base64_encode(input);
+    decoded = sz_base64_decode(encoded);
+    assert(encoded->len == (n + 2) / 3 * 4);
+    check_string_bytes(decoded, (const char *)bytes, n);
+    sz_release(input);
+    check_string_bytes(copy, (const char *)bytes, n);
+    sz_release(copy);
+    sz_release(decoded);
+    sz_release(encoded);
+  }
+
+  for (int base64_mode = 0; base64_mode < 2; base64_mode++) {
+    const char **invalid = base64_mode ? bad_base64 : bad_hex;
+    size_t count = base64_mode ? sizeof bad_base64 / sizeof bad_base64[0]
+                              : sizeof bad_hex / sizeof bad_hex[0];
+    SzString *(*decode)(const SzString *) = base64_mode ? sz_base64_decode : sz_hex_decode;
+    for (size_t i = 0; i < count; i++) {
+      SzString *input = sz_string_from_cstr(invalid[i]);
+      SzString *decoded = decode(input);
+      check_string_bytes(decoded, "", 0);
+      sz_release(decoded);
+      sz_release(input);
+    }
+    {
+      SzString *input = sz_string_from_bytes("00\0A", 4);
+      SzString *decoded = decode(input);
+      check_string_bytes(decoded, "", 0);
+      sz_release(decoded);
+      sz_release(input);
+    }
+  }
+  for (size_t i = 0; i < sizeof sha256 / sizeof sha256[0]; i++) {
+    SzString *input = sz_string_from_cstr(sha256[i].raw);
+    SzString *digest = sz_hash_sha256(input);
+    check_string_bytes(digest, sha256[i].digest, 64);
+    sz_release(digest);
+    sz_release(input);
+  }
+  sz_alloc_stats(&live_bytes, &live_count);
+  assert(live_bytes == base_bytes && live_count == base_count);
 }
 
 static void test_hmac(void) {
@@ -7215,93 +7305,6 @@ int main(void) {
                                     sz_string_from_cstr("x"));
       assert(strcmp(sz_string_cstr(rep), "a1b") == 0);
       sz_release(rep);
-    }
-    {
-      SzString *h = sz_hash_sha256(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h),
-                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") ==
-             0);
-      sz_release(h);
-      h = sz_hash_sha256(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h),
-                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") ==
-             0);
-      sz_release(h);
-      h = sz_hash_sha256(sz_string_from_cstr(
-          "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"));
-      assert(strcmp(sz_string_cstr(h),
-                    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1") ==
-             0);
-      sz_release(h);
-    }
-    {
-      SzString *h = sz_hex_encode(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h), "616263") == 0);
-      sz_release(h);
-      h = sz_hex_encode(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("616263"));
-      assert(strcmp(sz_string_cstr(h), "abc") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("4D616E"));
-      assert(strcmp(sz_string_cstr(h), "Man") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("zz"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-    }
-    {
-      SzString *h = sz_base64_encode(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h), "YWJj") == 0);
-      sz_release(h);
-      h = sz_base64_encode(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_base64_encode(sz_string_from_cstr("f"));
-      assert(strcmp(sz_string_cstr(h), "Zg==") == 0);
-      sz_release(h);
-      h = sz_base64_encode(sz_string_from_cstr("fo"));
-      assert(strcmp(sz_string_cstr(h), "Zm8=") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("YWJj"));
-      assert(strcmp(sz_string_cstr(h), "abc") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("Zg=="));
-      assert(strcmp(sz_string_cstr(h), "f") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("Zm8="));
-      assert(strcmp(sz_string_cstr(h), "fo") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("!!!!"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("Y"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-    }
-    {
-      SzString *s = sz_string_from_cstr("abc");
-      SzString *b = sz_bytes_from_str(s);
-      assert(sz_string_len(b) == 3);
-      sz_release(s);
-      sz_release(b);
-      s = sz_string_from_bytes("\xc3\xa9", 2);
-      b = sz_bytes_from_str(s);
-      assert(sz_string_len(b) == 2);
-      sz_release(s);
-      sz_release(b);
-      s = sz_string_from_cstr("");
-      b = sz_bytes_from_str(s);
-      assert(sz_string_len(b) == 0);
-      sz_release(s);
-      sz_release(b);
     }
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
@@ -15655,6 +15658,7 @@ int main(void) {
     free(aliases);
   }
 
+  test_encodings();
   test_deferred_completion();
   test_pick_names();
   test_long_replay();

@@ -1,5 +1,5 @@
-# make has a built-in CC=cc default, so ?= never fires. Plain = keeps
-# clang the default while `make CC=gcc` on the command line still wins.
+# Use clang by default. A command-line CC value takes precedence.
+# The built-in CC=cc prevents the use of ?= here.
 CC = clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
@@ -7,7 +7,7 @@ FFI_SKIA := $(ROOT)/crates/ffi-skia
 EMBEDDER := $(ROOT)/crates/embedder-desktop
 MOBILE := $(ROOT)/crates/embedder-mobile
 UNAME_S := $(shell uname -s)
-# OpenSSL (net.c https). macOS keeps OpenSSL keg-only under Homebrew.
+# HTTPS uses OpenSSL. Homebrew supplies its macOS prefix.
 ifeq ($(UNAME_S),Darwin)
 SSL_PREFIX := $(shell brew --prefix openssl@3 2>/dev/null)
 ifneq ($(SSL_PREFIX),)
@@ -39,9 +39,8 @@ $(BUILDDIR):
 
 FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 
-# Keep ffi-skia on its own CFLAGS so optional ASan runs do not leave
-# instrumented objects for later non-ASan `make -C ffi-skia test`.
-# `lib` does not need the Skia archive (headers live in ffi-skia/include).
+# Use separate paint flags to keep sanitizer builds independent.
+# The runtime archive needs paint headers, but no paint archive.
 ffi-skia:
 	@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
@@ -53,8 +52,8 @@ lib: $(BUILDDIR)/libscuzz_rt.a
 $(BUILDDIR)/libscuzz_rt.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-# Skia CPU prebuilt: C++ + zlib/bz2 (+ Darwin text frameworks).
-# CoreFoundation: macOS runtime parks main in CFRunLoop for AppKit hops.
+# The Skia CPU archive needs C++, zlib, bzip2, and macOS text frameworks.
+# CoreFoundation runs AppKit work on the macOS main thread.
 SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_SKIA)/build/sk_capi_backend && \
 	if [ "$$(uname -s)" = Darwin ]; then \
 	  echo -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
@@ -83,7 +82,7 @@ $(BUILDDIR)/reload_bad.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | $(BU
 	$(CC) $(CFLAGS) $(INCLUDES) -DRELOAD_SCHEMA='"counter:string"' -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
 
 # Relink tests after paint selection so they use the selected archive.
-$(BUILDDIR)/test_io: tests/test_io.c $(BUILDDIR)/libscuzz_rt.a ffi-skia | $(BUILDDIR)
+$(BUILDDIR)/test_io: tests/test_io.c src/rt_util.h $(BUILDDIR)/libscuzz_rt.a ffi-skia | $(BUILDDIR)
 	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) tests/test_io.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 

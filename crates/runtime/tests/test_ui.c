@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE 200809L
 #include "scuzz_ui.h"
 #include "sk_capi.h"
 #include "../src/ui_script.h"
@@ -6711,6 +6711,138 @@ static void test_radius_does_not_grow_button(void) {
   sz_view_free(wrap);
 }
 
+/* Check the tap array separately from the accessibility tree. */
+static void check_control_tap_dump(SzView *control, const char *desc,
+                                   const char *label) {
+  SzUiConfig cfg = {0};
+  SzView *root = sz_view_column();
+  SzUiSession *session;
+  SzAdt *parsed, *taps, *tap;
+  SzList *hold;
+  char path[] = "/tmp/scuzz_ui_control_tap.XXXXXX";
+  int fd = mkstemp(path);
+  char *dump;
+  assert(fd >= 0);
+  close(fd);
+  sz_view_add_child(root, control);
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.f;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, desc));
+  free(dump);
+  parsed = json_slurp_parse(path);
+  taps = json_doc_key((SzAdt *)sz_adt_payload(parsed), "taps");
+  assert(taps && sz_json_is_arr(taps));
+  tap = json_arr_head(taps, &hold);
+  assert(sz_list_len(hold) == 1);
+  assert(tap && json_str_eq(tap, "label", label));
+  assert(json_doc_int(tap, "i", -1) == 0);
+  sz_release(hold);
+  sz_release(parsed);
+  sz_ui_unmount(session);
+  remove(path);
+}
+
+static void test_control_tap_dumps(void) {
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_checkbox(sig, "Done"), "checkbox:Done=0", "Done");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_switch(sig, "On"), "switch:On=0", "On");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_chip(sig, "Pin"), "chip:Pin=0", "Pin");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_checkbox_list_tile(sig, "Star"), "checktile:Star=0", "Star");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_switch_list_tile(sig, "Quiet"), "switchtile:Quiet=0", "Quiet");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_radio_list_tile(sig, 1, "Night"), "radiotile:Night=0", "Night");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_segmented(sig, "List", "Grid"), "segmented:0", "segmented");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_filter_chip(sig, "Tag"), "filterchip:Tag=0", "Tag");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(1);
+    check_control_tap_dump(sz_view_choice_chip(sig, 0, "Day"), "choicechip:Day=0", "Day");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_input_chip(sig, "In"), "inputchip:In=0", "In");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_radio(sig, 1, "On"), "radio:On=0", "On");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(40);
+    check_control_tap_dump(sz_view_slider(sig), "slider:40", "slider");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_icon_button("i", counter_tap, sig), "iconbutton:i", "i");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_fab("+", counter_tap, sig), "fab:+", "+");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_outlined_button("Edit", counter_tap, sig), "outlined:Edit", "Edit");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_text_button("Open", counter_tap, sig), "textbutton:Open", "Open");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_action_chip("Go", counter_tap, sig), "actionchip:Go", "Go");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S")), "inkwell:face", "face");
+    sz_signal_int_free(sig);
+  }
+}
+
 static void test_checkbox_sizes(void) {
   SzView *box;
   SzSignalInt *sig;
@@ -7007,36 +7139,6 @@ static void test_activate_offscreen_button(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_checkbox_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_checkbox.dump";
-  char *dump;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_checkbox(sig, "Done"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "checkbox:Done=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "Done") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_switch_sizes(void) {
   SzView *sw;
@@ -7152,36 +7254,6 @@ static void test_switch_paint_off_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_switch_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_switch.dump";
-  char *dump;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_switch(sig, "On"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "switch:On=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "On") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_chip_sizes(void) {
   SzView *ch;
@@ -7341,36 +7413,6 @@ static void test_chip_paint_off_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_chip.dump";
-  char *dump;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_chip(sig, "Pin"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "chip:Pin=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "Pin") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_list_tile_sizes(void) {
   SzView *tile;
@@ -8215,38 +8257,6 @@ static void test_icon_button_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_icon_button_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_iconbutton.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_icon_button("i", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "iconbutton:i") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "i") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_vertical_divider_sizes(void) {
   SzView *d;
@@ -8777,38 +8787,6 @@ static void test_checkbox_list_tile_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_checkbox_list_tile_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_checktile.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_checkbox_list_tile(sig, "Star"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "checktile:Star=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Star") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_switch_list_tile_sizes(void) {
   SzView *t;
@@ -8923,38 +8901,6 @@ static void test_switch_list_tile_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_switch_list_tile_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_switchtile.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_switch_list_tile(sig, "Quiet"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "switchtile:Quiet=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Quiet") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_radio_list_tile_sizes(void) {
   SzView *t;
@@ -9091,38 +9037,6 @@ static void test_radio_list_tile_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_radio_list_tile_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_radiotile.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_radio_list_tile(sig, 1, "Night"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "radiotile:Night=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Night") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_segmented_sizes(void) {
   SzView *t;
@@ -9237,38 +9151,6 @@ static void test_segmented_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_segmented_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_segmented.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_segmented(sig, "List", "Grid"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "segmented:0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "segmented") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_fab_sizes(void) {
   SzView *b;
@@ -9361,38 +9243,6 @@ static void test_fab_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_fab_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_fab.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_fab("+", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "fab:+") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "+") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_fab_tap_twice(void) {
   SzView *b;
@@ -9917,38 +9767,6 @@ static void test_outlined_button_paint_not_primary(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_outlined_button_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_outlined.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_outlined_button("Edit", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "outlined:Edit") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Edit") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_text_button_sizes(void) {
   SzView *b, *filled;
@@ -10222,38 +10040,6 @@ static void test_text_button_paint_not_filled(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_text_button_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_textbutton.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_text_button("Open", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "textbutton:Open") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Open") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_placeholder_sizes(void) {
   SzView *ph, *av;
@@ -11384,38 +11170,6 @@ static void test_ink_well_paint_empty(void) {
   sz_view_free(root);
 }
 
-static void test_ink_well_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_ink_well.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S")));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "inkwell:face") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "face") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_ink_well_child_in_taps_dump(void) {
   SzUiConfig cfg;
@@ -12760,38 +12514,6 @@ static void test_filter_chip_paint_mark_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_filter_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_filterchip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_filter_chip(sig, "Tag"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "filterchip:Tag=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Tag") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_choice_chip_sizes(void) {
   SzView *ch, *plain;
@@ -13025,38 +12747,6 @@ static void test_choice_chip_group_exclusive(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_choice_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_choicechip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(1);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_choice_chip(sig, 0, "Day"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "choicechip:Day=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Day") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_action_chip_sizes(void) {
   SzView *ch, *wide;
@@ -13309,38 +12999,6 @@ static void test_action_chip_paint_not_primary(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_action_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_actionchip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_action_chip("Go", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "actionchip:Go") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Go") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_input_chip_sizes(void) {
   SzView *ch, *plain;
@@ -13575,38 +13233,6 @@ static void test_input_chip_paint_mark_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_input_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_inputchip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_input_chip(sig, "In"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "inputchip:In=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "In") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_radio_sizes(void) {
   SzView *r;
@@ -13736,36 +13362,6 @@ static void test_radio_paint_off_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_radio_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_radio.dump";
-  char *dump;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_radio(sig, 1, "On"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "radio:On=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "On") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_slider_sizes(void) {
   SzView *sl;
@@ -13906,36 +13502,6 @@ static void test_slider_paint_fill(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_slider_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_slider.dump";
-  char *dump;
-
-  sig = sz_signal_int(40);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_slider(sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "slider:40") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "slider") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_slider_pointer_drag(void) {
   SzUiConfig cfg;
@@ -17533,6 +17099,7 @@ int main(int argc, char **argv) {
   test_radius_clips_border_corners();
   test_radius_hit_test_reaches_child();
   test_radius_does_not_grow_button();
+  test_control_tap_dumps();
   test_checkbox_sizes();
   test_checkbox_a11y_off_on();
   test_a11y_dump_long_labels();
@@ -17544,14 +17111,12 @@ int main(int argc, char **argv) {
   test_control_labels_stay_in_bounds();
   test_tap_collect_tree_order();
   test_activate_offscreen_button();
-  test_checkbox_in_taps_dump();
   test_switch_sizes();
   test_switch_a11y_off_on();
   test_switch_nonzero_is_on();
   test_switch_tap_toggles();
   test_switch_hit_test();
   test_switch_paint_off_on();
-  test_switch_in_taps_dump();
   test_chip_sizes();
   test_chip_a11y_off_on();
   test_chip_nonzero_is_on();
@@ -17559,7 +17124,6 @@ int main(int argc, char **argv) {
   test_chip_hit_test();
   test_chip_paint_off_on();
   test_selection_tabs_without_color();
-  test_chip_in_taps_dump();
   test_list_tile_sizes();
   test_list_tile_unbounded_width();
   test_list_tile_a11y();
@@ -17600,7 +17164,6 @@ int main(int argc, char **argv) {
   test_icon_button_tap();
   test_icon_button_hit_test();
   test_icon_button_paint();
-  test_icon_button_in_taps_dump();
   test_vertical_divider_sizes();
   test_vertical_divider_tight_height();
   test_vertical_divider_a11y();
@@ -17626,32 +17189,27 @@ int main(int argc, char **argv) {
   test_checkbox_list_tile_tap();
   test_checkbox_list_tile_hit_test();
   test_checkbox_list_tile_paint();
-  test_checkbox_list_tile_in_taps_dump();
   test_switch_list_tile_sizes();
   test_switch_list_tile_a11y();
   test_switch_list_tile_tap();
   test_switch_list_tile_hit_test();
   test_switch_list_tile_paint();
-  test_switch_list_tile_in_taps_dump();
   test_radio_list_tile_sizes();
   test_radio_list_tile_a11y();
   test_radio_list_tile_tap();
   test_radio_list_tile_group_exclusive();
   test_radio_list_tile_hit_test();
   test_radio_list_tile_paint();
-  test_radio_list_tile_in_taps_dump();
   test_segmented_sizes();
   test_segmented_a11y();
   test_segmented_tap();
   test_segmented_hit_test();
   test_segmented_paint();
-  test_segmented_in_taps_dump();
   test_fab_sizes();
   test_fab_a11y();
   test_fab_tap();
   test_fab_hit_test();
   test_fab_paint();
-  test_fab_in_taps_dump();
   test_fab_tap_twice();
   test_fab_a11y_distinct();
   test_tooltip_sizes();
@@ -17679,7 +17237,6 @@ int main(int argc, char **argv) {
   test_outlined_button_hit_test();
   test_outlined_button_paint();
   test_outlined_button_paint_not_primary();
-  test_outlined_button_in_taps_dump();
   test_text_button_sizes();
   test_text_button_empty_min_width();
   test_text_button_null_label();
@@ -17694,7 +17251,6 @@ int main(int argc, char **argv) {
   test_text_button_hit_test();
   test_text_button_paint();
   test_text_button_paint_not_filled();
-  test_text_button_in_taps_dump();
   test_placeholder_sizes();
   test_placeholder_empty_sizes();
   test_placeholder_same_origin();
@@ -17754,7 +17310,6 @@ int main(int argc, char **argv) {
   test_ink_well_paint_child();
   test_ink_well_paint_no_mark();
   test_ink_well_paint_empty();
-  test_ink_well_in_taps_dump();
   test_ink_well_child_in_taps_dump();
   test_visibility_sizes_on();
   test_visibility_sizes_off();
@@ -17815,7 +17370,6 @@ int main(int argc, char **argv) {
   test_filter_chip_hit_test();
   test_filter_chip_paint_off_on();
   test_filter_chip_paint_mark_on();
-  test_filter_chip_in_taps_dump();
   test_choice_chip_sizes();
   test_choice_chip_empty_min_width();
   test_choice_chip_null_label();
@@ -17828,7 +17382,6 @@ int main(int argc, char **argv) {
   test_choice_chip_hit_test();
   test_choice_chip_paint_off_on();
   test_choice_chip_group_exclusive();
-  test_choice_chip_in_taps_dump();
   test_action_chip_sizes();
   test_action_chip_empty_min_width();
   test_action_chip_null_label();
@@ -17843,7 +17396,6 @@ int main(int argc, char **argv) {
   test_action_chip_hit_test();
   test_action_chip_paint();
   test_action_chip_paint_not_primary();
-  test_action_chip_in_taps_dump();
   test_input_chip_sizes();
   test_input_chip_empty_min_width();
   test_input_chip_null_label();
@@ -17856,14 +17408,12 @@ int main(int argc, char **argv) {
   test_input_chip_hit_test();
   test_input_chip_paint_off_on();
   test_input_chip_paint_mark_on();
-  test_input_chip_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();
   test_radio_group_exclusive();
   test_radio_hit_test();
   test_radio_paint_off_on();
-  test_radio_in_taps_dump();
   test_slider_sizes();
   test_slider_a11y();
   test_slider_clamps_a11y();
@@ -17871,7 +17421,6 @@ int main(int argc, char **argv) {
   test_slider_tap_clamps_edges();
   test_slider_hit_test();
   test_slider_paint_fill();
-  test_slider_in_taps_dump();
   test_slider_pointer_drag();
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();

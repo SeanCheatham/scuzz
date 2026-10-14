@@ -9,7 +9,7 @@ Supported features and exclusions. Product decisions and language direction: [`p
 | Scala-inspired definitions, algebraic data types, and pattern matching | Keep |
 | Local `val` / blocks | Cut. Use `for` with `=` or `<-` ([philosophy](philosophy.md#language-direction)) |
 | Traits as interfaces; `Option` and `Either` forms as enums | Keep |
-| Local type inference, generics | Keep. Specialize generics early |
+| Local type inference, generics | Keep |
 | Higher-kinded types | Only where effects need them (`IO`) |
 | `var` | Cut. UI state uses `Signal` or built-in cells |
 | Built-in `IO` / fibers / `Resource` | Keep |
@@ -24,7 +24,7 @@ Supported features and exclusions. Product decisions and language direction: [`p
 
 | Area | Supported | Excluded |
 | --- | --- | --- |
-| Binary format | Native ELF, Mach-O, and PE through LLVM | JVM class files, JARs, and a JavaScript language backend |
+| Binary format | Native ELF and Mach-O through LLVM. WebAssembly for GUI applications | JVM class files, JARs, and a JavaScript language backend |
 | Dependencies | Path dependencies in `scuzz.toml` | Maven, Ivy, git or registry dependencies, library publishing, and build plugins |
 | Effects | Built-in `IO`, fibers, `Resource`, and the standard kits | cats-effect, a ZIO library port, and Future as the default effect |
 | Verification | Hermetic TestRuntime, claims, live assertions, simulation, search, mutation, and corpus replay | App unit-test trees, third-party verification frameworks, live external networks in simulation, and expected dump fixtures |
