@@ -2,6 +2,7 @@
 #include "sk_capi.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 
 int main(void) {
@@ -81,6 +82,31 @@ int main(void) {
     px = sk_surface_peek_pixels(surf, &px_len);
     assert(px[(1 * 32 + 1) * 4 + 3] > a1);
     assert(px[(1 * 32 + 1) * 4 + 3] < 255);
+  }
+
+  /* Large coordinates fill only the current clip. */
+  {
+    const float sizes[] = {(float)INT_MAX, (float)INT_MAX * 2.f};
+    for (int i = 0; i < 2; i++) {
+      float origin = i ? -sizes[i] * .5f : 0.f;
+      sk_canvas_clear(canvas, sk_color_rgba(20, 40, 80, 255));
+      sk_canvas_save(canvas);
+      sk_canvas_clip_rect(canvas, origin, origin, sizes[i], sizes[i]);
+      sk_canvas_clip_rect(canvas, 8, 8, 12, 12);
+      sk_paint_set_color(paint, sk_color_rgba(240, 240, 240, 255));
+      sk_canvas_draw_rect(canvas, origin, origin, sizes[i], sizes[i], paint);
+      sk_canvas_restore(canvas);
+      px = sk_surface_peek_pixels(surf, &px_len);
+      assert(px && px_len == 32 * 32 * 4);
+      for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++) {
+        const uint8_t *pixel = px + (y * 32 + x) * 4;
+        int inside = x >= 8 && x < 20 && y >= 8 && y < 20;
+        assert(pixel[0] == (inside ? 240 : 20));
+        assert(pixel[1] == (inside ? 240 : 40));
+        assert(pixel[2] == (inside ? 240 : 80));
+        assert(pixel[3] == 255);
+      }
+    }
   }
 
   sk_paint_delete(paint);

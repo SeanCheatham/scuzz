@@ -3798,6 +3798,22 @@ PY_RANGE
   "$SCUZZ" package --target web --out-dir "$web_tmp/motion output" examples/motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' size-motion
+  python3 - "$web_tmp/size limit" <<'PY_SIZE_LIMIT'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+(root / 'src').mkdir(parents=True)
+(root / 'scuzz.toml').write_text('[package]\nname="size-limit"\n[ui]\ndefault_runtime="headless"\n')
+(root / 'src/Main.scuzz').write_text('''@main def main: IO[Unit] =
+  for {
+    width = Signal.make(9223372036854775807)
+    height = Signal.make(9223372036854775807)
+    _ <- Ui.run(_ => View.unconstrainedBox(View.animatedSize(width, height, 8, View.background(Color.rgb(255, 0, 0), View.text("")))))
+  } yield ()
+''')
+PY_SIZE_LIMIT
+  "$SCUZZ" fmt "$web_tmp/size limit"
+  "$SCUZZ" package --target web --out-dir "$web_tmp/size limit output" "$web_tmp/size limit"
+  node crates/embedder-web/test.cjs "$web_tmp/size limit output/package/web" '' size-limit
   python3 - "$web_tmp/motion Unicode" <<'PY_MOTION_UTF8'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])

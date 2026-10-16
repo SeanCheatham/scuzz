@@ -219,9 +219,10 @@ void sk_canvas_clear(SkCanvas *canvas, SkColor color) {
   }
 }
 
-/* Floor, not truncate: a rect at x = -0.5 covers pixel -1. A plain (int)
- * cast shifts negative geometry right by up to one pixel. */
+/* Floor negative coordinates. Clamp before the integer conversion. */
 static int sw_floor_int(float v) {
+  if (!(v > (float)INT_MIN)) return INT_MIN;
+  if (v >= (float)INT_MAX) return INT_MAX;
   int i = (int)v;
   return (float)i > v ? i - 1 : i;
 }
@@ -231,19 +232,27 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
   int x0, y0, x1, y1, ix, iy;
   if (!canvas || !canvas->surface || !paint || w <= 0 || h <= 0)
     return;
+  x0 = sw_floor_int(x);
+  y0 = sw_floor_int(y);
+  x1 = sw_floor_int(x + w);
+  y1 = sw_floor_int(y + h);
+  if (x0 < canvas->clip_x0) x0 = canvas->clip_x0;
+  if (y0 < canvas->clip_y0) y0 = canvas->clip_y0;
+  if (x1 > canvas->clip_x1) x1 = canvas->clip_x1;
+  if (y1 > canvas->clip_y1) y1 = canvas->clip_y1;
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 > canvas->surface->width) x1 = canvas->surface->width;
+  if (y1 > canvas->surface->height) y1 = canvas->surface->height;
+  if (x0 >= x1 || y0 >= y1) return;
   if (canvas->surface->gpu) {
-    sk_gpu_fill_rect(canvas->surface->target, sw_floor_int(x), sw_floor_int(y),
-                     sw_floor_int(x + w), sw_floor_int(y + h), canvas->clip_x0,
+    sk_gpu_fill_rect(canvas->surface->target, x0, y0, x1, y1, canvas->clip_x0,
                      canvas->clip_y0, canvas->clip_x1, canvas->clip_y1,
                      paint->color.r, paint->color.g, paint->color.b,
                      paint->color.a);
     return;
   }
   cpu_paint_ops++;
-  x0 = sw_floor_int(x);
-  y0 = sw_floor_int(y);
-  x1 = sw_floor_int(x + w);
-  y1 = sw_floor_int(y + h);
   for (iy = y0; iy < y1; iy++)
     for (ix = x0; ix < x1; ix++)
       put_pixel(canvas->surface, ix, iy, paint->color);
