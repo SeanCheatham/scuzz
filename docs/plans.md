@@ -50,7 +50,7 @@ All 44 selected motion comparisons have equal native and evaluator timelines and
 Desktop input and resize checks pass.
 Full Web integration checks pass.
 The relocated SDK CLI self-check includes the D-Bus link dependency and passes.
-Repeat package integration after the CLI self-check update.
+Full package integration checks pass.
 Clean UI integration remains open.
 Recordings include the initial preference before live input.
 A shared runtime check replays 20 cases with the opposite initial preference.
