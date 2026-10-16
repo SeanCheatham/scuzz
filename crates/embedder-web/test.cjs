@@ -1080,6 +1080,57 @@ async function checkShaping(browserType, url, mobile) {
     await comparePixels('ab אב 12', [['ab ', 'ltr'], ['12', 'ltr'], [' ', 'ltr'], ['אב', 'rtl']]);
     await comparePixels('क्षि ปู่ 中文', [['क्षि ปู่ 中文', 'ltr']]);
     await comparePixels('नमस्ते สวัสดี 中文漢字', [['नमस्ते สวัสดี 中文漢字', 'ltr']]);
+    for (const source of ['السلام عليكم', 'تفاصيل']) {
+      const result = await page.evaluate(source => {
+        const block = Module.textBlocks.find(block => block.text === source);
+        const node = Module.nodes.get(block.id), lines = block.lines;
+        const scale = Module.webFrame.scale;
+        const boxes = node.fragments.map(span => span.getBoundingClientRect());
+        const geometry = boxes.map((box, i) => Math.max(Math.abs(box.left * scale - lines[i].x), Math.abs(box.width * scale - lines[i].width)));
+        const x = Math.min(...lines.map(line => line.x));
+        const end = Math.max(...lines.map(line => line.x + line.width));
+        const left = Math.max(0, Math.floor(x) - 2), top = Math.max(0, Math.floor(lines[0].y - lines[0].font * 1.5));
+        const width = Math.min(Module.canvas.width - left, Math.ceil(end) - left + 2);
+        const height = Math.ceil(lines[0].font * 2);
+        const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
+        const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
+        const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
+        const ctx = reference.getContext('2d'); ctx.font = lines[0].font + 'px ' + Module.scuzzFontStack;
+        ctx.textAlign = 'left'; ctx.direction = 'rtl'; ctx.fillStyle = '#ffffff';
+        ctx.fillText(source, x - left, lines[0].y - top);
+        if (lines[0].style & 8) {
+          const underline = lines[0].y + lines[0].font * .1;
+          ctx.fillRect(Math.floor(x) - left, Math.floor(underline) - top, Math.floor(end) - Math.floor(x),
+            Math.floor(underline + Math.max(1, lines[0].font / 16)) - Math.floor(underline));
+        }
+        const mask = ctx.getImageData(0, 0, width, height).data;
+        let delta = 0;
+        for (let p = 0; p < width * height; p++) {
+          const at = left + p % width;
+          const line = lines.find((line, i) => at >= Math.round(boxes[i].left * scale) && at < Math.round(boxes[i].right * scale)) || (at < x ? lines.at(-1) : lines[0]);
+          const ink = [(line.ink >>> 16) & 255, (line.ink >>> 8) & 255, line.ink & 255];
+          for (let channel = 0; channel < 3; channel++) {
+            const expected = Math.floor((ink[channel] * mask[p * 4 + 3] + background[channel] * (255 - mask[p * 4 + 3])) / 255);
+            delta = Math.max(delta, Math.abs(expected - actual[p * 4 + channel]));
+          }
+        }
+        const range = document.createRange();
+        range.setStart(node.fragments[0].firstChild, 0);
+        range.setEnd(node.fragments.at(-1).firstChild, node.fragments.at(-1).textContent.length);
+        getSelection().removeAllRanges(); getSelection().addRange(range);
+        let copied;
+        const event = new Event('copy', {cancelable: true});
+        Object.defineProperty(event, 'clipboardData', {value: {setData(type, value) { if (type === 'text/plain') copied = value; }}});
+        document.dispatchEvent(event); getSelection().removeAllRanges();
+        return {delta, geometry, copied, pieces: lines.map(line => line.text), inks: lines.map(line => line.ink), width: end - x, reference: ctx.measureText(source).width};
+      }, source);
+      assert(result.geometry.every(delta => delta < 1), JSON.stringify(result));
+      assert(Math.abs(result.width - result.reference) < 1, JSON.stringify(result));
+      assert(result.delta <= 2, JSON.stringify(result));
+      assert.equal(result.copied, source);
+      assert(result.inks.some(ink => (ink >>> 0) === 0xff165ca0), JSON.stringify(result));
+      assert(result.pieces.length > 1, JSON.stringify(result));
+    }
     const fontWidths = await page.evaluate(() => {
       const ctx = document.createElement('canvas').getContext('2d');
       return [['Scuzz devanagari', 'क्षि'], ['Scuzz thai', 'ปู่'], ['Scuzz sc', '中文漢字']].map(([font, source]) => {

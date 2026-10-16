@@ -9,13 +9,14 @@
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #f5efdf; }
 canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: pinch-zoom; }
 #text-layer { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
-#text-layer .text span { position: absolute; white-space: pre; color: transparent;
+#text-layer .text { position: absolute; white-space: pre; text-align: left; pointer-events: auto; }
+#text-layer .text span { position: relative; white-space: pre; color: transparent;
   pointer-events: auto; user-select: text; -webkit-user-select: text; cursor: text; }
 #text-layer .text span::selection { background: var(--selection, #f4d35e); color: var(--ink, #24211c); }
 #app { position: relative; width: 100%; height: 100%; }
 .control { position: absolute; display: block; box-sizing: border-box; margin: 0; padding: 0;
   border: 0; background: transparent; color: transparent; cursor: pointer; pointer-events: auto; }
-#text-layer .text .inline-action { pointer-events: none; user-select: text; }
+#text-layer .text .inline-action { position: static; display: inline; pointer-events: auto; user-select: text; }
 #text-layer .text .inline-action, #text-layer .text .inline-action span { cursor: pointer; }
 .inline-action:focus-visible { outline: none !important; }
 .control:focus-visible { outline: 2px solid var(--ink, #24211c); outline-offset: -4px; }
@@ -115,12 +116,22 @@ var Module = {
         event.preventDefault();
         Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key === ' ' ? 'Space' : event.key, 0, Number(event.repeat)]);
       });
-      node.addEventListener('pointerdown', event => { node.dragOrigin = [event.clientX, event.clientY]; node.inlineDrag = false; });
-      node.addEventListener('pointerup', event => {
-        if (node.dragOrigin) node.inlineDrag = (event.clientX - node.dragOrigin[0]) ** 2 + (event.clientY - node.dragOrigin[1]) ** 2 > 36;
-        node.dragOrigin = null;
+      node.addEventListener('pointerdown', event => {
+        node.dragOrigin = [event.clientX, event.clientY]; node.inlineDrag = false;
+        // Keep the first caret inside the action during source selection.
+        node.removeAttribute('tabindex');
+        const finish = end => {
+          if (end.pointerId !== event.pointerId) return;
+          node.inlineDrag = end.type === 'pointercancel' ||
+            (end.clientX - event.clientX) ** 2 + (end.clientY - event.clientY) ** 2 > 36;
+          node.dragOrigin = null;
+          node.tabIndex = node.item.tabStop ? 0 : -1;
+          window.removeEventListener('pointerup', finish);
+          window.removeEventListener('pointercancel', finish);
+        };
+        window.addEventListener('pointerup', finish);
+        window.addEventListener('pointercancel', finish);
       });
-      node.addEventListener('pointercancel', () => { node.dragOrigin = null; node.inlineDrag = true; });
     }
     node.addEventListener('focus', () => {
       if (node.item.role === 57) {
@@ -295,7 +306,7 @@ var Module = {
       } else if (item.group) {
         node.hidden = item.hidden;
         node.style.zIndex = item.role === 56 ? '2' : '';
-        if (item.role === 47) node.tabIndex = item.tabStop ? 0 : -1;
+        if (item.role === 47) if (!item.inline || !node.dragOrigin) node.tabIndex = item.tabStop ? 0 : -1;
         node.setAttribute('role', {35: 'group', 43: 'dialog', 46: 'tablist', 47: 'tabpanel', 48: 'region', 51: 'navigation', 53: 'radiogroup', 54: 'region', 56: 'listbox'}[item.role]);
         node.setAttribute('aria-label', item.label);
         if (item.role === 43) node.setAttribute('aria-modal', 'true');
@@ -303,24 +314,32 @@ var Module = {
         node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
         node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
       } else if (item.lines) {
-        // Text fragments use the containing group coordinates.
         item.x = ox; item.y = oy;
-        node.className = 'text';
+        node.className = 'text'; node.dir = 'auto';
+        node.style.left = '0px'; node.style.top = '0px';
+        node.style.width = Module.canvas.width / scale + 'px';
+        node.style.height = Module.canvas.height / scale + 'px';
+        node.style.lineHeight = '0px';
         if (item.level) { node.setAttribute('role', 'heading'); node.setAttribute('aria-level', item.level); }
         else { node.removeAttribute('role'); node.removeAttribute('aria-level'); }
-        let lineIndex = 0;
-        const actions = new Set();
-        node.fragments ||= [];
+        let lineIndex = 0, breakIndex = 0, baseline;
+        const actions = new Set(), fragments = [];
+        node.fragments ||= []; node.breaks ||= [];
         item.lines.forEach(line => {
           let span = node.fragments[lineIndex];
           if (!span) { span = document.createElement('span'); span.append(document.createTextNode('')); node.fragments[lineIndex] = span; }
-          lineIndex++;
           const action = line.action ? Module.nodes.get(line.action) : null;
-          if (action && !actions.has(action)) { place(node, action); actions.add(action); }
+          const freshAction = action && !actions.has(action);
+          if (baseline !== undefined && baseline !== line.y) {
+            let br = node.breaks[breakIndex];
+            if (!br) { br = document.createElement('br'); node.breaks[breakIndex] = br; }
+            breakIndex++;
+            place(action && !freshAction ? action : node, br);
+          }
+          baseline = line.y;
+          if (freshAction) { place(node, action); actions.add(action); }
           place(action || node, span);
-          const originX = action ? action.item.x : ox;
-          const originY = action ? action.item.y : oy;
-          span.dir = 'auto';
+          span.removeAttribute('dir');
           if (span.textContent !== line.text) span.textContent = line.text;
           span.block = frame.texts.indexOf(item); span.sourceStart = line.start; span.sourceEnd = line.end; span.synthetic = Boolean(line.synthetic);
           const style = line.style || 0;
@@ -328,27 +347,44 @@ var Module = {
           if (!baselines.has(fontStyle)) {
             context.font = fontStyle;
             const metrics = context.measureText('M');
-            baselines.set(fontStyle, ((metrics.fontBoundingBoxAscent ?? line.font * 0.8 / scale) - (metrics.fontBoundingBoxDescent ?? line.font * 0.2 / scale)) / 2);
+            baselines.set(fontStyle, metrics.fontBoundingBoxAscent ?? line.font * 0.8 / scale);
           }
-          const top = line.y / scale - line.line_h / scale / 2 - baselines.get(fontStyle);
-          span.style.left = (line.x - originX) / scale + 'px'; span.style.top = top - originY / scale + 'px';
-          span.style.width = line.width / scale + 'px'; span.style.height = line.line_h / scale + 'px';
+          if (lineIndex === 0) node.style.font = fontStyle;
+          span.style.left = '0px'; span.style.top = '0px';
           span.style.font = fontStyle; span.style.lineHeight = line.line_h / scale + 'px';
           span.style.textDecorationLine = (style & 8) ? 'underline' : 'none';
           span.style.textDecorationColor = 'transparent';
           if (line.ink !== undefined) span.style.setProperty('--ink', Module.cssColor(line.ink));
-          clip(span, line.x, top * scale, line.width, line.line_h, line.clip, scale);
+          fragments.push({span, line, ascent: baselines.get(fontStyle)});
+          lineIndex++;
         });
         while (node.fragments.length > lineIndex) node.fragments.pop().remove();
+        while (node.breaks.length > breakIndex) node.breaks.pop().remove();
         for (const parent of [node, ...actions])
           while (parent.children.length > (positions.get(parent) || 0)) parent.lastChild.remove();
+        let dx = 0, dy = 0;
+        if (fragments.length) {
+          const first = fragments[0], rect = first.span.getBoundingClientRect();
+          dx = first.line.x / scale - rect.left;
+          dy = first.line.y / scale - first.ascent - rect.top;
+          node.style.left = dx + 'px'; node.style.top = dy + 'px';
+        }
+        const boxes = fragments.map(fragment => fragment.span.getBoundingClientRect());
+        fragments.forEach(({span, line, ascent}, i) => {
+          span.style.left = line.x / scale - boxes[i].left + 'px';
+          span.style.top = line.y / scale - ascent - boxes[i].top + 'px';
+        });
+        const width = Math.max(0, ...fragments.map(({line}) => line.x + line.width - ox - dx * scale));
+        const height = Math.max(0, ...fragments.map(({line, ascent}, i) => line.y - ascent * scale + boxes[i].height * scale - oy - dy * scale));
+        node.style.width = width / scale + 'px'; node.style.height = height / scale + 'px';
+        clip(node, ox + dx * scale, oy + dy * scale, width, height, item.lines[0]?.clip, scale);
       } else {
         node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
         node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
         node.setAttribute('aria-label', item.label);
         if (item.description) node.setAttribute('aria-describedby', 'view-' + item.description);
         else node.removeAttribute('aria-describedby');
-        node.tabIndex = item.tabStop ? 0 : -1;
+        if (!item.inline || !node.dragOrigin) node.tabIndex = item.tabStop ? 0 : -1;
         if (item.route !== null) {
           const http = item.route.startsWith('http://') || item.route.startsWith('https://');
           node.href = http ? item.route : '#stage=' + encodeURIComponent(item.route);
@@ -405,25 +441,12 @@ var Module = {
           }
         }
         clip(node, item.x, item.y, item.w, item.h, item.clip, scale);
-        if (item.inline) {
-          const paths = [];
-          for (const [x, y, w, h] of item.boxes) {
-            const left = Math.max(x, item.clip ? item.clip[0] : x);
-            const top = Math.max(y, item.clip ? item.clip[1] : y);
-            const right = Math.min(x + w, item.clip ? item.clip[0] + item.clip[2] : x + w);
-            const bottom = Math.min(y + h, item.clip ? item.clip[1] + item.clip[3] : y + h);
-            if (right <= left || bottom <= top) continue;
-            const a = (left - item.x) / scale, b = (top - item.y) / scale;
-            const c = (right - item.x) / scale, d = (bottom - item.y) / scale;
-            paths.push(`M ${a} ${b} H ${c} V ${d} H ${a} Z`);
-          }
-          node.style.clipPath = paths.length ? `path("${paths.join(' ')}")` : 'inset(100%)';
-        }
+        if (item.inline) node.style.clipPath = '';
       }
     });
     for (const [id, node] of Module.nodes) if (!live.has(id)) { node.remove(); Module.nodes.delete(id); }
     const modal = frame.items.find(item => item.group && item.role === 43)?.id || 0;
-    if (modal !== Module.modalId || (focused && focused !== Module.canvas && focused !== layer && !focused.isConnected)) {
+    if (modal !== Module.modalId || (focused && focused !== Module.canvas && focused !== layer && document.activeElement !== focused)) {
       const id = Module.ccall('sz_web_focused', 'number', [], []);
       (Module.nodes.get(id) || layer).focus({preventScroll: true});
     }

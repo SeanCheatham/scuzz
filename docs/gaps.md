@@ -113,12 +113,15 @@ Inline action checks cover wrapped fragments, Int keys, callbacks, focus, source
 Physical-device and real screen-reader checks for inline actions remain open.
 Default native Skia checks cover kerning, ligatures, combining accents, Arabic joining, and mixed-direction lines.
 Source cluster checks cover wrapping and ellipsis. Field checks cover shaped carets and pointer positions.
+Same-font span checks cover kerning, ligatures, Arabic joining, combining marks, and fallback clusters.
+Native paint checks compare 25 style and source-cluster cases with unsplit text.
+Browser checks cover joined source ranges, colored glyphs, copying, wrapped-action selection, and retained focus.
 Pinned Noto fonts supply native and browser fallback for Devanagari, Thai, and Simplified Chinese.
 Finite checks cover source clusters, mark bounds, CJK field positions, and composition.
 Browser checks cover delayed font loading, retained focus, source copying, and font advances.
 The CJK font download uses 17.8 MB before compression. Smaller font delivery remains open.
 Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
-Other script coverage, shaping across styled spans, wrapped paragraph direction, and full bidi caret affinity remain open.
+Other script coverage, shaping across font changes, wrapped paragraph direction, and full bidi caret affinity remain open.
 Native software and OpenGL renderers keep code-point cells. Their proportional shaping remains open.
 Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.

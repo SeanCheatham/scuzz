@@ -13,7 +13,7 @@ Select work from these application needs:
 
 1. Screen-reader support and keyboard behavior for remaining composite controls.
    Add editable option search when an application needs it.
-2. Wider font coverage, shaping across styled spans, wrapped paragraph direction, and bidi caret affinity.
+2. Wider font coverage, shaping across font changes, wrapped paragraph direction, and bidi caret affinity.
 3. Layout and transform transitions with replay and cancellation.
    Add native operating-system motion preference detection.
 

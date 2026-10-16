@@ -576,6 +576,9 @@ Measurement and paint use the same positioned glyphs.
 The embedded face supplies kerning, ligatures, combining marks, and Arabic forms.
 Wrapping and ellipsis keep shaped source clusters together.
 Plain text measurement and paint use complete lines.
+Adjacent spans with the same font and size use one shaping run.
+Color, underline, and inline actions keep this shaping context.
+Each paint span uses its source range within the complete run.
 Field carets, pointer input, and selection use shaped source positions.
 Left and Right move a field caret in the visual direction.
 Composition paints the complete preview without changing the committed Signal.
@@ -585,7 +588,7 @@ The browser uses its font shaper and source positions from DOM text ranges.
 Pinned Noto fonts supply fallback for Devanagari, Thai, and Simplified Chinese.
 Font selection keeps source clusters together. Text line boxes contain fallback marks.
 Web packages include the same fonts. Font loading updates layout and keeps input state.
-Other script coverage, shaping across styled spans, wrapped paragraph direction, and full bidi caret affinity remain open.
+Other script coverage, shaping across font changes, wrapped paragraph direction, and full bidi caret affinity remain open.
 The software and OpenGL native renderers retain their code-point cells.
 They do not supply these proportional shaping guarantees.
 See the [HarfBuzz shaping model](https://harfbuzz.github.io/getting-started.html).
