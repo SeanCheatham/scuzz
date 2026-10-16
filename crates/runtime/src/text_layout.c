@@ -50,30 +50,30 @@ static float range_width(const SzText *text, int start, int end, float font, flo
     const SzTextRun *run = &text->runs[i];
     int a = start > run->start ? start : run->start;
     int b = end < text->runs[next - 1].end ? end : text->runs[next - 1].end;
-    width += sk_font_measure_span(source + a, (size_t)(b - a), run_font(run, font, scale), run->style);
+    width += sk_font_measure_span((SkTextRange){source, (size_t)text->length, (size_t)a, (size_t)b}, run_font(run, font, scale), run->style);
     i = next;
   }
   return width;
 }
 
-static void emit_part(const char *source, int start, int end, float left, float right,
+static void emit_part(SkTextRange context, int start, int end, float left, float right,
   float x, float baseline, float font, float height, const SzTextRun *run,
-  int context_start, int context_end, SzTextFragmentFn emit, void *env) {
-  emit(source, start, end, x + left, baseline, right - left, font, height,
-    run->style, run->color, run->colored, 0, run->action, context_start, context_end, x, env);
+  SzTextFragmentFn emit, void *env) {
+  emit(context, start, end, x + left, baseline, right - left, font, height,
+    run->style, run->color, run->colored, 0, run->action, x, env);
 }
 
-static void emit_run(const char *source, int start, int end, const float *leading,
+static void emit_run(SkTextRange context, int start, int end, const float *leading,
   const float *trailing, float x, float baseline, float font, float height,
-  const SzTextRun *run, int context_start, int context_end, SzTextFragmentFn emit, void *env) {
+  const SzTextRun *run, SzTextFragmentFn emit, void *env) {
+  const char *source = context.source;
   int first = start, ready = 0;
   float left = 0.f, right = 0.f;
   for (int byte = start; byte < end;) {
-    float a = fminf(leading[byte - context_start], trailing[byte - context_start]);
-    float b = fmaxf(leading[byte - context_start], trailing[byte - context_start]);
+    float a = fminf(leading[byte - context.start], trailing[byte - context.start]);
+    float b = fmaxf(leading[byte - context.start], trailing[byte - context.start]);
     if (ready && (a > right + .01f || b < left - .01f)) {
-      emit_part(source, first, byte, left, right, x, baseline, font, height, run,
-        context_start, context_end, emit, env);
+      emit_part(context, first, byte, left, right, x, baseline, font, height, run, emit, env);
       first = byte; ready = 0;
     }
     left = ready ? fminf(left, a) : a;
@@ -82,8 +82,7 @@ static void emit_run(const char *source, int start, int end, const float *leadin
     byte++;
     while (byte < end && ((unsigned char)source[byte] & 0xc0) == 0x80) byte++;
   }
-  if (ready) emit_part(source, first, end, left, right, x, baseline, font, height, run,
-    context_start, context_end, emit, env);
+  if (ready) emit_part(context, first, end, left, right, x, baseline, font, height, run, emit, env);
 }
 
 typedef struct TextLine { int start, end, dots; float width, font; } TextLine;
@@ -144,13 +143,13 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
     SzTextRun fallback = {0};
     const SzTextRun *last = text && style_index < text->count ? &text->runs[style_index] : &fallback;
     float dots_font = run_font(last, font, scale);
-    float dots_width = sk_font_measure_span("...", 3, dots_font, last->style);
+    float dots_width = sk_font_measure_span(sk_text_range("...", 3), dots_font, last->style);
     if (l == count - 1 && result.truncated && ellipsis) {
       for (;;) {
         style_index = run_at(text, line->end > line->start ? previous_byte(source, line->end, line->start) : line->start);
         last = text && style_index < text->count ? &text->runs[style_index] : &fallback;
         dots_font = run_font(last, font, scale);
-        dots_width = sk_font_measure_span("...", 3, dots_font, last->style);
+        dots_width = sk_font_measure_span(sk_text_range("...", 3), dots_font, last->style);
         if (width <= 0.f || range_width(text, line->start, line->end, font, scale) + dots_width <= width) {
           line->dots = 1;
           break;
@@ -175,7 +174,7 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
       int start = text->runs[i].start > line->start ? text->runs[i].start : line->start;
       int end = text->runs[next - 1].end;
       if (end > line->end) end = line->end;
-      sk_font_span_metrics(source + start, (size_t)(end - start), size, text->runs[i].style, &a, &d);
+      sk_font_span_metrics((SkTextRange){source, (size_t)length, (size_t)start, (size_t)end}, size, text->runs[i].style, &a, &d);
       float font_a, font_d;
       sk_font_metrics(size, text->runs[i].style, &font_a, &font_d);
       a = fmaxf(a, font_a); d = fmaxf(d, font_d);
@@ -202,17 +201,17 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
       int a = line->start > text->runs[i].start ? line->start : text->runs[i].start;
       int b = line->end < text->runs[next - 1].end ? line->end : text->runs[next - 1].end;
       float size = run_font(&text->runs[i], font, scale);
-      float advance = sk_font_measure_span(source + a, (size_t)(b - a), size, text->runs[i].style);
+      float advance = sk_font_measure_span((SkTextRange){source, (size_t)text->length, (size_t)a, (size_t)b}, size, text->runs[i].style);
       if (emit) {
         size_t positions = (size_t)(b - a) + 1;
         float *leading = sz_alloc(positions * 2 * sizeof(float)), *trailing = leading + positions;
-        sk_font_text_positions(source + a, (size_t)(b - a), size, text->runs[i].style, leading, trailing);
+        sk_font_text_positions((SkTextRange){source, (size_t)text->length, (size_t)a, (size_t)b}, size, text->runs[i].style, leading, trailing);
         for (int j = i; j < next; j++) {
           const SzTextRun *run = &text->runs[j];
           int start = a > run->start ? a : run->start;
           int end = b < run->end ? b : run->end;
-          emit_run(source, start, end, leading, trailing, x, baseline, size, line_height,
-            run, a, b, emit, env);
+          emit_run((SkTextRange){source, (size_t)length, (size_t)a, (size_t)b}, start, end, leading, trailing, x, baseline, size, line_height,
+            run, emit, env);
         }
         sz_free(leading);
       }
@@ -222,11 +221,11 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
     if (emit && line->end == line->start && !line->dots) {
       SzTextRun empty = {0};
       const SzTextRun *run = text && inherited < text->count ? &text->runs[inherited] : &empty;
-      emit(source, line->start, line->end, 0.f, baseline, 0.f, line->font,
-        line_height, run->style, run->color, run->colored, 0, run->action, line->start, line->end, 0.f, env);
+      emit((SkTextRange){source, (size_t)length, (size_t)line->start, (size_t)line->end}, line->start, line->end, 0.f, baseline, 0.f, line->font,
+        line_height, run->style, run->color, run->colored, 0, run->action, 0.f, env);
     }
-    if (line->dots && emit) emit(source, line->end, line->end, x, baseline,
-      dots_width, dots_font, line_height, last->style, last->color, last->colored, 1, 0, line->end, line->end, x, env);
+    if (line->dots && emit) emit((SkTextRange){source, (size_t)length, (size_t)line->end, (size_t)line->end}, line->end, line->end, x, baseline,
+      dots_width, dots_font, line_height, last->style, last->color, last->colored, 1, 0, x, env);
     if (line->width > result.width) result.width = line->width;
     result.height += line_height;
   }

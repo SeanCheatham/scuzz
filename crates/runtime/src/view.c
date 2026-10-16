@@ -2878,12 +2878,12 @@ static void ellipsize_to_width(char *line, size_t cap, float max_w, float font_p
 }
 
 static float span_width(const char *s, int start, int end, float font_px) {
-  return s && end > start ? sk_font_measure_span(s + start, (size_t)(end - start), font_px, 0) : 0.f;
+  return s && end > start ? sk_font_measure_span(sk_text_range(s + start, (size_t)(end - start)), font_px, 0) : 0.f;
 }
 
 static float *text_positions(const char *text, int length, float font) {
   float *positions = sz_alloc(((size_t)length + 1) * 2 * sizeof(float));
-  sk_font_text_positions(text, (size_t)length, font, 0, positions, positions + length + 1);
+  sk_font_text_positions(sk_text_range(text, (size_t)length), font, 0, positions, positions + length + 1);
   return positions;
 }
 
@@ -3666,7 +3666,7 @@ static float text_line_h(const SzTheme *theme, float font_px) {
 
 static float plain_text_metrics(const char *text, const SzTheme *theme, float font, float *baseline) {
   float ascent, descent;
-  sk_font_span_metrics(text, strlen(text), font, 0, &ascent, &descent);
+  sk_font_span_metrics(sk_text_range(text, strlen(text)), font, 0, &ascent, &descent);
   *baseline = fmaxf(font + scale_px(theme, 2.f), ascent);
   return fmaxf(text_line_h(theme, font), *baseline + descent);
 }
@@ -4047,11 +4047,12 @@ static void layout_virtual(SzView *v, float x, float y, float width,
   v->frame.h = (float)total;
 }
 
-static void layout_text_action(const char *source, int start, int end,
+static void layout_text_action(SkTextRange context, int start, int end,
   float x, float baseline, float width, float font, float line_height,
   int style, uint32_t color, int colored, int ellipsis, int group,
-  int context_start, int context_end, float context_x, void *env) {
-  (void)context_start; (void)context_end; (void)context_x;
+  float context_x, void *env) {
+  const char *source = context.source;
+  (void)context; (void)context_x;
   (void)source; (void)start; (void)end; (void)line_height; (void)color; (void)colored;
   SzView *view = env;
   if (group <= 0 || group > view->child_count || ellipsis || width <= 0) return;
@@ -6425,34 +6426,30 @@ typedef struct SzRichPaint {
 #endif
 } SzRichPaint;
 
-static void paint_rich_fragment(const char *source, int start, int end,
+static void paint_rich_fragment(SkTextRange context, int start, int end,
   float x, float baseline, float width, float font, float line_height,
   int style, uint32_t color, int colored, int ellipsis, int action,
-  int context_start, int context_end, float context_x, void *env) {
+  float context_x, void *env) {
+  const char *source = context.source;
   SzRichPaint *paint = env;
   (void)action;
   uint32_t ink = colored ? color : paint->color;
   SkPaint *p = sk_paint_new();
   sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(ink)));
   sk_paint_set_text_size(p, font);
-  if (ellipsis || (start == context_start && end == context_end)) {
-    sk_canvas_draw_span(paint->canvas, ellipsis ? "..." : source + context_start,
-      ellipsis ? 3 : (size_t)(context_end - context_start), paint->x + context_x,
-      paint->y + baseline, p, style);
+  if (ellipsis || ((size_t)start == context.start && (size_t)end == context.end)) {
+    sk_canvas_draw_span(paint->canvas, ellipsis ? sk_text_range("...", 3) : context, paint->x + context_x, paint->y + baseline, p, style);
   } else if (width > 0.f) {
     SzView *root = paint->view;
     while (root->parent) root = root->parent;
-    float context_width = sk_font_measure_span(source + context_start,
-      (size_t)(context_end - context_start), font, style);
+    float context_width = sk_font_measure_span(context, font, style);
     /* Keep one glyph and underline mask at each pixel boundary. */
     float left = x - context_x <= .001f ? 0.f : roundf(paint->x + x);
     float right = x + width - context_x >= context_width - .001f ?
       root->viewport_w : roundf(paint->x + x + width);
     sk_canvas_save(paint->canvas);
     sk_canvas_clip_rect(paint->canvas, left, 0.f, fmaxf(0.f, right - left), root->viewport_h);
-    sk_canvas_draw_span(paint->canvas, source + context_start,
-      (size_t)(context_end - context_start), paint->x + context_x, paint->y + baseline,
-      p, style);
+    sk_canvas_draw_span(paint->canvas, context, paint->x + context_x, paint->y + baseline, p, style);
     sk_canvas_restore(paint->canvas);
   }
   sk_paint_delete(p);
@@ -6467,6 +6464,7 @@ static void paint_rich_fragment(const char *source, int start, int end,
     sz_release(display);
   }
 #else
+  (void)source;
   (void)width;
   (void)line_height;
 #endif

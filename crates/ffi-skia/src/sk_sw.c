@@ -531,7 +531,7 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
 #ifdef __EMSCRIPTEN__
   {
     float ascent, descent;
-    sk_font_span_metrics(text, strlen(text), size, style, &ascent, &descent);
+    sk_font_span_metrics(sk_text_range(text, strlen(text)), size, style, &ascent, &descent);
     float advance_width = web_text_width(text, (int)strlen(text), size, style, web_text_direction(text, (int)strlen(text)));
     int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - size)));
     int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + size)));
@@ -644,7 +644,7 @@ EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int st
     Object.assign(probe.style, {position: 'fixed', left: '0', top: '0', visibility: 'hidden', whiteSpace: 'pre', pointerEvents: 'none'});
     document.body.append(probe);
   }
-  probe.style.font = ((style & 2) ? 'italic ' : '') + ((style & 1) ? 'bold ' : '') + size + 'px ' + Module.scuzzFontStack; probe.textContent = source;
+  probe.style.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack; probe.textContent = source;
   const origin = probe.getBoundingClientRect().left;
   const range = document.createRange(), node = probe.firstChild;
   let byte = 0, unit = 0, last = 0;
@@ -666,7 +666,10 @@ EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int st
 });
 #endif
 
-void sk_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing) {
+void sk_font_text_positions(SkTextRange range, float font_px, int style, float *leading, float *trailing) {
+  if (range.start > range.end || range.end > range.bytes) return;
+  const char *text = range.source ? range.source + range.start : NULL;
+  size_t bytes = range.end - range.start;
   if (!leading || !trailing || bytes > INT32_MAX) return;
   memset(leading, 0, (bytes + 1) * sizeof(float));
   memset(trailing, 0, (bytes + 1) * sizeof(float));
@@ -729,7 +732,10 @@ EM_JS(void, web_span_metrics, (const char *text, int bytes, float size, int styl
 });
 #endif
 
-void sk_font_span_metrics(const char *text, size_t bytes, float font_px, int style, float *ascent, float *descent) {
+void sk_font_span_metrics(SkTextRange range, float font_px, int style, float *ascent, float *descent) {
+  if (range.start > range.end || range.end > range.bytes) return;
+  const char *text = range.source ? range.source + range.start : NULL;
+  size_t bytes = range.end - range.start;
   float metrics[2];
   sk_font_metrics(font_px, style, &metrics[0], &metrics[1]);
 #ifdef __EMSCRIPTEN__
@@ -741,7 +747,10 @@ void sk_font_span_metrics(const char *text, size_t bytes, float font_px, int sty
   if (descent) *descent = metrics[1];
 }
 
-float sk_font_measure_span(const char *text, size_t bytes, float font_px, int style) {
+float sk_font_measure_span(SkTextRange range, float font_px, int style) {
+  if (range.start > range.end || range.end > range.bytes) return 0.f;
+  const char *text = range.source ? range.source + range.start : NULL;
+  size_t bytes = range.end - range.start;
   if (!text) return 0.f;
   if (font_px <= 0.f) font_px = 8.f;
 #ifdef __EMSCRIPTEN__
@@ -759,8 +768,11 @@ float sk_font_measure_span(const char *text, size_t bytes, float font_px, int st
 #endif
 }
 
-void sk_canvas_draw_span(SkCanvas *canvas, const char *text, size_t bytes,
+void sk_canvas_draw_span(SkCanvas *canvas, SkTextRange range,
                          float x, float y, const SkPaint *paint, int style) {
+  if (range.start > range.end || range.end > range.bytes) return;
+  const char *text = range.source ? range.source + range.start : NULL;
+  size_t bytes = range.end - range.start;
   if (!text || bytes == SIZE_MAX || !paint) return;
   char *copy = malloc(bytes + 1);
   if (!copy) return;
@@ -769,7 +781,7 @@ void sk_canvas_draw_span(SkCanvas *canvas, const char *text, size_t bytes,
   draw_styled_string(canvas, copy, x, y, paint, style);
   free(copy);
   if (style & SK_TEXT_UNDERLINE) {
-    float width = sk_font_measure_span(text, bytes, paint->text_size, style);
+    float width = sk_font_measure_span(range, paint->text_size, style);
     sk_canvas_draw_rect(canvas, x, y + paint->text_size * 0.1f, width,
                          fmaxf(1.f, paint->text_size / 16.f), paint);
   }

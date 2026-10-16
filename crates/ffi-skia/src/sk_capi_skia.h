@@ -6,6 +6,7 @@
 #define SK_CAPI_SKIA_H
 
 #include <stddef.h>
+#include "../include/sk_text.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -44,12 +45,12 @@ void scuzz_skia_paint_set_color(void *paint, uint8_t r, uint8_t g, uint8_t b,
                                 uint8_t a);
 void scuzz_skia_paint_set_text_size(void *paint, float size);
 float scuzz_skia_paint_get_text_size(const void *paint);
-void scuzz_skia_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing);
+void scuzz_skia_font_text_positions(SkTextRange text, float font_px, int style, float *leading, float *trailing);
 void scuzz_skia_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks);
 void scuzz_skia_font_metrics(float font_px, int style, float *ascent, float *descent);
-void scuzz_skia_font_span_metrics(const char *text, size_t bytes, float font_px, int style, float *ascent, float *descent);
-float scuzz_skia_font_measure_span(const char *text, size_t bytes, float font_px, int style);
-void scuzz_skia_canvas_draw_span(void *canvas, const char *text, size_t bytes,
+void scuzz_skia_font_span_metrics(SkTextRange text, float font_px, int style, float *ascent, float *descent);
+float scuzz_skia_font_measure_span(SkTextRange text, float font_px, int style);
+void scuzz_skia_canvas_draw_span(void *canvas, SkTextRange text,
                                 float x, float y, const void *paint, int style);
 float scuzz_skia_font_measure_string(const char *text, float font_px);
 float scuzz_skia_font_measure_string_mono(const char *text, float font_px);

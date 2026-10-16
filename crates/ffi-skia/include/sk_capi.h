@@ -6,6 +6,7 @@
 #define SK_CAPI_H
 
 #include <stddef.h>
+#include "sk_text.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -71,15 +72,15 @@ void sk_paint_set_text_size(SkPaint *paint, float size);
 float sk_paint_get_text_size(const SkPaint *paint);
 
 enum { SK_TEXT_BOLD = 1, SK_TEXT_ITALIC = 2, SK_TEXT_MONO = 4, SK_TEXT_UNDERLINE = 8 };
-/* Store leading and trailing positions for each source byte. Allocate bytes + 1. */
-void sk_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing);
+/* Store positions for the selected bytes. Allocate end - start + 1 entries. */
+void sk_font_text_positions(SkTextRange text, float font_px, int style, float *leading, float *trailing);
 /* Mark source byte offsets at shaped cluster boundaries. Allocate bytes + 1. */
 void sk_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks);
 void sk_font_metrics(float font_px, int style, float *ascent, float *descent);
 /* Return source text bounds above and below the baseline. */
-void sk_font_span_metrics(const char *text, size_t bytes, float font_px, int style, float *ascent, float *descent);
-float sk_font_measure_span(const char *text, size_t bytes, float font_px, int style);
-void sk_canvas_draw_span(SkCanvas *canvas, const char *text, size_t bytes,
+void sk_font_span_metrics(SkTextRange text, float font_px, int style, float *ascent, float *descent);
+float sk_font_measure_span(SkTextRange text, float font_px, int style);
+void sk_canvas_draw_span(SkCanvas *canvas, SkTextRange text,
                          float x, float y, const SkPaint *paint, int style);
 
 /* Advance width of UTF-8 text at font_px. sk_sw is monospace. One advance

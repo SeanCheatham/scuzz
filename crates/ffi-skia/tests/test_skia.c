@@ -142,7 +142,7 @@ static void assert_text_equivalent(const char *source, const char *const *pieces
   sk_paint_set_color(paint, sk_color_rgba(20, 30, 40, 255));
   sk_paint_set_text_size(paint, 28);
   sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
-  sk_canvas_draw_span(canvas, source, strlen(source), 8, 50, paint, style);
+  sk_canvas_draw_span(canvas, sk_text_range(source, strlen(source)), 8, 50, paint, style);
   size_t bytes = 0;
   const uint8_t *actual = sk_surface_peek_pixels(surface, &bytes);
   uint8_t *expected = malloc(bytes);
@@ -151,15 +151,50 @@ static void assert_text_equivalent(const char *source, const char *const *pieces
   sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
   float x = 8;
   for (int i = 0; i < count; i++) {
-    sk_canvas_draw_span(canvas, pieces[i], strlen(pieces[i]), x, 50, paint, style);
-    x += sk_font_measure_span(pieces[i], strlen(pieces[i]), 28, style);
+    sk_canvas_draw_span(canvas, sk_text_range(pieces[i], strlen(pieces[i])), x, 50, paint, style);
+    x += sk_font_measure_span(sk_text_range(pieces[i], strlen(pieces[i])), 28, style);
   }
-  assert(fabsf(sk_font_measure_span(source, strlen(source), 28, style) - (x - 8)) < .001f);
+  assert(fabsf(sk_font_measure_span(sk_text_range(source, strlen(source)), 28, style) - (x - 8)) < .001f);
   actual = sk_surface_peek_pixels(surface, NULL);
   assert(memcmp(expected, actual, bytes) == 0);
   free(expected);
   sk_paint_delete(paint);
   sk_surface_unref(surface);
+}
+
+static void test_paragraph_ranges(void) {
+  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  const char *prefix[] = {"אבגדהוז ", "אבגדהוז\n", ("\xe2\x80\xab" "abcdefg "),
+    "abcdefg ", "abcdefg \xe2\x81\xa7", "אבגדהוז ", "abcdefg "};
+  const char *line[] = {"AB אב", "AB אב", "AB אב", "אב AB", "AB אב", "12: AB אב!", "12 אב AB!"};
+  const char *suffix[] = {"", "", "\xe2\x80\xac", "", "\xe2\x81\xa9", "", ""};
+  const int rtl[] = {1, 0, 1, 0, 1, 1, 0};
+  for (int i = 0; i < 7; i++) {
+    char source[128], reference[128];
+    snprintf(source, sizeof source, "%s%s%s", prefix[i], line[i], suffix[i]);
+    snprintf(reference, sizeof reference, "%s%s", rtl[i] ? "\xe2\x80\x8f" : "\xe2\x80\x8e", line[i]);
+    SkTextRange range = {source, strlen(source), strlen(prefix[i]), strlen(prefix[i]) + strlen(line[i])};
+    float leading[128], trailing[128], ref_leading[128], ref_trailing[128];
+    sk_font_text_positions(range, 24, 0, leading, trailing);
+    sk_font_text_positions(sk_text_range(reference, strlen(reference)), 24, 0, ref_leading, ref_trailing);
+    for (size_t byte = 0; byte <= strlen(line[i]); byte++) {
+      assert(fabsf(leading[byte] - ref_leading[byte + 3]) < .001f);
+      assert(fabsf(trailing[byte] - ref_trailing[byte + 3]) < .001f);
+    }
+    float width = sk_font_measure_span(range, 24, 0);
+    assert(fabsf(width - sk_font_measure_span(sk_text_range(reference, strlen(reference)), 24, 0)) < .001f);
+    SkSurface *actual = sk_surface_make_raster_n32_premul(256, 64);
+    SkSurface *expected = sk_surface_make_raster_n32_premul(256, 64);
+    assert(actual && expected);
+    SkCanvas *a = sk_surface_get_canvas(actual), *b = sk_surface_get_canvas(expected);
+    sk_canvas_clear(a, sk_color_argb(0)); sk_canvas_clear(b, sk_color_argb(0));
+    SkPaint *paint = sk_paint_new();
+    sk_paint_set_text_size(paint, 24); sk_paint_set_color(paint, sk_color_argb(0xff165ca0));
+    sk_canvas_draw_span(a, range, 4, 40, paint, 0);
+    sk_canvas_draw_span(b, sk_text_range(reference, strlen(reference)), 4, 40, paint, 0);
+    assert(!memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), 256 * 64 * 4));
+    sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+  }
 }
 
 static void test_shaped_text(void) {
@@ -172,18 +207,18 @@ static void test_shaped_text(void) {
   sk_text_cluster_breaks("لا", 4, breaks);
   assert(breaks[0] && !breaks[1] && !breaks[2] && !breaks[3] && breaks[4]);
   float leading[32], trailing[32];
-  sk_font_text_positions("אב", 4, 28, 0, leading, trailing);
+  sk_font_text_positions(sk_text_range("אב", 4), 28, 0, leading, trailing);
   assert(leading[0] > leading[2] && leading[2] > leading[4]);
   assert(fabsf(leading[0] - sk_font_measure_string("אב", 28)) < .001f);
   assert(leading[4] == 0.f && trailing[3] == 0.f);
-  sk_font_text_positions("AV", 2, 28, 0, leading, trailing);
+  sk_font_text_positions(sk_text_range("AV", 2), 28, 0, leading, trailing);
   assert(leading[1] < sk_font_measure_string("A", 28));
-  sk_font_text_positions("fi", 2, 28, 0, leading, trailing);
+  sk_font_text_positions(sk_text_range("fi", 2), 28, 0, leading, trailing);
   assert(leading[0] < leading[1] && leading[1] < leading[2]);
-  sk_font_text_positions("fi", 2, 28, SK_TEXT_MONO, leading, trailing);
-  assert(fabsf(leading[2] - sk_font_measure_span("fi", 2, 28, SK_TEXT_MONO)) < .001f);
-  assert(fabsf(leading[1] - sk_font_measure_span("f", 1, 28, SK_TEXT_MONO)) < .001f);
-  sk_font_text_positions("é", 3, 28, 0, leading, trailing);
+  sk_font_text_positions(sk_text_range("fi", 2), 28, SK_TEXT_MONO, leading, trailing);
+  assert(fabsf(leading[2] - sk_font_measure_span(sk_text_range("fi", 2), 28, SK_TEXT_MONO)) < .001f);
+  assert(fabsf(leading[1] - sk_font_measure_span(sk_text_range("f", 1), 28, SK_TEXT_MONO)) < .001f);
+  sk_font_text_positions(sk_text_range("é", 3), 28, 0, leading, trailing);
   assert(leading[1] == trailing[0] && leading[3] == trailing[0]);
   float separate = sk_font_measure_string("A", 28) + sk_font_measure_string("V", 28);
   assert(sk_font_measure_string("AV", 28) < separate - 1.f);
@@ -203,7 +238,7 @@ static void test_shaped_text(void) {
     assert_text_equivalent("A ⁧אב⁩ B", isolate, 3, style);
     assert_text_equivalent("X (אב)", brackets, 3, style);
   }
-  assert(sk_font_measure_span("ab ignored", 2, 28, 0) == sk_font_measure_string("ab", 28));
+  assert(sk_font_measure_span(sk_text_range("ab ignored", 2), 28, 0) == sk_font_measure_string("ab", 28));
 }
 
 static void test_font_fallback(void) {
@@ -214,9 +249,9 @@ static void test_font_fallback(void) {
   for (size_t i = 0; i < sizeof widths / sizeof widths[0]; i++) {
     size_t bytes = strlen(source[i]);
     for (int style = 0; style < 4; style++)
-      assert(fabsf(sk_font_measure_span(source[i], bytes, 32, style) - widths[i]) < .002f);
+      assert(fabsf(sk_font_measure_span(sk_text_range(source[i], bytes), 32, style) - widths[i]) < .002f);
     float leading[64], trailing[64];
-    sk_font_text_positions(source[i], bytes, 32, 0, leading, trailing);
+    sk_font_text_positions(sk_text_range(source[i], bytes), 32, 0, leading, trailing);
     assert(fabsf(leading[bytes] - widths[i]) < .002f);
     for (size_t j = 0; j <= bytes; j++) {
       assert(isfinite(leading[j]) && isfinite(trailing[j]));
@@ -244,8 +279,8 @@ static void test_font_fallback(void) {
   for (int style = 0; style < 4; style++) for (int i = 0; i < 7; i++) {
     sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
     float a, d;
-    sk_font_span_metrics(source[i], strlen(source[i]), 32, style, &a, &d);
-    sk_canvas_draw_span(canvas, source[i], strlen(source[i]), 40, 50, paint, style);
+    sk_font_span_metrics(sk_text_range(source[i], strlen(source[i])), 32, style, &a, &d);
+    sk_canvas_draw_span(canvas, sk_text_range(source[i], strlen(source[i])), 40, 50, paint, style);
     const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
     int ink = 0;
     for (int y = 0; y < 100; y++) for (int x = 0; x < 320; x++) {
@@ -271,9 +306,9 @@ static void test_text_spans(void) {
     const char *source = "Word ignored";
     for (int style = 0; style < 16; style++) {
       sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
-      float width = sk_font_measure_span(source, 4, 24, style);
+      float width = sk_font_measure_span(sk_text_range(source, 4), 24, style);
       assert(width > 0 && width < 240);
-      sk_canvas_draw_span(canvas, source, 4, 4, 40, paint, style);
+      sk_canvas_draw_span(canvas, sk_text_range(source, 4), 4, 40, paint, style);
       const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
       int ink = 0;
       for (int y = 0; y < 80; y++) for (int x = 0; x < 240; x++) {
@@ -285,7 +320,7 @@ static void test_text_spans(void) {
       }
       assert(ink > 0);
     }
-    assert(sk_font_measure_span("", 0, 24, 15) == 0);
+    assert(sk_font_measure_span(sk_text_range("", 0), 24, 15) == 0);
     sk_paint_delete(paint);
     sk_surface_unref(surface);
   }
@@ -363,6 +398,7 @@ int main(void) {
   test_opacity_layers(0);
   if (sk_gpu_available()) test_opacity_layers(1);
   test_shaped_text();
+  test_paragraph_ranges();
   test_font_fallback();
   test_text_spans();
   test_images();

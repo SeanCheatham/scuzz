@@ -19199,11 +19199,12 @@ typedef struct TextProbe {
   float x[32], baseline[32], fonts[32];
 } TextProbe;
 
-static void text_probe(const char *source, int start, int end,
+static void text_probe(SkTextRange context, int start, int end,
   float x, float baseline, float width, float font, float line_height,
   int style, uint32_t color, int colored, int ellipsis, int action,
-  int context_start, int context_end, float context_x, void *env) {
-  (void)context_start; (void)context_end; (void)context_x;
+  float context_x, void *env) {
+  const char *source = context.source;
+  (void)context; (void)context_x;
   (void)action;
   (void)source; (void)width; (void)line_height; (void)color; (void)colored;
   TextProbe *probe = env;
@@ -19289,7 +19290,7 @@ static void test_shaped_text_wrapping(void) {
   if (sk_font_measure_string("i", 14) == sk_font_measure_string("W", 14)) return;
   const char *source = "ééé";
   SzText *text = test_text_span(source);
-  float width = sk_font_measure_span(source, 3, 14, 0);
+  float width = sk_font_measure_span(sk_text_range(source, 3), 14, 0);
   TextProbe probe = {0};
   SzTextMetrics metrics = sz_text_layout(text, 14, 1, 6, width + .01f, 0, 0, text_probe, &probe);
   assert(metrics.lines == 3 && probe.count == 3);
@@ -19297,7 +19298,7 @@ static void test_shaped_text_wrapping(void) {
   sz_release(text);
   text = test_text_span("éééééééééé");
   probe = (TextProbe){0};
-  metrics = sz_text_layout(text, 14, 1, 6, width + sk_font_measure_span("...", 3, 14, 0) + .01f,
+  metrics = sz_text_layout(text, 14, 1, 6, width + sk_font_measure_span(sk_text_range("...", 3), 14, 0) + .01f,
     1, 1, text_probe, &probe);
   assert(metrics.truncated && probe.dots == 1);
   for (int i = 0; i < probe.count; i++) assert(probe.starts[i] % 3 == 0 && probe.ends[i] % 3 == 0);
@@ -19313,7 +19314,7 @@ static void test_shaped_text_wrapping(void) {
   memset(long_line, 'M', 400); long_line[400] = 0;
   plain = sz_view_text(long_line);
   sz_view_layout(plain, 6400, 80, sz_theme_default());
-  float full_width = sk_font_measure_span(long_line, 400, 14, 0);
+  float full_width = sk_font_measure_span(sk_text_range(long_line, 400), 14, 0);
   assert(sz_view_frame(plain).w >= full_width);
   SkSurface *surface = sk_surface_make_raster_n32_premul(6400, 80);
   assert(surface);
@@ -19855,7 +19856,7 @@ static void test_fallback_text_layout(void) {
     SzTextMetrics metrics = sz_text_layout(styled, 14, 1, 6, 400, 0, 0, text_probe, &probe);
     assert(metrics.lines == 1 && probe.count == 1);
     float ascent, descent;
-    sk_font_span_metrics(source[i], strlen(source[i]), 32, SK_TEXT_ITALIC, &ascent, &descent);
+    sk_font_span_metrics(sk_text_range(source[i], strlen(source[i])), 32, SK_TEXT_ITALIC, &ascent, &descent);
     assert(probe.baseline[0] >= ascent && metrics.height >= probe.baseline[0] + descent);
     SzView *plain = sz_view_text(source[i]);
     SzView *root = sz_view_font_size(32, plain);
@@ -19946,6 +19947,45 @@ static void test_styled_text_values(void) {
   assert(bytes == before_bytes && count == before_count);
 }
 
+static void test_wrapped_paragraph_direction(void) {
+  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  SzText *prefix = test_text_span("אבגדהוז ");
+  SzText *latin = test_text_span("AB ");
+  SzText *hebrew = test_text_span("אב");
+  SzText *colored = sz_text_color(0xff165ca0, latin);
+  SzText *tail = test_text_pair(colored, hebrew);
+  SzText *text = test_text_pair(prefix, tail);
+  float width = ceilf(sk_font_measure_span(sk_text_range("אבגדהוז", strlen("אבגדהוז")), 24, 0)) + 1.f;
+  TextProbe probe = {0};
+  SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width, 0, 0, text_probe, &probe);
+  assert(metrics.lines == 2 && probe.count == 3);
+  assert(probe.baseline[1] == probe.baseline[2]);
+  /* The Latin run follows the Hebrew run in the RTL paragraph. */
+  assert(probe.x[1] > probe.x[2]);
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  SzView *view = sz_view_rich_text(text);
+  width += 4.f;
+  SkSurface *actual = sk_surface_make_raster_n32_premul((int)width, 96);
+  SkSurface *expected = sk_surface_make_raster_n32_premul((int)width, 96);
+  assert(actual && expected);
+  assert(sz_view_paint(view, sk_surface_get_canvas(actual), width, 96, &theme));
+  SkCanvas *canvas = sk_surface_get_canvas(expected);
+  sk_canvas_clear(canvas, sk_color_argb(0));
+  SkPaint *paint = sk_paint_new();
+  sk_paint_set_text_size(paint, 24); sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+  /* The direction mark gives the independent line the paragraph direction. */
+  const char *reference = "\xe2\x80\x8f" "AB אב";
+  sk_canvas_draw_span(canvas, sk_text_range(reference, strlen(reference)), 2, probe.baseline[1], paint, 0);
+  const uint8_t *a = sk_surface_peek_pixels(actual, NULL);
+  const uint8_t *b = sk_surface_peek_pixels(expected, NULL);
+  assert(!memcmp(a + (int)width * 30 * 4, b + (int)width * 30 * 4, (size_t)(int)width * 66 * 4));
+  sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+  sz_view_free(view);
+  sz_release(prefix); sz_release(latin); sz_release(hebrew);
+  sz_release(colored); sz_release(tail); sz_release(text);
+}
+
 static void test_styled_shaping_context(void) {
   uint64_t before_bytes, before_count, end_bytes, end_count;
   sz_alloc_stats(&before_bytes, &before_count);
@@ -20012,9 +20052,9 @@ static void test_styled_text_wrap(void) {
   SzText *b = test_text_span("lo world");
   SzText *bold = sz_text_bold(a);
   SzText *text = test_text_pair(bold, b);
-  float width = sk_font_measure_span("hel", 3, 14, SK_TEXT_BOLD) +
-                sk_font_measure_span("lo", 2, 14, 0);
-  width = fmaxf(width, sk_font_measure_span("world", 5, 14, 0)) + .01f;
+  float width = sk_font_measure_span(sk_text_range("hel", 3), 14, SK_TEXT_BOLD) +
+                sk_font_measure_span(sk_text_range("lo", 2), 14, 0);
+  width = fmaxf(width, sk_font_measure_span(sk_text_range("world", 5), 14, 0)) + .01f;
   TextProbe probe = {0};
   SzTextMetrics metrics = sz_text_layout(text, 14, 1, 6, width, 0, 0, text_probe, &probe);
   assert(metrics.lines == 2 && probe.count == 3);
@@ -20037,8 +20077,8 @@ static void test_styled_text_wrap(void) {
   SzText *part = test_text_pair(bold, big);
   SzText *tail = test_text_span(" tail");
   text = test_text_pair(part, tail);
-  width = sk_font_measure_span("word ", 5, 14, SK_TEXT_BOLD) +
-          sk_font_measure_span("Z", 1, 40, 0) + sk_font_measure_span(" ", 1, 14, 0) + .01f;
+  width = sk_font_measure_span(sk_text_range("word ", 5), 14, SK_TEXT_BOLD) +
+          sk_font_measure_span(sk_text_range("Z", 1), 40, 0) + sk_font_measure_span(sk_text_range(" ", 1), 14, 0) + .01f;
   probe = (TextProbe){0};
   metrics = sz_text_layout(text, 14, 1, 6, width, 1, 1, text_probe, &probe);
   assert(probe.count == 2 && probe.dots == 1);
@@ -20047,7 +20087,7 @@ static void test_styled_text_wrap(void) {
   sz_release(part); sz_release(tail); sz_release(text);
 
   text = test_text_span("λ🙂");
-  width = sk_font_measure_span("λ", 2, 14, 0) + .01f;
+  width = sk_font_measure_span(sk_text_range("λ", 2), 14, 0) + .01f;
   probe = (TextProbe){0};
   metrics = sz_text_layout(text, 14, 1, 6, width, 0, 0, text_probe, &probe);
   assert(metrics.lines == 2 && probe.count == 2);
@@ -20066,12 +20106,12 @@ static void test_styled_text_sizes(void) {
   assert(metrics.lines == 1 && metrics.height >= 36.f && probe.count == 2);
   assert(probe.fonts[0] == 30.f && probe.fonts[1] == 14.f);
   assert(probe.baseline[0] == 32.f && probe.baseline[1] == 32.f);
-  float measured = sk_font_measure_span("Large", 5, 30, 0) + sk_font_measure_span(" small", 6, 14, 0);
+  float measured = sk_font_measure_span(sk_text_range("Large", 5), 30, 0) + sk_font_measure_span(sk_text_range(" small", 6), 14, 0);
   assert(fabsf(metrics.width - measured) < .01f);
   probe = (TextProbe){0};
   metrics = sz_text_layout(text, 28, 2, 12, 2000, 0, 0, text_probe, &probe);
   assert(metrics.height >= 72.f && probe.baseline[0] == 64.f);
-  measured = sk_font_measure_span("Large", 5, 60, 0) + sk_font_measure_span(" small", 6, 28, 0);
+  measured = sk_font_measure_span(sk_text_range("Large", 5), 60, 0) + sk_font_measure_span(sk_text_range(" small", 6), 28, 0);
   assert(fabsf(metrics.width - measured) < .01f);
   SzView *view = sz_view_rich_text(text);
   sz_release(text);
@@ -20253,6 +20293,11 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--paragraph-direction")) {
+    test_wrapped_paragraph_direction();
+    puts("paragraph direction tests ok");
+    return 0;
+  }
   if (argc == 2 && (!strcmp(argv[1], "--styled-shaping") || !strcmp(argv[1], "--styled-shaping-gpu"))) {
     if (!strcmp(argv[1], "--styled-shaping-gpu")) assert(sk_gpu_available());
     test_styled_shaping_context();
@@ -20279,6 +20324,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--shaping")) {
     test_shaped_field_geometry();
     test_shaped_text_wrapping();
+  test_wrapped_paragraph_direction();
     test_fallback_text_layout();
     test_styled_shaping_context();
     test_styled_text_wrap();
@@ -21076,6 +21122,7 @@ int main(int argc, char **argv) {
   test_select_scope_and_journal();
   test_shaped_field_geometry();
   test_shaped_text_wrapping();
+  test_wrapped_paragraph_direction();
   test_fallback_text_layout();
   test_styled_text_values();
   test_styled_shaping_context();

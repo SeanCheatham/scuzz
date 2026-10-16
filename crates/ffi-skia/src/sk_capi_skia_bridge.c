@@ -70,8 +70,8 @@ float sk_paint_get_text_size(const SkPaint *paint) {
   return scuzz_skia_paint_get_text_size(paint);
 }
 
-void sk_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing) {
-  scuzz_skia_font_text_positions(text, bytes, font_px, style, leading, trailing);
+void sk_font_text_positions(SkTextRange text, float font_px, int style, float *leading, float *trailing) {
+  scuzz_skia_font_text_positions(text, font_px, style, leading, trailing);
 }
 
 void sk_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks) {
@@ -82,17 +82,17 @@ void sk_font_metrics(float font_px, int style, float *ascent, float *descent) {
   scuzz_skia_font_metrics(font_px, style, ascent, descent);
 }
 
-void sk_font_span_metrics(const char *text, size_t bytes, float font_px, int style, float *ascent, float *descent) {
-  scuzz_skia_font_span_metrics(text, bytes, font_px, style, ascent, descent);
+void sk_font_span_metrics(SkTextRange text, float font_px, int style, float *ascent, float *descent) {
+  scuzz_skia_font_span_metrics(text, font_px, style, ascent, descent);
 }
 
-float sk_font_measure_span(const char *text, size_t bytes, float font_px, int style) {
-  return scuzz_skia_font_measure_span(text, bytes, font_px, style);
+float sk_font_measure_span(SkTextRange text, float font_px, int style) {
+  return scuzz_skia_font_measure_span(text, font_px, style);
 }
 
-void sk_canvas_draw_span(SkCanvas *canvas, const char *text, size_t bytes,
+void sk_canvas_draw_span(SkCanvas *canvas, SkTextRange text,
                          float x, float y, const SkPaint *paint, int style) {
-  scuzz_skia_canvas_draw_span(canvas, text, bytes, x, y, paint, style);
+  scuzz_skia_canvas_draw_span(canvas, text, x, y, paint, style);
 }
 
 float sk_font_measure_string(const char *text, float font_px) {

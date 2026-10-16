@@ -62,7 +62,7 @@ GPU_LIBS := -lEGL -lGLESv2
 SKIA_LIBS := -lstdc++ -lm -lz -lbz2
 endif
 
-build/%.o: src/%.c include/sk_capi.h src/png_enc.h src/sk_gpu.h src/sk_utf8.h | build
+build/%.o: src/%.c include/sk_capi.h include/sk_text.h src/png_enc.h src/sk_gpu.h src/sk_utf8.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 build/image.o build/image_dec.o: src/image_dec.h
@@ -105,7 +105,7 @@ $(SB_DIR)/.stamp: $(PIN) | build
 build/sheenbidi.o: $(SB_DIR)/.stamp
 	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o $@
 
-build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
+build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h include/sk_text.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
 	$(CXX) -std=c++17 -O2 -fPIC -c src/sk_capi_skia.cpp -o $@ \
 	  -Ibuild/skia-src -I$(HB_DIR) -I$(SB_DIR)/Headers -DSK_RELEASE -DSCUZZ_SKIA_EMBEDDED_FONT \
 	  -DSCUZZ_SKIA_EMBEDDED_MONO_FONT
@@ -133,7 +133,7 @@ $(MONO_C): $(MONO_TTF)
 $(MONO_OBJ): $(MONO_C)
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
-build/sk_capi_skia_bridge.o: src/sk_capi_skia_bridge.c include/sk_capi.h src/sk_capi_skia.h | build
+build/sk_capi_skia_bridge.o: src/sk_capi_skia_bridge.c include/sk_capi.h include/sk_text.h src/sk_capi_skia.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 lib-sk-sw: $(OBJ) build/sk_gpu_none.o | build

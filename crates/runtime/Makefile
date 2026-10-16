@@ -47,7 +47,7 @@ ffi-skia:
 $(BUILDDIR)/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h src/image.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILDDIR)/text.o $(BUILDDIR)/text_layout.o $(BUILDDIR)/view.o $(BUILDDIR)/test_ui: src/text.h
+$(BUILDDIR)/text.o $(BUILDDIR)/text_layout.o $(BUILDDIR)/view.o $(BUILDDIR)/test_ui: src/text.h $(FFI_SKIA)/include/sk_text.h
 
 $(BUILDDIR)/image_dec.o: $(FFI_SKIA)/src/image_dec.c $(FFI_SKIA)/src/image_dec.h $(FFI_SKIA)/src/stb_image.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(FFI_SKIA)/src -c $< -o $@
