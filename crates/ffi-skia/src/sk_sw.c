@@ -612,11 +612,13 @@ static WebTextLayout web_text_layout(SkTextRange range, float size, int style) {
             SBUInteger at = part;
             SBCodepoint cp = SBCodepointSequenceGetCodepointAt(&sequence, &at);
             int arabic = script->script == SBScriptARAB && web_arabic_font(cp);
-            while (at < end) {
+            /* Keep isolate controls as shaping boundaries. */
+            int isolate = cp >= 0x2066 && cp <= 0x2069;
+            while (at < end && !isolate) {
               SBUInteger next = at;
               SBCodepoint cp = SBCodepointSequenceGetCodepointAt(&sequence, &next);
               int font = script->script == SBScriptARAB && web_arabic_font(cp);
-              if (font != arabic) break;
+              if (font != arabic || (cp >= 0x2066 && cp <= 0x2069)) break;
               at = next;
             }
             WebTextRun *grown = layout.count < SIZE_MAX / sizeof(WebTextRun) ?

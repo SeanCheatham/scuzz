@@ -1051,7 +1051,9 @@ async function checkShapingFontChanges(page, browserType, mobile, joining = fals
     ['\u202dمعم\u202c', [['\u202dﻢﻌ\u202c', 18, 1, false], ['ﻣ', 18, 0, false]]],
     ['\u202dfiمم\u202c', [['fiﻢ', 18, 1, false], ['ﻣ', 18, 0, false]]],
     ['م'.repeat(10) + 'ر', null, false, true],
-    ['م'.repeat(10) + 'د', null, false, true]
+    ['م'.repeat(10) + 'د', null, false, true],
+    ['م\u2067\u2069ر', [['ﺭ', 18, 0, true], ['ﻡ', 18, 0, true]], false, false, [18, 0]],
+    ['م\u2067\u2069ر', [['ﺭ', 18, 0, true], ['ﻡ', 18, 1, true]]]
   ] : [
     ['אבגדהו', [['דהו', 18, 0, true], ['אבג', 24, 0, true]]],
     ['זחטיכל', [['יכל', 18, 0, true], ['זחט', 18, 1, true]]],

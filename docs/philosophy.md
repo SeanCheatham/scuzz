@@ -583,6 +583,7 @@ Color, underline, and inline actions keep this shaping context.
 Proportional font and size changes keep the visual order of each line.
 Native and browser Arabic text keeps joining forms across font and size changes.
 Joining stays within one direction run of the visible line.
+Isolate controls block joining.
 Native font groups keep glyph context from the same direction run in the visible line.
 Each paint span uses its source range within the complete run.
 Field carets, pointer input, and selection use shaped source positions.

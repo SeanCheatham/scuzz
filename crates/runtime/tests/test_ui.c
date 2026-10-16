@@ -19950,15 +19950,15 @@ static void test_styled_text_values(void) {
 
 static void test_font_change_joining(void) {
   if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
-  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م", "\xe2\x80\xadمع", ("\xe2\x80\xad" "fiم"), "م", "م"};
-  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9", "م\xe2\x80\xac", "م\xe2\x80\xac", "مممممممممر", "مممممممممد"};
-  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ", "\xe2\x80\xadﻢﻌ\xe2\x80\xac", "fiﻢ", "ﻡ...", "ﻣ"};
-  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ", "ﻣ", "ﻣ", NULL, "ﻢ..."};
+  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م", "\xe2\x80\xadمع", ("\xe2\x80\xad" "fiم"), "م", "م", "م", "م"};
+  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9", "م\xe2\x80\xac", "م\xe2\x80\xac", "مممممممممر", "مممممممممد", "\xe2\x81\xa7\xe2\x81\xa9ر", "\xe2\x81\xa7\xe2\x81\xa9ر"};
+  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ", "\xe2\x80\xadﻢﻌ\xe2\x80\xac", "fiﻢ", "ﻡ...", "ﻣ", "ﻡ", "ﻡ"};
+  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ", "ﻣ", "ﻣ", NULL, "ﻢ...", "ﺭ", "ﺭ"};
   SzTheme theme = *sz_theme_default();
   theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
-  for (int i = 0; i < 22; i++) {
+  for (int i = 0; i < 24; i++) {
     SzText *a = test_text_span(first[i]), *b = test_text_span(last[i]);
-    int style = i == 1 ? SK_TEXT_ITALIC : i == 2 ? 0 : SK_TEXT_BOLD;
+    int style = i == 1 ? SK_TEXT_ITALIC : i == 2 || i == 22 ? 0 : SK_TEXT_BOLD;
     float size = i == 2 || i == 11 ? 32 : 24;
     SzText *styled = style == SK_TEXT_ITALIC ? sz_text_italic(a) : sz_text_bold(a);
     SzText *sized = sz_text_size((int)size, style ? styled : a);
@@ -19971,7 +19971,7 @@ static void test_font_change_joining(void) {
       sz_release(third); sz_release(small);
     }
     int width = i == 10 ? (int)ceilf(sk_font_measure_span(sk_text_range("ﻡ", strlen("ﻡ")), 24, style)) + 5 : 400;
-    int ellipsis = i >= 20;
+    int ellipsis = i == 20 || i == 21;
     if (ellipsis) {
       float reference = sk_font_measure_span(sk_text_range(first_form[i], strlen(first_form[i])), size, style);
       if (last_form[i]) reference += sk_font_measure_span(sk_text_range(last_form[i], strlen(last_form[i])), 24, 0);
