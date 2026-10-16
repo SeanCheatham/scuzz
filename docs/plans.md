@@ -38,4 +38,6 @@ Its campaign reaches all 29 triggers. It rejects four mutants and reports two in
 Browser scale checks pass in Chromium, Firefox, and WebKit, including phone emulation.
 Browser source limits, popup anchors, and ancestor input clips pass in the same configurations.
 Fresh native sanitizer checks include fractional control records.
-Exact replay and full integration checks remain open.
+All 44 native and evaluator replay cases have equal timelines and claims.
+Their checks include displayed scale bounds, source values, retained fields, and cancellation.
+The rebuilt CLI manual includes both scale APIs. Full integration checks remain open.
