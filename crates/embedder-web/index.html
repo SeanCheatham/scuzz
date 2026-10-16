@@ -9,14 +9,14 @@
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #f5efdf; }
 canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: pinch-zoom; }
 #text-layer { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
-#text-layer .text { position: absolute; white-space: pre; text-align: left; pointer-events: auto; }
+#text-layer .text { position: absolute; white-space: pre; text-align: left; pointer-events: none; }
 #text-layer .text span { position: relative; display: inline-block; transform-origin: left top; white-space: pre; color: transparent;
   pointer-events: auto; user-select: text; -webkit-user-select: text; cursor: text; }
 #text-layer .text span::selection { background: var(--selection, #f4d35e); color: var(--ink, #24211c); }
 #app { position: relative; width: 100%; height: 100%; }
 .control { position: absolute; display: block; box-sizing: border-box; margin: 0; padding: 0;
   border: 0; background: transparent; color: transparent; cursor: pointer; pointer-events: auto; }
-#text-layer .text .inline-action { position: absolute; display: inline-block; pointer-events: auto; user-select: text; }
+#text-layer .text .inline-action { position: absolute; display: inline-block; pointer-events: none; user-select: text; }
 #text-layer .text .inline-action, #text-layer .text .inline-action span { cursor: pointer; }
 .inline-action:focus-visible { outline: none !important; }
 .control:focus-visible { outline: 2px solid var(--ink, #24211c); outline-offset: -4px; }
@@ -119,11 +119,18 @@ var Module = {
       });
       node.addEventListener('pointerdown', event => {
         node.dragOrigin = [event.clientX, event.clientY]; node.inlineDrag = false;
+        const contains = point => {
+          const scale = Module.webFrame.scale;
+          const x = point.clientX * scale, y = point.clientY * scale;
+          return node.item.boxes.some(([left, top, width, height]) =>
+            x >= left && x < left + width && y >= top && y < top + height);
+        };
+        node.inlinePress = contains(event);
         // Keep the first caret inside the action during source selection.
         node.removeAttribute('tabindex');
         const finish = end => {
           if (end.pointerId !== event.pointerId) return;
-          node.inlineDrag = end.type === 'pointercancel' ||
+          node.inlineDrag = end.type === 'pointercancel' || !contains(end) ||
             (end.clientX - event.clientX) ** 2 + (end.clientY - event.clientY) ** 2 > 36;
           node.dragOrigin = null;
           node.tabIndex = node.item.tabStop ? 0 : -1;
@@ -223,7 +230,7 @@ var Module = {
     } else {
       node.addEventListener('click', event => {
         if ((node.item.role === 55 || node.item.role === 57) && event.detail) { event.preventDefault(); return; }
-        if (node.item.inline && event.detail && node.inlineDrag) { event.preventDefault(); return; }
+        if (node.item.inline && event.detail && (node.inlineDrag || node.inlinePress === false)) { event.preventDefault(); return; }
         if (node.item.inline) node.focus({preventScroll: true});
         if (node.tagName === 'A' && (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)) return;
         const route = node.item?.route || '';

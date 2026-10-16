@@ -1012,6 +1012,16 @@ async function checkSelect(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function activateInline(page, node, mobile) {
+  const point = await node.evaluate(node => {
+    const box = node.item.boxes[0], scale = Module.webFrame.scale;
+    const x = (box[0] + box[2] / 2) / scale, y = (box[1] + box[3] / 2) / scale;
+    return {x, y, hit: node.contains(document.elementFromPoint(x, y))};
+  });
+  assert(point.hit, 'The action fragment receives pointer input');
+  if (mobile) await page.touchscreen.tap(point.x, point.y); else await page.mouse.click(point.x, point.y);
+}
+
 async function checkShapingFontChanges(page, browserType, mobile, joining = false) {
   await page.setViewportSize({width: mobile ? 390 : 640, height: 1600});
   await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
@@ -1104,7 +1114,9 @@ async function checkShapingFontChanges(page, browserType, mobile, joining = fals
     assert(result.dotsLeft && Math.abs(result.advance - result.expectedAdvance) < .1, source + ': ' + JSON.stringify(result));
     assert.equal(result.copied, ellipsis ? source.slice(0, result.end) : source);
   }
-  await page.getByRole('button', {name: joining ? 'محمد' : 'קר AB CD', exact: true}).click();
+  const action = page.getByRole('button', {name: joining ? 'محمد' : 'קר AB CD', exact: true});
+  await action.evaluate(node => node.focus({preventScroll: true}));
+  await activateInline(page, action, mobile);
   await page.waitForFunction(value => Module.textBlocks.some(block => block.text === value), joining ? 'Count: 83' : 'Count: 52');
   await panel.click();
   assert.equal(await page.getByRole('textbox', {name: 'Name', exact: true}).inputValue(), 'café');
@@ -1222,7 +1234,7 @@ async function checkShapingParagraphs(page, browserType, mobile) {
     await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Count: 12'));
     await page.evaluate(() => getSelection().removeAllRanges());
   }
-  await action.click();
+  await activateInline(page, action, mobile);
   await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Count: 29'));
   await panel.click();
   await page.waitForFunction(() => !Module.textBlocks.some(block => block.text === 'WWWWWW אבגד AB'));
@@ -1589,13 +1601,7 @@ async function checkInline(browserType, url, mobile) {
     const name = page.getByRole('textbox', {name: 'Name', exact: true});
     const expectText = async text => page.waitForFunction(text => Module.textBlocks.some(block => block.text === text), text);
     const focus = async node => assert.equal(await node.evaluate(node => document.activeElement === node), true);
-    const activate = async node => {
-      const point = await node.evaluate(node => {
-        const box = node.item.boxes[0], scale = Module.webFrame.scale;
-        return {x: (box[0] + box[2] / 2) / scale, y: (box[1] + box[3] / 2) / scale};
-      });
-      if (mobile) await page.touchscreen.tap(point.x, point.y); else await page.mouse.click(point.x, point.y);
-    };
+    const activate = node => activateInline(page, node, mobile);
     assert.equal(await add.count(), 2);
     assert.equal(await page.getByRole('button', {name: 'Hidden action', exact: true}).count(), 0);
     assert.equal(await page.getByRole('button').count(), 9);
@@ -1613,6 +1619,17 @@ async function checkInline(browserType, url, mobile) {
     });
     if (mobile) await page.touchscreen.tap(prefixPoint.x, prefixPoint.y); else await page.mouse.click(prefixPoint.x, prefixPoint.y);
     await expectText('Last action: 0');
+    if (!mobile) {
+      const edge = await add.nth(0).evaluate(node => {
+        const [x, y, width, height] = node.item.boxes[0], scale = Module.webFrame.scale;
+        return {x: (x + width / 2) / scale, y: (y + height) / scale};
+      });
+      await page.mouse.move(edge.x, edge.y - 1); await page.mouse.down();
+      await page.mouse.move(edge.x, edge.y + 2); await page.mouse.up();
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await expectText('Last action: 0');
+      await page.evaluate(() => getSelection().removeAllRanges());
+    }
     if (!mobile) {
       const endpoints = await details.evaluate(node => {
         const first = node.firstChild.getBoundingClientRect();
