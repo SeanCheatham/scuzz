@@ -4117,6 +4117,51 @@ PY_POSITION_LIMIT
   "$SCUZZ" fmt "$web_tmp/position limit"
   "$SCUZZ" package --target web --out-dir "$web_tmp/position limit output" "$web_tmp/position limit"
   node crates/embedder-web/test.cjs "$web_tmp/position limit output/package/web" '' position-limit
+  python3 - "$web_tmp/scale limit" "$web_tmp/scale input" <<'PY_SCALE_FIXTURES'
+import pathlib, sys
+fixtures = [
+    (sys.argv[1], 'scale-limit', '''def scene(label: String, child: View): View =
+  View.semantics(label, View.sized(64, 32, View.clip(View.stack([View.sized(64, 32, View.background(Color.rgb(255, 255, 255), View.text(""))), child]))))
+
+def red(): View =
+  View.sized(40, 30, View.background(Color.rgb(255, 0, 0), View.text("")))
+
+@main def main: IO[Unit] =
+  for {
+    value = Signal.make(9223372036854775807)
+    raw = Signal.map(value, n => s"Raw scale: $n")
+    _ <- Ui.run(_ => View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.button("Minimum scale", _ => Signal.set(value, -9223372036854775808)), View.button("Normal scale", _ => Signal.set(value, 100)), View.button("Maximum scale", _ => Signal.set(value, 9223372036854775807)), View.bindText(raw), scene("Animated scale scene", View.animatedScale(value, 8, red())), scene("Static scale scene", View.scale(9223372036854775807, red())), scene("Zero scale scene", View.scale(-9223372036854775808, red()))])))
+  } yield ()
+'''),
+    (sys.argv[2], 'scale-input', '''def panel(name: Signal[String], selected: Signal[Int], options: Signal[List[String]], count: Signal[Int]): View =
+  View.column([View.textField(name, "Scaled field"), View.select(selected, "Scaled choices", options), View.tooltip("Scaled action help", View.sized(120, 40, View.button("Scaled action", _ => Signal.set(count, Signal.get(count) + 1))))])
+
+def scene(value: Signal[Int], child: View): View =
+  View.semantics("Scale input scene", View.sized(320, 240, View.clip(View.stack([View.sized(320, 240, View.background(Color.rgb(255, 255, 255), View.text(""))), View.positioned(100, 60, View.animatedScale(value, 8, View.semantics("Scale input bounds", View.sized(120, 120, child))))]))))
+
+@main def main: IO[Unit] =
+  for {
+    value = Signal.make(200)
+    name = Signal.make("Scaled input")
+    selected = Signal.make(0)
+    options = Signal.make(["First", "Second", "Third"])
+    count = Signal.make(0)
+    countText = Signal.map(count, n => s"Action count: $n")
+    _ <- Ui.run(_ => View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.button("Large scale", _ => Signal.set(value, 400)), View.button("Double scale", _ => Signal.set(value, 200)), View.bindText(countText), View.padding(20, scene(value, panel(name, selected, options, count)))])))
+  } yield ()
+'''),
+ ]
+for destination, name, source in fixtures:
+    root = pathlib.Path(destination)
+    (root / 'src').mkdir(parents=True)
+    (root / 'scuzz.toml').write_text(f'[package]\nname="{name}"\n[ui]\ndefault_runtime="headless"\n')
+    (root / 'src/Main.scuzz').write_text(source)
+PY_SCALE_FIXTURES
+  for mode in limit input; do
+    "$SCUZZ" fmt "$web_tmp/scale $mode"
+    "$SCUZZ" package --target web --out-dir "$web_tmp/scale $mode output" "$web_tmp/scale $mode"
+    node crates/embedder-web/test.cjs "$web_tmp/scale $mode output/package/web" '' "scale-$mode"
+  done
   python3 - "$web_tmp/motion Unicode" <<'PY_MOTION_UTF8'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])

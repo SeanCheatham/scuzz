@@ -1128,6 +1128,108 @@ async function checkContentMotion(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkScaleLimit(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 720},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await page.goto(url);
+    await page.waitForFunction(() => Module.ready && Module.webFrame?.transitions.some(item => item.kind === 'scale'));
+    const state = () => page.evaluate(() => {
+      const frame = Module.webFrame.transitions.find(item => item.kind === 'scale');
+      return [frame.value, frame.target, frame.remaining];
+    });
+    const pixel = async (label, x, y) => {
+      const box = await page.getByRole('group', {name: label, exact: true}).boundingBox();
+      return page.evaluate(({box, x, y}) => {
+        const scale = Module.webFrame.scale;
+        return Array.from(Module.canvas.getContext('2d').getImageData(Math.floor((box.x + x) * scale), Math.floor((box.y + y) * scale), 1, 1).data);
+      }, {box, x, y});
+    };
+    const raw = () => page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []));
+    assert.deepEqual(await state(), [2147483647, 2147483647, 0]);
+    assert((await raw()).includes('text:Raw scale: 9223372036854775807'));
+    for (const label of ['Animated scale scene', 'Static scale scene']) {
+      assert.deepEqual(await pixel(label, 1, 1), [255, 0, 0, 255]);
+      assert.deepEqual(await pixel(label, 63, 31), [255, 0, 0, 255]);
+    }
+    assert.deepEqual(await pixel('Zero scale scene', 20, 15), [255, 255, 255, 255]);
+    await page.getByRole('button', {name: 'Minimum scale', exact: true}).click();
+    await page.waitForFunction(() => Module.webFrame.transitions.some(item => item.kind === 'scale' && item.value === 0 && item.remaining === 0));
+    assert.deepEqual(await state(), [0, 0, 0]);
+    assert((await raw()).includes('text:Raw scale: -9223372036854775808'));
+    assert.deepEqual(await pixel('Animated scale scene', 20, 15), [255, 255, 255, 255]);
+    await page.getByRole('button', {name: 'Normal scale', exact: true}).click();
+    await page.waitForFunction(() => Module.webFrame.transitions.some(item => item.kind === 'scale' && item.value === 100 && item.remaining === 0));
+    assert.deepEqual(await pixel('Animated scale scene', 39, 29), [255, 0, 0, 255]);
+    assert.deepEqual(await pixel('Animated scale scene', 40, 30), [255, 255, 255, 255]);
+    assert.deepEqual(errors, []);
+    console.log(`web scale limits: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
+async function checkScaleInput(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 720},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await openMotionPage(page, url);
+    const advance = async count => {
+      for (let i = 0; i < count; i++) {
+        const deadline = Date.now() + 30000;
+        while (!await page.evaluate(() => { const before = Module.webFrame; window.motionStep(); return before !== Module.webFrame; })) {
+          assert(Date.now() < deadline, 'scale input paints a frame');
+          await page.waitForTimeout(10);
+        }
+      }
+    };
+    const pointer = async (x, y) => {
+      if (mobile) await page.touchscreen.tap(x, y); else await page.mouse.click(x, y);
+    };
+    const scene = await page.getByRole('group', {name: 'Scale input scene', exact: true}).boundingBox();
+    const field = page.getByRole('textbox', {name: 'Scaled field', exact: true});
+    const choices = page.getByRole('combobox', {name: 'Scaled choices', exact: true});
+    const action = page.getByRole('button', {name: 'Scaled action', exact: true});
+    let box = await action.boundingBox();
+    assert(Math.abs(box.x - scene.x - 40) < .01 && Math.abs(box.y - scene.y - 160) < .01);
+    assert(Math.abs(box.width - 240) < .01 && Math.abs(box.height - 80) < .01);
+    await action.focus(); await advance(1);
+    const tooltip = page.getByRole('tooltip').filter({hasText: 'Scaled action help'});
+    const help = await tooltip.boundingBox();
+    assert(help && Math.abs(help.x - box.x) < .01 && Math.abs(help.y - box.y - box.height) < .01, JSON.stringify({help, box}));
+    const trigger = await choices.boundingBox();
+    await pointer(trigger.x + trigger.width / 2, trigger.y + trigger.height / 2); await advance(1);
+    const list = page.getByRole('listbox', {name: 'Scaled choices', exact: true});
+    const popup = await list.boundingBox();
+    assert(popup && Math.abs(popup.x - trigger.x) < .01 && Math.abs(popup.y - trigger.y - trigger.height) < .01);
+    assert(Math.abs(popup.width - 240) < .01 && Math.abs(popup.height - 120) < .01, JSON.stringify(popup));
+    const option = page.getByRole('option', {name: 'Third', exact: true});
+    box = await option.boundingBox();
+    assert(Math.abs(box.y - popup.y - 80) < .01 && Math.abs(box.height - 40) < .01);
+    assert(box.y >= scene.y + scene.height, 'the popup extends past the clipped scene');
+    await pointer(box.x + box.width / 2, box.y + box.height / 2); await advance(1);
+    assert.equal(await choices.getAttribute('aria-expanded'), 'false');
+    assert.equal(await choices.textContent(), 'Third');
+    box = await action.boundingBox();
+    await pointer(box.x + box.width / 2, box.y + box.height / 2); await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(item => item.text === 'Action count: 1')));
+    await page.getByRole('button', {name: 'Large scale', exact: true}).evaluate(node => node.click()); await advance(8);
+    box = await field.boundingBox();
+    assert(Math.abs(box.x - scene.x + 80) < .01 && Math.abs(box.y - scene.y + 120) < .01);
+    assert(Math.abs(box.width - 480) < .01 && Math.abs(box.height - 160) < .01);
+    assert(await field.evaluate((node, point) => document.elementFromPoint(point.x, point.y) !== node,
+      {x: scene.x - 4, y: scene.y + 12}), 'the ancestor clip excludes the displayed field outside the scene');
+    await pointer(scene.x + 8, scene.y + 12); await advance(1);
+    assert(await field.evaluate(node => document.activeElement === node));
+    assert.deepEqual(errors, []);
+    console.log(`web scale input: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkScaleMotion(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2833,7 +2935,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

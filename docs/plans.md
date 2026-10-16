@@ -36,4 +36,6 @@ Recorded control bounds preserve fractional coordinates. A focused native check 
 The motion sample uses nested static scales and one animated scale.
 Its campaign reaches all 29 triggers. It rejects four mutants and reports two inert mutations.
 Browser scale checks pass in Chromium, Firefox, and WebKit, including phone emulation.
-Exact replay, browser source limits and popup checks, and full integration checks remain open.
+Browser source limits, popup anchors, and ancestor input clips pass in the same configurations.
+Fresh native sanitizer checks include fractional control records.
+Exact replay and full integration checks remain open.
