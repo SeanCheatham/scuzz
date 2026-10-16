@@ -390,7 +390,9 @@ It sends live changes through the shared input path.
 An absent portal does not prevent application use.
 Android reads the system animation setting before the application worker starts.
 It sends live changes through the shared input path. Resume reads the setting again.
-Apple operating-system preference detection remains open.
+macOS reads the workspace motion preference and observes display-option changes.
+iOS reads the accessibility motion preference and observes status changes.
+Release preference observers when the native session ends.
 The shared `reduceMotion` input records preference changes.
 Record the initial session preference before live input.
 Apply a preference change to the View tree before later input.

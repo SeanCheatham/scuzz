@@ -19,8 +19,7 @@ Use the iOS accessibility preference and its motion-status notification.
 Use the Android animator setting with change and resume handling.
 Release observers when the native session ends.
 Keep Android system controls outside the Scuzz viewport.
-The emulator shows that the native action bar covers the first application controls.
-Remove this bar. Apply system, display cutout, and keyboard insets to the host container.
+Apply system, display cutout, and keyboard insets to the host container.
 Check input against the visible controls.
 Keep unavailable platform execution checks explicit.
 
@@ -45,9 +44,11 @@ Status: Native sessions support an explicit reduction setting and recorded prefe
 Linux has initial detection and live Settings portal input.
 A private bus check covers repeated changes, invalid signals, foreign senders, stale replies, service restart, and shutdown.
 It rejects a deliberate inversion of the preference.
-Rebuild the product CLI after the shared runtime checks.
+The rebuilt product CLI includes the current runtime and GUI manual.
+The motion campaign reaches all 29 triggers. It rejects four mutants and reports no survivors.
+All 44 selected motion replays have equal native and evaluator timelines and claims.
 Desktop input and resize checks pass.
-Full native and evaluator replay, browser, and package checks remain open.
+Full UI, browser, and package integration checks remain open.
 Recordings include the initial preference before live input.
 A shared runtime check replays 20 cases with the opposite initial preference.
 A native event fixture compares 400 Desktop and Mobile recordings across all five transition types.
@@ -65,6 +66,10 @@ The finite Android emulator check passes with a temporary app and restored setti
 It checks initial reduction, live changes, visible input, resume, and a new process.
 The host container excludes the system bars and display cutout.
 Keyboard-inset execution checks remain open.
-Apple native preference sources remain open.
+macOS reads the workspace preference and observes its notification center.
+iOS reads the accessibility preference and observes its status notification.
+Both sources release their observers at shutdown. iOS also reads the setting on resume.
+The existing Apple test programs include notification and session cleanup checks.
+Apple SDK compilation and execution remain unverified.
 The Linux host has D-Bus development files and tools for a finite private session bus.
 Apple SDK tools are unavailable on this host. Apple execution checks remain open.

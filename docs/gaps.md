@@ -163,7 +163,9 @@ Android reads the animation setting before application startup and observes live
 Android emulator checks cover initial preferences, live changes, visible input, resume, and restart.
 The Android viewport excludes the system bars and display cutout.
 Android keyboard-inset execution checks remain open.
-Apple preference detection and real-device motion checks remain open.
+Apple preference sources read the initial setting and observe native notifications.
+Their SDK compilation and execution remain unverified.
+Real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 
 Use the UI work order in `vision.md`.

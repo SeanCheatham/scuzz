@@ -21,6 +21,8 @@ static int g_q_head;
 static int g_q_tail;
 static os_unfair_lock g_q_lock = OS_UNFAIR_LOCK_INIT;
 static _Atomic int g_alive;
+static id g_motion_observer;
+static _Atomic int g_motion_active, g_motion_current, g_motion_reported;
 static char *g_text_bufs[TEXT_RING];
 static int g_text_i;
 static char *g_poll_text;
@@ -93,6 +95,34 @@ int sz_mobile_available(void) { return 1; }
 
 int sz_mobile_alive(void) { return atomic_load(&g_alive); }
 
+static void motion_on_main(void (^action)(void)) {
+  if (NSThread.isMainThread) action();
+  else dispatch_sync(dispatch_get_main_queue(), action);
+}
+
+int sz_mobile_reduced_motion(void) {
+  __block int reduced = 0;
+  motion_on_main(^{
+    if (!g_motion_observer) {
+      g_motion_observer = [NSNotificationCenter.defaultCenter
+          addObserverForName:UIAccessibilityReduceMotionStatusDidChangeNotification
+          object:nil queue:NSOperationQueue.mainQueue
+          usingBlock:^(NSNotification *notification) {
+            (void)notification;
+            if (atomic_load(&g_motion_active))
+              atomic_store(&g_motion_current, UIAccessibilityIsReduceMotionEnabled() != NO);
+          }];
+      reduced = UIAccessibilityIsReduceMotionEnabled() != NO;
+      atomic_store(&g_motion_current, reduced);
+      atomic_store(&g_motion_reported, reduced);
+      atomic_store(&g_motion_active, 1);
+    } else {
+      reduced = atomic_load(&g_motion_current);
+    }
+  });
+  return reduced;
+}
+
 void scuzz_ios_set_alive(int alive) { atomic_store(&g_alive, alive ? 1 : 0); }
 
 void scuzz_ios_push_lifecycle(int phase) {
@@ -100,6 +130,12 @@ void scuzz_ios_push_lifecycle(int phase) {
   if (phase != SZ_LIFECYCLE_RESUME && phase != SZ_LIFECYCLE_PAUSE &&
       phase != SZ_LIFECYCLE_STOP)
     return;
+  if (phase == SZ_LIFECYCLE_RESUME) {
+    motion_on_main(^{
+      if (atomic_load(&g_motion_active))
+        atomic_store(&g_motion_current, UIAccessibilityIsReduceMotionEnabled() != NO);
+    });
+  }
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_LIFECYCLE;
   ev.lifecycle = (SzLifecyclePhase)phase;
@@ -109,6 +145,15 @@ void scuzz_ios_push_lifecycle(int phase) {
 void sz_mobile_shutdown(void) {
   int i;
   scuzz_ios_set_alive(0);
+  atomic_store(&g_motion_active, 0);
+  motion_on_main(^{
+    if (g_motion_observer) {
+      [NSNotificationCenter.defaultCenter removeObserver:g_motion_observer];
+      g_motion_observer = nil;
+    }
+    atomic_store(&g_motion_current, 0);
+    atomic_store(&g_motion_reported, 0);
+  });
   os_unfair_lock_lock(&g_q_lock);
   for (i = 0; i < TEXT_RING; i++) {
     free(g_text_bufs[i]);
@@ -154,6 +199,12 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   char *p;
   if (!out)
     return 0;
+  int reduced = atomic_load(&g_motion_current);
+  if (atomic_load(&g_motion_active) && reduced != atomic_load(&g_motion_reported)) {
+    atomic_store(&g_motion_reported, reduced);
+    *out = (SzInputEvent){.kind = SZ_INPUT_REDUCED_MOTION, .reduced_motion = reduced};
+    return 1;
+  }
   os_unfair_lock_lock(&g_q_lock);
   if (g_q_head == g_q_tail) {
     os_unfair_lock_unlock(&g_q_lock);
