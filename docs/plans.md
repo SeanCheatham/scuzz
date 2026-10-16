@@ -14,4 +14,4 @@ Run sanitizer, renderer, and integration checks.
 
 Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
 
-Status: Eighteen native Arabic cases pass with exact pixels. Direction controls and isolates limit joining context. They cover bold, italic, size changes, joining controls, transparent marks, medial forms, source preservation, and hard and soft line breaks. The native FFI and full UI suites pass. Add browser joining context, application replay, sanitizer checks, and full integration.
+Status: Twenty native Arabic cases pass with exact pixels. Direction controls and isolates limit joining context. They cover bold, italic, size changes, joining controls, transparent marks, medial forms, source preservation, and hard and soft line breaks. The native FFI and full UI suites pass. Normal, ASan, and UBSan runtime suites pass. The two additional override cases pass targeted normal and sanitizer checks. Chromium desktop and mobile checks pass twenty browser cases. Firefox medial joining remains open. Complete browser checks, application replay, renderer checks, and full integration.

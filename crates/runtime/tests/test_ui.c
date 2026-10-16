@@ -19950,13 +19950,13 @@ static void test_styled_text_values(void) {
 
 static void test_font_change_joining(void) {
   if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
-  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م"};
-  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9"};
-  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ"};
-  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ"};
+  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م", "\xe2\x80\xadمع", ("\xe2\x80\xad" "fiم")};
+  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9", "م\xe2\x80\xac", "م\xe2\x80\xac"};
+  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ", "\xe2\x80\xadﻢﻌ\xe2\x80\xac", "fiﻢ"};
+  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ", "ﻣ", "ﻣ"};
   SzTheme theme = *sz_theme_default();
   theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
-  for (int i = 0; i < 18; i++) {
+  for (int i = 0; i < 20; i++) {
     SzText *a = test_text_span(first[i]), *b = test_text_span(last[i]);
     int style = i == 1 ? SK_TEXT_ITALIC : i == 2 ? 0 : SK_TEXT_BOLD;
     float size = i == 2 || i == 11 ? 32 : 24;
@@ -20001,7 +20001,7 @@ static void test_font_change_joining(void) {
     int parts = i == 11 ? 3 : 2;
     for (int j = parts - 1; j >= 0; j--) {
       if (!pieces[j]) continue;
-      int part = i == 13 || i == 14 ? parts - 1 - j : j;
+      int part = i == 13 || i == 14 || i >= 18 ? parts - 1 - j : j;
       positions[part] = x;
       x += sk_font_measure_span(sk_text_range(pieces[part], strlen(pieces[part])), sizes[part], flags[part]);
     }
