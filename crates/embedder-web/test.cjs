@@ -1091,6 +1091,123 @@ async function checkContentMotion(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkPositionMotion(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 2000},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile, reducedMotion: 'no-preference'});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await openMotionPage(page, url);
+    const state = () => page.evaluate(() => Module.webFrame.transitions.find(item => item.kind === 'position'));
+    const advance = async count => {
+      const frames = [];
+      for (let i = 0; i < count; i++) {
+        const deadline = Date.now() + 30000;
+        while (!await page.evaluate(() => {
+          const before = Module.webFrame; window.motionStep(); return before !== Module.webFrame;
+        })) {
+          assert(Date.now() < deadline, 'position transition paints a frame');
+          await page.waitForTimeout(10);
+        }
+        frames.push(await state());
+      }
+      return frames;
+    };
+    const click = name => page.getByRole('button', {name, exact: true}).evaluate(node => node.click());
+    const pointer = async (x, y) => {
+      if (mobile) await page.touchscreen.tap(x, y); else await page.mouse.click(x, y);
+    };
+    const name = page.getByRole('textbox', {name: 'Position name', exact: true});
+    const group = page.getByRole('group', {name: 'Position bounds', exact: true});
+    const scene = page.getByRole('group', {name: 'Position scene', exact: true});
+    const add = page.getByRole('button', {name: 'Position add', exact: true});
+    const after = page.getByRole('main', {name: 'Application', exact: true}).getByText('After position sample', {exact: true});
+    const show = page.getByRole('checkbox', {name: 'Show position content', exact: true});
+    await page.getByRole('checkbox', {name: 'Show position sample', exact: true}).evaluate(node => node.click());
+    await advance(1);
+    assert.deepEqual([(await state()).x, (await state()).y, (await state()).remaining], [16, 16, 0]);
+    const origin = await scene.boundingBox(), below = await after.boundingBox();
+    const firstButton = await add.boundingBox();
+    const geometry = async (x, y, oldIsEmpty = false) => {
+      const box = await group.boundingBox(), field = await name.boundingBox(), next = await after.boundingBox();
+      assert(Math.abs(box.x - origin.x - x) < .01 && Math.abs(box.y - origin.y - y) < .01, JSON.stringify({box, origin, x, y}));
+      assert(Math.abs(box.width - 120) < .01 && Math.abs(box.height - 80) < .01);
+      assert(Math.abs(field.x - box.x) < .01 && Math.abs(field.y - box.y) < .01 && Math.abs(field.width - 120) < .01 && Math.abs(field.height - 40) < .01);
+      assert(Math.abs(next.y - below.y) < .01, 'the bounded scene keeps following content in place');
+      const pixels = await page.evaluate(({box, origin}) => {
+        const scale = Module.webFrame.scale, ctx = Module.canvas.getContext('2d');
+        const pixel = (x, y) => Array.from(ctx.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data);
+        return {inside: pixel(box.x + 118, box.y + 78), old: pixel(origin.x + 18, origin.y + 94)};
+      }, {box, origin});
+      assert.deepEqual(pixels.inside, [225, 235, 245, 255]);
+      if (oldIsEmpty) assert.deepEqual(pixels.old, [255, 255, 255, 255]);
+    };
+    await geometry(16, 16);
+    await name.fill('Kept position input');
+    await name.evaluate(node => { node.setSelectionRange(2, 5); node.dispatchEvent(new Event('select')); });
+    const original = await name.elementHandle();
+    await click('Far position');
+    const moved = [];
+    for (let i = 0; i < 3; i++) {
+      const frame = (await advance(1))[0]; moved.push([frame.x, frame.y, frame.remaining]);
+      await geometry(frame.x, frame.y, true);
+    }
+    assert.deepEqual(moved, [[36, 31, 7], [56, 46, 6], [76, 61, 5]]);
+    assert(await name.evaluate(node => document.activeElement === node));
+    assert.deepEqual(await name.evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ['Kept position input', 2, 5]);
+    await pointer(firstButton.x + firstButton.width / 2, firstButton.y + firstButton.height / 2);
+    await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Position count: 0')));
+    await click('Near position');
+    const retarget = await advance(8);
+    assert.deepEqual(retarget.map(frame => [frame.x, frame.y]),
+      [[91, 70], [86, 64], [81, 57], [76, 51], [71, 45], [66, 39], [61, 32], [56, 26]]);
+    await geometry(56, 26);
+    assert(await original.evaluate(node => node === document.querySelector('input[aria-label="Position name"]')));
+    assert.equal(await name.inputValue(), 'Kept position input');
+    const current = await add.boundingBox();
+    await pointer(current.x + current.width / 2, current.y + current.height / 2); await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Position count: 1')));
+    await click('Home position'); await advance(8); await geometry(0, 0);
+    assert.equal(await name.count(), 1);
+    await click('Right position');
+    const right = await advance(8); assert(right.every(frame => frame.y === 0));
+    assert.equal(right.at(-1).x, 176);
+    await click('Down position');
+    const down = await advance(8); assert(down.every(frame => frame.x === 176));
+    assert.equal(down.at(-1).y, 136); await geometry(176, 136);
+    await click('Near position'); await advance(2);
+    const frozen = await state(); await page.waitForTimeout(100);
+    assert.deepEqual(await state(), frozen, 'elapsed time does not advance a position transition');
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.equal(await state(), undefined); assert.equal(await name.count(), 0);
+    await click('Far position'); await advance(1);
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.deepEqual([(await state()).x, (await state()).y, (await state()).remaining], [176, 136, 0]);
+    assert.equal(await name.inputValue(), 'Kept position input');
+    await click('Near position'); await advance(2);
+    await page.evaluate(() => {
+      window.motionPreferenceChange = undefined;
+      Module.motionPreference.addEventListener('change', () => window.motionPreferenceChange = Module.motionPreference.matches, {once: true});
+    });
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.evaluate(() => window.motionBrowserFrame());
+    await page.waitForFunction(() => window.motionPreferenceChange === true);
+    await advance(1);
+    assert.deepEqual([(await state()).x, (await state()).y, (await state()).remaining], [56, 26, 0]);
+    assert((await state()).suppressed); await geometry(56, 26);
+    await click('Outside position'); await advance(1);
+    assert.deepEqual([(await state()).x, (await state()).y, (await state()).remaining], [330, 250, 0]);
+    await pointer(origin.x + 331, origin.y + 251); await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Position count: 1')));
+    await click('Home position'); await advance(1); await geometry(0, 0);
+    assert.equal(await name.inputValue(), 'Kept position input');
+    assert.deepEqual(errors, []);
+    console.log(`web position motion: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkSelect(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2574,7 +2691,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

@@ -141,7 +141,11 @@ Content-size transitions measure the child with incoming constraints and keep fr
 Native checks cover wrapped text, constraints, exact steps, clipping, and retained input.
 Browser checks cover pixels, following content, retargeting, hidden cancellation, reduction, and input state.
 Native and evaluator replays compare exact content-size timelines and claims.
-Position and transform transitions remain open.
+Position transitions use the shared pump clock and current child layout.
+Native checks cover exact steps, both axes, clipped parents, source limits, and retained selection.
+Browser checks cover moving control bounds, old and current pointer locations, hidden cancellation, and reduction.
+Native and evaluator replays compare exact position timelines, claims, and control bounds.
+Transform transitions remain open.
 Native operating-system motion preference detection and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 

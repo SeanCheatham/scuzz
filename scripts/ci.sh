@@ -2457,7 +2457,69 @@ build = package / 'build'
 source = build / 'fuzz/ev'
 ui = name in ('editor', 'layout', 'list', 'controls', 'split', 'choices', 'disclosure', 'inline', 'tooltips', 'shaping', 'themes', 'text', 'measured', 'select', 'motion')
 cases = {
-    'motion': [('content-pending', [
+    'motion': [('position-pending', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-retarget', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 3},
+        {'op': 'tap', 'id': 'button:Near position'}, {'op': 'pump', 'k': 1},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-axes', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Right position'}, {'op': 'pump', 'k': 8},
+        {'op': 'tap', 'id': 'button:Down position'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-origin', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept position input'},
+        {'op': 'tap', 'id': 'button:Position add'},
+        {'op': 'tap', 'id': 'button:Home position'}, {'op': 'pump', 'k': 8},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-hidden', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 2},
+        {'op': 'tap', 'id': 'checkbox:Show position content'},
+        {'op': 'tap', 'id': 'button:Near position'}, {'op': 'pump', 'k': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position content'},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-reduced', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 2},
+        {'op': 'reduceMotion', 'value': True}, {'op': 'pump', 'k': 1}]),
+        ('position-retained', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept position input'},
+        {'op': 'tap', 'id': 'button:Position add'},
+        {'op': 'tap', 'id': 'button:Near position'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-scale', [
+        {'op': 'resize', 'width': 360, 'height': 2000, 'scale': 2},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-paused-target', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'},
+        {'op': 'tap', 'id': 'button:Near position'}, {'op': 'pump', 'k': 3}]),
+        ('position-clipped', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'button:Outside position'}, {'op': 'pump', 'k': 8},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('content-pending', [
         {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
         {'op': 'tap', 'id': 'checkbox:Show content sample'},
         {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 2},
@@ -2999,6 +3061,30 @@ for label, events in cases:
         evaluated = json.loads((output / 'eval.json').read_text())
         for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y'):
             assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
+        if label.startswith('position-'):
+            transition = next(item for item in native['transitions'] if item['kind'] == 'position')
+            expected = {'position-pending': (56, 46, 176, 136, 6),
+                'position-retarget': (74, 57, 56, 26, 7), 'position-axes': (176, 46, 176, 136, 6),
+                'position-origin': (0, 0, 0, 0, 0), 'position-hidden': (56, 26, 56, 26, 0),
+                'position-reduced': (176, 136, 176, 136, 0), 'position-retained': (146, 109, 56, 26, 6),
+                'position-scale': (56, 46, 176, 136, 6), 'position-paused-target': (56, 46, 56, 26, 8),
+                'position-clipped': (330, 250, 330, 250, 0)}[label]
+            assert tuple(transition[key] for key in ('x', 'y', 'targetX', 'targetY', 'remaining')) == expected, transition
+            values = {item.get('name'): item.get('value') for item in native['signals']}
+            assert (values['positionX'], values['positionY']) == expected[2:4], values
+            retained = label in ('position-origin', 'position-retained')
+            assert values['positionName'] == ('Kept position input' if retained else 'Retained position input'), values
+            assert values['positionCount'] == (1 if retained else 0), values
+            fields = [item for item in native['fields'] if item['label'] == 'Position name']
+            assert len(fields) == 1, native['fields']
+            button = next(item for item in native['taps'] if item['label'] == 'Position add')
+            toggle = next(item for item in native['taps'] if item['label'] == 'Show position content')
+            assert button['x'] == 12 + expected[0], button
+            assert button['y'] == toggle['y'] + 140 + expected[1], button
+            assert button['h'] == 40, button
+            assert native['reducedMotion'] == (label == 'position-reduced'), native
+            print(f'motion {label}: exact position, targets, control bounds, and retained input pass', flush=True)
+            continue
         if label.startswith('content-'):
             transition = next(item for item in native['transitions'] if item['kind'] == 'contentSize')
             expected = {'content-pending': (616, 115, 616, 160, 6),
@@ -3877,6 +3963,7 @@ PY_RANGE
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' size-motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' content-motion
+  node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' position-motion
   python3 - "$web_tmp/size limit" <<'PY_SIZE_LIMIT'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])
