@@ -44,9 +44,9 @@ Status: Native sessions support an explicit reduction setting and recorded prefe
 Linux has initial detection and live Settings portal input.
 A private bus check covers repeated changes, invalid signals, foreign senders, stale replies, service restart, and shutdown.
 It rejects a deliberate inversion of the preference.
-Rebuild the product CLI after the keyboard request change.
+The rebuilt product CLI includes the keyboard request change.
 The motion campaign reaches all 29 triggers. It rejects four mutants and reports no survivors.
-Repeat the 44 selected motion comparisons with the rebuilt CLI.
+All 44 selected motion comparisons have equal native and evaluator timelines and claims.
 Desktop input and resize checks pass.
 Full UI, browser, and package integration checks remain open.
 Recordings include the initial preference before live input.
@@ -55,7 +55,8 @@ A native event fixture compares 400 Desktop and Mobile recordings across all fiv
 It checks retained input, field selection, and the forced native setting.
 The native replay check rejects a missing initial preference, stale suppression, and an ignored forced setting.
 Preference updates clear inherited suppression before later input.
-Repeat full runtime IO, UI, ASan, and UBSan checks after the keyboard request change.
+Full normal, ASan, and UBSan runtime checks pass with the keyboard request change.
+Desktop and mobile host checks pass.
 All 400 native replay cases pass in normal, ASan, and UBSan builds.
 The private Linux Settings portal check also passes under both sanitizers.
 Android reads the animation setting before the application worker starts.
