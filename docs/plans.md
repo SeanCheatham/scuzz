@@ -31,5 +31,7 @@ Rebuild the product CLI and check its GUI manual.
 Status: The shared paint API supports nested uniform scales in Skia, software, and GPU rendering.
 Save and restore include the scale. Clips and opacity layers use device coordinates.
 Pixel checks cover rectangles, text, images, zero scale, invalid values, and large coordinates.
-Software ASan and UBSan checks pass. An independent pixel check rejects unscaled text.
+Native runtime checks and software ASan and UBSan checks pass.
+An independent pixel check rejects unscaled text.
+Clipped image samples check source coordinates in all three renderers.
 The View API, displayed input geometry, browser overlays, transitions, and application checks remain open.

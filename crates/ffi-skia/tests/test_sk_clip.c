@@ -121,6 +121,8 @@ static void check_scale(int gpu) {
     assert(abs(p[3] - (inside ? 128 : 0)) <= 1);
     if (inside && x <= 25) assert(p[0] >= 127 && p[2] == 0);
     if (inside && x >= 38) assert(p[0] == 0 && p[2] >= 127);
+    if (inside && x == 30) { assert(abs(p[0] - 88) <= 2); assert(abs(p[2] - 40) <= 2); }
+    if (inside && x == 33) { assert(abs(p[0] - 40) <= 2); assert(abs(p[2] - 88) <= 2); }
   }
 
   /* Compare transformed bitmap text with independent pixel replication. */
