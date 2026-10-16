@@ -19973,6 +19973,11 @@ static void test_font_change_joining(void) {
     int width = i == 10 ? (int)ceilf(sk_font_measure_span(sk_text_range("ﻡ", strlen("ﻡ")), 24, style)) + 5 : 400;
     TextProbe probe = {0};
     SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width - 4, 0, 0, text_probe, &probe);
+    if (i == 15) {
+      SzTextMetrics fit = sz_text_layout(text, 24, 1, 6, nextafterf(metrics.width, 0.f), 0, 0, NULL, NULL);
+      SzTextMetrics narrow = sz_text_layout(text, 24, 1, 6, metrics.width - 1.f, 0, 0, NULL, NULL);
+      assert(fit.lines == 1 && narrow.lines > 1);
+    }
     int two_lines = i == 9 || i == 10 || i == 12;
     assert(metrics.lines == (two_lines ? 2 : 1));
     SzView *root = sz_view_rich_text(text);

@@ -1,6 +1,7 @@
 #include "text.h"
 #include "sk_capi.h"
 #include <limits.h>
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -201,6 +202,8 @@ static void add_line(TextLine **lines, int *count, int *capacity, int start, int
 SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float gap,
   float width, int max_lines, int ellipsis, SzTextFragmentFn emit, void *env) {
   SzTextMetrics result = {0};
+  /* Keep measured widths on one line after float rounding in parent layout. */
+  float limit = width + 4.f * FLT_EPSILON * fmaxf(1.f, width);
   const char *source = sz_text_source(text);
   int length = text ? text->length : 0;
   uint8_t *breaks = sz_alloc((size_t)length + 1);
@@ -211,12 +214,12 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
     int i = start, space = -1, end = start, next = start;
     int paragraph_end = start;
     while (paragraph_end < length && source[paragraph_end] != '\n') paragraph_end++;
-    if (width <= 0.f || range_width(text, start, paragraph_end, font, scale, 0) <= width) {
+    if (width <= 0.f || range_width(text, start, paragraph_end, font, scale, 0) <= limit) {
       i = end = next = paragraph_end;
     } else while (i < length && source[i] != '\n') {
       int after = next_cluster(breaks, i, length);
       if (source[i] == ' ' && breaks[i + 1]) space = i;
-      if (width > 0.f && range_width(text, start, after, font, scale, 0) > width) {
+      if (width > 0.f && range_width(text, start, after, font, scale, 0) > limit) {
         if (space >= start) {
           end = space;
           next = space + 1;
@@ -248,7 +251,7 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
         last = text && style_index < text->count ? &text->runs[style_index] : &fallback;
         dots_font = run_font(last, font, scale);
         dots_width = sk_font_measure_span(sk_text_range("...", 3), dots_font, last->style);
-        if (width <= 0.f || range_width(text, line->start, line->end, font, scale, 1) <= width) {
+        if (width <= 0.f || range_width(text, line->start, line->end, font, scale, 1) <= limit) {
           line->dots = 1;
           break;
         }
