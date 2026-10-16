@@ -15781,6 +15781,61 @@ static void test_scale_record_bounds(void) {
   sz_ui_unmount(session); sz_view_free(root);
 }
 
+static void scale_wrapping_geometry(SzView *root, SzView *text, SzView *marker, SzRect reference, int percent) {
+  SzRect displayed = sz_view_frame(text), following = sz_view_frame(marker), column = sz_view_frame(root);
+  assert(fabsf(following.y - reference.h) < .01f);
+  assert(fabsf(column.h - reference.h - 8) < .01f);
+  assert(fabsf(displayed.w - reference.w * percent / 100.f) < .01f);
+  assert(fabsf(displayed.h - reference.h * percent / 100.f) < .01f);
+}
+
+static void test_scale_wrapping(void) {
+  const char *sources[] = {
+    "This paragraph uses several short words. The layout keeps each word on one line.",
+    "مرحبا بالعالم. This paragraph uses Arabic and Latin words. مرحبا بالعالم.",
+    "नमस्ते दुनिया. This paragraph uses several short words. नमस्ते दुनिया."
+  };
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  const int widths[] = {80, 120, 160};
+  const int steps[] = {113, 125, 138, 150, 163, 175, 188, 200};
+  for (int sample = 0; sample < 3; sample++) {
+    SzView *reference = sz_view_text(sources[sample]);
+    SzView *text = sz_view_text(sources[sample]);
+    SzSignalInt *value = sz_signal_int(100);
+    SzView *marker = sz_view_sized(80, 8, sz_view_text(""));
+    SzView *root = sz_view_column();
+    sz_view_add_child(root, sz_view_animated_scale(value, 8, text));
+    sz_view_add_child(root, marker);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(240, 640);
+    assert(surface);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    sz_view_layout(reference, 80, 640, &theme);
+    SzRect frame = sz_view_frame(reference);
+    assert(frame.h > theme.font_px * 2);
+    assert(sz_view_paint(root, canvas, 80, 640, &theme));
+    scale_wrapping_geometry(root, text, marker, frame, 100);
+    sz_signal_int_set(value, 200);
+    for (int repeat = 0; repeat < 3; repeat++) {
+      sz_view_layout(root, 80, 640, &theme);
+      scale_wrapping_geometry(root, text, marker, frame, 100);
+    }
+    for (int step = 0; step < 8; step++) {
+      assert(sz_view_paint(root, canvas, 80, 640, &theme));
+      scale_wrapping_geometry(root, text, marker, frame, steps[step]);
+    }
+    for (int i = 0; i < 3; i++) {
+      sz_view_layout(reference, widths[i], 640, &theme);
+      frame = sz_view_frame(reference);
+      assert(sz_view_paint(root, canvas, widths[i], 640, &theme));
+      scale_wrapping_geometry(root, text, marker, frame, 200);
+    }
+    sz_view_reduce_motion(root, 1); sz_signal_int_set(value, 0);
+    assert(sz_view_paint(root, canvas, 160, 640, &theme));
+    scale_wrapping_geometry(root, text, marker, frame, 0);
+    sk_surface_unref(surface); sz_view_free(root); sz_view_free(reference); sz_signal_int_free(value);
+  }
+}
+
 static void position_step(SzView *root, SzView *child, SkCanvas *canvas,
                           int x, int y, const SzTheme *theme) {
   int scale = (int)theme->px_scale;
@@ -21436,7 +21491,7 @@ static void test_styled_text_clip_and_theme(void) {
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--scale")) {
     test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
-    test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds();
+    test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds(); test_scale_wrapping();
     puts("scale tests ok"); return 0;
   }
   if (argc == 2 && !strcmp(argv[1], "--animated-position")) {
@@ -22220,7 +22275,7 @@ int main(int argc, char **argv) {
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
   test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
-  test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds();
+  test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds(); test_scale_wrapping();
   test_animated_position_steps();
   test_animated_position_retains_input();
   test_animated_position_limits();
