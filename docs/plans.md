@@ -40,4 +40,5 @@ Browser source limits, popup anchors, and ancestor input clips pass in the same 
 Fresh native sanitizer checks include fractional control records.
 All 44 native and evaluator replay cases have equal timelines and claims.
 Their checks include displayed scale bounds, source values, retained fields, and cancellation.
-The rebuilt CLI manual includes both scale APIs. Full integration checks remain open.
+The rebuilt CLI manual includes both scale APIs. Full Web integration checks pass.
+Package and clean UI integration checks remain open.
