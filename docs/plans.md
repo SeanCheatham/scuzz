@@ -14,4 +14,13 @@ Check native editor input and scaled text in software, OpenGL, and Skia.
 Run affected runtime, sanitizer, package, browser, and replay checks.
 Rebuild the CLI. Keep unavailable platform checks explicit.
 
-Status: Inspect native monospace measurement and editor cell behavior.
+Status: The portable provider uses pinned DejaVu Sans Mono outlines.
+Native monospace metrics use fractional advances.
+The 168-row independent reference check passes.
+It rejects deliberate metric and glyph placement defects.
+It includes fractional sizes, Greek, and Cyrillic text.
+Renderer and UI runtime checks pass for software, OpenGL, and Skia.
+Scale checks compare monospace spans and editor cells with larger glyphs.
+Caret paint uses a device pixel column. Reported caret geometry keeps fractional values.
+Runtime sanitizer checks are in progress.
+Portable C++ sanitizer and application checks remain open.

@@ -83,7 +83,10 @@ static SkFont make_font(float size) {
 
 static SkFont make_mono_font(float size) {
   float px = size > 0.f ? size : 8.f;
-  return SkFont(mono_typeface(), px);
+  SkFont font(mono_typeface(), px);
+  font.setSubpixel(true);
+  font.setLinearMetrics(true);
+  return font;
 }
 
 static hb_blob_t *font_table(hb_face_t *, hb_tag_t tag, void *data) {

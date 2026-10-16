@@ -12,7 +12,7 @@ from png_max_delta import read_png
 
 
 def check_metrics(reference, actual):
-    assert len(reference) == len(actual) == 96
+    assert len(reference) == len(actual) == 168
     for index, (expected, row) in enumerate(zip(reference, actual)):
         assert abs(expected["width"] - row["width"]) < .001, (index, "width")
         assert expected["breaks"] == row["breaks"], (index, "clusters")
@@ -25,9 +25,9 @@ def check_metrics(reference, actual):
 def check_pixels(reference, actual):
     width, height, expected = reference
     w, h, pixels = actual
-    assert (w, h) == (width, height) == (600, 96 * 48)
+    assert (w, h) == (width, height) == (600, 168 * 48)
     results = []
-    for row in range(96):
+    for row in range(168):
         ratios = []
         masses = []
         for source, target in [(pixels, expected), (expected, pixels)]:
@@ -81,9 +81,9 @@ def main():
         before = "return SkFont(default_typeface(), px);"
         assert outline_source.count(before) == 1
         outline_source = outline_source.replace(before, "SkFont font(default_typeface(), px); font.setHinting(SkFontHinting::kNone); font.setSubpixel(true); return font;")
-        before = "return SkFont(mono_typeface(), px);"
+        before = "font.setLinearMetrics(true);"
         assert outline_source.count(before) == 1
-        outline_source = outline_source.replace(before, "SkFont font(mono_typeface(), px); font.setHinting(SkFontHinting::kNone); font.setSubpixel(true); return font;")
+        outline_source = outline_source.replace(before, "font.setLinearMetrics(true); font.setHinting(SkFontHinting::kNone);")
         (output / "outline.cpp").write_text(outline_source)
         run(["clang++", "-std=c++17", "-O2", "-fPIC", "-Isrc", "-Ibuild/skia-src", "-Ibuild/harfbuzz",
              "-Ibuild/sheenbidi/Headers", "-DSK_RELEASE", "-c", str(output / "outline.cpp"), "-o", str(output / "outline.o")], "outline-compile")
@@ -108,8 +108,8 @@ def main():
         run(["make", "lib", "CC=clang", "CXX=clang++"], "controls-build")
         source = (crate / "src/sk_native_text.cpp").read_text()
         defects = {
-            "metric": ("return scuzz_text::shape_text(range, size, shape_font).width;",
-                       "return scuzz_text::shape_text(range, size, shape_font).width + 1.f;"),
+            "metric": ("return shape_span(range, size, style).width;",
+                       "return shape_span(range, size, style).width + 1.f;"),
             "glyph": ("x + shaped.positions[i].x * scale", "x + 3. + shaped.positions[i].x * scale"),
         }
         for name, (before, after) in defects.items():
@@ -133,7 +133,7 @@ def main():
                 print(name + " defect rejected", flush=True)
             else:
                 raise AssertionError(name + " defect passes")
-        report.write_text(json.dumps({"rows": 96, "pixelReference": "Skia with hinting off and subpixel positions",
+        report.write_text(json.dumps({"rows": 168, "pixelReference": "Skia with hinting off and subpixel positions",
                                       "maximumUnmatchedInk": largest,
                                       "metricDefectRejected": True, "glyphDefectRejected": True,
                                       "sourceSha256": hashlib.sha256(source.encode()).hexdigest()}, indent=2) + "\n")

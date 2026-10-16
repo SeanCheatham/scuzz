@@ -1,4 +1,5 @@
 #include "sk_native_text.h"
+#include "../include/sk_capi.h"
 #include "sk_text_shape.h"
 #include <hb-ot.h>
 #include <array>
@@ -8,8 +9,8 @@
 #include <mutex>
 
 extern "C" {
-extern const unsigned char scuzz_font_latin[], scuzz_font_devanagari[], scuzz_font_thai[], scuzz_font_sc[], scuzz_font_arabic[];
-extern const unsigned int scuzz_font_latin_len, scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len, scuzz_font_arabic_len;
+extern const unsigned char scuzz_font_latin[], scuzz_font_devanagari[], scuzz_font_thai[], scuzz_font_sc[], scuzz_font_arabic[], scuzz_font_mono[];
+extern const unsigned int scuzz_font_latin_len, scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len, scuzz_font_arabic_len, scuzz_font_mono_len;
 }
 
 namespace {
@@ -20,11 +21,11 @@ hb_font_t *font_for(unsigned index, int style) {
     std::once_flag once;
     Font font{nullptr, hb_font_destroy};
   };
-  static std::array<Entry, 20> entries;
+  static std::array<Entry, 24> entries;
   Entry &entry = entries[index * 4 + (style & 3)];
   std::call_once(entry.once, [&entry, index, style] {
-    const unsigned char *data[] = {scuzz_font_latin, scuzz_font_devanagari, scuzz_font_thai, scuzz_font_sc, scuzz_font_arabic};
-    const unsigned lengths[] = {scuzz_font_latin_len, scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len, scuzz_font_arabic_len};
+    const unsigned char *data[] = {scuzz_font_latin, scuzz_font_devanagari, scuzz_font_thai, scuzz_font_sc, scuzz_font_arabic, scuzz_font_mono};
+    const unsigned lengths[] = {scuzz_font_latin_len, scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len, scuzz_font_arabic_len, scuzz_font_mono_len};
     hb_blob_t *blob = hb_blob_create(reinterpret_cast<const char *>(data[index]), lengths[index], HB_MEMORY_MODE_READONLY, nullptr, nullptr);
     hb_face_t *face = hb_face_create(blob, 0);
     hb_blob_destroy(blob);
@@ -32,8 +33,8 @@ hb_font_t *font_for(unsigned index, int style) {
     hb_face_destroy(face);
     hb_ot_font_set_funcs(font);
     hb_variation_t variations[] = {{HB_TAG('w','g','h','t'), 400.f}, {HB_TAG('w','d','t','h'), 100.f}};
-    if (index) hb_font_set_variations(font, variations, 2);
-    if (style & 1) hb_font_set_synthetic_bold(font, 1.f / 24.f, 1.f / 24.f, true);
+    if (index && index != 5) hb_font_set_variations(font, variations, 2);
+    if (style & 1) hb_font_set_synthetic_bold(font, 1.f / 24.f, 1.f / 24.f, index != 5);
     if (style & 2) hb_font_set_synthetic_slant(font, .2f);
     if (!hb_face_get_glyph_count(hb_font_get_face(font))) std::abort();
     hb_font_make_immutable(font);
@@ -46,6 +47,31 @@ hb_font_t *shape_font(unsigned index) { return font_for(index, 0); }
 
 float font_scale(hb_font_t *font, float size) {
   return (size > 0.f ? size : 8.f) / hb_face_get_upem(hb_font_get_face(font));
+}
+
+scuzz_text::ShapedText shape_span(SkTextRange range, float size, int style) {
+  if (!(style & SK_TEXT_MONO)) return scuzz_text::shape_text(range, size, shape_font);
+  scuzz_text::ShapedText result;
+  if (!range.source || !sk_text_valid(range) || range.bytes > INT_MAX || !std::isfinite(size)) return result;
+  size_t bytes = range.end - range.start;
+  SBCodepointSequence sequence = {SBStringEncodingUTF8, const_cast<char *>(range.source + range.start), bytes};
+  hb_font_t *font = font_for(5, 0);
+  float scale = font_scale(font, size);
+  for (SBUInteger p = 0; p < bytes;) {
+    SBUInteger start = p;
+    SBCodepoint codepoint = SBCodepointSequenceGetCodepointAt(&sequence, &p);
+    hb_codepoint_t glyph = 0;
+    hb_font_get_nominal_glyph(font, codepoint, &glyph);
+    result.glyphs.push_back(static_cast<uint16_t>(glyph));
+    result.fonts.push_back(5);
+    result.clusters.push_back(static_cast<unsigned>(start));
+    result.positions.push_back({result.width, 0.f});
+    result.starts.push_back(result.width);
+    result.width += hb_font_get_glyph_h_advance(font, glyph) * scale;
+    result.ends.push_back(result.width);
+    result.rtl.push_back(false);
+  }
+  return result;
 }
 
 struct Point { double x, y; };
@@ -160,25 +186,41 @@ void raster(const Outline &outline, SkTextCoverage emit, void *data) {
 
 } // namespace
 
-float sk_native_text_measure(SkTextRange range, float size) {
-  return scuzz_text::shape_text(range, size, shape_font).width;
+float sk_native_text_measure(SkTextRange range, float size, int style) {
+  return shape_span(range, size, style).width;
 }
 
-void sk_native_text_positions(SkTextRange range, float size, float *leading, float *trailing) {
-  scuzz_text::text_positions(range, size, shape_font, leading, trailing);
+void sk_native_text_positions(SkTextRange range, float size, int style, float *leading, float *trailing) {
+  if (!(style & SK_TEXT_MONO)) {
+    scuzz_text::text_positions(range, size, shape_font, leading, trailing);
+    return;
+  }
+  if (!leading || !trailing || !sk_text_valid(range) || range.bytes > INT_MAX) return;
+  size_t bytes = range.end - range.start;
+  std::fill(leading, leading + bytes + 1, 0.f);
+  std::fill(trailing, trailing + bytes + 1, 0.f);
+  auto shaped = shape_span(range, size, style);
+  for (size_t i = 0; i < shaped.clusters.size(); i++) {
+    size_t end = i + 1 < shaped.clusters.size() ? shaped.clusters[i + 1] : bytes;
+    for (size_t p = shaped.clusters[i]; p < end; p++) {
+      leading[p] = shaped.starts[i];
+      trailing[p] = shaped.ends[i];
+    }
+  }
+  leading[bytes] = trailing[bytes] = shaped.width;
 }
 
 void sk_native_text_breaks(const char *text, size_t bytes, uint8_t *breaks) {
   scuzz_text::cluster_breaks(text, bytes, breaks, shape_font);
 }
 
-void sk_native_text_metrics(float size, float *ascent, float *descent) {
+void sk_native_text_metrics(float size, int style, float *ascent, float *descent) {
   if (!std::isfinite(size)) {
     if (ascent) *ascent = 0.f;
     if (descent) *descent = 0.f;
     return;
   }
-  hb_font_t *font = shape_font(0);
+  hb_font_t *font = font_for(style & SK_TEXT_MONO ? 5 : 0, 0);
   hb_font_extents_t extents{};
   hb_font_get_h_extents(font, &extents);
   float scale = font_scale(font, size);
@@ -187,7 +229,11 @@ void sk_native_text_metrics(float size, float *ascent, float *descent) {
 }
 
 void sk_native_text_span_metrics(SkTextRange range, float size, int style, float *ascent, float *descent) {
-  auto shaped = scuzz_text::shape_text(range, size, shape_font);
+  if (style & SK_TEXT_MONO) {
+    sk_native_text_metrics(size, style, ascent, descent);
+    return;
+  }
+  auto shaped = shape_span(range, size, style);
   float a = 0.f, d = 0.f;
   for (size_t i = 0; i < shaped.glyphs.size(); i++) {
     hb_font_t *font = font_for(shaped.fonts[i], style);
@@ -204,7 +250,7 @@ void sk_native_text_span_metrics(SkTextRange range, float size, int style, float
 void sk_native_text_draw(SkTextRange range, float size, int style, double x, double y, double scale,
                          int x0, int y0, int x1, int y1, SkTextCoverage emit, void *data) {
   if (!emit || x0 >= x1 || y0 >= y1 || !(scale > 0.) || !std::isfinite(scale) || !std::isfinite(x) || !std::isfinite(y)) return;
-  auto shaped = scuzz_text::shape_text(range, size, shape_font);
+  auto shaped = shape_span(range, size, style);
   for (size_t i = 0; i < shaped.glyphs.size(); i++) {
     hb_font_t *font = font_for(shaped.fonts[i], style);
     Outline outline{{}, x + shaped.positions[i].x * scale, y + shaped.positions[i].y * scale,

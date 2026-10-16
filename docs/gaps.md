@@ -130,11 +130,13 @@ The CJK font download uses 17.8 MB before compression. Smaller font delivery rem
 Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
 Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
 Native software and OpenGL use the shared native shaper and clipped glyph coverage rows.
-Their monospace paint keeps ASCII bitmap glyphs. Scalable editor glyphs remain open.
+Their monospace paint uses pinned DejaVu Sans Mono glyph outlines.
+Monospace fallback faces remain open.
 Paint checks cover proportional advances, source clusters, styles, paragraph ranges, and large zoom values.
 Full runtime checks pass for all three native renderers. Android arm64 and x86_64 builds pass.
 ASan and UBSan checks pass for the portable shaper and glyph raster path.
-48 script, size, and style cases compare widths, carets, clusters, and glyph outlines with Skia.
+168 script, size, and style cases compare widths, carets, clusters, and glyph outlines with Skia.
+They include proportional and monospace spans at fractional font sizes.
 The glyph reference uses unhinted Skia with subpixel positions.
 Text advance and glyph placement defects fail these checks.
 Current UI checks pass for software, OpenGL, Skia, ASan, and UBSan.

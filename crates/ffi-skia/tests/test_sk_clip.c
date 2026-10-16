@@ -126,37 +126,52 @@ static void check_scale(int gpu) {
   }
 
   /* Compare a text transform with the same glyphs at twice the size. */
-  uint8_t original[64 * 64 * 4];
-  sk_paint_set_text_size(paint, 14);
-  float advance = sk_font_measure_string("AB", 14);
-  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
-  sk_canvas_draw_string(canvas, "AB", 2, 24, paint);
-  memcpy(original, pixels(surface), sizeof original);
-  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
-  sk_canvas_save(canvas);
-  assert(sk_canvas_scale(canvas, 2, 0, 0));
-  assert(sk_font_measure_string("AB", 14) == advance);
-  sk_canvas_draw_string(canvas, "AB", 2, 24, paint);
-  sk_canvas_restore(canvas);
-  data = pixels(surface);
-  SkSurface *reference = sk_surface_make_raster_n32_premul(64, 64);
-  assert(reference);
-  SkCanvas *reference_canvas = sk_surface_get_canvas(reference);
-  sk_canvas_clear(reference_canvas, sk_color_rgba(0, 0, 0, 0));
-  sk_paint_set_text_size(paint, 28);
-  sk_canvas_draw_string(reference_canvas, "AB", 4, 48, paint);
-  const uint8_t *expected = pixels(reference);
-  int before = 0, after = 0;
-  for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
-    const uint8_t *p = data + (y * 64 + x) * 4;
-    const uint8_t *q = expected + (y * 64 + x) * 4;
-    for (int channel = 0; channel < 4; channel++) assert(abs(p[channel] - q[channel]) <= 1);
-    if (original[(y * 64 + x) * 4 + 3]) before++;
-    if (p[3]) { after++; assert(y >= 20 && y < 52 && x < 64); }
+  for (int mode = 0; mode < 3; mode++) {
+    uint8_t original[64 * 64 * 4];
+    sk_paint_set_text_size(paint, 14);
+    int style = mode ? SK_TEXT_MONO : 0;
+    const char *text = mode ? "éЖ" : "AB";
+    SkTextRange range = sk_text_range(text, strlen(text));
+    float advance = sk_font_measure_span(range, 14, style);
+    sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+    if (mode == 2) sk_canvas_draw_mono_string(canvas, text, 2, 24, paint);
+    else sk_canvas_draw_span(canvas, range, 2, 24, paint, style);
+    memcpy(original, pixels(surface), sizeof original);
+    if (mode == 2) {
+      sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+      sk_canvas_draw_span(canvas, range, 2, 24, paint, SK_TEXT_MONO);
+      data = pixels(surface);
+      for (size_t i = 0; i < sizeof original; i++) assert(abs(data[i] - original[i]) <= 1);
+    }
+    sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+    sk_canvas_save(canvas);
+    assert(sk_canvas_scale(canvas, 2, 0, 0));
+    assert(sk_font_measure_span(range, 14, style) == advance);
+    if (mode) assert(fabsf(sk_font_measure_span(range, 28, style) - 2 * advance) < .001f);
+    if (mode == 2) sk_canvas_draw_mono_string(canvas, text, 2, 24, paint);
+    else sk_canvas_draw_span(canvas, range, 2, 24, paint, style);
+    sk_canvas_restore(canvas);
+    data = pixels(surface);
+    SkSurface *reference = sk_surface_make_raster_n32_premul(64, 64);
+    assert(reference);
+    SkCanvas *reference_canvas = sk_surface_get_canvas(reference);
+    sk_canvas_clear(reference_canvas, sk_color_rgba(0, 0, 0, 0));
+    sk_paint_set_text_size(paint, 28);
+    if (mode == 2) sk_canvas_draw_mono_string(reference_canvas, text, 4, 48, paint);
+    else sk_canvas_draw_span(reference_canvas, range, 4, 48, paint, style);
+    const uint8_t *expected = pixels(reference);
+    int before = 0, after = 0;
+    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+      const uint8_t *p = data + (y * 64 + x) * 4;
+      const uint8_t *q = expected + (y * 64 + x) * 4;
+      for (int channel = 0; channel < 4; channel++) assert(abs(p[channel] - q[channel]) <= 1);
+      if (original[(y * 64 + x) * 4 + 3]) before++;
+      if (p[3]) { after++; assert(y >= 20 && y < 52 && x < 64); }
+    }
+    assert(before > 20 && after > before * 2);
+    sk_surface_unref(reference);
+    sk_paint_set_text_size(paint, 14);
   }
-  assert(before > 20 && after > before * 2);
-  sk_surface_unref(reference);
-  sk_paint_set_text_size(paint, 14);
 
   /* Zero scale excludes paint. Clear still uses the device clip. */
   sk_canvas_save(canvas);

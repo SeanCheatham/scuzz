@@ -650,7 +650,9 @@ Field carets, pointer input, and selection use shaped source positions.
 Left and Right move a field caret in the visual direction.
 Composition paints the complete preview without changing the committed Signal.
 Source strings keep their original UTF-8 bytes.
-Editor cells and native monospace spans keep their cell layout.
+Editor cells and native monospace spans use pinned DejaVu Sans Mono glyph outlines.
+Their font metrics scale without pixel rounding. Editor cells keep one source character per column.
+Monospace spans use source order. Glyph coverage is limited to this face.
 The browser uses the same pinned paragraph direction algorithm.
 Pinned HarfBuzz data supplies Arabic joining at font boundaries.
 Its font shaper and DOM text ranges supply glyphs and source positions.

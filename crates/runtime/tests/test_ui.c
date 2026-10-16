@@ -4182,8 +4182,11 @@ static void test_edit_paint_scale_and_clip(void) {
       }
       pixels = sk_surface_peek_pixels(surf, &bytes);
       assert(pixels && bytes == 240 * 180 * 4);
-      assert(px_rgb(pixels, 240, (int)ceilf(caret.x), (int)ceilf(caret.y + 2.f * scale),
-                    0x24, 0x23, 0x1F));
+      int caret_ink = 0;
+      for (int x = (int)floorf(caret.x); x < (int)ceilf(caret.x + caret.w); x++)
+        caret_ink |= px_rgb(pixels, 240, x, (int)ceilf(caret.y + 2.f * scale),
+                            0x24, 0x23, 0x1F);
+      assert(caret_ink);
       if (!editor) {
         sz_signal_str_set(text, "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM");
         assert(sz_view_paint(root, canvas, 240, 180, &theme));

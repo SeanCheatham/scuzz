@@ -7,11 +7,11 @@
 int main(int argc, char **argv) {
   assert(argc == 2);
   const char *sources[] = {"AV fi é — Proportional text", "السلام عليكم", "אב AB 12",
-                          "नमस्ते क्षि", "สวัสดี ปู่", "中文漢字"};
+                          "नमस्ते क्षि", "สวัสดี ปู่", "中文漢字", "é Ω Ж λ ≤ →"};
   const char *backend = getenv("SCUZZ_SKIA");
   int gpu = backend && !strcmp(backend, "gpu");
-  SkSurface *surface = gpu ? sk_surface_make_gpu_n32_premul(600, 96 * 48)
-                           : sk_surface_make_raster_n32_premul(600, 96 * 48);
+  SkSurface *surface = gpu ? sk_surface_make_gpu_n32_premul(600, 168 * 48)
+                           : sk_surface_make_raster_n32_premul(600, 168 * 48);
   assert(surface);
   SkCanvas *canvas = sk_surface_get_canvas(surface);
   SkPaint *paint = sk_paint_new();
@@ -20,8 +20,10 @@ int main(int argc, char **argv) {
   sk_paint_set_color(paint, sk_color_rgba(25, 35, 45, 255));
   puts("[");
   int row = 0;
-  for (int size = 16; size <= 32; size += 16) for (int style = 0; style < 8; style++) {
-    sk_paint_set_text_size(paint, (float)size);
+  const float sizes[] = {16.f, 16.25f, 32.f};
+  for (size_t size_index = 0; size_index < sizeof sizes / sizeof sizes[0]; size_index++) for (int style = 0; style < 8; style++) {
+    float size = sizes[size_index];
+    sk_paint_set_text_size(paint, size);
     for (size_t i = 0; i < sizeof sources / sizeof sources[0]; i++, row++) {
       size_t bytes = strlen(sources[i]);
       SkTextRange range = sk_text_range(sources[i], bytes);
@@ -44,7 +46,7 @@ int main(int argc, char **argv) {
     }
   }
   puts("]");
-  assert(row == 96 && sk_encode_png_to_file(surface, argv[1]));
+  assert(row == 168 && sk_encode_png_to_file(surface, argv[1]));
   sk_paint_delete(paint);
   sk_surface_unref(surface);
   return 0;

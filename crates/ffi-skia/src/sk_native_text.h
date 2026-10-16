@@ -8,10 +8,10 @@
 extern "C" {
 #endif
 
-float sk_native_text_measure(SkTextRange range, float size);
-void sk_native_text_positions(SkTextRange range, float size, float *leading, float *trailing);
+float sk_native_text_measure(SkTextRange range, float size, int style);
+void sk_native_text_positions(SkTextRange range, float size, int style, float *leading, float *trailing);
 void sk_native_text_breaks(const char *text, size_t bytes, uint8_t *breaks);
-void sk_native_text_metrics(float size, float *ascent, float *descent);
+void sk_native_text_metrics(float size, int style, float *ascent, float *descent);
 void sk_native_text_span_metrics(SkTextRange range, float size, int style,
                                  float *ascent, float *descent);
 

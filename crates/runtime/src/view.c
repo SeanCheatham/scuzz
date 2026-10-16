@@ -7637,7 +7637,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     sz_free(display);
     if (v->focused) {
       SzRect cursor = sz_view_caret_rect(v, theme);
-      if (cursor.w > 0.f) paint_rect(c, cursor.x, cursor.y, cursor.w, cursor.h, theme->foreground);
+      if (cursor.w > 0.f) paint_rect(c, floorf(cursor.x), cursor.y, cursor.w, cursor.h, theme->foreground);
     }
     sk_canvas_restore(c);
     g_clip = prev_clip;
@@ -7791,7 +7791,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     if (v->focused) {
       SzRect caret = sz_view_caret_rect(v, theme);
       if (caret.w > 0.f)
-        paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->foreground);
+        paint_rect(c, floorf(caret.x), caret.y, caret.w, caret.h, theme->foreground);
     }
     sk_canvas_restore(c);
     g_clip = prev_clip;

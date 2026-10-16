@@ -2,8 +2,6 @@
  * Peek reads the framebuffer. There is no CPU paint buffer. */
 
 #include "sk_gpu.h"
-#include "sk_font8.h"
-#include "sk_utf8.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -406,124 +404,6 @@ void sk_gpu_fill_rect(SkGpuTarget *target, int x0, int y0, int x1, int y1,
   quad_ndc(verts, target, x0, y0, x1, y1);
   premul(r, g, b, a, col);
   draw_verts(verts, 6, col, a == 255);
-}
-
-static int gpu_advance(float font_px) {
-  int a = (int)(font_px + 0.5f);
-  return a < 1 ? 1 : a;
-}
-
-static int push_px(float **verts, int *n, int *cap, const SkGpuTarget *t, double x,
-                   double y, int cx0, int cy0, int cx1, int cy1,
-                   float scale, float tx, float ty) {
-  float *nv;
-  int need;
-  double left = floor(x * scale + tx), top = floor(y * scale + ty);
-  double right = floor((x + 1) * scale + tx), bottom = floor((y + 1) * scale + ty);
-  left = fmax(0, fmax(cx0, left)); top = fmax(0, fmax(cy0, top));
-  right = fmin(t->w, fmin(cx1, right)); bottom = fmin(t->h, fmin(cy1, bottom));
-  if (!(right > left) || !(bottom > top)) return 1;
-  need = *n + 12;
-  if (need > *cap) {
-    int c = *cap ? *cap * 2 : 256;
-    while (c < need)
-      c *= 2;
-    nv = (float *)realloc(*verts, (size_t)c * sizeof(float));
-    if (!nv)
-      return 0;
-    *verts = nv;
-    *cap = c;
-  }
-  quad_ndc(*verts + *n, t, left, top, right, bottom);
-  *n += 12;
-  return 1;
-}
-
-void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
-                      float size, uint8_t r, uint8_t g, uint8_t b, uint8_t a,
-                      int cx0, int cy0, int cx1, int cy1, int style,
-                      float transform, float tx, float ty) {
-  float px;
-  float scale;
-  float col[4];
-  float *verts = NULL;
-  int n = 0;
-  int cap = 0;
-  int advance;
-  int baseline;
-  double cx;
-  int fast;
-  const char *p;
-  if (!target || !text || a == 0 || !gpu_ready())
-    return;
-  bind_target(target);
-  if (!set_scissor(target, cx0, cy0, cx1, cy1))
-    return;
-  px = size > 0.f ? size : 8.f;
-  scale = px / 8.f;
-  advance = gpu_advance(px);
-  baseline = (int)(px - 1.f + 0.5f);
-  if (baseline < 0)
-    baseline = 0;
-  fast = scale >= 0.999f && scale <= 1.001f;
-  cx = floor((double)x);
-  premul(r, g, b, a, col);
-  for (p = text; *p;) {
-    int clen = sk_utf8_clen(p);
-    unsigned char ch = (unsigned char)*p;
-    const uint8_t *glyph;
-    double gy;
-    int row;
-    int bit;
-    if (clen < 1)
-      clen = 1;
-    if (ch < 32 || ch > 126)
-      ch = '?';
-    glyph = sk_font8[ch - 32];
-    gy = floor((double)y) - baseline;
-    if (fast) {
-      for (row = 0; row < 8; row++) {
-        uint8_t bits = glyph[row];
-        for (bit = 0; bit < 8; bit++) {
-          if (bits & (uint8_t)(1u << bit)) {
-            if (!push_px(&verts, &n, &cap, target, cx + bit + ((style & 2) ? (7 - row) / 4 : 0), gy + row, cx0, cy0,
-                         cx1, cy1, transform, tx, ty))
-              goto draw;
-            if ((style & 1) && !push_px(&verts, &n, &cap, target,
-                cx + bit + 1 + ((style & 2) ? (7 - row) / 4 : 0), gy + row,
-                cx0, cy0, cx1, cy1, transform, tx, ty)) goto draw;
-          }
-        }
-      }
-    } else {
-      int sr;
-      int sc;
-      for (sr = 0; sr < advance; sr++) {
-        row = (int)((float)sr / scale);
-        if (row > 7)
-          row = 7;
-        for (sc = 0; sc < advance; sc++) {
-          bit = (int)((float)sc / scale);
-          if (bit > 7)
-            bit = 7;
-          if (glyph[row] & (uint8_t)(1u << bit)) {
-            if (!push_px(&verts, &n, &cap, target, cx + sc + ((style & 2) ? (advance - sr) / 5 : 0), gy + sr, cx0, cy0,
-                         cx1, cy1, transform, tx, ty))
-              goto draw;
-            if ((style & 1) && !push_px(&verts, &n, &cap, target,
-                cx + sc + 1 + ((style & 2) ? (advance - sr) / 5 : 0), gy + sr,
-                cx0, cy0, cx1, cy1, transform, tx, ty)) goto draw;
-          }
-        }
-      }
-    }
-    cx += advance;
-    p += clen;
-  }
-draw:
-  if (n > 0)
-    draw_verts(verts, n / 2, col, a == 255);
-  free(verts);
 }
 
 const uint8_t *sk_gpu_read(SkGpuTarget *target, size_t *out_size) {
