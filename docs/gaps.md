@@ -83,6 +83,7 @@ Real device checks for virtual lists remain open.
 Real mobile device bitmap checks remain open.
 Image color profiles, orientation metadata, and animated formats remain open.
 Browser accessibility and real screen-reader checks remain incomplete.
+Android exposes its drawing surface without child controls to platform accessibility tools.
 Keyboard checks cover a form, named radio groups, manual tabs, nested dialogs, named range sliders, and editors.
 Range checks cover signed 64-bit bounds, stepped values, pointer input, and browser accessibility data.
 Physical-device and real screen-reader checks for sliders remain open.
@@ -131,6 +132,9 @@ Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
 Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
 Native software and OpenGL use the shared native shaper and clipped glyph coverage rows.
 Their monospace paint uses pinned DejaVu Sans Mono glyph outlines.
+Monospace metrics scale without pixel rounding.
+Unicode editor checks cover pointer input, arrow movement, insertion, and source byte offsets at two scales.
+They pass for software, OpenGL, Skia, ASan, and UBSan.
 Monospace fallback faces remain open.
 Paint checks cover proportional advances, source clusters, styles, paragraph ranges, and large zoom values.
 Full runtime checks pass for all three native renderers. Android arm64 and x86_64 builds pass.
@@ -140,10 +144,13 @@ They include proportional and monospace spans at fractional font sizes.
 The glyph reference uses unhinted Skia with subpixel positions.
 Text advance and glyph placement defects fail these checks.
 Current UI checks pass for software, OpenGL, Skia, ASan, and UBSan.
-Current shaping and text checks pass in all five browser configurations. Package CI passes.
+Browser shaping checks pass in all five configurations.
+Current text and control checks pass in all five configurations. Package CI passes.
 Android API 36 emulator checks cover text changes, typing after a combining mark,
 keyboard viewport changes, button input, and retained state after resume.
 The emulator uses x86_64, four cores, and 4 GB of memory.
+Monospace application checks also cover counter input, typing, keyboard viewport changes, and resume.
+Software and OpenGL application snapshots have a maximum channel delta of 1.
 Software and OpenGL replay produce exact native and evaluator timelines and claims.
 The OpenGL campaign completes within the probe limits with Mesa worker threads disabled.
 Default-renderer replay and clean Headless UI checks pass.

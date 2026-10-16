@@ -11,10 +11,10 @@ Headless remains a required peer for layout, input, and verification.
 
 Select work from these application needs:
 
-1. Screen-reader support and keyboard behavior for remaining composite controls.
+1. Expose shared semantics to native screen readers.
+   Complete keyboard behavior for remaining composite controls.
    Add editable option search when an application needs it.
-2. Scalable monospace glyphs for the native software and OpenGL renderers.
-   Add wider font coverage, other contextual scripts across font changes, and bidi caret affinity.
+2. Add wider font coverage, other contextual scripts across font changes, and bidi caret affinity.
 3. Rotation transitions with replay and cancellation.
 
 Use working applications to check each capability.
