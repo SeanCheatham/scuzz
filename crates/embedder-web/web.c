@@ -64,6 +64,23 @@ void sz_web_transition(SzView *view, int value, int target, int remaining, int s
   web_transition(sz_view_id(view), value, target, remaining, suppressed);
 }
 
+EM_JS(void, web_scale_begin, (uintptr_t view, float factor, float x, float y, int clipped, float cx, float cy, float cw, float ch), {
+  const f = Module.webFrame;
+  const id = 'scale:' + Number(view);
+  f.items.push({id, group: true, scaleGroup: {factor, x, y}, x: 0, y: 0, w: 0, h: 0,
+    parent: f.groups.at(-1), clip: clipped ? [cx, cy, cw, ch] : null});
+  f.groups.push(id);
+});
+void sz_web_scale_begin(SzView *view, float scale, float x, float y, int clipped, SzRect clip) {
+  web_scale_begin(sz_view_id(view), scale, x, y, clipped, clip.x, clip.y, clip.w, clip.h);
+}
+EM_JS(void, web_scale_transition, (uintptr_t view, int value, int target, int remaining, int suppressed), {
+  Module.webFrame.transitions.push({id: Number(view), kind: 'scale', value, target, remaining, suppressed: Boolean(suppressed)});
+});
+void sz_web_scale_transition(SzView *view, int value, int target, int remaining, int suppressed) {
+  web_scale_transition(sz_view_id(view), value, target, remaining, suppressed);
+}
+
 EM_JS(void, web_size_transition, (uintptr_t view, int width, int height, int target_width, int target_height, int remaining, int suppressed), {
   Module.webFrame.transitions.push({id: Number(view), kind: 'size', width, height,
     targetWidth: target_width, targetHeight: target_height, remaining, suppressed: Boolean(suppressed)});
@@ -91,8 +108,14 @@ void sz_web_position_transition(SzView *view, int x, int y, int target_x, int ta
 EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t active, int count), {
   const item = Module.webFrame.items.at(-1);
   item.active = Number(active); item.optionCount = count;
+  let parent = item.parent;
+  for (let id = parent; id;) {
+    const ancestor = Module.webFrame.items.find(item => item.id === id);
+    if (ancestor.scaleGroup) parent = ancestor.parent;
+    id = ancestor.parent;
+  }
   Module.webFrame.items.push({id: Number(popup), group: true, role: 56, label: item.label,
-    parent: item.parent, related: Number(owner), hidden: !item.checked, x: 0, y: 0, w: 0, h: 0});
+    parent, related: Number(owner), hidden: !item.checked, x: 0, y: 0, w: 0, h: 0});
 });
 void sz_web_select_state(SzView *view, SzView *popup, SzView *active, int count) {
   web_select_state(sz_view_id(view), sz_view_id(popup), sz_view_id(active), count);

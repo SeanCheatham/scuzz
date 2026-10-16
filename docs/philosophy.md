@@ -366,6 +366,20 @@ Hidden or reduced content snaps to its target. Pause preserves the current posit
 Layout and input do not advance the shared clock.
 Recorded output includes current coordinates, target coordinates, and remaining pumps.
 
+Use `View.scale(percent, child)` for a static scale.
+Use `View.animatedScale(value, pumps, child)` for a scale transition.
+Use a `Signal[Int]` percentage. Use 100 for the original size.
+Display clamps to 0 through the signed 32-bit maximum without writing the Signal.
+Scale about the child center. Keep surrounding layout and text wrapping unchanged.
+Paint, input, control bounds, field selection, and popup anchors use displayed geometry.
+Positive scale changes keep child state and keyboard focus.
+Zero scale excludes child paint, input, focus, and accessibility. Keep child state.
+Use the shared pump clock. The count is positive and fits a signed 32-bit integer.
+Initial display uses the current value. A target change starts from the current scale.
+Layout and input do not advance the clock. Pause preserves the current scale.
+Hidden or reduced content snaps to its target.
+Recorded output includes current scale, target scale, and remaining pumps.
+
 Use `View.reducedMotion(reduced, child)` to reduce motion in a subtree.
 A nonzero Signal snaps explicit transitions and removes built-in motion steps.
 An ancestor or session preference stays effective inside nested wrappers.

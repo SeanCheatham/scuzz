@@ -278,13 +278,18 @@ var Module = {
     frame.items.forEach(item => {
       live.add(item.id);
       let node = Module.nodes.get(item.id);
-      const kind = item.tooltip ? 'tooltip' : item.group ? 'group' : item.lines ? 'text' : item.route !== null ? 'link' : String(item.role);
+      const kind = item.tooltip ? 'tooltip' : item.scaleGroup ? 'scale' : item.group ? 'group' : item.lines ? 'text' : item.route !== null ? 'link' : String(item.role);
       if (node && node.kind !== kind) { node.remove(); Module.nodes.delete(item.id); node = null; }
       if (!node) {
         node = item.tooltip || item.lines || item.group ? document.createElement('div') : Module.makeControl(item);
         node.kind = kind; node.dataset.view = item.id;
         node.id = 'view-' + item.id;
         if (item.group) node.className = 'semantic-group';
+        if (item.scaleGroup) {
+          node.childContainer = document.createElement('div');
+          Object.assign(node.childContainer.style, {position: 'absolute', left: '0px', top: '0px', transformOrigin: '0 0'});
+          node.append(node.childContainer);
+        }
         if (item.group && (item.role === 47 || item.role === 43)) {
           node.classList.add('panel'); node.tabIndex = item.role === 43 ? -1 : 0;
           node.addEventListener('focus', () => Module.ccall('sz_web_focus', null, ['number'], [node.item.id]));
@@ -308,7 +313,7 @@ var Module = {
       const parent = item.parent ? Module.nodes.get(item.parent) : layer;
       const ox = item.parent ? parent.item.x : 0;
       const oy = item.parent ? parent.item.y : 0;
-      if (!item.inline) place(parent, node);
+      if (!item.inline) place(parent.childContainer || parent, node);
       if (item.tooltip) {
         node.className = 'tooltip';
         node.setAttribute('role', 'tooltip');
@@ -316,6 +321,15 @@ var Module = {
         node.hidden = item.hidden;
         node.style.left = item.x / scale + 'px'; node.style.top = item.y / scale + 'px';
         node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
+      } else if (item.scaleGroup) {
+        node.style.left = -ox / scale + 'px'; node.style.top = -oy / scale + 'px';
+        node.style.width = node.style.height = '1px';
+        const {factor, x, y} = item.scaleGroup;
+        node.childContainer.style.transform = `matrix(${factor},0,0,${factor},${x * (1 - factor) / scale},${y * (1 - factor) / scale})`;
+        node.style.clipPath = item.clip ? (() => {
+          const [cx, cy, cw, ch] = item.clip;
+          return `polygon(${cx / scale}px ${cy / scale}px,${(cx + cw) / scale}px ${cy / scale}px,${(cx + cw) / scale}px ${(cy + ch) / scale}px,${cx / scale}px ${(cy + ch) / scale}px)`;
+        })() : '';
       } else if (item.group) {
         node.hidden = item.hidden;
         node.style.zIndex = item.role === 56 ? '2' : '';

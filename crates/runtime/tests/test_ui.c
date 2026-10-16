@@ -15760,6 +15760,27 @@ static void test_scale_small_input(void) {
   }
 }
 
+static void test_scale_record_bounds(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzView *button = sz_view_ink_well("Fractional scale", NULL, NULL, sz_view_sized(80, 40, sz_view_text("")));
+  SzView *root = sz_view_theme(&theme, scale_scene(sz_view_scale(113, button)));
+  SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 320, .height = 240, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&config, root);
+  assert(session && sz_ui_pump_sync(session));
+  const char *path = "build/test_scale_bounds.json";
+  assert(sz_ui_session_write_dump(session, path));
+  char *dump = slurp_cstr(path);
+  const char *taps = strstr(dump, "\"taps\":["); assert(taps);
+  const char *tap = strstr(taps, "\"label\":\"Fractional scale\"");
+  assert(tap);
+  double x, y, w, h;
+  assert(sscanf(tap, "\"label\":\"Fractional scale\",\"x\":%lf,\"y\":%lf,\"w\":%lf,\"h\":%lf", &x, &y, &w, &h) == 4);
+  assert(fabs(x - 94.8) < .001 && fabs(y - 77.4) < .001);
+  assert(fabs(w - 90.4) < .001 && fabs(h - 45.2) < .001);
+  free(dump); remove(path);
+  sz_ui_unmount(session); sz_view_free(root);
+}
+
 static void position_step(SzView *root, SzView *child, SkCanvas *canvas,
                           int x, int y, const SzTheme *theme) {
   int scale = (int)theme->px_scale;
@@ -21415,7 +21436,7 @@ static void test_styled_text_clip_and_theme(void) {
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--scale")) {
     test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
-    test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input();
+    test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds();
     puts("scale tests ok"); return 0;
   }
   if (argc == 2 && !strcmp(argv[1], "--animated-position")) {
@@ -22199,7 +22220,7 @@ int main(int argc, char **argv) {
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
   test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
-  test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input();
+  test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds();
   test_animated_position_steps();
   test_animated_position_retains_input();
   test_animated_position_limits();

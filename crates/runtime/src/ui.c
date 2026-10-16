@@ -613,7 +613,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     SzRect fr = sz_view_control_frame(buttons[i]);
     fprintf(f, "%s{\"i\":%d,\"label\":", i ? "," : "", i);
     fputs_json_str(f, sz_view_a11y_label(buttons[i]));
-    fprintf(f, ",\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f}", (double)fr.x,
+    fprintf(f, ",\"x\":%.17g,\"y\":%.17g,\"w\":%.17g,\"h\":%.17g}", (double)fr.x,
             (double)fr.y, (double)fr.w, (double)fr.h);
   }
   fputs("],\"fields\":[", f);

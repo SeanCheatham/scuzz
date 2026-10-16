@@ -2457,7 +2457,92 @@ build = package / 'build'
 source = build / 'fuzz/ev'
 ui = name in ('editor', 'layout', 'list', 'controls', 'split', 'choices', 'disclosure', 'inline', 'tooltips', 'shaping', 'themes', 'text', 'measured', 'select', 'motion')
 cases = {
-    'motion': [('position-pending', [
+    'motion': [('scale-baseline', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('scale-pending',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 2},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+ ('scale-retarget',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 3},
+   {'op': 'tap', 'id': 'button:Shrink scale'},
+   {'op': 'pump', 'k': 1},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+ ('scale-collapse',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 8},
+   {'op': 'text', 'i': 1, 'value': 'Kept scale input'},
+   {'op': 'tap', 'id': 'button:Scale add'},
+   {'op': 'tap', 'id': 'button:Collapse scale'},
+   {'op': 'pump', 'k': 8},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+ ('scale-reset',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 8},
+   {'op': 'text', 'i': 1, 'value': 'Kept scale input'},
+   {'op': 'tap', 'id': 'button:Scale add'},
+   {'op': 'tap', 'id': 'button:Reset scale'},
+   {'op': 'pump', 'k': 8},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+ ('scale-hidden',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 2},
+   {'op': 'tap', 'id': 'checkbox:Show scale content'},
+   {'op': 'tap', 'id': 'button:Shrink scale'},
+   {'op': 'pump', 'k': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale content'},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+ ('scale-reduced',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 2},
+   {'op': 'reduceMotion', 'value': True},
+   {'op': 'pump', 'k': 1}]),
+ ('scale-retained',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 8},
+   {'op': 'text', 'i': 1, 'value': 'Kept scale input'},
+   {'op': 'tap', 'id': 'button:Scale add'},
+   {'op': 'tap', 'id': 'button:Shrink scale'},
+   {'op': 'pump', 'k': 2},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+ ('scale-device',
+  [{'op': 'resize', 'width': 360, 'height': 2000, 'scale': 2},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 2},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+ ('scale-paused-target',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Grow scale'},
+   {'op': 'pump', 'k': 2},
+   {'op': 'lifecycle', 'phase': 'pause'},
+   {'op': 'tap', 'id': 'button:Shrink scale'},
+   {'op': 'pump', 'k': 3}]),
+ ('scale-small',
+  [{'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+   {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+   {'op': 'tap', 'id': 'button:Small scale'},
+   {'op': 'pump', 'k': 8},
+   {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('position-pending', [
         {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
         {'op': 'tap', 'id': 'checkbox:Show position sample'},
         {'op': 'tap', 'id': 'button:Far position'}, {'op': 'pump', 'k': 2},
@@ -3061,6 +3146,34 @@ for label, events in cases:
         evaluated = json.loads((output / 'eval.json').read_text())
         for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y'):
             assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
+        if label.startswith('scale-'):
+            transition = next(item for item in native['transitions'] if item['kind'] == 'scale')
+            expected = {'scale-baseline': (100, 100, 0), 'scale-pending': (125, 200, 6), 'scale-retarget': (127, 50, 7),
+                'scale-collapse': (0, 0, 0), 'scale-reset': (100, 100, 0),
+                'scale-hidden': (50, 50, 0), 'scale-reduced': (200, 200, 0),
+                'scale-retained': (163, 50, 6), 'scale-device': (125, 200, 6),
+                'scale-paused-target': (125, 50, 8), 'scale-small': (1, 1, 0)}[label]
+            assert tuple(transition[key] for key in ('value', 'target', 'remaining')) == expected, transition
+            values = {item.get('name'): item.get('value') for item in native['signals']}
+            assert values['scaleValue'] == expected[1], values
+            retained = label in ('scale-collapse', 'scale-reset', 'scale-retained')
+            assert values['scaleName'] == ('Kept scale input' if retained else 'Retained scale input'), values
+            assert values['scaleCount'] == (1 if retained else 0), values
+            fields = [item for item in native['fields'] if item['label'] == 'Scale name']
+            assert len(fields) == (0 if label == 'scale-collapse' else 1), native['fields']
+            buttons = [item for item in native['taps'] if item['label'] == 'Scale add']
+            assert len(buttons) == (0 if label == 'scale-collapse' else 1), native['taps']
+            if buttons:
+                button = buttons[0]
+                toggle = next(item for item in native['taps'] if item['label'] == 'Show scale content')
+                factor = expected[0] / 100
+                assert abs(button['x'] - (172 - 60 * factor)) < .002, button
+                assert abs(button['y'] - (toggle['y'] + 200)) < .002, (button, toggle)
+                if label == 'scale-baseline': scale_button_width = button['w']
+                assert abs(button['w'] - scale_button_width * factor) < .003 and abs(button['h'] - 40 * factor) < .002, button
+            assert native['reducedMotion'] == (label == 'scale-reduced'), native
+            print(f'motion {label}: exact scale, targets, displayed control bounds, and retained input pass', flush=True)
+            continue
         if label.startswith('position-'):
             transition = next(item for item in native['transitions'] if item['kind'] == 'position')
             expected = {'position-pending': (56, 46, 176, 136, 6),
@@ -3964,6 +4077,7 @@ PY_RANGE
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' size-motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' content-motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' position-motion
+  node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' scale-motion
   python3 - "$web_tmp/size limit" <<'PY_SIZE_LIMIT'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])

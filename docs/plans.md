@@ -28,12 +28,12 @@ Reject a deliberate paint or coordinate defect with an independent check.
 Run runtime, sanitizer, renderer, browser, and integration checks.
 Rebuild the product CLI and check its GUI manual.
 
-Status: Shared canvas and native View APIs support nested uniform scales.
+Status: Shared canvas, native View, Scuzz, and browser paths support nested uniform scales.
 Native paint and input use the child center. Layout and text wrapping stay unchanged.
-Field selection, range controls, scroll input, popups, source limits, and motion controls have focused native checks.
-Normal, ASan, and UBSan native runtime checks pass.
+Normal, ASan, and UBSan native scale checks pass. Canvas checks pass with all three renderers.
 An independent input check rejects a missing inverse transform.
-Canvas pixel checks pass in Skia, software, and GPU rendering.
-Software paint ASan and UBSan checks pass.
-Native scale, position, size, and content-size checks pass with software and GPU rendering.
-The Scuzz API, browser overlays, motion application, replay, and integration checks remain open.
+Recorded control bounds preserve fractional coordinates. A focused native check verifies these bounds.
+The motion sample uses nested static scales and one animated scale.
+Its campaign reaches all 29 triggers. It rejects four mutants and reports two inert mutations.
+Browser scale checks pass in Chromium, Firefox, and WebKit, including phone emulation.
+Exact replay, browser source limits and popup checks, and full integration checks remain open.

@@ -1128,6 +1128,111 @@ async function checkContentMotion(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkScaleMotion(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 2000},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile, reducedMotion: 'no-preference'});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await openMotionPage(page, url);
+    const state = () => page.evaluate(() => Module.webFrame.transitions.find(item => item.kind === 'scale'));
+    const advance = async count => {
+      const frames = [];
+      for (let i = 0; i < count; i++) {
+        const deadline = Date.now() + 30000;
+        while (!await page.evaluate(() => {
+          const before = Module.webFrame; window.motionStep(); return before !== Module.webFrame;
+        })) {
+          assert(Date.now() < deadline, 'scale transition paints a frame');
+          await page.waitForTimeout(10);
+        }
+        frames.push(await state());
+      }
+      return frames;
+    };
+    const click = name => page.getByRole('button', {name, exact: true}).evaluate(node => node.click());
+    const pointer = async (x, y) => {
+      if (mobile) await page.touchscreen.tap(x, y); else await page.mouse.click(x, y);
+    };
+    const name = page.getByRole('textbox', {name: 'Scale name', exact: true});
+    const group = page.getByRole('group', {name: 'Scale bounds', exact: true});
+    const scene = page.getByRole('group', {name: 'Scale scene', exact: true});
+    const add = page.getByRole('button', {name: 'Scale add', exact: true});
+    const after = page.getByRole('main', {name: 'Application', exact: true}).getByText('After scale sample', {exact: true});
+    const show = page.getByRole('checkbox', {name: 'Show scale content', exact: true});
+    await page.getByRole('checkbox', {name: 'Show scale sample', exact: true}).evaluate(node => node.click());
+    await advance(1);
+    assert.deepEqual([(await state()).value, (await state()).remaining], [100, 0]);
+    const origin = await scene.boundingBox(), below = await after.boundingBox(), firstButton = await add.boundingBox();
+    const geometry = async percent => {
+      const factor = percent / 100, box = await group.boundingBox(), field = await name.boundingBox();
+      const x = origin.x + 160 - 60 * factor, y = origin.y + 120 - 40 * factor;
+      assert(Math.abs(box.x - x) < .02 && Math.abs(box.y - y) < .02, JSON.stringify({box, x, y}));
+      assert(Math.abs(box.width - 120 * factor) < .02 && Math.abs(box.height - 80 * factor) < .02);
+      assert(Math.abs(field.x - x) < .02 && Math.abs(field.y - y) < .02);
+      assert(Math.abs(field.width - 120 * factor) < .02 && Math.abs(field.height - 40 * factor) < .02);
+      assert(Math.abs((await after.boundingBox()).y - below.y) < .01, 'scale preserves surrounding layout');
+      const pixel = await page.evaluate(({x, y}) => {
+        const scale = Module.webFrame.scale;
+        return Array.from(Module.canvas.getContext('2d').getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data);
+      }, {x: x + 118 * factor, y: y + 78 * factor});
+      assert.deepEqual(pixel, [225, 235, 245, 255]);
+    };
+    await geometry(100);
+    await name.fill('Kept scale input');
+    await name.evaluate(node => { node.setSelectionRange(2, 5); node.dispatchEvent(new Event('select')); });
+    const original = await name.elementHandle();
+    await click('Grow scale');
+    const grow = [];
+    for (let i = 0; i < 3; i++) {
+      const frame = (await advance(1))[0]; grow.push([frame.value, frame.remaining]);
+      await geometry(frame.value);
+    }
+    assert.deepEqual(grow, [[113, 7], [125, 6], [138, 5]]);
+    assert(await name.evaluate(node => document.activeElement === node));
+    assert.deepEqual(await name.evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ['Kept scale input', 2, 5]);
+    await click('Shrink scale');
+    const shrink = await advance(8);
+    assert.deepEqual(shrink.map(frame => frame.value), [127, 116, 105, 94, 83, 72, 61, 50]);
+    await geometry(50);
+    assert(await original.evaluate(node => node === document.querySelector('input[aria-label="Scale name"]')));
+    await pointer(firstButton.x + firstButton.width - 6, firstButton.y + firstButton.height - 6);
+    await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Scale count: 0')));
+    const current = await add.boundingBox();
+    await pointer(current.x + current.width / 2, current.y + current.height / 2); await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Scale count: 1')));
+    await click('Collapse scale'); await advance(8);
+    assert.deepEqual([(await state()).value, (await state()).remaining], [0, 0]);
+    assert.equal(await name.count(), 0); assert.equal(await add.count(), 0);
+    await click('Reset scale'); await advance(8); await geometry(100);
+    assert.equal(await name.inputValue(), 'Kept scale input');
+    await click('Grow scale'); await advance(2);
+    const frozen = await state(); await page.waitForTimeout(100);
+    assert.deepEqual(await state(), frozen, 'elapsed time does not advance scale');
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.equal(await state(), undefined); assert.equal(await name.count(), 0);
+    await click('Grow scale'); await advance(1);
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.deepEqual([(await state()).value, (await state()).remaining], [200, 0]);
+    await geometry(200); assert.equal(await name.inputValue(), 'Kept scale input');
+    await click('Shrink scale'); await advance(2);
+    await page.evaluate(() => {
+      window.motionPreferenceChange = undefined;
+      Module.motionPreference.addEventListener('change', () => window.motionPreferenceChange = Module.motionPreference.matches, {once: true});
+    });
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.evaluate(() => window.motionBrowserFrame());
+    await page.waitForFunction(() => window.motionPreferenceChange === true);
+    await advance(1);
+    assert.deepEqual([(await state()).value, (await state()).remaining], [50, 0]);
+    assert((await state()).suppressed); await geometry(50);
+    assert.deepEqual(errors, []);
+    console.log(`web scale motion: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkPositionMotion(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2728,7 +2833,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

@@ -7849,6 +7849,11 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
   case SZ_VIEW_SCALE:
   case SZ_VIEW_ANIMATED_SCALE: {
+#ifdef __EMSCRIPTEN__
+    if (v->kind == SZ_VIEW_ANIMATED_SCALE)
+      sz_web_scale_transition(v, v->animation_value, v->animation_target,
+        v->animation_duration - v->animation_step, v->motion_suppressed);
+#endif
     float scale = view_scale(v);
     if (!(scale > 0)) break;
     SzRect frame = scale_pivot_frame(v), previous_clip = g_clip, previous_radius = g_radius_rect;
@@ -7856,6 +7861,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float radius = g_radius;
     sk_canvas_save(c);
     if (sk_canvas_scale(c, scale, x, y)) {
+#ifdef __EMSCRIPTEN__
+      sz_web_scale_begin(v, scale, x, y, g_clip_on, g_clip);
+#endif
       if (g_clip_on) g_clip = inverse_scale_clip(g_clip, scale, x, y);
       if (g_radius_on) {
         g_radius_rect = (SzRect){x + (g_radius_rect.x - x) / scale,
@@ -7863,6 +7871,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         g_radius /= scale;
       }
       for (i = 0; i < v->child_count; i++) paint_node(v->children[i], c, theme);
+#ifdef __EMSCRIPTEN__
+      sz_web_group_end();
+#endif
     }
     sk_canvas_restore(c);
     g_clip = previous_clip; g_radius_rect = previous_radius; g_radius = radius;
