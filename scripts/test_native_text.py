@@ -60,7 +60,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     report = output / "summary.json"
     report.unlink(missing_ok=True)
-    env = dict(os.environ, CC="clang", CXX="clang++", LIBGL_ALWAYS_SOFTWARE="1", LP_NUM_THREADS="2")
+    env = dict(os.environ, CC="clang", CXX="clang++", LIBGL_ALWAYS_SOFTWARE="1", LP_NUM_THREADS="0")
     references = {}
 
     def run(args, label, stdout=None):

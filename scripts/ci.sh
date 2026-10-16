@@ -2315,8 +2315,8 @@ PY
 slice_gpu() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
-  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 SCUZZ_SKIA=gpu make -C crates/ffi-skia test -j"$JOBS" CC=clang
-  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 SCUZZ_SKIA=gpu "$SCUZZ" fuzz --iterations 0 examples/counter
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=0 SCUZZ_SKIA=gpu make -C crates/ffi-skia test -j"$JOBS" CC=clang
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=0 SCUZZ_SKIA=gpu "$SCUZZ" fuzz --iterations 0 examples/counter
   make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
 
@@ -2325,8 +2325,8 @@ slice_differential() {
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
   need_cmd python3 "sudo apt-get install -y python3"
   python3 scripts/test_png_max_delta.py
-  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 python3 scripts/test_native_text.py
-  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 "$SCUZZ" fuzz --differential --iterations 0 examples/counter
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=0 python3 scripts/test_native_text.py
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=0 "$SCUZZ" fuzz --differential --iterations 0 examples/counter
   make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
 

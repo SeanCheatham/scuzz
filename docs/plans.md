@@ -58,10 +58,9 @@ Android API 36 emulator checks pass on x86_64 with four cores and 4 GB of memory
 They cover text changes, typing after a combining mark, keyboard viewport changes,
 button input, and retained state after resume.
 Software replay produces exact native and evaluator timelines and claims.
-The OpenGL live probe exceeds its virtual memory budget with the default Mesa worker pool.
-Two Mesa workers let this probe complete within the existing time and memory limits.
-Software OpenGL checks set LP_NUM_THREADS=2.
-The full OpenGL campaign is in progress.
+Software OpenGL checks set LP_NUM_THREADS=0 to disable Mesa worker threads.
+The full OpenGL campaign passes within the existing time and memory limits.
+All mutation probes complete. Native and evaluator timelines and claims match exactly.
 Rebuild the UI host and shaping programs for each selected renderer.
 Default-renderer replay and clean UI validation remain open.
 Make uses clang++ as its default C++ compiler.

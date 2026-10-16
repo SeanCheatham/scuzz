@@ -142,9 +142,9 @@ Current shaping and text checks pass in all five browser configurations. Package
 Android API 36 emulator checks cover text changes, typing after a combining mark,
 keyboard viewport changes, button input, and retained state after resume.
 The emulator uses x86_64, four cores, and 4 GB of memory.
-Software replay produces exact native and evaluator timelines and claims.
-The OpenGL live graph probe times out before its campaign starts.
-OpenGL replay, final default-renderer replay, and clean UI checks remain open.
+Software and OpenGL replay produce exact native and evaluator timelines and claims.
+The OpenGL campaign completes within the probe limits with Mesa worker threads disabled.
+Final default-renderer replay and clean UI checks remain open.
 Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.
 Renderer checks cover overlap, nested layers, clips, transparency, and GPU orientation.
