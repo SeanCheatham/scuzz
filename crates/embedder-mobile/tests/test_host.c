@@ -30,6 +30,7 @@ int main(void) {
   assert(setenv("SCUZZ_MOBILE_SHELL", "1", 1) == 0);
   assert(sz_mobile_available());
   assert(!sz_mobile_alive());
+  assert(!sz_mobile_reduced_motion());
   assert(!sz_mobile_poll_event(&event));
 
   /* Each positive pixel size needs four bytes per pixel. */

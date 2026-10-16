@@ -11,6 +11,7 @@
 
 extern int scuzz_app_main(int argc, char **argv);
 void scuzz_android_set_alive(int alive);
+void scuzz_android_set_reduced_motion(int reduced);
 void sz_mobile_shutdown(void);
 int scuzz_android_frame_width(void);
 int scuzz_android_frame_height(void);
@@ -154,6 +155,13 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeResize(
   (void)env;
   (void)thiz;
   (void)scuzz_android_push_resize((int)width, (int)height);
+}
+
+JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeMotionPreference(
+    JNIEnv *env, jobject thiz, jboolean reduced) {
+  (void)env;
+  (void)thiz;
+  scuzz_android_set_reduced_motion(reduced != JNI_FALSE);
 }
 
 JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeLifecycle(

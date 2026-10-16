@@ -40,6 +40,8 @@ int sz_mobile_poll_event(SzInputEvent *out) {
 /* The host shell exits the Mobile loop after one frame. */
 int sz_mobile_alive(void) { return 0; }
 
+int sz_mobile_reduced_motion(void) { return 0; }
+
 void sz_mobile_set_keyboard(int visible) {
   g_keyboard = visible ? 1 : 0;
   if (shell_enabled()) {

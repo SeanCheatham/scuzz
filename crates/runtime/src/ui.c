@@ -98,6 +98,7 @@ __attribute__((weak)) int sz_mobile_poll_event(SzInputEvent *out) {
   return 0;
 }
 __attribute__((weak)) int sz_mobile_alive(void) { return 0; }
+__attribute__((weak)) int sz_mobile_reduced_motion(void) { return 0; }
 __attribute__((weak)) int sz_mobile_clipboard_set(const char *text) {
   (void)text;
   return 0;
@@ -260,6 +261,8 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
     if (ds > s->cfg.scale)
       s->cfg.scale = ds;
   }
+  if (s->cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available())
+    s->cfg.reduced_motion |= sz_mobile_reduced_motion();
   s->root = root;
   sz_view_reduce_motion(root, s->cfg.reduced_motion);
   s->owns_view = 0;

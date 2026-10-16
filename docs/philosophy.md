@@ -388,7 +388,9 @@ The browser follows `prefers-reduced-motion` and listens for changes.
 Linux Desktop reads the Settings portal motion preference before motion starts.
 It sends live changes through the shared input path.
 An absent portal does not prevent application use.
-Other native operating-system preference detection remains open.
+Android reads the system animation setting before the application worker starts.
+It sends live changes through the shared input path. Resume reads the setting again.
+Apple operating-system preference detection remains open.
 The shared `reduceMotion` input records preference changes.
 Record the initial session preference before live input.
 Apply a preference change to the View tree before later input.

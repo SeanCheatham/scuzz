@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_ui.h"
 #include "scuzz_embedder.h"
+#include "scuzz_mobile.h"
 #include "../src/ui_script.h"
 #include <assert.h>
 #include <stdio.h>
@@ -27,6 +28,15 @@ int sz_embedder_present(const char *title, int w, int h, int pw, int ph,
   return 1;
 }
 void sz_embedder_shutdown(void) { queued = 0; shutdowns++; }
+
+int sz_mobile_available(void) { return 1; }
+int sz_mobile_reduced_motion(void) { return sz_embedder_reduced_motion(); }
+int sz_mobile_poll_event(SzInputEvent *out) { return sz_embedder_poll_event(out); }
+int sz_mobile_present(const char *title, int w, int h, int pw, int ph,
+                      const uint8_t *rgba, size_t bytes) {
+  return sz_embedder_present(title, w, h, pw, ph, rgba, bytes);
+}
+void sz_mobile_shutdown(void) { sz_embedder_shutdown(); }
 
 typedef struct Fixture {
   SzSignalInt *value;
@@ -84,7 +94,8 @@ static void prepare(Fixture *f) {
 int main(void) {
   const char *path = "/tmp/scuzz-native-motion.json";
   unsetenv("SCUZZ_UI_REDUCED_MOTION");
-  for (int kind = 0; kind < 5; kind++) for (int initial = 0; initial <= 1; initial++)
+  for (int peer = 0; peer <= 1; peer++)
+      for (int kind = 0; kind < 5; kind++) for (int initial = 0; initial <= 1; initial++)
       for (int force = 0; force <= 1; force++)
       for (int steps = 1; steps <= 5; steps++) for (int cut = 0; cut <= 1; cut++) {
     Fixture live, replay;
@@ -92,7 +103,7 @@ int main(void) {
     else unsetenv("SCUZZ_UI_REDUCED_MOTION");
     preference = initial;
     int before_queries = queries, before_shutdowns = shutdowns;
-    SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_DESKTOP, .width = 320,
+    SzUiConfig cfg = {.kind = peer ? SZ_UI_RUNTIME_MOBILE : SZ_UI_RUNTIME_DESKTOP, .width = 320,
                      .height = 280, .scale = 1, .reduced_motion = force};
     fixture_make(&live, kind);
     SzUiSession *session = sz_ui_mount(&cfg, live.root);
@@ -145,6 +156,6 @@ int main(void) {
     fixture_free(&live); fixture_free(&replay);
   }
   remove(path);
-  puts("Native motion: 200 recordings replay with equal transitions and retained input.");
+  puts("Native motion: 400 recordings replay with equal transitions and retained input.");
   return 0;
 }

@@ -35,7 +35,7 @@ Sources:
 - [macOS preference notification](https://developer.apple.com/documentation/appkit/nsworkspace/accessibilitydisplayoptionsdidchangenotification)
 - [iOS preference](https://developer.apple.com/documentation/uikit/uiaccessibility/isreducemotionenabled)
 - [iOS preference notification](https://developer.apple.com/documentation/uikit/uiaccessibility/reducemotionstatusdidchangenotification)
-- [Android animator preference](https://developer.android.com/reference/android/animation/ValueAnimator#areAnimatorsEnabled())
+- [Android animator preference](https://developer.android.com/reference/android/provider/Settings.Global#ANIMATOR_DURATION_SCALE)
 
 Status: Native sessions support an explicit reduction setting and recorded preference events.
 Linux has initial detection and live Settings portal input.
@@ -46,14 +46,18 @@ Desktop input and resize checks pass.
 Full native and evaluator replay, browser, and package checks remain open.
 Recordings include the initial preference before live input.
 A shared runtime check replays 20 cases with the opposite initial preference.
-A native event fixture compares 200 recordings across all five transition types.
+A native event fixture compares 400 Desktop and Mobile recordings across all five transition types.
 It checks retained input, field selection, and the forced native setting.
 The native replay check rejects a missing initial preference, stale suppression, and an ignored forced setting.
 Preference updates clear inherited suppression before later input.
 Normal runtime IO and UI checks pass.
 Full ASan and UBSan runtime checks pass.
-All 200 native replay cases pass in normal, ASan, and UBSan builds.
+All 400 native replay cases pass in normal, ASan, and UBSan builds.
 The private Linux Settings portal check also passes under both sanitizers.
-Other native preference sources remain open.
+Android reads the animation setting before the application worker starts.
+It observes changes and reads the setting again on resume.
+The Java source compiles. Android packages compile for both native ABIs.
+A finite emulator check remains open.
+Apple native preference sources remain open.
 The Linux host has D-Bus development files and tools for a finite private session bus.
 Apple SDK tools are unavailable on this host. Apple execution checks remain open.

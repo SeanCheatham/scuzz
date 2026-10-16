@@ -34,6 +34,9 @@ int sz_mobile_poll_event(SzInputEvent *out);
  * Host shell returns 0 so the CI smoke stays a single frame. */
 int sz_mobile_alive(void);
 
+/* Read the initial system motion preference. Start change delivery. */
+int sz_mobile_reduced_motion(void);
+
 /* Enqueue an OS event. Returns 1 if stored. */
 int sz_mobile_push_event(const SzInputEvent *event);
 

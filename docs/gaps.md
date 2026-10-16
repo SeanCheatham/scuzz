@@ -155,11 +155,12 @@ Rotation transitions remain open.
 Linux Desktop reads the Settings portal motion preference and receives live changes.
 A private bus check covers initial values, invalid signals, foreign senders, stale replies, and service restart.
 Recordings include the initial session preference before live input.
-Shared runtime checks compare 200 native event recordings with Headless replay across five transition types.
+Shared runtime checks compare 400 Desktop and Mobile event recordings with Headless replay across five transition types.
 They check retained input, field selection, and the forced native setting.
 The shared runtime checks and private portal check pass under ASan and UBSan.
 Full native and evaluator preference replay checks remain open.
-Other native operating-system motion preference detection and real-device motion checks remain open.
+Android reads the animation setting before application startup and observes live changes.
+Android emulator checks, Apple preference detection, and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 
 Use the UI work order in `vision.md`.

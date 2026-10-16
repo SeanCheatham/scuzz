@@ -2,12 +2,14 @@ package dev.scuzz.app;
 
 import android.app.Activity;
 import android.content.Context;
+import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
@@ -47,6 +49,13 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   private int pointW;
   private int pointH;
   private final Handler tick = new Handler(Looper.getMainLooper());
+  private boolean motionWatching;
+  private final ContentObserver motionObserver = new ContentObserver(tick) {
+    @Override
+    public void onChange(boolean selfChange) {
+      if (motionWatching) syncMotionPreference();
+    }
+  };
   private final Runnable blit =
       new Runnable() {
         @Override
@@ -73,9 +82,17 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
   public native void nativeLifecycle(int phase);
 
+  public native void nativeMotionPreference(boolean reduced);
+
   public native void nativeSetAlive(int alive);
 
   public native int nativeKeyboardVisible();
+
+  private void syncMotionPreference() {
+    float scale = Settings.Global.getFloat(
+        getContentResolver(), Settings.Global.ANIMATOR_DURATION_SCALE, 1f);
+    nativeMotionPreference(scale == 0f);
+  }
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -118,6 +135,11 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     pointW = Math.max(1, (int) (dm.widthPixels / density));
     pointH = Math.max(1, (int) (dm.heightPixels / density));
     File dump = new File(getFilesDir(), "scuzz_android.debug.dump");
+    getContentResolver().registerContentObserver(
+        Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+        false, motionObserver);
+    motionWatching = true;
+    syncMotionPreference();
     nativeStart(dump.getAbsolutePath(), pointW, pointH, density);
     scheduleInject();
   }
@@ -131,11 +153,14 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   @Override
   protected void onResume() {
     super.onResume();
+    if (motionWatching) syncMotionPreference();
     nativeLifecycle(LIFECYCLE_RESUME);
   }
 
   @Override
   protected void onDestroy() {
+    motionWatching = false;
+    getContentResolver().unregisterContentObserver(motionObserver);
     nativeLifecycle(LIFECYCLE_STOP);
     nativeSetAlive(0);
     super.onDestroy();
