@@ -279,7 +279,7 @@ def wantLink(): String =
   "clang -O0 -Wno-override-module 'build/hello.ll' 'crates/runtime/build/libscuzz_rt.a' -lpthread -lssl -lcrypto -o 'build/hello'"
 
 def wantLinkUi(): String =
-  "clang -O0 -Wno-override-module 'a.ll' 'rt.a' './crates/ffi-skia/build/libsk_capi.a' -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive './crates/embedder-desktop/build/libscuzz_embedder.a' -Wl,--no-whole-archive -lX11 -Wl,--whole-archive './crates/embedder-mobile/build/libscuzz_mobile.a' -Wl,--no-whole-archive -lpthread -lssl -lcrypto -rdynamic -o 'app'"
+  "clang -O0 -Wno-override-module 'a.ll' 'rt.a' './crates/ffi-skia/build/libsk_capi.a' -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive './crates/embedder-desktop/build/libscuzz_embedder.a' -Wl,--no-whole-archive -lX11 -ldbus-1 -Wl,--whole-archive './crates/embedder-mobile/build/libscuzz_mobile.a' -Wl,--no-whole-archive -lpthread -lssl -lcrypto -rdynamic -o 'app'"
 
 def wantLinkMacUi(): String =
   "clang -O0 -Wno-override-module 'a.ll' 'rt.a' './crates/ffi-skia/build/libsk_capi.a' -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon -Xlinker -force_load -Xlinker './crates/embedder-desktop/build/libscuzz_embedder.a' -framework Cocoa -lobjc -Xlinker -force_load -Xlinker './crates/embedder-mobile/build/libscuzz_mobile.a' -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o 'app'"
