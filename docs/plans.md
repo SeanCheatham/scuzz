@@ -43,15 +43,17 @@ A private bus check covers repeated changes, invalid signals, foreign senders, s
 It rejects a deliberate inversion of the preference.
 Rebuild the product CLI after the shared runtime checks.
 Desktop input and resize checks pass.
-Runtime, replay, sanitizer, and package checks remain open for this change.
+Full native and evaluator replay, browser, and package checks remain open.
 Recordings include the initial preference before live input.
 A shared runtime check replays 20 cases with the opposite initial preference.
-A native event fixture compares 100 recordings across all five transition types.
-It checks retained input and field selection.
-The native replay check rejects a missing initial preference and stale suppression.
+A native event fixture compares 200 recordings across all five transition types.
+It checks retained input, field selection, and the forced native setting.
+The native replay check rejects a missing initial preference, stale suppression, and an ignored forced setting.
 Preference updates clear inherited suppression before later input.
 Normal runtime IO and UI checks pass.
-ASan and UBSan checks remain open.
+Full ASan and UBSan runtime checks pass.
+All 200 native replay cases pass in normal, ASan, and UBSan builds.
+The private Linux Settings portal check also passes under both sanitizers.
 Other native preference sources remain open.
 The Linux host has D-Bus development files and tools for a finite private session bus.
 Apple SDK tools are unavailable on this host. Apple execution checks remain open.

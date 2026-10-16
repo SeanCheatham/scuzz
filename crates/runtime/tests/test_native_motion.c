@@ -85,12 +85,15 @@ int main(void) {
   const char *path = "/tmp/scuzz-native-motion.json";
   unsetenv("SCUZZ_UI_REDUCED_MOTION");
   for (int kind = 0; kind < 5; kind++) for (int initial = 0; initial <= 1; initial++)
+      for (int force = 0; force <= 1; force++)
       for (int steps = 1; steps <= 5; steps++) for (int cut = 0; cut <= 1; cut++) {
     Fixture live, replay;
+    if (force) setenv("SCUZZ_UI_REDUCED_MOTION", "1", 1);
+    else unsetenv("SCUZZ_UI_REDUCED_MOTION");
     preference = initial;
     int before_queries = queries, before_shutdowns = shutdowns;
     SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_DESKTOP, .width = 320,
-                     .height = 280, .scale = 1};
+                     .height = 280, .scale = 1, .reduced_motion = force};
     fixture_make(&live, kind);
     SzUiSession *session = sz_ui_mount(&cfg, live.root);
     assert(session && sz_ui_pump_sync(session));
@@ -101,13 +104,13 @@ int main(void) {
       SzInputEvent key = {.kind = SZ_INPUT_KEY, .key = "Space"};
       assert(sz_ui_session_live_inject(session, &key));
       assert(sz_ui_pump_sync(session));
-      assert(sz_view_transition_pending(live.root) == !preference);
+      assert(sz_view_transition_pending(live.root) == !(preference || force));
       if (cut && i + 1 == steps) break;
       preference = !preference;
       queued = 1;
       assert(sz_ui_pump_sync(session));
       assert(!queued);
-      if (preference) assert(!sz_view_motion_pending(live.root));
+      if (preference || force) assert(!sz_view_motion_pending(live.root));
     }
     assert(!strcmp(sz_signal_str_get(live.input), "Retained input"));
     assert(sz_view_text_field_sel_start(live.field) == 1);
@@ -118,7 +121,7 @@ int main(void) {
     assert(shutdowns == before_shutdowns + 1);
     int before_presents = presents;
     cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-    cfg.reduced_motion = !initial;
+    cfg.reduced_motion = !(initial || force);
     fixture_make(&replay, kind);
     session = sz_ui_mount(&cfg, replay.root);
     assert(session && sz_ui_pump_sync(session));
@@ -142,6 +145,6 @@ int main(void) {
     fixture_free(&live); fixture_free(&replay);
   }
   remove(path);
-  puts("Native motion: 100 recordings replay with equal transitions and retained input.");
+  puts("Native motion: 200 recordings replay with equal transitions and retained input.");
   return 0;
 }
