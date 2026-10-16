@@ -270,15 +270,16 @@ static void test_shaped_text(void) {
 static void test_font_fallback(void) {
   if (sk_font_measure_string("i", 32) == sk_font_measure_string("W", 32)) return;
   /* The pinned font files give these advances at weight 400 and size 32. */
-  const char *source[] = {"नमस्ते", "कि", "क्षि", "สวัสดี", "ปู่", "中文漢字", "日本語"};
-  const float widths[] = {67.584f, 32.864f, 31.232f, 72.064f, 19.36f, 128.f, 96.f};
+  const char *source[] = {"नमस्ते", "कि", "क्षि", "สวัสดี", "ปู่", "中文漢字", "日本語", "ࡰ"};
+  const float widths[] = {67.584f, 32.864f, 31.232f, 72.064f, 19.36f, 128.f, 96.f, 7.616f};
   for (size_t i = 0; i < sizeof widths / sizeof widths[0]; i++) {
     size_t bytes = strlen(source[i]);
     for (int style = 0; style < 4; style++)
       assert(fabsf(sk_font_measure_span(sk_text_range(source[i], bytes), 32, style) - widths[i]) < .002f);
     float leading[64], trailing[64];
     sk_font_text_positions(sk_text_range(source[i], bytes), 32, 0, leading, trailing);
-    assert(fabsf(leading[bytes] - widths[i]) < .002f);
+    assert(fabsf(leading[bytes] - (i == 7 ? 0.f : widths[i])) < .002f);
+    if (i == 7) assert(fabsf(leading[0] - widths[i]) < .002f);
     for (size_t j = 0; j <= bytes; j++) {
       assert(isfinite(leading[j]) && isfinite(trailing[j]));
       assert(leading[j] >= -.01f && trailing[j] <= widths[i] + .01f);

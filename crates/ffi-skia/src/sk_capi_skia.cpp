@@ -121,17 +121,17 @@ static hb_blob_t *font_table(hb_face_t *, hb_tag_t tag, void *data) {
 }
 
 extern "C" {
-extern const unsigned char scuzz_font_devanagari[], scuzz_font_thai[], scuzz_font_sc[];
-extern const unsigned int scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len;
+extern const unsigned char scuzz_font_devanagari[], scuzz_font_thai[], scuzz_font_sc[], scuzz_font_arabic[];
+extern const unsigned int scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len, scuzz_font_arabic_len;
 }
 
 static sk_sp<SkTypeface> text_typeface(unsigned index) {
   if (!index) return default_typeface();
-  static std::array<sk_sp<SkTypeface>, 3> faces;
-  static std::array<std::once_flag, 3> once;
+  static std::array<sk_sp<SkTypeface>, 4> faces;
+  static std::array<std::once_flag, 4> once;
   std::call_once(once[index - 1], [index] {
-    const unsigned char *data[] = {scuzz_font_devanagari, scuzz_font_thai, scuzz_font_sc};
-    const unsigned lengths[] = {scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len};
+    const unsigned char *data[] = {scuzz_font_devanagari, scuzz_font_thai, scuzz_font_sc, scuzz_font_arabic};
+    const unsigned lengths[] = {scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len, scuzz_font_arabic_len};
     auto bytes = SkData::MakeWithoutCopy(data[index - 1], lengths[index - 1]);
     auto manager = SkFontMgr_New_Custom_Empty();
     auto face = manager->makeFromData(bytes);
@@ -149,9 +149,9 @@ static sk_sp<SkTypeface> text_typeface(unsigned index) {
 
 static hb_font_t *shape_font(unsigned index = 0) {
   using Font = std::unique_ptr<hb_font_t, decltype(&hb_font_destroy)>;
-  static std::array<Font, 4> fonts = {Font(nullptr, hb_font_destroy), Font(nullptr, hb_font_destroy),
-    Font(nullptr, hb_font_destroy), Font(nullptr, hb_font_destroy)};
-  static std::array<std::once_flag, 4> once;
+  static std::array<Font, 5> fonts = {Font(nullptr, hb_font_destroy), Font(nullptr, hb_font_destroy),
+    Font(nullptr, hb_font_destroy), Font(nullptr, hb_font_destroy), Font(nullptr, hb_font_destroy)};
+  static std::array<std::once_flag, 5> once;
   std::call_once(once[index], [index] {
     sk_sp<SkTypeface> typeface = text_typeface(index);
     if (!typeface) std::abort();
@@ -186,7 +186,7 @@ static bool font_covers(unsigned index, const char *text, size_t bytes) {
 }
 
 static unsigned select_font(const char *text, size_t bytes) {
-  for (unsigned index = 0; index < 4; index++)
+  for (unsigned index = 0; index < 5; index++)
     if (font_covers(index, text, bytes)) return index;
   return 0;
 }

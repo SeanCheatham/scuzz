@@ -590,7 +590,7 @@ Source strings keep their original UTF-8 bytes.
 Editor cells and native monospace spans keep their cell layout.
 The browser uses the same pinned paragraph direction algorithm.
 Its font shaper and DOM text ranges supply glyphs and source positions.
-Pinned Noto fonts supply fallback for Devanagari, Thai, and Simplified Chinese.
+Pinned Noto fonts supply fallback for Arabic, Devanagari, Thai, and Simplified Chinese.
 Font selection keeps source clusters together. Text line boxes contain fallback marks.
 Web packages include the same fonts. Font loading updates layout and keeps input state.
 Other script coverage, contextual glyph forms across font changes and full bidi caret affinity remain open.

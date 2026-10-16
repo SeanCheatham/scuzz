@@ -6,6 +6,7 @@ Exclude hidden lines from this context.
 Keep paragraph direction, source text, inline actions, wrapping, and ellipsis in agreement.
 
 Use the pinned HarfBuzz joining data for browser boundary context.
+Use a pinned Arabic font to keep virtual joiners with fallback letters.
 Keep source controls and source offsets in the original text.
 Check joined, non-joining, and transparent characters.
 Compare native and browser pixels with independent joining forms.

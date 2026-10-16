@@ -19,5 +19,12 @@
     "path": "ofl/notosanssc/NotoSansSC[wght].ttf",
     "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
     "unicode_range": "U+2E80-2FFF,U+3000-30FF,U+31C0-31EF,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FF00-FFEF,U+20000-2FA1F"
+  },
+  {
+    "name": "arabic",
+    "revision": "2bc5d431b584d89e646214bf6cfa75494e76ceea",
+    "path": "ofl/notosansarabic/NotoSansArabic[wdth,wght].ttf",
+    "sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e",
+    "unicode_range": "U+0600-06FF,U+0750-077F,U+0870-089F,U+08A0-08FF,U+200C-200D,U+FB50-FDFF,U+FE70-FEFF,U+10EC0-10EFF,U+1EE00-1EEFF"
   }
 ]
