@@ -41,4 +41,4 @@ Fresh native sanitizer checks include fractional control records.
 All 44 native and evaluator replay cases have equal timelines and claims.
 Their checks include displayed scale bounds, source values, retained fields, and cancellation.
 The rebuilt CLI manual includes both scale APIs. Full Web integration checks pass.
-Package and clean UI integration checks remain open.
+Package integration checks pass. Clean UI integration checks remain open.
