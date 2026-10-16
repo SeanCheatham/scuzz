@@ -49,7 +49,8 @@ fi
 
 OUT="$PROJ/build/android"
 rm -rf "$OUT"
-mkdir -p "$OUT"
+mkdir -p "$OUT/licenses"
+cp "$NDK/toolchains/llvm/prebuilt/$HOST/NOTICE" "$OUT/licenses/LLVM-LICENSE"
 
 if [ -z "${SCUZZ:-}" ] || [ ! -x "$SCUZZ" ]; then
   SCUZZ="$ROOT/examples/cli/build/cli"
