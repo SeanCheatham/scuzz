@@ -2212,11 +2212,11 @@ def orderedInputTimes(lines: List[String], time: Int): List[String] =
 
 def orderedInputTime(line: String, rest: List[String], time: Int): List[String] =
   if (!Str.startsWith(Str.trim(line), "inputTime ")) line :: orderedInputTimes(rest, time) else Str.parseInt(Str.trim(jRest(Str.trim(line)))) match {
-    case Result.Ok(value) => if (value < 0) line :: orderedInputTimes(rest, time) else for {
-      next = if (value < time) time else value
-    } yield Str.concat("inputTime ", Str.fromInt(next)) :: orderedInputTimes(rest, next)
-    case Result.Err(_) => line :: orderedInputTimes(rest, time)
-  }
+  case Result.Ok(value) => if (value < 0) line :: orderedInputTimes(rest, time) else for {
+  next = if (value < time) time else value
+} yield Str.concat("inputTime ", Str.fromInt(next)) :: orderedInputTimes(rest, next)
+  case Result.Err(_) => line :: orderedInputTimes(rest, time)
+}
 
 def varyLines(lines: List[String], seed: Int): String =
   if (List.isEmpty(lines)) "" else if (seed % 3 == 0) nls(List.reverse(lines)) else if (seed % 3 == 1) nls(List.concat(List.tail(lines), List.at(lines, 0) :: noStr())) else nls(List.concat(lines, List.at(lines, seed % List.len(lines)) :: noStr()))
