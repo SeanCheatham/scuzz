@@ -15157,6 +15157,35 @@ static void test_animated_size_steps(void) {
   }
 }
 
+static void test_animated_size_unbounded_limits(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale;
+    SzSignalInt *width = sz_signal_int(INT64_MAX), *height = sz_signal_int(INT64_MAX);
+    SzView *size = sz_view_animated_size(width, height, 4,
+      sz_view_background(0xffff0000, sz_view_text("")));
+    SzView *root = sz_view_unconstrained_box(size);
+    sz_view_reduce_motion(root, 1);
+    int edge = 64 * scale;
+    SkSurface *surface = sk_surface_make_raster_n32_premul(edge, edge);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    assert(sz_view_paint(root, canvas, edge, edge, &theme));
+    SzRect frame = sz_view_frame(size);
+    assert(frame.w == (float)INT_MAX * scale && frame.h == (float)INT_MAX * scale);
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, edge, 0, 0, 255, 0, 0));
+    assert(px_rgb(pixels, edge, edge - 1, edge - 1, 255, 0, 0));
+    assert(sz_signal_int_get(width) == INT64_MAX && sz_signal_int_get(height) == INT64_MAX);
+    sz_signal_int_set(width, INT64_MIN); sz_signal_int_set(height, INT64_MIN);
+    assert(sz_view_paint(root, canvas, edge, edge, &theme));
+    pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, edge, 0, 0, 0xf3, 0xef, 0xe3));
+    assert(!sz_view_transition_pending(root));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(width); sz_signal_int_free(height);
+  }
+}
+
 static void test_animated_size_retains_input(void) {
   SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
   SzSignalInt *width = sz_signal_int(200), *height = sz_signal_int(80), *visible = sz_signal_int(1);
@@ -20698,6 +20727,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--animated-size")) {
     test_animated_size_steps();
     test_animated_size_retains_input();
+    test_animated_size_unbounded_limits();
     puts("animated size tests ok");
     return 0;
   }
@@ -21460,6 +21490,7 @@ int main(int argc, char **argv) {
   test_slider_live_records_xy();
   test_animated_size_steps();
   test_animated_size_retains_input();
+  test_animated_size_unbounded_limits();
   test_progress_named_range();
   test_progress_sizes();
   test_progress_unbounded_width();
