@@ -137,7 +137,12 @@ ASan and UBSan checks pass for the portable shaper and glyph raster path.
 48 script, size, and style cases compare widths, carets, clusters, and glyph outlines with Skia.
 The glyph reference uses unhinted Skia with subpixel positions.
 Text advance and glyph placement defects fail these checks.
-Wider runtime parity, browser, package, and Android execution checks for this path remain open.
+Current UI checks pass for software, OpenGL, Skia, ASan, and UBSan.
+Current shaping and text checks pass in all five browser configurations. Package CI passes.
+Android API 36 emulator checks cover text changes, typing after a combining mark,
+keyboard viewport changes, button input, and retained state after resume.
+The emulator uses x86_64, four cores, and 4 GB of memory.
+Final renderer replay and clean UI checks remain open.
 Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.
 Renderer checks cover overlap, nested layers, clips, transparency, and GPU orientation.

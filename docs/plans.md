@@ -54,5 +54,10 @@ Native-only fonts stay in the assembly. They do not enter web assets.
 Offline checks cover all three output combinations.
 Package checks also build the portable renderer from bundled HarfBuzz source.
 Package CI passes. It builds the portable renderer from bundled source.
-Android input checks remain open. Repeat them without other validation jobs.
+Android API 36 emulator checks pass on x86_64 with four cores and 4 GB of memory.
+They cover text changes, typing after a combining mark, keyboard viewport changes,
+button input, and retained state after resume.
+Final native and evaluator checks cover each renderer. Clean UI validation is in progress.
+Make still selects its built-in g++ default when CXX is absent.
+Use clang++ as the default C++ compiler. Check a build without a CXX override.
 Apple SDK execution is unavailable on this host.
