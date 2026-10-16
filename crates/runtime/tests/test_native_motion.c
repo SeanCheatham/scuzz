@@ -58,10 +58,7 @@ static void change(SzView *view, void *env) {
       "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight");
 }
 
-static void fixture_make(Fixture *f, int kind) {
-  f->value = sz_signal_int(20);
-  f->input = sz_signal_str("Retained input");
-  f->label = sz_signal_str("short");
+static void fixture_build(Fixture *f, int kind) {
   f->action = sz_view_button("Change", change, f);
   f->field = sz_view_text_field(f->input, "Name");
   SzView *motion = NULL;
@@ -82,6 +79,13 @@ static void fixture_make(Fixture *f, int kind) {
   f->root = sz_view_column();
   sz_view_add_child(f->root, f->action);
   sz_view_add_child(f->root, motion);
+}
+
+static void fixture_make(Fixture *f, int kind) {
+  f->value = sz_signal_int(20);
+  f->input = sz_signal_str("Retained input");
+  f->label = sz_signal_str("short");
+  fixture_build(f, kind);
 }
 
 static void fixture_free(Fixture *f) {
@@ -123,6 +127,74 @@ static void test_keyboard_requests(void) {
     sz_view_free(field); sz_signal_str_free(text);
   }
   puts("Native keyboard: repeated field input requests pass.");
+}
+
+static void check_remaining(Fixture *fixture, int kind, int remaining) {
+  const char *kinds[] = {"opacity", "size", "position", "scale", "contentSize"};
+  char prefix[64];
+  snprintf(prefix, sizeof prefix, "pumps:%s:", kinds[kind]);
+  SzString *dump = sz_view_a11y_dump(fixture->root);
+  const char *line = strstr(sz_string_cstr(dump), prefix);
+  assert(line && strchr(line, '='));
+  assert(strtol(strchr(line, '=') + 1, NULL, 10) == remaining);
+  sz_string_free(dump);
+}
+
+static void test_motion_replacement(void) {
+  unsetenv("SCUZZ_UI_REDUCED_MOTION");
+  for (int peer = 0; peer <= 1; peer++) for (int kind = 0; kind < 5; kind++) {
+    preference = 1; queued = 0;
+    Fixture fixture;
+    fixture_make(&fixture, kind);
+    SzUiConfig cfg = {.kind = peer ? SZ_UI_RUNTIME_MOBILE : SZ_UI_RUNTIME_DESKTOP,
+                     .width = 320, .height = 280, .scale = 1};
+    SzUiSession *session = sz_ui_mount(&cfg, fixture.root);
+    assert(session && sz_ui_pump_sync(session));
+    prepare(&fixture);
+    SzInputEvent key = {.kind = SZ_INPUT_KEY, .key = "Space"};
+    assert(sz_ui_session_live_inject(session, &key) && sz_ui_pump_sync(session));
+    assert(!sz_view_motion_pending(fixture.root));
+    check_remaining(&fixture, kind, 0);
+    preference = 0; queued = 1;
+    assert(sz_ui_pump_sync(session));
+    SzInputEvent lifecycle = {.kind = SZ_INPUT_LIFECYCLE, .lifecycle = SZ_LIFECYCLE_PAUSE};
+    assert(sz_ui_session_live_inject(session, &lifecycle));
+    assert(sz_ui_session_live_inject(session, &key) && sz_ui_pump_sync(session));
+    assert(!sz_view_transition_pending(fixture.root));
+    check_remaining(&fixture, kind, 8);
+    preference = 1; queued = 1;
+    assert(sz_ui_pump_sync(session));
+    assert(!sz_view_motion_pending(fixture.root));
+    check_remaining(&fixture, kind, 0);
+
+    sz_signal_str_set(fixture.input, "Retained replacement input");
+    SzView *old = fixture.root;
+    fixture_build(&fixture, kind);
+    assert(sz_ui_session_replace_root(session, fixture.root));
+    sz_view_free(old);
+    assert(sz_ui_pump_sync(session));
+    prepare(&fixture);
+    assert(sz_ui_session_live_inject(session, &key) && sz_ui_pump_sync(session));
+    assert(!sz_view_motion_pending(fixture.root));
+    check_remaining(&fixture, kind, 0);
+    assert(!strcmp(sz_signal_str_get(fixture.input), "Retained replacement input"));
+    preference = 0; queued = 1;
+    assert(sz_ui_pump_sync(session));
+    assert(sz_ui_session_live_inject(session, &key) && sz_ui_pump_sync(session));
+    assert(!sz_view_transition_pending(fixture.root));
+    check_remaining(&fixture, kind, 8);
+    lifecycle.lifecycle = SZ_LIFECYCLE_RESUME;
+    assert(sz_ui_session_live_inject(session, &lifecycle) && sz_ui_pump_sync(session));
+    assert(sz_view_transition_pending(fixture.root));
+    check_remaining(&fixture, kind, 7);
+    for (int pump = 0; pump < 8; pump++) assert(sz_ui_pump_sync(session));
+    assert(!sz_view_motion_pending(fixture.root));
+    check_remaining(&fixture, kind, 0);
+    assert(!strcmp(sz_signal_str_get(fixture.input), "Retained replacement input"));
+    sz_ui_unmount(session);
+    fixture_free(&fixture);
+  }
+  puts("Native motion: pause, reduction, View replacement, and resume checks pass.");
 }
 
 int main(void) {
@@ -191,6 +263,7 @@ int main(void) {
   }
   remove(path);
   test_keyboard_requests();
+  test_motion_replacement();
   puts("Native motion: 400 recordings replay with equal transitions and retained input.");
   return 0;
 }
