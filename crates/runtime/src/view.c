@@ -3149,6 +3149,16 @@ static float *text_positions(const char *text, int length, float font) {
   return positions;
 }
 
+static int field_caret_after_zero_width(const char *source, int length, int caret, const float *positions) {
+  while (caret < length) {
+    int next = caret + utf8_clen(source, caret);
+    if (next > length || positions[caret] != positions[next] ||
+        positions[caret] != positions[length + 1 + caret]) break;
+    caret = next;
+  }
+  return caret;
+}
+
 static char *field_display(const SzView *view, int *caret, int *pre_start, int *pre_end) {
   const char *source = field_cstr(view), *preedit = edit_preedit(view);
   int length = (int)strlen(source), extra = (int)strlen(preedit);
@@ -8794,6 +8804,7 @@ static int caret_offset_at_x(SzView *f, float x) {
     if (byte == length) break;
     byte += utf8_clen(source, byte);
   }
+  best = field_caret_after_zero_width(source, length, best, positions);
   sz_free(positions);
   return best;
 }
@@ -9748,7 +9759,7 @@ static void field_move_caret(SzView *t, int dir) {
       if (byte == n) break;
       byte += utf8_clen(cur, byte);
     }
-    t->caret = best;
+    t->caret = field_caret_after_zero_width(cur, n, best, positions);
     sz_free(positions);
     return;
   }

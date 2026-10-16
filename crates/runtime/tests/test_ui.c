@@ -20182,6 +20182,46 @@ static SzText *test_text_pair(SzText *a, SzText *b) {
   return text;
 }
 
+static void test_shaped_field_marks(void) {
+  const char *source[] = {"AV fi é", "ȩ́", "مَ", "שׁ", "ปู่", "कि"};
+  const int rtl[] = {0, 0, 1, 1, 0, 0};
+  for (int size = 16; size <= 32; size += 16) for (int i = 0; i < 6; i++) {
+    SzTheme theme = *sz_theme_default();
+    theme.font_px = (float)size;
+    SzSignalStr *value = sz_signal_str(source[i]);
+    SzView *field = sz_view_text_field(value, "Name");
+    sz_view_layout(field, 320, 100, &theme);
+    sz_view_focus(field, field);
+    SzRect frame = sz_view_frame(field);
+    int end = (int)strlen(source[i]);
+    sz_view_activate(field, field, rtl[i] ? frame.x + 1 : frame.x + frame.w - 1, frame.y + frame.h / 2);
+    assert(sz_view_text_field_caret(field) == end);
+    sz_view_handle_text_edit(field, "Kept", 0);
+    char expected[128];
+    snprintf(expected, sizeof expected, "%sKept", source[i]);
+    assert(!strcmp(sz_signal_str_get(value), expected));
+    sz_signal_str_set(value, source[i]);
+    sz_view_set_text_field_caret(field, 0);
+    for (int step = 0; step < end; step++) sz_view_handle_key(field, rtl[i] ? "ArrowLeft" : "ArrowRight", "", 0);
+    assert(sz_view_text_field_caret(field) == end);
+    sz_view_handle_text_edit(field, "Kept", 0);
+    assert(!strcmp(sz_signal_str_get(value), expected));
+    sz_view_free(field);
+    sz_signal_str_free(value);
+  }
+  SzSignalStr *value = sz_signal_str("fi");
+  SzView *field = sz_view_text_field(value, "Name");
+  sz_view_layout(field, 320, 100, sz_theme_default());
+  sz_view_focus(field, field);
+  sz_view_set_text_field_caret(field, 0);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 1);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 2);
+  sz_view_free(field);
+  sz_signal_str_free(value);
+}
+
 static void test_shaped_field_geometry(void) {
   assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
   SzSignalStr *value = sz_signal_str("אב");
@@ -21618,6 +21658,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc == 2 && !strcmp(argv[1], "--shaping")) {
+    test_shaped_field_marks();
     test_shaped_field_geometry();
     test_shaped_text_wrapping();
     test_font_change_joining();
@@ -22433,6 +22474,7 @@ int main(int argc, char **argv) {
   test_select_reactive_options();
   test_select_pointer_identity();
   test_select_scope_and_journal();
+  test_shaped_field_marks();
   test_shaped_field_geometry();
   test_shaped_text_wrapping();
   test_font_change_joining();
