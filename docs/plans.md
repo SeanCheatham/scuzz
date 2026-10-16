@@ -18,4 +18,4 @@ Run sanitizer, browser, renderer, and integration checks.
 
 Transform transitions and native operating-system motion preferences remain open.
 
-Status: Source inspection confirms that shared transitions support opacity. Size implementation remains.
+Status: The native constructor and pump clock pass focused checks. Geometry and pixel checks cover scales 1 and 2. Retargeting, pause, reduction, zero size, hidden content, range limits, and retained input pass. A deliberate clipping defect fails the pixel check. A zero-size parent suppresses child transitions. The full native suite is active. The Scuzz API, evaluator mount, motion application, browser output, sanitizer checks, renderer checks, exact replay, and integration remain.

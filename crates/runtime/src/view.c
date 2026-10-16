@@ -186,6 +186,8 @@ struct SzView {
 
   /* Pump-counted motion. 0 is quiet. The step is motion_left. */
   int animation_value, animation_from, animation_target;
+  SzSignalInt *size_height;
+  int animation_height, animation_from_height, animation_target_height;
   int animation_step, animation_duration, animation_ready;
   int motion_reduced, motion_paused, motion_suppressed;
   int motion;
@@ -226,6 +228,7 @@ static void view_set_tap(SzView *v, SzViewTapFn on_tap, void *env) {
 }
 
 static int view_is_shown(const SzView *v);
+static int size_collapsed(const SzView *view);
 static float scale_px(const SzTheme *theme, float v);
 static int clear_focus(SzView *v);
 static void field_commit_preedit(SzView *v);
@@ -257,7 +260,7 @@ static int view_is_branch_shown(const SzView *v) {
 
 static int view_is_path_shown(const SzView *v) {
   for (; v; v = v->parent) {
-    if (!view_is_branch_shown(v))
+    if (!view_is_branch_shown(v) || size_collapsed(v))
       return 0;
   }
   return 1;
@@ -411,7 +414,7 @@ static int motion_pending_node(const SzView *v) {
   int i;
   if (!v)
     return 0;
-  if (v->motion_left > 0 || (v->kind == SZ_VIEW_ANIMATED_OPACITY &&
+  if (v->motion_left > 0 || ((v->kind == SZ_VIEW_ANIMATED_OPACITY || v->kind == SZ_VIEW_ANIMATED_SIZE) &&
       v->animation_ready && v->animation_step < v->animation_duration))
     return 1;
   for (i = 0; i < v->child_count; i++)
@@ -422,7 +425,7 @@ static int motion_pending_node(const SzView *v) {
 
 static int transition_pending_node(const SzView *view) {
   if (!view) return 0;
-  if (view->kind == SZ_VIEW_ANIMATED_OPACITY && view->animation_ready &&
+  if ((view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SIZE) && view->animation_ready &&
       view->animation_step < view->animation_duration) return 1;
   for (int i = 0; i < view->child_count; i++)
     if (transition_pending_node(view->children[i])) return 1;
@@ -480,7 +483,7 @@ static int view_accepts_children(const SzView *view) {
          kind == SZ_VIEW_SELECT || kind == SZ_VIEW_THEME || kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
-         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY ||
+         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY || kind == SZ_VIEW_ANIMATED_SIZE ||
          kind == SZ_VIEW_REDUCED_MOTION || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
@@ -2025,6 +2028,7 @@ static int a11y_kind_flag(SzViewKind kind) {
 }
 
 static int a11y_recurse(const SzView *v) {
+  if (size_collapsed(v)) return 0;
   if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
     return 0;
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
@@ -2038,7 +2042,7 @@ static int a11y_recurse(const SzView *v) {
 
 static void a11y_dump_motion(SzView *v, char **buf, size_t *len, size_t *cap) {
   char label[80];
-  char line[320];
+  char line[512];
   if (!v) return;
   if (v->kind == SZ_VIEW_ANIMATED_OPACITY && v->animation_ready) {
     motion_label_copy(v, label, sizeof label);
@@ -2046,6 +2050,15 @@ static void a11y_dump_motion(SzView *v, char **buf, size_t *len, size_t *cap) {
       "opacity:%s=%d\ntarget:opacity:%s=%d\npumps:opacity:%s=%d\n",
       label, v->animation_value, label, v->animation_target, label,
       v->animation_duration - v->animation_step);
+    sz_dump_append(buf, len, cap, line);
+  }
+  if (v->kind == SZ_VIEW_ANIMATED_SIZE && v->animation_ready) {
+    motion_label_copy(v, label, sizeof label);
+    snprintf(line, sizeof line,
+      "size:%s=%d,%d\ntarget:size:%s=%d,%d\npumps:size:%s=%d\n",
+      label, v->animation_value, v->animation_height,
+      label, v->animation_target, v->animation_target_height,
+      label, v->animation_duration - v->animation_step);
     sz_dump_append(buf, len, cap, line);
   }
   if (v->motion_left <= 0) return;
@@ -2480,6 +2493,55 @@ SzView *sz_view_animated_opacity(SzSignalInt *value, int64_t pumps, SzView *chil
   return view;
 }
 
+SzView *sz_view_animated_size(SzSignalInt *width, SzSignalInt *height, int64_t pumps, SzView *child) {
+  if (!width || !height || !child || pumps < 1 || pumps > INT_MAX)
+    sz_panic("Animated size needs two Signals, a child, and positive pump count within Int32");
+  SzView *view = view_new(SZ_VIEW_ANIMATED_SIZE);
+  view->sig_int = width;
+  view->size_height = height;
+  view->animation_duration = (int)pumps;
+  sz_view_add_child(view, child);
+  return view;
+}
+
+static int size_axis(int64_t value) {
+  return value < 0 ? 0 : value > INT_MAX ? INT_MAX : (int)value;
+}
+
+static int size_collapsed(const SzView *view) {
+  return view && view->kind == SZ_VIEW_ANIMATED_SIZE && view->animation_ready &&
+    (view->frame.w <= 0 || view->frame.h <= 0);
+}
+
+static void sync_size(SzView *view, int suppressed) {
+  int width = size_axis(sz_signal_int_get(view->sig_int));
+  int height = size_axis(sz_signal_int_get(view->size_height));
+  if (!view->animation_ready || suppressed) {
+    view->animation_ready = 1;
+    view->animation_value = view->animation_from = view->animation_target = width;
+    view->animation_height = view->animation_from_height = view->animation_target_height = height;
+    view->animation_step = view->animation_duration;
+  } else if (width != view->animation_target || height != view->animation_target_height) {
+    view->animation_from = view->animation_value;
+    view->animation_from_height = view->animation_height;
+    view->animation_target = width;
+    view->animation_target_height = height;
+    view->animation_step = view->animation_value == width && view->animation_height == height ? view->animation_duration : 0;
+  }
+}
+
+static int size_suppressed(const SzView *view) {
+  for (const SzView *p = view; p; p = p->parent) {
+    if (!view_is_shown(p) || p->motion_reduced ||
+        (p != view && size_collapsed(p)) ||
+        (p->kind == SZ_VIEW_REDUCED_MOTION && sz_signal_int_get(p->sig_int)) ||
+        (p->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(p)) ||
+        (p->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(p)) ||
+        (p->kind == SZ_VIEW_OVERLAY && !view_overlay_open(p))) return 1;
+  }
+  return 0;
+}
+
 SzView *sz_view_reduced_motion(SzSignalInt *reduced, SzView *child) {
   if (!reduced || !child) sz_panic("Reduced motion needs a Signal and a child");
   SzView *view = view_new(SZ_VIEW_REDUCED_MOTION);
@@ -2500,7 +2562,7 @@ void sz_view_pause_motion(SzView *root, int paused) {
   if (root) root->motion_paused = paused != 0;
 }
 
-static void sync_opacity(SzView *view, int shown, int reduced) {
+static void sync_transitions(SzView *view, int shown, int reduced) {
   if (!view) return;
   shown = shown && view_is_shown(view) &&
     !(view->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(view)) &&
@@ -2524,17 +2586,29 @@ static void sync_opacity(SzView *view, int shown, int reduced) {
       view->animation_step = view->animation_value == target ? view->animation_duration : 0;
     }
   }
-  for (int i = 0; i < view->child_count; i++) sync_opacity(view->children[i], shown, reduced);
+  if (view->kind == SZ_VIEW_ANIMATED_SIZE) sync_size(view, view->motion_suppressed);
+  for (int i = 0; i < view->child_count; i++)
+    sync_transitions(view->children[i], shown && !size_collapsed(view), reduced);
 }
 
-static void step_opacity(SzView *view) {
-  if (!view) return;
-  if (view->kind == SZ_VIEW_ANIMATED_OPACITY && view->animation_step < view->animation_duration) {
+static int animation_lerp(int from, int target, int64_t step, int64_t duration) {
+  return (int)(((duration - step) * from + step * target + duration / 2) / duration);
+}
+
+static int step_transitions(SzView *view) {
+  if (!view) return 0;
+  int resized = 0;
+  if ((view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SIZE) &&
+      view->animation_step < view->animation_duration) {
     int64_t step = ++view->animation_step, duration = view->animation_duration;
-    view->animation_value = (int)(((duration - step) * view->animation_from +
-      step * view->animation_target + duration / 2) / duration);
+    view->animation_value = animation_lerp(view->animation_from, view->animation_target, step, duration);
+    if (view->kind == SZ_VIEW_ANIMATED_SIZE) {
+      view->animation_height = animation_lerp(view->animation_from_height, view->animation_target_height, step, duration);
+      resized = 1;
+    }
   }
-  for (int i = 0; i < view->child_count; i++) step_opacity(view->children[i]);
+  for (int i = 0; i < view->child_count; i++) resized |= step_transitions(view->children[i]);
+  return resized;
 }
 
 int sz_view_paint_opacity(const SzView *view) {
@@ -4917,10 +4991,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.h = max_h;
     break;
   }
+  case SZ_VIEW_ANIMATED_SIZE:
   case SZ_VIEW_SIZED: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    float tw = scale_px(theme, (float)v->img_w);
-    float th = scale_px(theme, (float)v->img_h);
+    if (v->kind == SZ_VIEW_ANIMATED_SIZE) sync_size(v, size_suppressed(v));
+    float tw = scale_px(theme, (float)(v->kind == SZ_VIEW_ANIMATED_SIZE ? v->animation_value : v->img_w));
+    float th = scale_px(theme, (float)(v->kind == SZ_VIEW_ANIMATED_SIZE ? v->animation_height : v->img_h));
+    if (tw < min_w) tw = min_w;
+    if (th < min_h) th = min_h;
     if (max_w > 0.f && tw > max_w)
       tw = max_w;
     if (max_h > 0.f && th > max_h)
@@ -5321,7 +5399,7 @@ static int rects_intersect(SzRect a, SzRect b, SzRect *out);
 static int popup_owner_in_scope(SzView *v, SzView *scope);
 
 static SzView *open_select_node(SzView *v) {
-  if (!v || !view_is_shown(v) ||
+  if (!v || !view_is_shown(v) || size_collapsed(v) ||
       (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v)) ||
       (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v)) ||
       (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))) return NULL;
@@ -5549,7 +5627,7 @@ void sz_view_layout(SzView *root, float width, float height, const SzTheme *them
   layout_node(root, 0.f, 0.f, width, height, theme);
   sync_modal_focus(root);
   sync_selects(root);
-  sync_opacity(root, 1, root->motion_reduced);
+  sync_transitions(root, 1, root->motion_reduced);
   sync_tooltips(root);
 }
 
@@ -5574,7 +5652,7 @@ static int popup_owner_in_scope(SzView *v, SzView *scope) {
         (p->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(p)) ||
         (p->kind == SZ_VIEW_OVERLAY && !view_overlay_open(p))) return 0;
     if (p->kind == SZ_VIEW_IGNORE_POINTER || p->kind == SZ_VIEW_ABSORB_POINTER) return 0;
-    if (p->kind == SZ_VIEW_SCROLL || p->kind == SZ_VIEW_CLIP || p->kind == SZ_VIEW_APP_SHELL) {
+    if (p->kind == SZ_VIEW_SCROLL || p->kind == SZ_VIEW_CLIP || p->kind == SZ_VIEW_ANIMATED_SIZE || p->kind == SZ_VIEW_APP_SHELL) {
       SzRect clipped;
       if (!rects_intersect(visible, p->frame, &clipped)) return 0;
       visible = clipped;
@@ -7540,6 +7618,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     sk_canvas_restore(c);
     break;
   }
+  case SZ_VIEW_ANIMATED_SIZE:
+    if (!size_collapsed(v)) paint_children_clipped(v, c, theme);
+    break;
   case SZ_VIEW_CLIP:
     paint_children_clipped(v, c, theme);
     break;
@@ -7859,7 +7940,8 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   sz_view_layout(root, (float)width, (float)height, theme);
   /* Record press, appear, tab, and insert steps before this frame paints. */
   motion_note_node(root);
-  if (!root->motion_paused) step_opacity(root);
+  if (!root->motion_paused && step_transitions(root))
+    sz_view_layout(root, (float)width, (float)height, theme);
 #ifdef __EMSCRIPTEN__
   web_route_book = NULL;
   web_modal_scope = find_open_overlay(root);
@@ -7972,7 +8054,7 @@ static void restore_group_focus(SzView *group) {
 static SzView *find_active_focus_group(SzView *v) {
   int i;
   SzView *found;
-  if (!v || !view_is_shown(v))
+  if (!v || !view_is_shown(v) || size_collapsed(v))
     return NULL;
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return NULL;
@@ -8231,7 +8313,7 @@ int sz_view_has_focused_text_field(SzView *root) {
 static SzView *find_focused_edit(SzView *root) {
   int i;
   SzView *found;
-  if (!root || !view_is_shown(root))
+  if (!root || !view_is_shown(root) || size_collapsed(root))
     return NULL;
   if (root->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(root))
     return NULL;
@@ -8629,7 +8711,7 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
 
 static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
   int i;
-  if (!v || !view_is_shown(v) || n >= cap)
+  if (!v || !view_is_shown(v) || size_collapsed(v) || n >= cap)
     return n;
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
       v->kind == SZ_VIEW_MERGE_SEMANTICS)
@@ -8655,7 +8737,7 @@ int sz_view_collect_text_fields(SzView *root, SzView **out, int cap) {
 }
 
 SzView *sz_view_first_editor(SzView *root) {
-  if (!view_is_branch_shown(root)) return NULL;
+  if (!view_is_branch_shown(root) || size_collapsed(root)) return NULL;
   if (root->kind == SZ_VIEW_EDITOR) return root;
   for (int i = 0; i < root->child_count; i++) {
     SzView *editor = sz_view_first_editor(root->children[i]);
@@ -8666,7 +8748,7 @@ SzView *sz_view_first_editor(SzView *root) {
 
 static int collect_editors_node(SzView *v, SzView **out, int cap, int n) {
   int i;
-  if (!v || !view_is_shown(v) || n >= cap)
+  if (!v || !view_is_shown(v) || size_collapsed(v) || n >= cap)
     return n;
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
       v->kind == SZ_VIEW_MERGE_SEMANTICS)
@@ -8693,7 +8775,7 @@ int sz_view_collect_editors(SzView *root, SzView **out, int cap) {
 
 static int collect_splits_node(SzView *v, SzView **out, int cap, int n) {
   int i;
-  if (!v || !view_is_shown(v) || n >= cap)
+  if (!v || !view_is_shown(v) || size_collapsed(v) || n >= cap)
     return n;
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return n;
@@ -8718,7 +8800,7 @@ int sz_view_collect_splits(SzView *root, SzView **out, int cap) {
 
 static int collect_overlays_node(SzView *v, SzView **out, int cap, int n) {
   int i;
-  if (!v || !view_is_shown(v) || n >= cap)
+  if (!v || !view_is_shown(v) || size_collapsed(v) || n >= cap)
     return n;
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return n;
@@ -8744,7 +8826,7 @@ int sz_view_collect_overlays(SzView *root, SzView **out, int cap) {
 static SzView *find_open_overlay(SzView *v) {
   int i;
   SzView *found;
-  if (!v || !view_is_shown(v))
+  if (!v || !view_is_shown(v) || size_collapsed(v))
     return NULL;
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return NULL;
@@ -8767,7 +8849,7 @@ SzView *sz_view_input_scope(SzView *root) {
 }
 
 static int focus_hidden(const SzView *v) {
-  return !v || v->kind == SZ_VIEW_SELECT_OPTION || !view_is_shown(v) ||
+  return !v || v->kind == SZ_VIEW_SELECT_OPTION || !view_is_shown(v) || size_collapsed(v) ||
     (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v)) ||
     (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v)) ||
     (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v));
@@ -8778,6 +8860,13 @@ static void dump_transition_nodes(SzView *view, FILE *file, int *index) {
   if (view->kind == SZ_VIEW_ANIMATED_OPACITY) {
     fprintf(file, "%s{\"i\":%d,\"value\":%d,\"target\":%d,\"remaining\":%d,\"suppressed\":%s}",
       *index ? "," : "", *index, view->animation_value, view->animation_target,
+      view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
+    (*index)++;
+  }
+  if (view->kind == SZ_VIEW_ANIMATED_SIZE) {
+    fprintf(file, "%s{\"i\":%d,\"kind\":\"size\",\"width\":%d,\"height\":%d,\"targetWidth\":%d,\"targetHeight\":%d,\"remaining\":%d,\"suppressed\":%s}",
+      *index ? "," : "", *index, view->animation_value, view->animation_height,
+      view->animation_target, view->animation_target_height,
       view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
     (*index)++;
   }
@@ -9022,7 +9111,7 @@ const char *sz_view_focus_kind(SzView *root) {
 }
 
 static int collect_walk_hidden(const SzView *v) {
-  if (!v || !view_is_shown(v))
+  if (!v || !view_is_shown(v) || size_collapsed(v))
     return 1;
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return 1;
@@ -9784,7 +9873,7 @@ int sz_view_web_navigate(SzView *root, const char *title) {
 uintptr_t sz_view_id(const SzView *v) { return v ? v->id : 0; }
 
 SzView *sz_view_find(SzView *v, uintptr_t id) {
-  if (!id || !v || !view_is_shown(v) ||
+  if (!id || !v || !view_is_shown(v) || size_collapsed(v) ||
       (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v)) ||
       (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))) return NULL;
   if (v->id == id) return v;
@@ -9797,7 +9886,7 @@ SzView *sz_view_find(SzView *v, uintptr_t id) {
 
 #ifdef __EMSCRIPTEN__
 SzView *sz_view_web_find(SzView *v, uintptr_t id) {
-  if (!v || !view_is_shown(v) || v->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
+  if (!v || !view_is_shown(v) || size_collapsed(v) || v->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
       (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v)) ||
       (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v)) ||
       (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))) return NULL;

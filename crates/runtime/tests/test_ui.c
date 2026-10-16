@@ -15089,6 +15089,126 @@ static void test_slider_live_records_xy(void) {
   remove(record);
 }
 
+static void size_step(SzView *root, SzView *size, SkCanvas *canvas,
+                      int width, int height, const SzTheme *theme) {
+  int scale = (int)theme->px_scale;
+  assert(sz_view_paint(root, canvas, 400 * scale, 400 * scale, theme));
+  SzRect frame = sz_view_frame(size);
+  assert(frame.w == width * scale && frame.h == height * scale);
+}
+
+static void test_animated_size_steps(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0;
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.background = 0xffffffff;
+    SzSignalInt *width = sz_signal_int(80), *height = sz_signal_int(60);
+    SzSignalInt *taps = sz_signal_int(0);
+    SzView *child = sz_view_ink_well("Moving", counter_tap, taps,
+      sz_view_unconstrained_box(sz_view_sized(360, 320,
+        sz_view_background(0xffff0000, sz_view_text("")))));
+    SzView *size = sz_view_animated_size(width, height, 8, child);
+    SzView *root = sz_view_column(), *after = sz_view_button("After", NULL, NULL);
+    sz_view_add_child(root, size); sz_view_add_child(root, after);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400 * scale, 400 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    size_step(root, size, canvas, 80, 60, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(width, 240); sz_signal_int_set(height, 180);
+    for (int step = 1; step <= 8; step++) {
+      int w = 80 + step * 20, h = 60 + step * 15;
+      size_step(root, size, canvas, w, h, &theme);
+      assert(sz_view_frame(after).y == h * scale);
+      assert(sz_view_hit_test(root, (w - 1.f) * scale, (h - 1.f) * scale) == child);
+      assert(sz_view_hit_test(root, (w + 1.f) * scale, h * scale / 2.f) == NULL);
+      const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+      assert(px_rgb(pixels, 400 * scale, 1, 1, 255, 0, 0));
+      assert(px_rgb(pixels, 400 * scale, w * scale + 1, h * scale / 2, 255, 255, 255));
+      assert(px_rgb(pixels, 400 * scale, 1, h * scale + (int)theme.control_h + 1, 255, 255, 255));
+      assert(sz_view_transition_pending(root) == (step < 8));
+    }
+    sz_signal_int_set(width, 80); sz_signal_int_set(height, 60);
+    size_step(root, size, canvas, 220, 165, &theme);
+    size_step(root, size, canvas, 200, 150, &theme);
+    sz_signal_int_set(width, 40); sz_signal_int_set(height, 30);
+    for (int step = 1; step <= 8; step++)
+      size_step(root, size, canvas, 200 - step * 20, 150 - step * 15, &theme);
+    sz_view_pause_motion(root, 1);
+    sz_signal_int_set(width, 240); sz_signal_int_set(height, 180);
+    for (int step = 0; step < 3; step++) size_step(root, size, canvas, 40, 30, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_view_pause_motion(root, 0);
+    size_step(root, size, canvas, 65, 49, &theme);
+    sz_view_reduce_motion(root, 1);
+    size_step(root, size, canvas, 240, 180, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(width, INT64_MIN); sz_signal_int_set(height, INT64_MAX);
+    size_step(root, size, canvas, 0, 400, &theme);
+    assert(sz_signal_int_get(width) == INT64_MIN && sz_signal_int_get(height) == INT64_MAX);
+    SzString *dump = sz_view_a11y_dump(root);
+    assert(strstr(sz_string_cstr(dump), "size:Moving=0,2147483647\n"));
+    assert(!strstr(sz_string_cstr(dump), "inkwell:Moving"));
+    sz_string_free(dump);
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(width); sz_signal_int_free(height); sz_signal_int_free(taps);
+  }
+}
+
+static void test_animated_size_retains_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *width = sz_signal_int(200), *height = sz_signal_int(80), *visible = sz_signal_int(1);
+  SzSignalStr *text = sz_signal_str("Kept");
+  SzSignalInt *alpha = sz_signal_int(100);
+  SzView *field = sz_view_text_field(text, "Retained size field");
+  SzView *fade = sz_view_animated_opacity(alpha, 8, field);
+  SzView *size = sz_view_animated_size(width, height, 4, fade);
+  SzView *root = sz_view_visibility(visible, size);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  size_step(root, size, canvas, 200, 80, &theme);
+  sz_view_focus(root, field); sz_view_set_text_field_caret(field, 2);
+  sz_signal_int_set(width, 100); sz_signal_int_set(height, 40);
+  size_step(root, size, canvas, 175, 70, &theme);
+  assert(sz_view_focused(root) == field && sz_view_text_field_caret(field) == 2);
+  assert(!strcmp(sz_signal_str_get(text), "Kept"));
+  sz_signal_int_set(width, 0); sz_signal_int_set(height, 0);
+  for (int step = 0; step < 4; step++) assert(sz_view_paint(root, canvas, 400, 400, &theme));
+  assert(sz_view_focused(root) == NULL);
+  SzView *fields[2];
+  assert(sz_view_collect_text_fields(root, fields, 2) == 0);
+  assert(sz_view_hit_test(root, 1, 1) == NULL);
+  assert(sz_view_edit_target(root) == NULL);
+  assert(!sz_view_handle_text_edit(root, "hidden", 0));
+  assert(!strcmp(sz_signal_str_get(text), "Kept"));
+  FILE *file = tmpfile();
+  assert(file);
+  sz_view_transitions_dump_json(root, file);
+  rewind(file);
+  char json[512];
+  size_t bytes = fread(json, 1, sizeof json - 1, file);
+  json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"size\",\"width\":0,\"height\":0,\"targetWidth\":0,\"targetHeight\":0,\"remaining\":0"));
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(!strstr(sz_string_cstr(dump), "textfield:Retained size field"));
+  sz_string_free(dump);
+  sz_signal_int_set(alpha, 0);
+  assert(sz_view_paint(root, canvas, 400, 400, &theme));
+  assert(sz_view_animated_opacity_value(fade) == 0 && !sz_view_transition_pending(root));
+  sz_signal_int_set(visible, 0);
+  sz_signal_int_set(width, 300); sz_signal_int_set(height, 120);
+  assert(sz_view_paint(root, canvas, 400, 400, &theme));
+  assert(!sz_view_transition_pending(root));
+  sz_signal_int_set(visible, 1);
+  size_step(root, size, canvas, 300, 120, &theme);
+  assert(!sz_view_transition_pending(root));
+  assert(!strcmp(sz_signal_str_get(text), "Kept") && sz_view_text_field_caret(field) == 2);
+  sk_surface_unref(surface); sz_view_free(root);
+  sz_signal_int_free(alpha); sz_signal_int_free(width); sz_signal_int_free(height); sz_signal_int_free(visible); sz_signal_str_free(text);
+}
+
 static void test_progress_named_range(void) {
   const int64_t values[] = {INT64_MIN, -1, 0, 17, 100, INT64_MAX};
   const int expected[] = {0, 0, 0, 17, 100, 100};
@@ -20575,6 +20695,12 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--animated-size")) {
+    test_animated_size_steps();
+    test_animated_size_retains_input();
+    puts("animated size tests ok");
+    return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "--progress")) {
     test_progress_named_range();
     test_progress_a11y();
@@ -21332,6 +21458,8 @@ int main(int argc, char **argv) {
   test_slider_pointer_drag();
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
+  test_animated_size_steps();
+  test_animated_size_retains_input();
   test_progress_named_range();
   test_progress_sizes();
   test_progress_unbounded_width();
