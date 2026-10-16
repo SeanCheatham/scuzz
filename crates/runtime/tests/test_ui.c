@@ -20489,8 +20489,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--shaping")) {
     test_shaped_field_geometry();
     test_shaped_text_wrapping();
-  test_font_change_direction();
-  test_wrapped_paragraph_direction();
+    test_font_change_direction();
+    test_wrapped_paragraph_direction();
     test_fallback_text_layout();
     test_styled_shaping_context();
     test_styled_text_wrap();
