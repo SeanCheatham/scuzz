@@ -808,19 +808,19 @@ int sz_view_split_frac(const SzView *view) {
   return (int)n;
 }
 
-SzView *sz_view_progress(SzSignalInt *sig) {
+SzView *sz_view_progress(SzSignalInt *sig, const char *label) {
   SzView *v = view_new(SZ_VIEW_PROGRESS);
   v->sig_int = sig;
   v->a11y_role = SZ_A11Y_PROGRESS;
-  v->a11y_label = sz_strdup("progress");
+  v->a11y_label = sz_strdup(label ? label : "");
   return v;
 }
 
-SzView *sz_view_circular_progress(SzSignalInt *sig) {
+SzView *sz_view_circular_progress(SzSignalInt *sig, const char *label) {
   SzView *v = view_new(SZ_VIEW_CIRCULAR_PROGRESS);
   v->sig_int = sig;
   v->a11y_role = SZ_A11Y_CIRCULAR;
-  v->a11y_label = sz_strdup("circular");
+  v->a11y_label = sz_strdup(label ? label : "");
   return v;
 }
 
@@ -1289,6 +1289,12 @@ static int64_t percent_clamp(int64_t n) {
   if (n > 100)
     return 100;
   return n;
+}
+
+int sz_view_progress_value(const SzView *view) {
+  if (!view || (view->kind != SZ_VIEW_PROGRESS && view->kind != SZ_VIEW_CIRCULAR_PROGRESS))
+    return 0;
+  return (int)percent_clamp(view->sig_int ? sz_signal_int_get(view->sig_int) : 0);
 }
 
 SzRect sz_view_control_frame(const SzView *view) {
@@ -1931,7 +1937,7 @@ static void a11y_dump_line(char **buf, size_t *len, size_t *cap,
 /* Per-node a11y info shared by the text dump and the JSON tree. `label` is
  * the text-line label; it borrows from the view unless `live` holds it.
  * cls: 0 default (label only), 1 toggle (`num` is the on state), 2 numeric
- * (`num` is the value; `label` is its text form). */
+ * (`num` is the value; `label` keeps the name when available). */
 typedef struct SzA11yInfo {
   const char *label;
   char *live;
@@ -1986,11 +1992,7 @@ static SzA11yInfo a11y_node_info(SzView *v) {
   } else if (v->kind == SZ_VIEW_PROGRESS ||
              v->kind == SZ_VIEW_CIRCULAR_PROGRESS) {
     info.cls = 2;
-    info.num = v->sig_int ? percent_clamp(sz_signal_int_get(v->sig_int))
-                          : (v->kind == SZ_VIEW_SPLIT ? 50 : 0);
-    snprintf(tmp, sizeof tmp, "%lld", (long long)info.num);
-    info.live = sz_strdup(tmp);
-    info.label = info.live;
+    info.num = sz_view_progress_value(v);
   } else if (v->kind == SZ_VIEW_BADGE) {
     info.cls = 2;
     info.num = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
@@ -2061,7 +2063,8 @@ static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
     return;
   if (v->a11y_role != SZ_A11Y_NONE) {
     SzA11yInfo info = a11y_node_info(v);
-    a11y_dump_line(buf, len, cap, v->a11y_role, info.label, info.cls == 1 || v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_SPLIT,
+    a11y_dump_line(buf, len, cap, v->a11y_role, info.label, info.cls == 1 || v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_SPLIT ||
+                   v->kind == SZ_VIEW_PROGRESS || v->kind == SZ_VIEW_CIRCULAR_PROGRESS,
                    info.num);
     sz_free(info.live);
   }
@@ -2138,6 +2141,11 @@ static void a11y_json_node(SzView *v, FILE *f, int *first) {
       fputs(",\"label\":\"", f);
       sz_json_fputs_escaped(f, info.label);
       fputs("\",\"minimum\":0,\"maximum\":100,\"orientation\":\"vertical\"", f);
+    }
+    if (v->kind == SZ_VIEW_PROGRESS || v->kind == SZ_VIEW_CIRCULAR_PROGRESS) {
+      fputs(",\"label\":\"", f);
+      sz_json_fputs_escaped(f, info.label);
+      fputs("\",\"minimum\":0,\"maximum\":100", f);
     }
     if (v->kind == SZ_VIEW_SLIDER) {
       fputs(",\"label\":\"", f);
@@ -6590,9 +6598,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                        frame.x, frame.y, frame.w, frame.h);
   }
   if (!excluded && ((v->interactive && v->kind != SZ_VIEW_OVERLAY && v->kind != SZ_VIEW_SPLIT && v->kind != SZ_VIEW_SELECT) || v->kind == SZ_VIEW_IMAGE ||
-                    v->kind == SZ_VIEW_ICON)) {
+                    v->kind == SZ_VIEW_ICON || v->kind == SZ_VIEW_PROGRESS || v->kind == SZ_VIEW_CIRCULAR_PROGRESS)) {
     int checked = v->kind == SZ_VIEW_EXPANSION_TILE ? v->sig_int && sz_signal_int_get(v->sig_int) != 0 :
-      v->kind != SZ_VIEW_SLIDER && v->sig_int ? (int)sz_signal_int_get(v->sig_int) : 0;
+      v->kind != SZ_VIEW_SLIDER && v->kind != SZ_VIEW_PROGRESS && v->kind != SZ_VIEW_CIRCULAR_PROGRESS && v->sig_int ? (int)sz_signal_int_get(v->sig_int) : 0;
     if (v->kind == SZ_VIEW_CHOICE_CHIP || v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE)
       checked = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
     SzView *related = NULL;
@@ -7236,7 +7244,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_PROGRESS: {
-    float n = (float)percent_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
+    float n = (float)sz_view_progress_value(v);
     SzRect fill = v->frame;
     int edge = (int)(scale_px(theme, 1.f) + 0.5f);
     fill.w *= n / 100.f;
@@ -7249,7 +7257,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_CIRCULAR_PROGRESS: {
-    float n = (float)percent_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
+    float n = (float)sz_view_progress_value(v);
     float track = fminf(scale_px(theme, 2.f), fminf(v->frame.w, v->frame.h) * 0.5f);
     float fill = fminf(scale_px(theme, 6.f), fminf(v->frame.w, v->frame.h) * 0.5f);
     paint_border(c, v->frame, (int)(track + 0.5f), theme->muted);

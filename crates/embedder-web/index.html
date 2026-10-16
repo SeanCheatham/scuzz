@@ -107,7 +107,8 @@ var Module = {
   makeControl(item) {
     const editing = item.role === 3 || item.role === 41;
     const pictured = item.role === 4 || item.role === 49;
-    const node = document.createElement(item.inline ? 'span' : item.route !== null ? 'a' : editing ? (item.role === 3 ? 'input' : 'textarea') : (item.role === 8 || item.role === 42 || item.role === 55 || item.role === 57 || pictured) ? 'div' : 'button');
+    const progress = item.role === 10 || item.role === 20;
+    const node = document.createElement(item.inline ? 'span' : item.route !== null ? 'a' : editing ? (item.role === 3 ? 'input' : 'textarea') : (item.role === 8 || item.role === 42 || item.role === 55 || item.role === 57 || pictured || progress) ? 'div' : 'button');
     node.className = 'control' + (item.inline ? ' inline-action' : '');
     if (node.tagName === 'BUTTON') node.type = 'button';
     if (item.inline) {
@@ -224,6 +225,10 @@ var Module = {
         if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
       };
       for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) node.addEventListener(name, end);
+    } else if (progress) {
+      node.setAttribute('role', 'progressbar');
+      node.style.pointerEvents = 'none';
+      node.style.cursor = 'default';
     } else if (pictured) {
       node.setAttribute('role', 'img');
       node.style.cursor = 'default';
@@ -448,6 +453,10 @@ var Module = {
           if (!node.composing && node.value !== item.value) node.value = item.value;
           node.committed = item.value;
           node.placeholder = item.role === 3 ? item.label : '';
+        } else if (item.role === 10 || item.role === 20) {
+          node.setAttribute('aria-valuemin', item.range.minimum);
+          node.setAttribute('aria-valuemax', item.range.maximum);
+          node.setAttribute('aria-valuenow', item.range.value);
         } else if (item.role === 8 || item.role === 42) {
           if (item.role === 42) node.setAttribute('aria-controls', 'view-' + item.related);
           node.setAttribute('aria-valuemin', item.range.minimum);

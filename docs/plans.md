@@ -13,4 +13,4 @@ Check browser roles, names, values, focus, and retained nodes.
 Run native, sanitizer, browser, and integration checks.
 Real screen-reader and physical-device checks remain open.
 
-Status: Source inspection shows generic native labels and no browser progress nodes. Implementation remains.
+Status: Both constructors require names. Paint, Headless output, and browser ranges use one clamped value. The normal runtime suite passes. Native range checks cover signed 64-bit limits and escaped names. Chromium, Firefox, and WebKit pass the progress checks. Chromium and WebKit mobile emulation pass. Sanitizer checks, the controls campaign, exact replay, and full integration remain.

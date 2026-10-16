@@ -86,6 +86,10 @@ Browser accessibility and real screen-reader checks remain incomplete.
 Keyboard checks cover a form, named radio groups, manual tabs, nested dialogs, named range sliders, and editors.
 Range checks cover signed 64-bit bounds, stepped values, pointer input, and browser accessibility data.
 Physical-device and real screen-reader checks for sliders remain open.
+Named progress checks cover live values, range limits, hidden indicators, dialogs, and input exclusion.
+Native checks cover signed 64-bit limits and escaped names.
+Physical-device and real screen-reader checks for progress indicators remain open.
+Indeterminate progress remains open.
 Split-pane checks cover keys, collapse, restore, retained state, and named browser separators.
 Physical-device and real screen-reader checks for split panes remain open.
 Dialog checks cover initial focus, focus return, removed openers, and empty dialogs.

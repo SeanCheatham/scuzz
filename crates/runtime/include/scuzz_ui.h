@@ -319,10 +319,12 @@ SzView *sz_view_slider(SzSignalInt *sig, const char *label, int64_t minimum, int
 int64_t sz_view_slider_minimum(const SzView *view);
 int64_t sz_view_slider_maximum(const SzView *view);
 int64_t sz_view_slider_value(const SzView *view);
-/* Paints a 0-100 bar from `sig`. Not a tap target. */
-SzView *sz_view_progress(SzSignalInt *sig);
-/* Paints a 0-100 square ring from `sig`. Not a tap target. */
-SzView *sz_view_circular_progress(SzSignalInt *sig);
+/* Paint a named 0-100 bar from `sig`. Keep it outside pointer input. */
+SzView *sz_view_progress(SzSignalInt *sig, const char *label);
+/* Paint a named 0-100 square ring from `sig`. Keep it outside pointer input. */
+SzView *sz_view_circular_progress(SzSignalInt *sig, const char *label);
+/* Current percentage, clamped to 0-100. Other View kinds return 0. */
+int sz_view_progress_value(const SzView *view);
 /* `control_h` disc with `label`. Not a tap target. */
 SzView *sz_view_avatar(const char *label);
 /* Tap flips `sig` between 0 and 1. `label` is a11y + painted text. */
@@ -868,8 +870,8 @@ SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label);
 SzView *sz_lang_view_slider(SzSignalInt *sig, SzString *label, int64_t minimum, int64_t maximum, int64_t step);
-SzView *sz_lang_view_progress(SzSignalInt *sig);
-SzView *sz_lang_view_circular_progress(SzSignalInt *sig);
+SzView *sz_lang_view_progress(SzSignalInt *sig, SzString *label);
+SzView *sz_lang_view_circular_progress(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_avatar(SzString *label);
 SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);

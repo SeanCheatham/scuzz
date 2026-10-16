@@ -670,6 +670,12 @@ PageUp and PageDown change the value by ten steps.
 The browser uses the shared runtime for keys and pointer input.
 Its accessible value uses decimal text across the full Int range.
 Keyboard behavior uses the [W3C slider pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/).
+Use `View.progress(value, name)` or `View.circularProgress(value, name)` for completion indicators.
+Each indicator has an application name and a percentage from 0 through 100.
+Paint and accessibility clamp the value without writing the Signal.
+Indicators do not receive keyboard or pointer input.
+The browser exposes the name, range, and value with the progressbar role.
+See the [W3C range properties](https://www.w3.org/WAI/ARIA/apg/practices/range-related-properties/).
 Use `View.split(fraction, label, start, end)` for two resizable panes.
 The label names the primary pane and its vertical separator. An empty label uses Primary pane.
 The fraction is a percent from 0 through 100. Display clamps the value without writing it.

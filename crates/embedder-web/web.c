@@ -121,11 +121,12 @@ void sz_web_control(SzView *view, int role, const char *label, const char *route
   sz_web_control_id(sz_view_id(view), role, label, route, copy, value,
                     sz_view_id(related), checked, x, y, w, h, clipped, cx, cy, cw, ch, ink, selection, font, line_h, inset, gutter, sz_view_tab_stop(view), sz_view_paint_opacity(view));
   web_description(sz_view_id(sz_view_tooltip_owner(view)));
-  if (role == SZ_A11Y_SLIDER || role == SZ_A11Y_SPLIT) {
+  if (role == SZ_A11Y_SLIDER || role == SZ_A11Y_SPLIT || role == SZ_A11Y_PROGRESS || role == SZ_A11Y_CIRCULAR) {
     char minimum[32], maximum[32], current[32];
-    snprintf(minimum, sizeof minimum, "%lld", (long long)(role == SZ_A11Y_SPLIT ? 0 : sz_view_slider_minimum(view)));
-    snprintf(maximum, sizeof maximum, "%lld", (long long)(role == SZ_A11Y_SPLIT ? 100 : sz_view_slider_maximum(view)));
-    snprintf(current, sizeof current, "%lld", (long long)(role == SZ_A11Y_SPLIT ? sz_view_split_frac(view) : sz_view_slider_value(view)));
+    snprintf(minimum, sizeof minimum, "%lld", (long long)(role == SZ_A11Y_SLIDER ? sz_view_slider_minimum(view) : 0));
+    snprintf(maximum, sizeof maximum, "%lld", (long long)(role == SZ_A11Y_SLIDER ? sz_view_slider_maximum(view) : 100));
+    snprintf(current, sizeof current, "%lld", (long long)(role == SZ_A11Y_SLIDER ? sz_view_slider_value(view) :
+      role == SZ_A11Y_SPLIT ? sz_view_split_frac(view) : sz_view_progress_value(view)));
     web_slider_range(minimum, maximum, current);
   }
 }

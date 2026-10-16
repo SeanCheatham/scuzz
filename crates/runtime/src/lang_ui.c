@@ -93,10 +93,12 @@ SzView *sz_lang_view_slider(SzSignalInt *sig, SzString *label, int64_t minimum, 
   return sz_view_slider(sig, sz_string_cstr(label), minimum, maximum, step);
 }
 
-SzView *sz_lang_view_progress(SzSignalInt *sig) { return sz_view_progress(sig); }
+SzView *sz_lang_view_progress(SzSignalInt *sig, SzString *label) {
+  return sz_view_progress(sig, sz_string_cstr(label));
+}
 
-SzView *sz_lang_view_circular_progress(SzSignalInt *sig) {
-  return sz_view_circular_progress(sig);
+SzView *sz_lang_view_circular_progress(SzSignalInt *sig, SzString *label) {
+  return sz_view_circular_progress(sig, sz_string_cstr(label));
 }
 
 SzView *sz_lang_view_avatar(SzString *label) {

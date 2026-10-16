@@ -2019,6 +2019,68 @@ async function checkRangeBoundary(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkProgress(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: 640, height: 1400},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile});
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await page.goto(url);
+    await page.waitForFunction(() => Module.ready && Module.nodes.size > 0);
+    const linear = page.getByRole('progressbar', {name: 'Linear completion', exact: true});
+    const circular = page.getByRole('progressbar', {name: 'Circular completion', exact: true});
+    await linear.waitFor();
+    await circular.waitFor();
+    const original = await linear.elementHandle();
+    const expectValue = async value => {
+      for (const node of [linear, circular]) {
+        await page.waitForFunction(({node, value}) => node.getAttribute('aria-valuenow') === value,
+          {node: await node.elementHandle(), value});
+        assert.equal(await node.getAttribute('aria-valuemin'), '0');
+        assert.equal(await node.getAttribute('aria-valuemax'), '100');
+        assert.equal(await node.getAttribute('tabindex'), '-1');
+        assert.equal(await node.getAttribute('aria-valuetext'), null);
+      }
+    };
+    await expectValue('50');
+    assert.equal(await page.getByRole('progressbar').count(), 2);
+    const volume = page.getByRole('slider', {name: 'Volume', exact: true});
+    await volume.focus();
+    for (const [key, value] of [['Home', '0'], ['PageUp', '0'], ['End', '100'],
+      ['PageDown', '100'], ['Home', '0']]) {
+      await page.keyboard.press(key);
+      await expectValue(value);
+    }
+    assert(await original.evaluate(node => node === document.querySelector('[role="progressbar"][aria-label="Linear completion"]')));
+    const box = await linear.boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    assert.equal(await linear.evaluate(node => node === document.activeElement), false);
+    await expectValue('0');
+    await page.getByRole('checkbox', {name: 'Updates', exact: true}).click();
+    await page.getByRole('progressbar', {name: 'Optional completion', exact: true}).waitFor();
+    assert.equal(await page.getByRole('progressbar').count(), 3);
+    assert.equal(await page.locator('[aria-label="Private completion"]').count(), 0);
+    await page.getByRole('button', {name: 'Open', exact: true}).click();
+    await page.getByRole('dialog', {name: 'Edit details', exact: true}).waitFor();
+    assert.equal(await page.getByRole('progressbar').count(), 0);
+    await page.keyboard.press('Escape');
+    await linear.waitFor();
+    await expectValue('0');
+    await page.evaluate(() => {
+      const outside = document.createElement('button');
+      outside.textContent = 'Outside';
+      document.body.append(outside);
+    });
+    await page.getByRole('slider', {name: 'Precise count', exact: true}).focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Outside');
+    assert.deepEqual(errors, []);
+    console.log(`web progress: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkControls(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2246,7 +2308,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

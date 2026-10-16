@@ -2697,7 +2697,17 @@ cases = {
         ('large', [{'op': 'type', 'i': 2, 'value': 'Ada'},
                    {'op': 'tap', 'id': 'checkbox:Updates Custom'},
                    {'op': 'resize', 'width': 640, 'height': 720, 'scale': 2}])],
-    'controls': [('form', [
+    'controls': [('progress', [
+        {'op': 'tap', 'id': 'slider:Volume'},
+        {'op': 'key', 'key': 'Home'},
+        {'op': 'key', 'key': 'PageUp'},
+        {'op': 'key', 'key': 'End'},
+        {'op': 'key', 'key': 'PageDown'},
+        {'op': 'key', 'key': 'Home'},
+        {'op': 'tap', 'id': 'checkbox:Updates'},
+        {'op': 'tap', 'id': 'button:Open'},
+        {'op': 'key', 'key': 'Escape'}]),
+        ('form', [
         {'op': 'key', 'key': 'Tab'},
         {'op': 'key', 'key': 'a', 'text': 'Ada'},
         {'op': 'key', 'key': 'Tab'},
@@ -3042,7 +3052,17 @@ for label, events in cases:
             assert (slider['value'], slider['minimum'], slider['maximum'], slider['step']) == (values[signal], minimum, maximum, step), slider
             assert 'on' not in slider, slider
 
-        if label == 'form':
+        progress = {node['label']: node for node in a11y_nodes(native['a11y']) if node['role'] in ('progress', 'circular')}
+        expected = max(0, min(100, values['volume'] * 2 - 50))
+        names = {'Linear completion', 'Circular completion'}
+        if values['updates']: names.add('Optional completion')
+        assert set(progress) == names, progress
+        for node in progress.values():
+            assert (node['value'], node['minimum'], node['maximum']) == (expected, 0, 100), node
+        if label == 'progress':
+            assert values['volume'] == 0 and values['updates'] == 1, values
+            assert native['session']['focus'] == 'button:Open', native
+        elif label == 'form':
             assert all(values[k] == v for k, v in dict(name='Ada', nameText='Name: Ada', updates=1, volume=51,
                 plan=2, notes='notes  ', submitted=1).items()), values
         elif label == 'ranges':
@@ -3671,6 +3691,7 @@ SH
   "$SCUZZ" check examples/controls
   "$SCUZZ" package --target web --out-dir "$web_tmp/controls output" examples/controls
   node crates/embedder-web/test.cjs "$web_tmp/controls output/package/web" '' controls
+  node crates/embedder-web/test.cjs "$web_tmp/controls output/package/web" '' progress
 
   python3 - "$web_tmp/range-boundary" <<'PY_RANGE'
 import pathlib, sys

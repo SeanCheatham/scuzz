@@ -9356,7 +9356,7 @@ static void test_circular_progress_sizes(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   sz_view_layout(p, 200.f, 200.f, theme);
   assert(sz_view_kind(p) == SZ_VIEW_CIRCULAR_PROGRESS);
   f = sz_view_frame(p);
@@ -9372,13 +9372,13 @@ static void test_circular_progress_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(40);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:40") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=40") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, 7);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:7") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=7") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -9390,13 +9390,13 @@ static void test_circular_progress_clamps_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(150);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:100") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=100") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, -3);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=0") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -9409,7 +9409,7 @@ static void test_circular_progress_not_tap_target(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   sz_view_layout(p, 80.f, 80.f, theme);
   f = sz_view_frame(p);
   assert(!sz_view_is_tap_target(p));
@@ -9432,7 +9432,7 @@ static void test_circular_progress_paint_ring(void) {
   int tx, ty, cx, cy;
 
   sig = sz_signal_int(100);
-  root = sz_view_circular_progress(sig);
+  root = sz_view_circular_progress(sig, "Completion");
   sz_view_layout(root, 80.f, 80.f, theme);
   f = sz_view_frame(root);
   surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -9467,7 +9467,7 @@ static void test_circular_progress_in_row(void) {
 
   sig = sz_signal_int(40);
   row = sz_view_row();
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   sz_view_add_child(row, sz_view_button("Go", NULL, NULL));
   sz_view_add_child(row, p);
   sz_view_layout(row, 200.f, 200.f, theme);
@@ -9491,7 +9491,7 @@ static void test_circular_progress_not_in_taps_dump(void) {
 
   sig = sz_signal_int(40);
   root = sz_view_row();
-  sz_view_add_child(root, sz_view_circular_progress(sig));
+  sz_view_add_child(root, sz_view_circular_progress(sig, "Completion"));
   sz_view_add_child(root, sz_view_button("Go", counter_tap, sig));
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
@@ -9504,7 +9504,7 @@ static void test_circular_progress_not_in_taps_dump(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
-  assert(strstr(dump, "circular:40") != NULL);
+  assert(strstr(dump, "circular:Completion=40") != NULL);
   taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "circular") == NULL);
@@ -15089,6 +15089,37 @@ static void test_slider_live_records_xy(void) {
   remove(record);
 }
 
+static void test_progress_named_range(void) {
+  const int64_t values[] = {INT64_MIN, -1, 0, 17, 100, INT64_MAX};
+  const int expected[] = {0, 0, 0, 17, 100, 100};
+  assert(sz_view_progress_value(NULL) == 0);
+  for (int kind = 0; kind < 2; kind++) {
+    SzSignalInt *sig = sz_signal_int(0);
+    SzView *view = kind ? sz_view_circular_progress(sig, "Copy \"data\" ✓") :
+                          sz_view_progress(sig, "Copy \"data\" ✓");
+    assert(!strcmp(sz_view_a11y_label(view), "Copy \"data\" ✓"));
+    for (size_t i = 0; i < sizeof values / sizeof *values; i++) {
+      char json[512], needle[64];
+      FILE *file = tmpfile();
+      assert(file);
+      sz_signal_int_set(sig, values[i]);
+      assert(sz_view_progress_value(view) == expected[i]);
+      sz_view_a11y_dump_json(view, file);
+      rewind(file);
+      size_t size = fread(json, 1, sizeof json - 1, file);
+      json[size] = 0;
+      fclose(file);
+      snprintf(needle, sizeof needle, "\"value\":%d,", expected[i]);
+      assert(strstr(json, needle));
+      assert(strstr(json, "\"label\":\"Copy \\\"data\\\" ✓\""));
+      assert(strstr(json, "\"minimum\":0,\"maximum\":100"));
+      assert(sz_signal_int_get(sig) == values[i]);
+    }
+    sz_view_free(view);
+    sz_signal_int_free(sig);
+  }
+}
+
 static void test_progress_sizes(void) {
   SzView *p;
   SzSignalInt *sig;
@@ -15096,7 +15127,7 @@ static void test_progress_sizes(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   sz_view_layout(p, 200.f, 200.f, theme);
   assert(sz_view_kind(p) == SZ_VIEW_PROGRESS);
   f = sz_view_frame(p);
@@ -15113,7 +15144,7 @@ static void test_progress_unbounded_width(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   sz_view_layout(p, 0.f, 80.f, theme);
   f = sz_view_frame(p);
   assert(fabsf(f.w - 120.f) < 0.5f);
@@ -15127,13 +15158,13 @@ static void test_progress_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:40") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=40") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, 7);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:7") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=7") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -15145,13 +15176,13 @@ static void test_progress_clamps_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(150);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:100") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=100") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, -3);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=0") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -15164,7 +15195,7 @@ static void test_progress_not_tap_target(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   sz_view_layout(p, 200.f, 80.f, theme);
   f = sz_view_frame(p);
   assert(!sz_view_is_tap_target(p));
@@ -15186,7 +15217,7 @@ static void test_progress_amount_without_accent(void) {
     theme.primary = theme.surface;
     for (int kind = 0; kind < 2; kind++) {
       SzSignalInt *sig = sz_signal_int(0);
-      SzView *view = kind ? sz_view_circular_progress(sig) : sz_view_progress(sig);
+      SzView *view = kind ? sz_view_circular_progress(sig, "Completion") : sz_view_progress(sig, "Completion");
       SkSurface *surf = sk_surface_make_raster_n32_premul(160 * scale, 60 * scale);
       SkCanvas *canvas = sk_surface_get_canvas(surf);
       int previous = -1;
@@ -15227,7 +15258,7 @@ static void test_progress_paint_fill(void) {
   SzRect f;
 
   sig = sz_signal_int(100);
-  root = sz_view_progress(sig);
+  root = sz_view_progress(sig, "Completion");
   sz_view_layout(root, 80.f, 80.f, theme);
   f = sz_view_frame(root);
   surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -15259,7 +15290,7 @@ static void test_progress_not_in_taps_dump(void) {
 
   sig = sz_signal_int(40);
   root = sz_view_column();
-  sz_view_add_child(root, sz_view_progress(sig));
+  sz_view_add_child(root, sz_view_progress(sig, "Completion"));
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
   cfg.width = 200;
@@ -15271,7 +15302,7 @@ static void test_progress_not_in_taps_dump(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
-  assert(strstr(dump, "progress:40") != NULL);
+  assert(strstr(dump, "progress:Completion=40") != NULL);
   taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "progress") == NULL);
@@ -20544,6 +20575,18 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--progress")) {
+    test_progress_named_range();
+    test_progress_a11y();
+    test_progress_clamps_a11y();
+    test_progress_not_tap_target();
+    test_progress_amount_without_accent();
+    test_circular_progress_a11y();
+    test_circular_progress_clamps_a11y();
+    test_circular_progress_not_tap_target();
+    puts("named progress tests ok");
+    return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "--paragraph-direction")) {
     test_font_change_joining();
     test_font_change_direction();
@@ -21289,6 +21332,7 @@ int main(int argc, char **argv) {
   test_slider_pointer_drag();
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
+  test_progress_named_range();
   test_progress_sizes();
   test_progress_unbounded_width();
   test_progress_a11y();
