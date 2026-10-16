@@ -13,7 +13,7 @@ Select work from these application needs:
 
 1. Screen-reader support and keyboard behavior for remaining composite controls.
    Add editable option search when an application needs it.
-2. Proportional text shaping for the native software and OpenGL renderers.
+2. Scalable monospace glyphs for the native software and OpenGL renderers.
    Add wider font coverage, other contextual scripts across font changes, and bidi caret affinity.
 3. Rotation transitions with replay and cancellation.
 
