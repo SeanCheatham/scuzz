@@ -18,9 +18,9 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Unproven.** Full corpus replay plus bounded search fits a frequent decision loop. Evaluator timelines remain equal to compiled timelines on new generated proposals. Index-based state alignment remains clear when a proposal adds or removes steps.
 
-**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 8.8235 s from editor launch to the visible question. The evaluator host is cached. Frozen card preparation takes 3.852 s. Restart restores the saved cards in 934.3 ms. Cached card navigation takes 169.2 ms. Cached workload navigation takes 110.0 ms. Cached step navigation takes 109.9 ms. The 250 ms navigation target is met. Each value is one Headless sample. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It does not measure a cold host build. The warm run starts a new editor process and reuses the saved card identities and evidence.
+**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 8.0607 s from editor launch to the visible question. The evaluator host is cached. Frozen card preparation takes 3.435 s. Restart restores the saved cards in 933.4 ms. Cached card navigation takes 175.1 ms. Cached workload navigation takes 115.6 ms. Cached step navigation takes 108.5 ms. The 250 ms navigation target is met. Each value is one Headless sample. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It does not measure a cold host build. The warm run starts a new editor process and reuses the saved card identities and evidence.
 
-The host runs Linux 7.0.0-38-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `91bc80bd5845ddb7048a3347f436312219754f05bb3bde2ad86442993046392a`. The editor SHA-256 is `1586abb92e9b1617ff4982996e0dca2622ef0f363eb3614ca8006a41d3f2d011`. The evaluator host SHA-256 is `32136080bd09e218871e9958a9455658a8ed4359be979510847f866db70def5b`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
+The host runs Linux 7.0.0-38-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `3dc3badbe5fe03dcbee8f4a9f8b6b70bf59f402c62a7d9dd6e380aedf55af367`. The editor SHA-256 is `1ed0a020055f4619ddb2e36fb296bc1291233e447c8e41008e026eb5cbf1b27d`. The evaluator host SHA-256 is `a90a1b13db5a872b141c77403913e5f902cb5c601c108d47fe4cb95f08501c32`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
 
 **Finite parity.** CI compares exact timelines and claims for generated type-checker and code-generation drives. An IO proof keeps user signals visible and hides internal storage. Editor idle, queue-cache, and protocol replay have equal timelines and claims. The editor corpus has 228 passing entries. Its 22 claim drivers run. Three sometimes labels and four UI triggers remain unreached. These finite checks do not prove all programs equal. One sequential editor comparison takes 20.75 s for idle, 23.93 s for queue-cache, and 23.40 s for protocol replay on the evaluator. These intervals include host startup. The samples use Linux 7.0.0-38-generic. Compiled runs take 0.06 s, 0.21 s, and 0.21 s. The 20 s probe deadline and Linux memory limit apply.
 
@@ -146,7 +146,12 @@ Native checks cover exact steps, both axes, clipped parents, source limits, and 
 Browser checks cover moving control bounds, old and current pointer locations, hidden cancellation, and reduction.
 Browser range checks keep signed 64-bit source values while display clamps the coordinates.
 Native and evaluator replays compare exact position timelines, claims, and control bounds.
-Transform transitions remain open.
+Scale transitions use the shared pump clock and keep layout and text wrapping unchanged.
+Native and browser checks cover nested scales, clips, glyphs, source limits, and displayed input bounds.
+Zero scale excludes paint, input, focus, and accessibility. Child state remains available.
+Browser checks compare glyph coverage with a separate Canvas reference at six scales.
+Native and evaluator replays compare exact scale timelines, claims, and control bounds.
+Rotation transitions remain open.
 Native operating-system motion preference detection and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 
