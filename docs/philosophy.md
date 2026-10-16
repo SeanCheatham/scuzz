@@ -591,7 +591,7 @@ Its font shaper and DOM text ranges supply glyphs and source positions.
 Pinned Noto fonts supply fallback for Devanagari, Thai, and Simplified Chinese.
 Font selection keeps source clusters together. Text line boxes contain fallback marks.
 Web packages include the same fonts. Font loading updates layout and keeps input state.
-Other script coverage, shaping across font changes, wrapped paragraph direction, and full bidi caret affinity remain open.
+Other script coverage, shaping across font changes and full bidi caret affinity remain open.
 The software and OpenGL native renderers retain their code-point cells.
 They do not supply these proportional shaping guarantees.
 See the [HarfBuzz shaping model](https://harfbuzz.github.io/getting-started.html).

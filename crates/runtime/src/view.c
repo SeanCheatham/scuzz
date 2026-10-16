@@ -6417,9 +6417,28 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
     context = (SkTextRange){source, context.bytes + 3, (size_t)start, insert + 3};
   } else if (shortened) context.end = context.start;
 #ifdef __EMSCRIPTEN__
-  if (wp->selectable)
-    sz_web_text_line(s, context, wp->x, start, end, tmp, wp->x, wp->y, width, wp->font_px,
+  if (wp->selectable) {
+    int visible_end = source ? (int)context.end - 3 : shortened && !tmp[0] ? start : end;
+    char saved = tmp[visible_end - start];
+    tmp[visible_end - start] = 0;
+    sz_web_text_line(s, context, wp->x, start, visible_end, tmp, wp->x, wp->y, width, wp->font_px,
                      wp->line_h, g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h, wp->argb, 0, 0, 0);
+    tmp[visible_end - start] = saved;
+    if (source) {
+      size_t count = context.end - context.start + 1;
+      float *leading = sz_alloc(count * 2 * sizeof(float)), *trailing = leading + count;
+      sk_font_text_positions(context, wp->font_px, 0, leading, trailing);
+      float left = INFINITY, right = -INFINITY;
+      for (int byte = visible_end - start; byte < visible_end - start + 3; byte++) {
+        left = fminf(left, fminf(leading[byte], trailing[byte]));
+        right = fmaxf(right, fmaxf(leading[byte], trailing[byte]));
+      }
+      sz_web_text_line(s, context, wp->x, visible_end, visible_end, "...", wp->x + left, wp->y,
+        right - left, wp->font_px, wp->line_h, g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h,
+        wp->argb, 0, 1, 0);
+      sz_free(leading);
+    }
+  }
 #endif
   SkPaint *paint = sk_paint_new();
   if (paint) {

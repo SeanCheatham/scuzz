@@ -121,7 +121,7 @@ Finite checks cover source clusters, mark bounds, CJK field positions, and compo
 Browser checks cover delayed font loading, retained focus, source copying, and font advances.
 The CJK font download uses 17.8 MB before compression. Smaller font delivery remains open.
 Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
-Other script coverage, shaping across font changes, wrapped paragraph direction, and full bidi caret affinity remain open.
+Other script coverage, shaping across font changes and full bidi caret affinity remain open.
 Native software and OpenGL renderers keep code-point cells. Their proportional shaping remains open.
 Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.

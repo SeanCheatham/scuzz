@@ -1020,7 +1020,8 @@ async function checkShapingParagraphs(page, browserType, mobile) {
     ['שלום 12: AB אב!', true, false], ['WWWWWW 12 אב AB!', false, false],
     ['WWWWWW AB\u202aCD\u202cEF אב', false, false],
     ['WWWWWW אב[ אבגדה ] AB', false, false, [['אבגדה ]', 'rtl'], [' AB', 'ltr']]],
-    ['שלום עולם ארוך מאוד', true, false, null, true]
+    ['שלום עולם ארוך מאוד', true, false, null, true],
+    ['אבגדהוזחטיכלמנסע סוף', true, false, null, true]
   ];
   await page.setViewportSize({width: mobile ? 390 : 640, height: 1600});
   await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
