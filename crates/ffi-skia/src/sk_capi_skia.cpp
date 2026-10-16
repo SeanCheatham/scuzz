@@ -27,6 +27,7 @@
 #include <SheenBidi/SheenBidi.h>
 
 #include <climits>
+#include <cmath>
 #include <memory>
 #include <map>
 #include <vector>
@@ -534,6 +535,19 @@ void scuzz_skia_canvas_restore(void *canvas) {
   auto *c = static_cast<CapCanvas *>(canvas);
   if (c && c->raw)
     c->raw->restore();
+}
+
+int scuzz_skia_canvas_scale(void *canvas, float factor, float pivot_x, float pivot_y) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  if (!c || !c->raw || !(factor >= 0.f) || !std::isfinite(factor) ||
+      !std::isfinite(pivot_x) || !std::isfinite(pivot_y)) return 0;
+  SkMatrix local;
+  local.setScale(factor, factor, pivot_x, pivot_y);
+  SkMatrix matrix = c->raw->getTotalMatrix();
+  matrix.preConcat(local);
+  if (!local.isFinite() || !matrix.isFinite()) return 0;
+  c->raw->setMatrix(matrix);
+  return 1;
 }
 
 void scuzz_skia_canvas_clip_rect(void *canvas, float x, float y, float w,

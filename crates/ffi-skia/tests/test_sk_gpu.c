@@ -1,6 +1,7 @@
 #include "sk_capi.h"
 
 #include <stdio.h>
+#include <assert.h>
 #include <string.h>
 
 extern unsigned sk_sw_cpu_paint_ops(void);
@@ -34,6 +35,14 @@ static void paint_scene(SkSurface *s) {
   sk_canvas_draw_string(c, "A", 18, 20, p);
   sk_paint_set_color(p, sk_color_rgba(200, 100, 50, 128));
   sk_canvas_draw_rect(c, 0, 18, 8, 6, p);
+  sk_canvas_save(c);
+  sk_canvas_clip_rect(c, 28, 22, 12, 10);
+  assert(sk_canvas_scale(c, 1.5f, 28, 22));
+  assert(sk_canvas_save_layer_alpha(c, 180));
+  sk_canvas_draw_rect(c, 28, 22, 4, 4, p);
+  sk_canvas_draw_string(c, "A", 28, 29, p);
+  sk_canvas_restore(c);
+  sk_canvas_restore(c);
   sk_paint_delete(p);
 }
 

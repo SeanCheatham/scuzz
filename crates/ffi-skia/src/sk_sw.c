@@ -1,5 +1,6 @@
 #include "sk_capi.h"
 #include <limits.h>
+#include <float.h>
 #include "png_enc.h"
 #include "sk_gpu.h"
 #include "sk_utf8.h"
@@ -35,7 +36,8 @@ typedef struct {
   SkGpuTarget *target;
   uint8_t alpha;
   int layer;
-} SwClip;
+  float scale, tx, ty;
+} SwSave;
 
 struct SkCanvas {
   struct SkSurface *surface;
@@ -43,7 +45,8 @@ struct SkCanvas {
   int clip_y0;
   int clip_x1;
   int clip_y1;
-  SwClip *saves; /* heap; grows on demand */
+  float scale, tx, ty;
+  SwSave *saves; /* heap; grows on demand */
   int save_n;
   int save_cap;
   /* save() calls that failed to allocate. restore() eats them so the pair
@@ -79,6 +82,7 @@ SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
     return NULL;
   }
   s->canvas.surface = s;
+  s->canvas.scale = 1.f;
   s->canvas.clip_x0 = 0;
   s->canvas.clip_y0 = 0;
   s->canvas.clip_x1 = width;
@@ -106,6 +110,7 @@ SkSurface *sk_surface_make_gpu_n32_premul(int width, int height) {
   s->gpu = 1;
   s->target = target;
   s->canvas.surface = s;
+  s->canvas.scale = 1.f;
   s->canvas.clip_x0 = 0;
   s->canvas.clip_y0 = 0;
   s->canvas.clip_x1 = width;
@@ -220,22 +225,22 @@ void sk_canvas_clear(SkCanvas *canvas, SkColor color) {
 }
 
 /* Floor negative coordinates. Clamp before the integer conversion. */
-static int sw_floor_int(float v) {
-  if (!(v > (float)INT_MIN)) return INT_MIN;
-  if (v >= (float)INT_MAX) return INT_MAX;
+static int sw_floor_int(double v) {
+  if (!(v > (double)INT_MIN)) return INT_MIN;
+  if (v >= (double)INT_MAX) return INT_MAX;
   int i = (int)v;
-  return (float)i > v ? i - 1 : i;
+  return (double)i > v ? i - 1 : i;
 }
 
-void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
+static void sw_draw_rect(SkCanvas *canvas, double x, double y, double w, double h,
                          const SkPaint *paint) {
   int x0, y0, x1, y1, ix, iy;
-  if (!canvas || !canvas->surface || !paint || w <= 0 || h <= 0)
+  if (!canvas || !canvas->surface || !paint || !(w > 0) || !(h > 0) || !(canvas->scale > 0))
     return;
-  x0 = sw_floor_int(x);
-  y0 = sw_floor_int(y);
-  x1 = sw_floor_int(x + w);
-  y1 = sw_floor_int(y + h);
+  x0 = sw_floor_int((double)x * canvas->scale + canvas->tx);
+  y0 = sw_floor_int((double)y * canvas->scale + canvas->ty);
+  x1 = sw_floor_int(((double)x + w) * canvas->scale + canvas->tx);
+  y1 = sw_floor_int(((double)y + h) * canvas->scale + canvas->ty);
   if (x0 < canvas->clip_x0) x0 = canvas->clip_x0;
   if (y0 < canvas->clip_y0) y0 = canvas->clip_y0;
   if (x1 > canvas->clip_x1) x1 = canvas->clip_x1;
@@ -258,18 +263,40 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
       put_pixel(canvas->surface, ix, iy, paint->color);
 }
 
+void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
+                         const SkPaint *paint) {
+  sw_draw_rect(canvas, x, y, w, h, paint);
+}
+
+int sk_canvas_scale(SkCanvas *canvas, float factor, float pivot_x, float pivot_y) {
+  if (!canvas || canvas->save_dropped || !(factor >= 0.f) || !isfinite(factor) ||
+      !isfinite(pivot_x) || !isfinite(pivot_y)) return 0;
+  double local_x = (double)pivot_x * (1. - factor);
+  double local_y = (double)pivot_y * (1. - factor);
+  double scale = (double)canvas->scale * factor;
+  double tx = canvas->tx + canvas->scale * local_x;
+  double ty = canvas->ty + canvas->scale * local_y;
+  if (fabs(local_x) > FLT_MAX || fabs(local_y) > FLT_MAX ||
+      scale > FLT_MAX || fabs(tx) > FLT_MAX || fabs(ty) > FLT_MAX) return 0;
+  canvas->scale = (float)scale;
+  canvas->tx = (float)tx;
+  canvas->ty = (float)ty;
+  return 1;
+}
+
 static int sw_save(SkCanvas *canvas) {
   if (!canvas) return 0;
   if (canvas->save_n >= canvas->save_cap) {
     int cap = canvas->save_cap ? canvas->save_cap * 2 : 16;
-    SwClip *s = realloc(canvas->saves, (size_t)cap * sizeof *s);
+    SwSave *s = realloc(canvas->saves, (size_t)cap * sizeof *s);
     if (!s) return 0;
     canvas->saves = s;
     canvas->save_cap = cap;
   }
-  SwClip *top = &canvas->saves[canvas->save_n++];
-  *top = (SwClip){.x0 = canvas->clip_x0, .y0 = canvas->clip_y0,
-    .x1 = canvas->clip_x1, .y1 = canvas->clip_y1};
+  SwSave *top = &canvas->saves[canvas->save_n++];
+  *top = (SwSave){.x0 = canvas->clip_x0, .y0 = canvas->clip_y0,
+    .x1 = canvas->clip_x1, .y1 = canvas->clip_y1,
+    .scale = canvas->scale, .tx = canvas->tx, .ty = canvas->ty};
   return 1;
 }
 
@@ -287,7 +314,7 @@ int sk_canvas_save_layer_alpha(SkCanvas *canvas, uint8_t alpha) {
   if ((!pixels && !target) || !sw_save(canvas)) {
     free(pixels); sk_gpu_target_free(target); return 0;
   }
-  SwClip *top = &canvas->saves[canvas->save_n - 1];
+  SwSave *top = &canvas->saves[canvas->save_n - 1];
   top->layer = 1; top->alpha = alpha;
   top->pixels = s->pixels; top->target = s->target;
   s->pixels = pixels; s->target = target;
@@ -298,9 +325,10 @@ void sk_canvas_restore(SkCanvas *canvas) {
   if (!canvas) return;
   if (canvas->save_dropped > 0) { canvas->save_dropped--; return; }
   if (canvas->save_n <= 0) return;
-  SwClip top = canvas->saves[--canvas->save_n];
+  SwSave top = canvas->saves[--canvas->save_n];
   canvas->clip_x0 = top.x0; canvas->clip_y0 = top.y0;
   canvas->clip_x1 = top.x1; canvas->clip_y1 = top.y1;
+  canvas->scale = top.scale; canvas->tx = top.tx; canvas->ty = top.ty;
   if (!top.layer) return;
   SkSurface *s = canvas->surface;
   uint8_t *pixels = s->pixels;
@@ -330,15 +358,15 @@ void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
   int x0, y0, x1, y1;
   if (!canvas)
     return;
-  if (w <= 0.f || h <= 0.f) {
+  if (!(w > 0.f) || !(h > 0.f) || !(canvas->scale > 0.f)) {
     canvas->clip_x1 = canvas->clip_x0;
     canvas->clip_y1 = canvas->clip_y0;
     return;
   }
-  x0 = sw_floor_int(x);
-  y0 = sw_floor_int(y);
-  x1 = sw_floor_int(x + w);
-  y1 = sw_floor_int(y + h);
+  x0 = sw_floor_int((double)x * canvas->scale + canvas->tx);
+  y0 = sw_floor_int((double)y * canvas->scale + canvas->ty);
+  x1 = sw_floor_int(((double)x + w) * canvas->scale + canvas->tx);
+  y1 = sw_floor_int(((double)y + h) * canvas->scale + canvas->ty);
   if (x0 > canvas->clip_x0)
     canvas->clip_x0 = x0;
   if (y0 > canvas->clip_y0)
@@ -700,15 +728,17 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
   (void)direction; (void)joins; (void)arabic;
 #endif
   float size, scale;
-  int advance, baseline, cx, row, col, sr, sc;
+  int advance, baseline, row, col, sr, sc;
+  double cx;
   const char *p;
-  if (!canvas || !canvas->surface || !paint || !text)
+  if (!canvas || !canvas->surface || !paint || !text || !(canvas->scale > 0.f) || !isfinite(x) || !isfinite(y))
     return;
   if (canvas->surface->gpu) {
     sk_gpu_draw_text(canvas->surface->target, text, x, y, paint->text_size,
                      paint->color.r, paint->color.g, paint->color.b,
                      paint->color.a, canvas->clip_x0, canvas->clip_y0,
-                     canvas->clip_x1, canvas->clip_y1, style);
+                     canvas->clip_x1, canvas->clip_y1, style,
+                     canvas->scale, canvas->tx, canvas->ty);
     return;
   }
   cpu_paint_ops++;
@@ -720,7 +750,12 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
     float advance_width = web_text_width(text, (int)strlen(text), size, style, rtl, force, joins, arabic);
     float metrics[2];
     web_span_metrics(text, (int)strlen(text), size, style, rtl, force, joins, arabic, metrics);
-    float ascent = metrics[0], descent = metrics[1];
+    float ascent = metrics[0] * canvas->scale, descent = metrics[1] * canvas->scale;
+    advance_width *= canvas->scale;
+    x = (float)((double)x * canvas->scale + canvas->tx);
+    y = (float)((double)y * canvas->scale + canvas->ty);
+    size *= canvas->scale;
+    if (!isfinite(size) || !isfinite(x) || !isfinite(y)) return;
     int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - size)));
     int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + size)));
     /* Keep antialias coverage outside the geometric glyph bounds. */
@@ -747,12 +782,12 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
   baseline = (int)(size - 1.f + 0.5f);
   if (baseline < 0)
     baseline = 0;
-  cx = sw_floor_int(x);
+  cx = floor((double)x);
   for (p = text; *p;) {
     int clen = sk_utf8_clen(p);
     unsigned char ch = (unsigned char)*p;
     const uint8_t *glyph;
-    int gy = sw_floor_int(y) - baseline;
+    double gy = floor((double)y) - baseline;
     if (clen < 1)
       clen = 1;
     if (ch < 32 || ch > 126)
@@ -764,9 +799,9 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
         for (col = 0; col < 8; col++) {
           /* Font bytes are LSB-left in this table. */
           if (bits & (uint8_t)(1u << col)) {
-            int gx = cx + col + ((style & 2) ? (7 - row) / 4 : 0);
-            put_pixel(canvas->surface, gx, gy + row, paint->color);
-            if (style & 1) put_pixel(canvas->surface, gx + 1, gy + row, paint->color);
+            double gx = cx + col + ((style & 2) ? (7 - row) / 4 : 0);
+            sw_draw_rect(canvas, gx, gy + row, 1, 1, paint);
+            if (style & 1) sw_draw_rect(canvas, gx + 1, gy + row, 1, 1, paint);
           }
         }
       }
@@ -780,9 +815,9 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
           if (col > 7)
             col = 7;
           if (glyph[row] & (uint8_t)(1u << col)) {
-            int gx = cx + sc + ((style & 2) ? (advance - sr) / 5 : 0);
-            put_pixel(canvas->surface, gx, gy + sr, paint->color);
-            if (style & 1) put_pixel(canvas->surface, gx + 1, gy + sr, paint->color);
+            double gx = cx + sc + ((style & 2) ? (advance - sr) / 5 : 0);
+            sw_draw_rect(canvas, gx, gy + sr, 1, 1, paint);
+            if (style & 1) sw_draw_rect(canvas, gx + 1, gy + sr, 1, 1, paint);
           }
         }
       }
@@ -1146,33 +1181,37 @@ void sk_canvas_draw_image(SkCanvas *canvas, const SkImage *image, float x,
   if (!canvas || !canvas->surface || !image || !(w > 0.f) || !(h > 0.f) ||
       !(opacity > 0.f) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h))
     return;
+  if (!(canvas->scale > 0.f)) return;
+  double dx = (double)x * canvas->scale + canvas->tx;
+  double dy = (double)y * canvas->scale + canvas->ty;
+  double dw = (double)w * canvas->scale, dh = (double)h * canvas->scale;
   if (opacity > 1.f)
     opacity = 1.f;
   if (canvas->surface->gpu) {
     SkImage *cached = (SkImage *)image;
     if (!cached->gpu_image)
       cached->gpu_image = sk_gpu_image_new(image->pixels, image->width, image->height);
-    sk_gpu_draw_image(canvas->surface->target, cached->gpu_image, x, y, w, h,
+    sk_gpu_draw_image(canvas->surface->target, cached->gpu_image, dx, dy, dw, dh,
                        opacity, canvas->clip_x0, canvas->clip_y0,
                        canvas->clip_x1, canvas->clip_y1);
     return;
   }
   SkSurface *surface = canvas->surface;
-  float left = fmaxf(0.f, fmaxf((float)canvas->clip_x0, x));
-  float top = fmaxf(0.f, fmaxf((float)canvas->clip_y0, y));
-  float right = fminf((float)surface->width, fminf((float)canvas->clip_x1, x + w));
-  float bottom = fminf((float)surface->height, fminf((float)canvas->clip_y1, y + h));
+  double left = fmax(0., fmax(canvas->clip_x0, dx));
+  double top = fmax(0., fmax(canvas->clip_y0, dy));
+  double right = fmin(surface->width, fmin(canvas->clip_x1, dx + dw));
+  double bottom = fmin(surface->height, fmin(canvas->clip_y1, dy + dh));
   if (!(right > left) || !(bottom > top))
     return;
-  int x0 = (int)ceilf(left - 0.5f), y0 = (int)ceilf(top - 0.5f);
-  int x1 = (int)ceilf(right - 0.5f), y1 = (int)ceilf(bottom - 0.5f);
+  int x0 = (int)ceil(left - 0.5), y0 = (int)ceil(top - 0.5);
+  int x1 = (int)ceil(right - 0.5), y1 = (int)ceil(bottom - 0.5);
   cpu_paint_ops++;
-  for (int dy = y0; dy < y1; dy++) {
-    float sy = fminf(image->height - 1.f, fmaxf(0.f, (dy + 0.5f - y) * image->height / h - 0.5f));
+  for (int py = y0; py < y1; py++) {
+    float sy = fminf(image->height - 1.f, fmaxf(0.f, (py + 0.5 - dy) * image->height / dh - 0.5f));
     int iy = (int)sy, jy = iy + 1 < image->height ? iy + 1 : iy;
     float fy = sy - iy;
-    for (int dx = x0; dx < x1; dx++) {
-      float sx = fminf(image->width - 1.f, fmaxf(0.f, (dx + 0.5f - x) * image->width / w - 0.5f));
+    for (int px = x0; px < x1; px++) {
+      float sx = fminf(image->width - 1.f, fmaxf(0.f, (px + 0.5 - dx) * image->width / dw - 0.5f));
       int ix = (int)sx, jx = ix + 1 < image->width ? ix + 1 : ix;
       float fx = sx - ix;
       const uint8_t *a = image->pixels + ((size_t)iy * image->width + ix) * 4;
@@ -1185,7 +1224,7 @@ void sk_canvas_draw_image(SkCanvas *canvas, const SkImage *image, float x,
         float lower = c[channel] + (d[channel] - c[channel]) * fx;
         rgba[channel] = (uint8_t)((upper + (lower - upper) * fy) * opacity + 0.5f);
       }
-      uint8_t *pixel = surface->pixels + ((size_t)dy * surface->width + dx) * 4;
+      uint8_t *pixel = surface->pixels + ((size_t)py * surface->width + px) * 4;
       unsigned inverse = 255u - rgba[3];
       for (int channel = 0; channel < 4; channel++)
         pixel[channel] = (uint8_t)(rgba[channel] + (pixel[channel] * inverse + 127u) / 255u);

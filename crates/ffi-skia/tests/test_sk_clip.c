@@ -3,7 +3,183 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <float.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
+
+static const uint8_t *pixels(SkSurface *surface) {
+  size_t len = 0;
+  const uint8_t *data = sk_surface_peek_pixels(surface, &len);
+  assert(data && len == 64 * 64 * 4);
+  return data;
+}
+
+static void check_box(SkSurface *surface, int x0, int y0, int x1, int y1, int alpha) {
+  const uint8_t *data = pixels(surface);
+  for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+    const uint8_t *p = data + (y * 64 + x) * 4;
+    int a = x >= x0 && x < x1 && y >= y0 && y < y1 ? alpha : 0;
+    assert(p[0] == a && p[1] == 0 && p[2] == 0 && p[3] == a);
+  }
+}
+
+static void check_scale(int gpu) {
+  SkSurface *surface = gpu ? sk_surface_make_gpu_n32_premul(64, 64)
+                           : sk_surface_make_raster_n32_premul(64, 64);
+  assert(surface);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  SkPaint *paint = sk_paint_new();
+  assert(canvas && paint);
+  sk_paint_set_color(paint, sk_color_rgba(255, 0, 0, 255));
+
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_scale(canvas, 2, 8, 8));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  check_box(surface, 4, 4, 12, 12, 255);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_scale(canvas, .5f, 8, 8));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  check_box(surface, 6, 6, 10, 10, 255);
+  sk_canvas_restore(canvas);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  check_box(surface, 4, 4, 12, 12, 255);
+  sk_canvas_restore(canvas);
+
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_scale(canvas, .5f, 8, 8));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  check_box(surface, 7, 7, 9, 9, 255);
+  sk_canvas_restore(canvas);
+
+  /* The ancestor clip stays in device coordinates. The child clip scales. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  sk_canvas_clip_rect(canvas, 5, 3, 6, 7);
+  assert(sk_canvas_scale(canvas, 2, 8, 8));
+  sk_canvas_clip_rect(canvas, 6, 6, 4, 4);
+  sk_canvas_draw_rect(canvas, 0, 0, 64, 64, paint);
+  check_box(surface, 5, 4, 11, 10, 255);
+  sk_canvas_restore(canvas);
+
+  /* Composite each layer once in device coordinates. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_scale(canvas, 2, 8, 8));
+  assert(sk_canvas_save_layer_alpha(canvas, 128));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  sk_canvas_restore(canvas);
+  check_box(surface, 4, 4, 12, 12, 128);
+  assert(sk_canvas_save_layer_alpha(canvas, 255));
+  assert(sk_canvas_scale(canvas, .5f, 8, 8));
+  sk_canvas_restore(canvas);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  check_box(surface, 4, 4, 12, 12, 255);
+  sk_canvas_restore(canvas);
+
+  /* Invalid transforms leave the matrix unchanged. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_scale(canvas, 2, 8, 8));
+  assert(!sk_canvas_scale(canvas, -1, 0, 0));
+  assert(!sk_canvas_scale(canvas, NAN, 0, 0));
+  assert(!sk_canvas_scale(canvas, INFINITY, 0, 0));
+  assert(!sk_canvas_scale(canvas, 1, NAN, 0));
+  assert(!sk_canvas_scale(canvas, 1, 0, INFINITY));
+  assert(!sk_canvas_scale(canvas, FLT_MAX, FLT_MAX, 0));
+  assert(!sk_canvas_scale(canvas, FLT_MAX, 0, 0));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  check_box(surface, 4, 4, 12, 12, 255);
+  sk_canvas_restore(canvas);
+  assert(!sk_canvas_scale(NULL, 1, 0, 0));
+
+  uint8_t image_pixels[8 * 4];
+  for (int i = 0; i < 8; i++) {
+    image_pixels[i * 4] = i < 4 ? 255 : 0;
+    image_pixels[i * 4 + 1] = 0;
+    image_pixels[i * 4 + 2] = i < 4 ? 0 : 255;
+    image_pixels[i * 4 + 3] = 255;
+  }
+  SkImage *image = sk_image_make_rgba(image_pixels, 8, 1);
+  assert(image);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  sk_canvas_clip_rect(canvas, 16, 16, 32, 32);
+  assert(sk_canvas_scale(canvas, 2, 0, 0));
+  sk_canvas_draw_image(canvas, image, 0, 0, 32, 32, .5f);
+  sk_canvas_restore(canvas);
+  const uint8_t *data = pixels(surface);
+  for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+    const uint8_t *p = data + (y * 64 + x) * 4;
+    int inside = x >= 16 && x < 48 && y >= 16 && y < 48;
+    assert(abs(p[3] - (inside ? 128 : 0)) <= 1);
+    if (inside && x <= 25) assert(p[0] >= 127 && p[2] == 0);
+    if (inside && x >= 38) assert(p[0] == 0 && p[2] >= 127);
+  }
+
+  /* Compare transformed bitmap text with independent pixel replication. */
+  uint8_t original[64 * 64 * 4];
+  sk_paint_set_text_size(paint, 14);
+  float advance = sk_font_measure_string("AB", 14);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_draw_string(canvas, "AB", 2, 24, paint);
+  memcpy(original, pixels(surface), sizeof original);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_scale(canvas, 2, 0, 0));
+  assert(sk_font_measure_string("AB", 14) == advance);
+  sk_canvas_draw_string(canvas, "AB", 2, 24, paint);
+  sk_canvas_restore(canvas);
+  data = pixels(surface);
+  const char *backend = getenv("SCUZZ_SKIA");
+  int bitmap = backend && (!strcmp(backend, "gpu") || !strcmp(backend, "sk_sw"));
+  int before = 0, after = 0;
+  for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+    const uint8_t *p = data + (y * 64 + x) * 4;
+    const uint8_t *q = original + ((y / 2) * 64 + x / 2) * 4;
+    if (bitmap) assert(!memcmp(p, q, 4));
+    if (original[(y * 64 + x) * 4 + 3]) before++;
+    if (p[3]) { after++; assert(y >= 20 && y < 52 && x < 64); }
+  }
+  assert(before > 20 && after > before * 2);
+
+  /* Zero scale excludes paint. Clear still uses the device clip. */
+  sk_canvas_save(canvas);
+  assert(sk_canvas_scale(canvas, 0, 8, 8));
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_draw_rect(canvas, 0, 0, 64, 64, paint);
+  sk_canvas_draw_string(canvas, "AB", 2, 24, paint);
+  sk_canvas_draw_image(canvas, image, 0, 0, 32, 32, 1);
+  check_box(surface, 0, 0, 0, 0, 0);
+  sk_canvas_restore(canvas);
+
+  /* Large scales keep painting bounded by the visible clip. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  sk_canvas_clip_rect(canvas, 8, 8, 12, 12);
+  assert(sk_canvas_scale(canvas, (float)INT_MAX, 0, 0));
+  sk_canvas_draw_rect(canvas, -1, -1, 2, 2, paint);
+  check_box(surface, 8, 8, 20, 20, 255);
+  sk_canvas_draw_string(canvas, "AB", (float)INT_MAX, (float)INT_MAX, paint);
+  sk_canvas_draw_image(canvas, image, -1, -1, 2, 2, 1);
+  data = pixels(surface);
+  for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+    assert(data[(y * 64 + x) * 4 + 3] == (x >= 8 && x < 20 && y >= 8 && y < 20 ? 255 : 0));
+  sk_canvas_restore(canvas);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);
+  check_box(surface, 6, 6, 10, 10, 255);
+
+  sk_image_unref(image);
+  sk_paint_delete(paint);
+  sk_surface_unref(surface);
+}
 
 int main(void) {
   SkSurface *surf = sk_surface_make_raster_n32_premul(32, 32);
@@ -111,6 +287,9 @@ int main(void) {
 
   sk_paint_delete(paint);
   sk_surface_unref(surf);
-  puts("ffi-skia clip tests ok");
+  check_scale(0);
+  const char *backend = getenv("SCUZZ_SKIA");
+  if (backend && !strcmp(backend, "gpu")) check_scale(1);
+  puts("ffi-skia clip and scale tests ok");
   return 0;
 }

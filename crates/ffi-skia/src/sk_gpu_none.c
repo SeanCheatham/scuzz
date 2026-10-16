@@ -44,8 +44,9 @@ void sk_gpu_fill_rect(SkGpuTarget *target, int x0, int y0, int x1, int y1,
 
 void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
                       float size, uint8_t r, uint8_t g, uint8_t b, uint8_t a,
-                      int cx0, int cy0, int cx1, int cy1, int style) {
-  (void)style;
+                      int cx0, int cy0, int cx1, int cy1, int style,
+                      float transform, float tx, float ty) {
+  (void)style; (void)transform; (void)tx; (void)ty;
   (void)target;
   (void)text;
   (void)x;
@@ -73,8 +74,8 @@ void *sk_gpu_image_new(const uint8_t *pixels, int width, int height) {
   return NULL;
 }
 void sk_gpu_image_free(void *image) { (void)image; }
-void sk_gpu_draw_image(SkGpuTarget *target, const void *image, float x, float y,
-                       float w, float h, float opacity,
+void sk_gpu_draw_image(SkGpuTarget *target, const void *image, double x, double y,
+                       double w, double h, float opacity,
                        int cx0, int cy0, int cx1, int cy1) {
   (void)target; (void)image; (void)x; (void)y; (void)w; (void)h;
   (void)opacity; (void)cx0; (void)cy0; (void)cx1; (void)cy1;

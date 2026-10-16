@@ -62,6 +62,9 @@ void sk_canvas_save(SkCanvas *canvas);
  * Return 0 on allocation failure. A failed call leaves the stack unchanged. */
 int sk_canvas_save_layer_alpha(SkCanvas *canvas, uint8_t alpha);
 void sk_canvas_restore(SkCanvas *canvas);
+/* Compose a nonnegative uniform scale about this point. Save and restore
+ * include the scale. Return 0 for invalid or nonfinite matrix values. */
+int sk_canvas_scale(SkCanvas *canvas, float factor, float pivot_x, float pivot_y);
 /* Intersect the current clip with this rect. */
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h);
 

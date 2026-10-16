@@ -5,6 +5,7 @@
 #include "sk_font8.h"
 #include "sk_utf8.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -407,24 +408,21 @@ void sk_gpu_fill_rect(SkGpuTarget *target, int x0, int y0, int x1, int y1,
   draw_verts(verts, 6, col, a == 255);
 }
 
-static int gpu_floor(float v) {
-  int i = (int)v;
-  return (float)i > v ? i - 1 : i;
-}
-
 static int gpu_advance(float font_px) {
   int a = (int)(font_px + 0.5f);
   return a < 1 ? 1 : a;
 }
 
-static int push_px(float **verts, int *n, int *cap, const SkGpuTarget *t, int x,
-                   int y, int cx0, int cy0, int cx1, int cy1) {
+static int push_px(float **verts, int *n, int *cap, const SkGpuTarget *t, double x,
+                   double y, int cx0, int cy0, int cx1, int cy1,
+                   float scale, float tx, float ty) {
   float *nv;
   int need;
-  if (x < cx0 || y < cy0 || x >= cx1 || y >= cy1)
-    return 1;
-  if (x < 0 || y < 0 || x >= t->w || y >= t->h)
-    return 1;
+  double left = floor(x * scale + tx), top = floor(y * scale + ty);
+  double right = floor((x + 1) * scale + tx), bottom = floor((y + 1) * scale + ty);
+  left = fmax(0, fmax(cx0, left)); top = fmax(0, fmax(cy0, top));
+  right = fmin(t->w, fmin(cx1, right)); bottom = fmin(t->h, fmin(cy1, bottom));
+  if (!(right > left) || !(bottom > top)) return 1;
   need = *n + 12;
   if (need > *cap) {
     int c = *cap ? *cap * 2 : 256;
@@ -436,14 +434,15 @@ static int push_px(float **verts, int *n, int *cap, const SkGpuTarget *t, int x,
     *verts = nv;
     *cap = c;
   }
-  quad_ndc(*verts + *n, t, x, y, x + 1, y + 1);
+  quad_ndc(*verts + *n, t, left, top, right, bottom);
   *n += 12;
   return 1;
 }
 
 void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
                       float size, uint8_t r, uint8_t g, uint8_t b, uint8_t a,
-                      int cx0, int cy0, int cx1, int cy1, int style) {
+                      int cx0, int cy0, int cx1, int cy1, int style,
+                      float transform, float tx, float ty) {
   float px;
   float scale;
   float col[4];
@@ -452,7 +451,7 @@ void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
   int cap = 0;
   int advance;
   int baseline;
-  int cx;
+  double cx;
   int fast;
   const char *p;
   if (!target || !text || a == 0 || !gpu_ready())
@@ -467,13 +466,13 @@ void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
   if (baseline < 0)
     baseline = 0;
   fast = scale >= 0.999f && scale <= 1.001f;
-  cx = gpu_floor(x);
+  cx = floor((double)x);
   premul(r, g, b, a, col);
   for (p = text; *p;) {
     int clen = sk_utf8_clen(p);
     unsigned char ch = (unsigned char)*p;
     const uint8_t *glyph;
-    int gy;
+    double gy;
     int row;
     int bit;
     if (clen < 1)
@@ -481,18 +480,18 @@ void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
     if (ch < 32 || ch > 126)
       ch = '?';
     glyph = sk_font8[ch - 32];
-    gy = gpu_floor(y) - baseline;
+    gy = floor((double)y) - baseline;
     if (fast) {
       for (row = 0; row < 8; row++) {
         uint8_t bits = glyph[row];
         for (bit = 0; bit < 8; bit++) {
           if (bits & (uint8_t)(1u << bit)) {
             if (!push_px(&verts, &n, &cap, target, cx + bit + ((style & 2) ? (7 - row) / 4 : 0), gy + row, cx0, cy0,
-                         cx1, cy1))
+                         cx1, cy1, transform, tx, ty))
               goto draw;
             if ((style & 1) && !push_px(&verts, &n, &cap, target,
                 cx + bit + 1 + ((style & 2) ? (7 - row) / 4 : 0), gy + row,
-                cx0, cy0, cx1, cy1)) goto draw;
+                cx0, cy0, cx1, cy1, transform, tx, ty)) goto draw;
           }
         }
       }
@@ -509,11 +508,11 @@ void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
             bit = 7;
           if (glyph[row] & (uint8_t)(1u << bit)) {
             if (!push_px(&verts, &n, &cap, target, cx + sc + ((style & 2) ? (advance - sr) / 5 : 0), gy + sr, cx0, cy0,
-                         cx1, cy1))
+                         cx1, cy1, transform, tx, ty))
               goto draw;
             if ((style & 1) && !push_px(&verts, &n, &cap, target,
                 cx + sc + 1 + ((style & 2) ? (advance - sr) / 5 : 0), gy + sr,
-                cx0, cy0, cx1, cy1)) goto draw;
+                cx0, cy0, cx1, cy1, transform, tx, ty)) goto draw;
           }
         }
       }
@@ -649,8 +648,8 @@ void sk_gpu_image_free(void *image) {
   free(image);
 }
 
-static void gpu_draw_texture(SkGpuTarget *target, const void *image, float x, float y,
-                       float w, float h, float opacity,
+static void gpu_draw_texture(SkGpuTarget *target, const void *image, double x, double y,
+                       double w, double h, float opacity,
                        int cx0, int cy0, int cx1, int cy1, int flip) {
   if (!target || !image || !(w > 0.f) || !(h > 0.f) || !(opacity > 0.f) ||
       !gpu_ready() || !image_program())
@@ -658,13 +657,19 @@ static void gpu_draw_texture(SkGpuTarget *target, const void *image, float x, fl
   bind_target(target);
   if (!set_scissor(target, cx0, cy0, cx1, cy1))
     return;
-  float left = x / target->w * 2.f - 1.f;
-  float right = (x + w) / target->w * 2.f - 1.f;
-  float top = 1.f - y / target->h * 2.f;
-  float bottom = 1.f - (y + h) / target->h * 2.f;
+  double x0 = fmax(0, fmax(cx0, x)), y0 = fmax(0, fmax(cy0, y));
+  double x1 = fmin(target->w, fmin(cx1, x + w));
+  double y1 = fmin(target->h, fmin(cy1, y + h));
+  if (!(x1 > x0) || !(y1 > y0)) return;
+  float left = x0 / target->w * 2. - 1.;
+  float right = x1 / target->w * 2. - 1.;
+  float top = 1. - y0 / target->h * 2.;
+  float bottom = 1. - y1 / target->h * 2.;
   float positions[8] = {left, top, right, top, left, bottom, right, bottom};
-  float top_v = flip ? 1.f : 0.f, bottom_v = flip ? 0.f : 1.f;
-  const float uv[8] = {0.f, top_v, 1.f, top_v, 0.f, bottom_v, 1.f, bottom_v};
+  float u0 = (x0 - x) / w, u1 = (x1 - x) / w;
+  float v0 = (y0 - y) / h, v1 = (y1 - y) / h;
+  if (flip) { v0 = 1.f - v0; v1 = 1.f - v1; }
+  const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
   glUseProgram(g_image_prog);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, *(const GLuint *)image);
@@ -679,8 +684,8 @@ static void gpu_draw_texture(SkGpuTarget *target, const void *image, float x, fl
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
-void sk_gpu_draw_image(SkGpuTarget *target, const void *image, float x,
-                       float y, float w, float h, float opacity,
+void sk_gpu_draw_image(SkGpuTarget *target, const void *image, double x,
+                       double y, double w, double h, float opacity,
                        int cx0, int cy0, int cx1, int cy1) {
   gpu_draw_texture(target, image, x, y, w, h, opacity, cx0, cy0, cx1, cy1, 0);
 }

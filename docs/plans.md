@@ -28,4 +28,8 @@ Reject a deliberate paint or coordinate defect with an independent check.
 Run runtime, sanitizer, renderer, browser, and integration checks.
 Rebuild the product CLI and check its GUI manual.
 
-Status: The paint API saves clips and opacity layers. It has no scale operation. Input functions use layout coordinates. Shared scale transforms remain to implement.
+Status: The shared paint API supports nested uniform scales in Skia, software, and GPU rendering.
+Save and restore include the scale. Clips and opacity layers use device coordinates.
+Pixel checks cover rectangles, text, images, zero scale, invalid values, and large coordinates.
+Software ASan and UBSan checks pass. An independent pixel check rejects unscaled text.
+The View API, displayed input geometry, browser overlays, transitions, and application checks remain open.

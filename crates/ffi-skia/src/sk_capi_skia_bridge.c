@@ -50,6 +50,10 @@ int sk_canvas_save_layer_alpha(SkCanvas *canvas, uint8_t alpha) {
 
 void sk_canvas_restore(SkCanvas *canvas) { scuzz_skia_canvas_restore(canvas); }
 
+int sk_canvas_scale(SkCanvas *canvas, float factor, float pivot_x, float pivot_y) {
+  return scuzz_skia_canvas_scale(canvas, factor, pivot_x, pivot_y);
+}
+
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
   scuzz_skia_canvas_clip_rect(canvas, x, y, w, h);
 }
