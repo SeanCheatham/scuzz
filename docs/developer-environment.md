@@ -117,6 +117,12 @@ The GPU and Desktop checks need the host packages in [Optional CI slices](#optio
 C test builds keep assertions active, including when `CFLAGS` defines `NDEBUG`.
 Runtime tests relink after paint selection. They use the archive selected for that run.
 The test link includes the math library for each renderer.
+The differential CI slice runs `python3 scripts/test_native_text.py`.
+It compares 48 script, size, and style cases across the three native renderers.
+It checks metrics, carets, source clusters, and glyph outlines.
+The pixel reference uses Skia with hinting off and subpixel positions.
+The check permits one pixel for raster coverage and checks ink mass separately.
+It rejects deliberate text advance and glyph placement defects.
 The differential CI slice also runs `python3 scripts/test_png_max_delta.py`.
 It checks all five PNG filters, chunk integrity, incomplete image rejection, and comparator exit codes.
 The comparator reads static RGBA images with eight bits per channel and no interlacing.

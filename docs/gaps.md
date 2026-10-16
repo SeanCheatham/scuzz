@@ -132,7 +132,11 @@ Other contextual scripts, mark placement across font changes, and full bidi care
 Native software and OpenGL use the shared native shaper and clipped glyph coverage rows.
 Paint checks cover proportional advances, source clusters, styles, paragraph ranges, and large zoom values.
 The software runtime UI checks pass. Android arm64 and x86_64 builds pass.
-Wider runtime parity, sanitizer, browser, package, and Android execution checks for this path remain open.
+ASan and UBSan checks pass for the portable shaper and glyph raster path.
+48 script, size, and style cases compare widths, carets, clusters, and glyph outlines with Skia.
+The glyph reference uses unhinted Skia with subpixel positions.
+Text advance and glyph placement defects fail these checks.
+Wider runtime parity, browser, package, and Android execution checks for this path remain open.
 Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.
 Renderer checks cover overlap, nested layers, clips, transparency, and GPU orientation.

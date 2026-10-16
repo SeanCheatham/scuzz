@@ -38,6 +38,7 @@ The native build verifies the Latin and monospace files by SHA-256.
 The build supplies standalone HarfBuzz source from its pinned archive.
 Software runtime UI checks and all three renderer paint checks pass.
 Android arm64 and x86_64 builds pass. The APK includes font and shaper licenses.
-Sanitizer checks are in progress.
-Independent glyph controls, wider runtime parity, browser checks, package checks,
-and Android execution remain open. Apple SDK execution is unavailable on this host.
+ASan and UBSan checks pass for the portable shaper, font provider, and raster path.
+Independent Skia checks cover 48 script, size, and style cases.
+They reject deliberate text advance and glyph placement defects.
+Wider runtime parity, browser checks, package checks, and Android execution remain open. Apple SDK execution is unavailable on this host.

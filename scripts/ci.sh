@@ -2315,6 +2315,7 @@ slice_differential() {
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
   need_cmd python3 "sudo apt-get install -y python3"
   python3 scripts/test_png_max_delta.py
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python3 scripts/test_native_text.py
   xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 "$SCUZZ" fuzz --differential --iterations 0 examples/counter
   make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
