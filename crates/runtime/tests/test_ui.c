@@ -1178,11 +1178,14 @@ static void test_record_json(void) {
   events = json_doc_key(json, "events");
   assert(events && sz_json_is_arr(events) == 1);
   arr = sz_json_arr(events);
-  assert(sz_list_len(arr) == 2);
+  assert(sz_list_len(arr) == 3);
   assert(sz_jev_bool(json, "manualPumps"));
   ev0 = (SzAdt *)sz_list_head(arr);
-  assert(json_str_eq(ev0, "op", "pump") && json_doc_int(ev0, "k", 0) == 1);
+  assert(json_str_eq(ev0, "op", "reduceMotion"));
+  assert(sz_json_is_bool(sz_jev_key(ev0, "value")) && !sz_jev_bool(ev0, "value"));
   ev0 = (SzAdt *)sz_list_head(sz_list_tail(arr));
+  assert(json_str_eq(ev0, "op", "pump") && json_doc_int(ev0, "k", 0) == 1);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(arr)));
   assert(json_str_eq(ev0, "op", "tap"));
   assert(json_doc_int(ev0, "i", -1) == 0);
   sz_release(arr);
@@ -1198,8 +1201,8 @@ static void test_record_json(void) {
   json = (SzAdt *)sz_adt_payload(parsed);
   events = json_doc_key(json, "events");
   arr = sz_json_arr(events);
-  assert(sz_list_len(arr) == 3);
-  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(arr)));
+  assert(sz_list_len(arr) == 4);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(sz_list_tail(arr))));
   assert(json_str_eq(ev0, "op", "xy"));
   assert(sz_json_float_or(json_doc_key(ev0, "x"), 0.0) == 190.0);
   sz_release(arr);
@@ -1215,8 +1218,8 @@ static void test_record_json(void) {
   json = (SzAdt *)sz_adt_payload(parsed);
   events = json_doc_key(json, "events");
   arr = sz_json_arr(events);
-  assert(sz_list_len(arr) == 4);
-  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(sz_list_tail(arr))));
+  assert(sz_list_len(arr) == 5);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(sz_list_tail(sz_list_tail(arr)))));
   assert(json_str_eq(ev0, "op", "key"));
   assert(json_str_eq(ev0, "key", "s"));
   mods = json_doc_key(ev0, "mods");
@@ -20441,6 +20444,53 @@ static void test_opacity_utf8_labels(void) {
   sz_signal_int_free(value);
 }
 
+static void test_initial_motion_recording(void) {
+  const char *path = "/tmp/scuzz-initial-motion.json";
+  for (int initial = 0; initial <= 1; initial++) for (int taps = 0; taps <= 9; taps++) {
+    SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 240,
+                     .height = 100, .scale = 1, .reduced_motion = initial};
+    SzSignalInt *value = sz_signal_int(20);
+    SzView *button = sz_view_button("Increment", counter_tap, value);
+    SzView *root = sz_view_animated_opacity(value, 8, button);
+    SzUiSession *session = sz_ui_mount(&cfg, root);
+    assert(session && sz_ui_pump_sync(session));
+    sz_view_focus(root, button);
+    assert(sz_ui_session_set_record(session, path));
+    for (int i = 0; i < taps; i++) {
+      SzInputEvent event = {.kind = SZ_INPUT_KEY, .key = "Space"};
+      assert(sz_ui_session_live_inject(session, &event));
+    }
+    assert(sz_ui_pump_sync(session));
+    int displayed = sz_view_animated_opacity_value(root);
+    int pending = sz_view_motion_pending(root);
+    assert(displayed == 20 + (initial ? taps : (taps + 4) / 8));
+    assert(sz_signal_int_get(value) == 20 + taps);
+    SzString *expected = sz_view_a11y_dump(root);
+    char *record = slurp_cstr(path);
+    assert(strstr(record, initial
+        ? "\"events\":[{\"op\":\"reduceMotion\",\"value\":true}"
+        : "\"events\":[{\"op\":\"reduceMotion\",\"value\":false}"));
+    sz_ui_unmount(session); sz_view_free(root); sz_signal_int_free(value);
+
+    cfg.reduced_motion = !initial;
+    value = sz_signal_int(20);
+    button = sz_view_button("Increment", counter_tap, value);
+    root = sz_view_animated_opacity(value, 8, button);
+    session = sz_ui_mount(&cfg, root);
+    assert(session && sz_ui_pump_sync(session));
+    sz_view_focus(root, button);
+    sz_ui_script_run_file(session, path);
+    assert(sz_signal_int_get(value) == 20 + taps);
+    assert(sz_view_animated_opacity_value(root) == displayed);
+    assert(sz_view_motion_pending(root) == pending);
+    SzString *actual = sz_view_a11y_dump(root);
+    assert(!strcmp(sz_string_cstr(expected), sz_string_cstr(actual)));
+    sz_string_free(expected); sz_string_free(actual); free(record);
+    sz_ui_unmount(session); sz_view_free(root); sz_signal_int_free(value);
+  }
+  remove(path);
+}
+
 static void test_opacity_recorded_pumps(void) {
   const char *path = "/tmp/scuzz-opacity-journal.json";
   SzSignalInt *value = sz_signal_int(0);
@@ -21489,6 +21539,11 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--motion-preference-record")) {
+    test_record_json();
+    test_initial_motion_recording();
+    puts("initial motion recording tests ok"); return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "--scale")) {
     test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
     test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds(); test_scale_wrapping();
@@ -21548,7 +21603,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--opacity")) {
     test_opacity_transition_frames();
     test_opacity_session_pause_and_reduction();
-    test_opacity_recorded_pumps();
+    test_initial_motion_recording();
+  test_opacity_recorded_pumps();
     test_opacity_utf8_labels();
     puts("opacity tests ok");
     return 0;
@@ -22369,6 +22425,7 @@ int main(int argc, char **argv) {
   test_signal_scope_ownership();
   test_opacity_transition_frames();
   test_opacity_session_pause_and_reduction();
+  test_initial_motion_recording();
   test_opacity_recorded_pumps();
   test_opacity_utf8_labels();
   test_inline_text_actions();

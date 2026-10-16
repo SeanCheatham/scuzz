@@ -2730,8 +2730,12 @@ int sz_view_animated_opacity_value(const SzView *view) {
   return view && view->kind == SZ_VIEW_ANIMATED_OPACITY ? view->animation_value : 100;
 }
 
+static void sync_transitions(SzView *view, int shown, int reduced);
+
 void sz_view_reduce_motion(SzView *root, int reduced) {
-  if (root) root->motion_reduced = reduced != 0;
+  if (!root) return;
+  root->motion_reduced = reduced != 0;
+  sync_transitions(root, 1, root->motion_reduced);
 }
 
 void sz_view_pause_motion(SzView *root, int paused) {

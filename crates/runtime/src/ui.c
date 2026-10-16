@@ -204,6 +204,7 @@ static SzUiSession *g_live_session;
 static char *g_pending_title;
 
 static void host_free(char **p);
+static void record_json_event(SzUiSession *session, char *obj);
 static void session_drop_pointer(SzUiSession *session);
 
 static void session_wake_live(void) {
@@ -465,6 +466,9 @@ int sz_ui_session_set_record(SzUiSession *session, const char *path) {
   if (!f)
     return 0;
   fclose(f);
+  record_json_event(session, sz_strdup(session->cfg.reduced_motion
+      ? "{\"op\":\"reduceMotion\",\"value\":true}"
+      : "{\"op\":\"reduceMotion\",\"value\":false}"));
   return 1;
 }
 

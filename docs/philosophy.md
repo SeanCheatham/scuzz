@@ -390,6 +390,8 @@ It sends live changes through the shared input path.
 An absent portal does not prevent application use.
 Other native operating-system preference detection remains open.
 The shared `reduceMotion` input records preference changes.
+Record the initial session preference before live input.
+Apply a preference change to the View tree before later input.
 
 Script input paints one pump while an explicit transition has pending steps.
 Built-in four-pump motion finishes before the next scripted input.

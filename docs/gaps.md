@@ -154,7 +154,10 @@ Native and evaluator replays compare exact scale timelines, claims, and control 
 Rotation transitions remain open.
 Linux Desktop reads the Settings portal motion preference and receives live changes.
 A private bus check covers initial values, invalid signals, foreign senders, stale replies, and service restart.
-Initial preference recording and full native preference replay checks remain open.
+Recordings include the initial session preference before live input.
+Shared runtime checks compare 100 native event recordings with Headless replay across five transition types.
+They check retained input and field selection.
+Full native and evaluator preference replay checks remain open.
 Other native operating-system motion preference detection and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 
