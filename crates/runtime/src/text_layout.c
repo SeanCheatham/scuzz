@@ -57,20 +57,21 @@ static float range_width(const SzText *text, int start, int end, float font, flo
   const char *source = sz_text_source(text);
   char *joined = dots ? source_with_dots(source, text->length, end) : NULL;
   if (joined) source = joined;
+  SkTextRange line = sk_text_slice(source, (size_t)text->length + (dots ? 3 : 0),
+    (size_t)start, (size_t)end + (dots ? 3 : 0));
   for (int i = run_at(text, start); i < text->count && text->runs[i].start < end;) {
     int next = group_after(text, i, end, font, scale);
     const SzTextRun *run = &text->runs[i];
     int a = start > run->start ? start : run->start;
     int b = end < text->runs[next - 1].end ? end : text->runs[next - 1].end;
-    width += sk_font_measure_span((SkTextRange){source, (size_t)text->length + (dots ? 3 : 0),
-      (size_t)a, (size_t)b + (dots && b == end ? 3 : 0)}, run_font(run, font, scale), run->style);
+    width += sk_font_measure_span(sk_text_part(line, (size_t)a, (size_t)b + (dots && b == end ? 3 : 0)), run_font(run, font, scale), run->style);
     i = next;
   }
   if (dots && start == end) {
     int i = run_at(text, start);
     if (i == text->count && i > 0) i--;
     const SzTextRun *run = i < text->count ? &text->runs[i] : NULL;
-    width = sk_font_measure_span((SkTextRange){source, (size_t)text->length + 3, (size_t)end, (size_t)end + 3},
+    width = sk_font_measure_span(sk_text_slice(source, (size_t)text->length + 3, (size_t)end, (size_t)end + 3),
       run ? run_font(run, font, scale) : font, run ? run->style : 0);
   }
   sz_free(joined);
@@ -259,6 +260,8 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
     char *joined = line->dots ? source_with_dots(source, length, line->end) : NULL;
     const char *line_source = joined ? joined : source;
     size_t line_bytes = (size_t)length + (line->dots ? 3 : 0);
+    SkTextRange visible = sk_text_slice(line_source, line_bytes, (size_t)line->start,
+      (size_t)line->end + (line->dots ? 3 : 0));
     float largest = line->dots ? dots_font : 0.f;
     float ascent = 0.f, descent = 0.f;
     if (line->dots) {
@@ -274,7 +277,7 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
       int start = text->runs[i].start > line->start ? text->runs[i].start : line->start;
       int end = text->runs[next - 1].end;
       if (end > line->end) end = line->end;
-      sk_font_span_metrics((SkTextRange){line_source, line_bytes, (size_t)start, (size_t)end + (line->dots && end == line->end ? 3 : 0)}, size, text->runs[i].style, &a, &d);
+      sk_font_span_metrics(sk_text_part(visible, (size_t)start, (size_t)end + (line->dots && end == line->end ? 3 : 0)), size, text->runs[i].style, &a, &d);
       float font_a, font_d;
       sk_font_metrics(size, text->runs[i].style, &font_a, &font_d);
       a = fmaxf(a, font_a); d = fmaxf(d, font_d);
@@ -305,8 +308,8 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
     SzTextFragmentFn output = emit;
     void *output_env = env;
     if (mixed && emit) {
-      SkTextRange context = {line_source, line_bytes, (size_t)line->start,
-        (size_t)line->end + (line->dots ? 3 : 0)};
+      SkTextRange context = sk_text_slice(line_source, line_bytes, (size_t)line->start,
+        (size_t)line->end + (line->dots ? 3 : 0));
       size_t count = context.end - context.start + 1;
       visual_positions = sz_alloc(count * 2 * sizeof(float));
       sk_font_text_positions(context, font, 0, visual_positions, visual_positions + count);
@@ -319,8 +322,8 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
       int a = line->start > text->runs[i].start ? line->start : text->runs[i].start;
       int b = line->end < text->runs[next - 1].end ? line->end : text->runs[next - 1].end;
       float size = run_font(&text->runs[i], font, scale);
-      SkTextRange context = {line_source, line_bytes, (size_t)a,
-        (size_t)b + (line->dots && b == line->end ? 3 : 0)};
+      SkTextRange context = sk_text_part(visible, (size_t)a,
+        (size_t)b + (line->dots && b == line->end ? 3 : 0));
       float advance = sk_font_measure_span(context, size, text->runs[i].style);
       if (emit) {
         size_t positions = context.end - context.start + 1;
@@ -350,11 +353,11 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
     if (emit && line->end == line->start && !line->dots) {
       SzTextRun empty = {0};
       const SzTextRun *run = text && inherited < text->count ? &text->runs[inherited] : &empty;
-      emit((SkTextRange){source, (size_t)length, (size_t)line->start, (size_t)line->end}, line->start, line->end, 0.f, baseline, 0.f, line->font,
+      emit(sk_text_slice(source, (size_t)length, (size_t)line->start, (size_t)line->end), line->start, line->end, 0.f, baseline, 0.f, line->font,
         line_height, run->style, run->color, run->colored, 0, run->action, 0.f, env);
     }
     if (line->dots && emit && line->end == line->start)
-      emit((SkTextRange){line_source, line_bytes, (size_t)line->end, (size_t)line->end + 3},
+      emit(sk_text_slice(line_source, line_bytes, (size_t)line->end, (size_t)line->end + 3),
         line->end, line->end, 0.f, baseline, dots_width, dots_font, line_height,
         last->style, last->color, last->colored, 1, 0, 0.f, env);
     if (visual_positions) emit_fragments(&fragments, emit, env);

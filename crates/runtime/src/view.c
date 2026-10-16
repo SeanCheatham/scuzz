@@ -2878,7 +2878,7 @@ static void ellipsize_to_width(char *line, size_t cap, float max_w, float font_p
 }
 
 static float span_width(const char *s, int start, int end, float font_px) {
-  return s && end > start ? sk_font_measure_span((SkTextRange){s, strlen(s), (size_t)start, (size_t)end}, font_px, 0) : 0.f;
+  return s && end > start ? sk_font_measure_span(sk_text_slice(s, strlen(s), (size_t)start, (size_t)end), font_px, 0) : 0.f;
 }
 
 static float *text_positions(const char *text, int length, float font) {
@@ -6405,7 +6405,7 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
   int shortened = wp->ellipsis && wp->cap > 0 && wp->drawn == wp->cap - 1;
   if (shortened)
     ellipsize_to_width(tmp, (size_t)n + 4, wp->inner, wp->font_px);
-  SkTextRange context = {s, strlen(s), (size_t)start, (size_t)end};
+  SkTextRange context = sk_text_slice(s, strlen(s), (size_t)start, (size_t)end);
   char *source = NULL;
   if (shortened && tmp[0]) {
     /* Keep hidden source characters in the paragraph context. */
@@ -6414,7 +6414,7 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
     memcpy(source, s, insert);
     memcpy(source + insert, "...", 3);
     memcpy(source + insert + 3, s + insert, context.bytes - insert + 1);
-    context = (SkTextRange){source, context.bytes + 3, (size_t)start, insert + 3};
+    context = sk_text_slice(source, context.bytes + 3, (size_t)start, insert + 3);
   } else if (shortened) context.end = context.start;
 #ifdef __EMSCRIPTEN__
   if (wp->selectable) {

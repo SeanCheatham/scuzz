@@ -19948,6 +19948,78 @@ static void test_styled_text_values(void) {
   assert(bytes == before_bytes && count == before_count);
 }
 
+static void test_font_change_joining(void) {
+  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم"};
+  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر"};
+  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ"};
+  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ"};
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  for (int i = 0; i < 13; i++) {
+    SzText *a = test_text_span(first[i]), *b = test_text_span(last[i]);
+    int style = i == 1 ? SK_TEXT_ITALIC : i == 2 ? 0 : SK_TEXT_BOLD;
+    float size = i == 2 || i == 11 ? 32 : 24;
+    SzText *styled = style == SK_TEXT_ITALIC ? sz_text_italic(a) : sz_text_bold(a);
+    SzText *sized = sz_text_size((int)size, style ? styled : a);
+    SzText *middle = i == 11 ? sz_text_italic(b) : sz_text_color(theme.foreground, b);
+    SzText *text = test_text_pair(sized, middle);
+    if (i == 11) {
+      SzText *third = test_text_span("ر"), *small = sz_text_size(18, third);
+      SzText *joined = test_text_pair(text, small);
+      sz_release(text); text = joined;
+      sz_release(third); sz_release(small);
+    }
+    int width = i == 10 ? (int)ceilf(sk_font_measure_span(sk_text_range("ﻡ", strlen("ﻡ")), 24, style)) + 5 : 400;
+    TextProbe probe = {0};
+    SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width - 4, 0, 0, text_probe, &probe);
+    int two_lines = i == 9 || i == 10 || i == 12;
+    assert(metrics.lines == (two_lines ? 2 : 1));
+    SzView *root = sz_view_rich_text(text);
+    SkSurface *actual = sk_surface_make_raster_n32_premul(width, 128);
+    SkSurface *expected = sk_surface_make_raster_n32_premul(width, 128);
+    assert(actual && expected);
+    assert(sz_view_paint(root, sk_surface_get_canvas(actual), width, 128, &theme));
+    assert(!strcmp(sz_view_a11y_label(root), sz_text_source(text)));
+    SkCanvas *canvas = sk_surface_get_canvas(expected);
+    sk_canvas_clear(canvas, sk_color_argb(0));
+    SkPaint *paint = sk_paint_new();
+    sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+    const char *pieces[] = {first_form[i], last_form[i], "ﺮ"};
+    float sizes[] = {size, 24, 18};
+    int flags[] = {style, i == 11 ? SK_TEXT_ITALIC : 0, 0};
+    float reference_width = 0, baseline = probe.baseline[probe.count - 1];
+    if (two_lines) {
+      const char *prefix = i == 12 ? "Latin" : "ﻡ";
+      sk_paint_set_text_size(paint, size);
+      SkTextRange range = sk_text_range(prefix, strlen(prefix));
+      sk_canvas_draw_span(canvas, range, 2, probe.baseline[0], paint, style);
+      reference_width = sk_font_measure_span(range, size, style);
+      pieces[0] = i == 12 ? "ﻣ" : NULL;
+    }
+    float x = 2, positions[3] = {0};
+    int parts = i == 11 ? 3 : 2;
+    for (int j = parts - 1; j >= 0; j--) {
+      if (!pieces[j]) continue;
+      positions[j] = x;
+      x += sk_font_measure_span(sk_text_range(pieces[j], strlen(pieces[j])), sizes[j], flags[j]);
+    }
+    for (int j = 0; j < parts; j++) {
+      if (!pieces[j]) continue;
+      sk_paint_set_text_size(paint, sizes[j]);
+      sk_canvas_draw_span(canvas, sk_text_range(pieces[j], strlen(pieces[j])), positions[j], baseline, paint, flags[j]);
+    }
+    if (fabsf(metrics.width - fmaxf(reference_width, x - 2)) >= .01f)
+      fprintf(stderr, "joining width case %d: %f != %f\n", i, metrics.width, fmaxf(reference_width, x - 2));
+    assert(fabsf(metrics.width - fmaxf(reference_width, x - 2)) < .01f);
+    if (memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), (size_t)width * 128 * 4))
+      fprintf(stderr, "joining pixel case %d\n", i);
+    assert(!memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), (size_t)width * 128 * 4));
+    sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+    sz_view_free(root); sz_release(a); sz_release(b); sz_release(styled); sz_release(sized); sz_release(middle); sz_release(text);
+  }
+}
+
 static void test_font_change_direction(void) {
   if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
   const char *first[] = {"אבג", "אבג", "אבג", "אב AB", "ab אב", "אב", "A\nאב", "אבגדהוז אב"};
@@ -20456,6 +20528,7 @@ static void test_styled_text_clip_and_theme(void) {
 
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--paragraph-direction")) {
+    test_font_change_joining();
     test_font_change_direction();
     test_wrapped_paragraph_direction();
     test_rich_paragraph_ellipsis();
@@ -20489,6 +20562,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--shaping")) {
     test_shaped_field_geometry();
     test_shaped_text_wrapping();
+    test_font_change_joining();
     test_font_change_direction();
     test_wrapped_paragraph_direction();
     test_fallback_text_layout();
@@ -21288,6 +21362,7 @@ int main(int argc, char **argv) {
   test_select_scope_and_journal();
   test_shaped_field_geometry();
   test_shaped_text_wrapping();
+  test_font_change_joining();
   test_font_change_direction();
   test_wrapped_paragraph_direction();
   test_rich_paragraph_ellipsis();

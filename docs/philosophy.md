@@ -581,6 +581,7 @@ Plain text measurement and paint use complete lines.
 Adjacent spans with the same font and size use one shaping run.
 Color, underline, and inline actions keep this shaping context.
 Proportional font and size changes keep the visual order of each line.
+Native font groups keep the complete visible line as glyph context.
 Each paint span uses its source range within the complete run.
 Field carets, pointer input, and selection use shaped source positions.
 Left and Right move a field caret in the visual direction.

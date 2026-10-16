@@ -173,7 +173,7 @@ static void test_paragraph_ranges(void) {
     char source[128], reference[128];
     snprintf(source, sizeof source, "%s%s%s", prefix[i], line[i], suffix[i]);
     snprintf(reference, sizeof reference, "%s%s", rtl[i] ? "\xe2\x80\x8f" : "\xe2\x80\x8e", line[i]);
-    SkTextRange range = {source, strlen(source), strlen(prefix[i]), strlen(prefix[i]) + strlen(line[i])};
+    SkTextRange range = sk_text_slice(source, strlen(source), strlen(prefix[i]), strlen(prefix[i]) + strlen(line[i]));
     float leading[128], trailing[128], ref_leading[128], ref_trailing[128];
     sk_font_text_positions(range, 24, 0, leading, trailing);
     sk_font_text_positions(sk_text_range(reference, strlen(reference)), 24, 0, ref_leading, ref_trailing);
@@ -201,7 +201,7 @@ static void test_paragraph_brackets(void) {
   if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
   const char *source = "WWWWWW אב[ אבגדה ] AB", *prefix = "WWWWWW אב[ ";
   const char *first = "אבגדה ]", *last = " AB";
-  SkTextRange range = {source, strlen(source), strlen(prefix), strlen(source)};
+  SkTextRange range = sk_text_slice(source, strlen(source), strlen(prefix), strlen(source));
   float leading[64], trailing[64];
   sk_font_text_positions(range, 24, 0, leading, trailing);
   size_t bracket = strlen("אבגדה ");

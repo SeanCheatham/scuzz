@@ -513,17 +513,17 @@ typedef struct WebTextLayout { WebTextRun *runs; size_t count; float width; } We
 
 static WebTextLayout web_text_layout(SkTextRange range, float size, int style) {
   WebTextLayout layout = {0};
-  if (!range.source || range.start >= range.end || range.end > range.bytes || range.bytes > INT_MAX) return layout;
+  if (!range.source || range.start >= range.end || !sk_text_valid(range) || range.bytes > INT_MAX) return layout;
   SBCodepointSequence sequence = {SBStringEncodingUTF8, (void *)range.source, range.bytes};
   SBAlgorithmRef algorithm = SBAlgorithmCreate(&sequence);
   if (!algorithm) return layout;
   int failed = 0;
-  for (SBUInteger offset = 0; offset < range.end;) {
+  for (SBUInteger offset = 0; offset < range.line_end;) {
     SBParagraphRef paragraph = SBAlgorithmCreateParagraph(algorithm, offset, range.bytes - offset, SBLevelDefaultLTR);
     if (!paragraph) { failed = 1; break; }
     SBUInteger length = SBParagraphGetLength(paragraph);
-    SBUInteger start = offset > range.start ? offset : range.start;
-    SBUInteger end = offset + length < range.end ? offset + length : range.end;
+    SBUInteger start = offset > range.line_start ? offset : range.line_start;
+    SBUInteger end = offset + length < range.line_end ? offset + length : range.line_end;
     SBLineRef line = end > start ? SBParagraphCreateLine(paragraph, start, end - start) : NULL;
     if (line) {
       size_t count = SBLineGetRunCount(line);
@@ -535,8 +535,11 @@ static WebTextLayout web_text_layout(SkTextRange range, float size, int style) {
         layout.runs = grown;
         const SBRun *runs = SBLineGetRunsPtr(line);
         for (size_t i = 0; i < count; i++) {
+          size_t start = runs[i].offset > range.start ? runs[i].offset : range.start;
+          size_t end = runs[i].offset + runs[i].length < range.end ? runs[i].offset + runs[i].length : range.end;
+          if (start >= end) continue;
           WebTextRun *run = &layout.runs[layout.count++];
-          *run = (WebTextRun){runs[i].offset, runs[i].offset + runs[i].length,
+          *run = (WebTextRun){start, end,
             runs[i].level & 1, layout.width, 0.f};
           run->width = web_text_width(range.source + run->start, (int)(run->end - run->start), size, style, run->rtl, 1);
           layout.width += run->width;
@@ -755,7 +758,7 @@ EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int st
 #endif
 
 void sk_font_text_positions(SkTextRange range, float font_px, int style, float *leading, float *trailing) {
-  if (range.start > range.end || range.end > range.bytes) return;
+  if (!sk_text_valid(range)) return;
   const char *text = range.source ? range.source + range.start : NULL;
   size_t bytes = range.end - range.start;
   if (!leading || !trailing || bytes > INT32_MAX) return;
@@ -822,7 +825,7 @@ void sk_font_metrics(float font_px, int style, float *ascent, float *descent) {
 
 
 void sk_font_span_metrics(SkTextRange range, float font_px, int style, float *ascent, float *descent) {
-  if (range.start > range.end || range.end > range.bytes) return;
+  if (!sk_text_valid(range)) return;
   const char *text = range.source ? range.source + range.start : NULL;
   size_t bytes = range.end - range.start;
   float metrics[2];
@@ -847,7 +850,7 @@ void sk_font_span_metrics(SkTextRange range, float font_px, int style, float *as
 }
 
 float sk_font_measure_span(SkTextRange range, float font_px, int style) {
-  if (range.start > range.end || range.end > range.bytes) return 0.f;
+  if (!sk_text_valid(range)) return 0.f;
   const char *text = range.source ? range.source + range.start : NULL;
   size_t bytes = range.end - range.start;
   if (!text) return 0.f;
@@ -873,7 +876,7 @@ float sk_font_measure_span(SkTextRange range, float font_px, int style) {
 
 void sk_canvas_draw_span(SkCanvas *canvas, SkTextRange range,
                          float x, float y, const SkPaint *paint, int style) {
-  if (range.start > range.end || range.end > range.bytes) return;
+  if (!sk_text_valid(range)) return;
   const char *text = range.source ? range.source + range.start : NULL;
   size_t bytes = range.end - range.start;
   if (!text || bytes == SIZE_MAX || !paint) return;
