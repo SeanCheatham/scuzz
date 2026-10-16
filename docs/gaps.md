@@ -129,7 +129,10 @@ Browser checks cover delayed font loading, retained focus, source copying, and f
 The CJK font download uses 17.8 MB before compression. Smaller font delivery remains open.
 Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
 Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
-Native software and OpenGL renderers keep code-point cells. Their proportional shaping remains open.
+Native software and OpenGL use the shared native shaper and clipped glyph coverage rows.
+Paint checks cover proportional advances, source clusters, styles, paragraph ranges, and large zoom values.
+The software runtime UI checks pass. Android arm64 and x86_64 builds pass.
+Wider runtime parity, sanitizer, browser, package, and Android execution checks for this path remain open.
 Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.
 Renderer checks cover overlap, nested layers, clips, transparency, and GPU orientation.

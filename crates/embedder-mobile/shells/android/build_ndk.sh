@@ -108,7 +108,10 @@ build_abi() {
     "$clang" "${cflags[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" \
       -o "$obj/jni_$(basename "${src%.c}").o"
   done
-  "$clang" "${cflags[@]}" -shared -lm -ldl -llog -pthread "$obj"/*.o -o "$so"
+  make -C "$ROOT/crates/ffi-skia" portable-text TEXT_DIR="$obj/text" \
+    CC="$clang" CXX="$PRE/${triple}-clang++"
+  "$PRE/${triple}-clang++" "${cflags[@]}" -static-libstdc++ -shared \
+    -lm -ldl -llog -pthread "$obj"/*.o "$obj"/text/*.o -o "$so"
   echo "built $so"
 }
 

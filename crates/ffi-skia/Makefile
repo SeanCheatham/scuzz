@@ -13,6 +13,9 @@ SKIA_HDR_URL := $(shell awk -F= '/^hdr_url=/{print substr($$0,9); exit}' "$(PIN)
 INCLUDES := -Iinclude -Isrc
 SRC := src/image.c src/image_dec.c src/sk_sw.c src/png_enc.c src/sk_mono.c src/sk_color.c
 OBJ := $(SRC:src/%.c=build/%.o)
+TEXT_DIR ?= build
+TEXT_FLAGS ?=
+TEXT_OBJS := $(TEXT_DIR)/harfbuzz.o $(TEXT_DIR)/sheenbidi.o $(TEXT_DIR)/fonts.o $(TEXT_DIR)/sk_native_text.o
 SHIM_OBJS := build/sk_capi_skia.o build/sk_capi_skia_bridge.o
 HB_REV := $(shell awk -F= '/^harfbuzz_revision=/{print $$2; exit}' "$(PIN)")
 HB_SHA := $(shell awk -F= '/^harfbuzz_sha256=/{print $$2; exit}' "$(PIN)")
@@ -21,16 +24,18 @@ SB_REV := $(shell awk -F= '/^sheenbidi_revision=/{print $$2; exit}' "$(PIN)")
 SB_SHA := $(shell awk -F= '/^sheenbidi_sha256=/{print $$2; exit}' "$(PIN)")
 SB_DIR := build/sheenbidi
 
-.PHONY: all clean test lib lib-skia lib-sk-sw lib-gpu ensure-prebuilt ensure-fonts
+.PHONY: all clean test portable-text lib lib-skia lib-sk-sw lib-gpu ensure-prebuilt ensure-fonts
 
 all: lib
+
+portable-text: $(TEXT_OBJS) $(HB_DIR)/HarfBuzz-LICENSE
 
 build:
 	mkdir -p build
 
 # Default: pinned Skia prebuilt (fetch if needed). Opt out with SCUZZ_SKIA=sk_sw.
 # SCUZZ_SKIA=gpu: OpenGL raster. No CPU paint buffer. Peek reads the framebuffer.
-lib: ensure-prebuilt
+lib: ensure-prebuilt $(HB_DIR)/HarfBuzz-LICENSE
 	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ]; then \
 	  $(MAKE) --no-print-directory lib-sk-sw; \
 	elif [ "$${SCUZZ_SKIA:-}" = "gpu" ]; then \
@@ -51,9 +56,11 @@ ensure-prebuilt:
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
+TEXT_LIBS := -lc++
 GPU_LIBS := -framework OpenGL
 SKIA_LIBS := -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon
 else
+TEXT_LIBS := -lstdc++
 GPU_LIBS := -lEGL -lGLESv2
 SKIA_LIBS := -lstdc++ -lm -lz -lbz2
 endif
@@ -64,6 +71,12 @@ build/%.o: src/%.c include/sk_capi.h include/sk_text.h src/png_enc.h src/sk_gpu.
 build/image.o build/image_dec.o: src/image_dec.h
 
 build/image_dec.o: src/stb_image.h
+
+build/sk_sw.o: src/sk_native_text.h
+
+$(TEXT_DIR)/sk_native_text.o: src/sk_native_text.cpp src/sk_native_text.h src/sk_text_shape.h $(HB_DIR)/.stamp $(SB_DIR)/.stamp
+	@mkdir -p "$(@D)"
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -O2 $(TEXT_FLAGS) -fPIC -I$(HB_DIR) -I$(SB_DIR)/Headers -c $< -o $@
 
 build/sk_gpu.o: src/sk_gpu.c src/sk_gpu.h | build
 	$(CC) $(CFLAGS) -Wno-deprecated-declarations $(INCLUDES) -c $< -o $@
@@ -97,8 +110,9 @@ $(HB_DIR)/.source-stamp: $(HB_DIR)/.stamp
 	@test -f $(HB_DIR)/Source/harfbuzz.cc
 	@echo "$(HB_REV)" > $@
 
-build/harfbuzz.o: $(HB_DIR)/.source-stamp
-	$(CXX) -std=c++17 -O2 -fPIC -c $(HB_DIR)/Source/harfbuzz.cc -o $@
+$(TEXT_DIR)/harfbuzz.o: $(HB_DIR)/.source-stamp
+	@mkdir -p "$(@D)"
+	$(CXX) -std=c++17 -O2 $(TEXT_FLAGS) -fPIC -c $(HB_DIR)/Source/harfbuzz.cc -o $@
 
 $(HB_DIR)/arabic_joining.h: $(HB_DIR)/.stamp $(ROOT)/scripts/arabic_joining.py
 	python3 "$(ROOT)/scripts/arabic_joining.py" build/harfbuzz.tar.gz "$(HB_SHA)" $@
@@ -113,8 +127,9 @@ $(SB_DIR)/.stamp: $(PIN) | build
 	@test -f $(SB_DIR)/Headers/SheenBidi/SheenBidi.h
 	@echo "$(SB_REV)" > $@
 
-build/sheenbidi.o: $(SB_DIR)/.stamp
-	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o $@
+$(TEXT_DIR)/sheenbidi.o: $(SB_DIR)/.stamp
+	@mkdir -p "$(@D)"
+	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function $(TEXT_FLAGS) -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o $@
 
 build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h src/sk_text_shape.h include/sk_text.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
 	$(CXX) -std=c++17 -O2 -fPIC -c src/sk_capi_skia.cpp -o $@ \
@@ -126,34 +141,35 @@ build/fonts.S: $(ROOT)/scripts/fetch_fonts.py $(ROOT)/third_party/fonts/PIN | bu
 ensure-fonts: | build
 	python3 "$(ROOT)/scripts/fetch_fonts.py" build/fonts
 
-build/fonts.o: build/fonts.S | ensure-fonts
-	$(CC) -fPIC -c $< -o $@
+$(TEXT_DIR)/fonts.o: build/fonts.S | ensure-fonts
+	@mkdir -p "$(@D)"
+	$(CC) $(TEXT_FLAGS) -fPIC -c $< -o $@
 
 build/sk_capi_skia_bridge.o: src/sk_capi_skia_bridge.c include/sk_capi.h include/sk_text.h src/sk_capi_skia.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-lib-sk-sw: $(OBJ) build/sk_gpu_none.o | build
+lib-sk-sw: $(OBJ) $(TEXT_OBJS) build/sk_gpu_none.o | build
 	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx sk_sw build/sk_capi_backend; then \
 	  fresh=1; \
-	  for o in $(OBJ) build/sk_gpu_none.o; do \
+	  for o in $(OBJ) $(TEXT_OBJS) build/sk_gpu_none.o; do \
 	    if [ $$o -nt build/libsk_capi.a ]; then fresh=0; fi; \
 	  done; \
 	  if [ $$fresh -eq 1 ]; then exit 0; fi; \
 	fi; \
 	rm -f build/libsk_capi.a; \
-	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu_none.o; \
+	ar rcs build/libsk_capi.a $(OBJ) $(TEXT_OBJS) build/sk_gpu_none.o; \
 	echo sk_sw > build/sk_capi_backend
 
-lib-gpu: $(OBJ) build/sk_gpu.o | build
+lib-gpu: $(OBJ) $(TEXT_OBJS) build/sk_gpu.o | build
 	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx gpu build/sk_capi_backend; then \
 	  fresh=1; \
-	  for o in $(OBJ) build/sk_gpu.o; do \
+	  for o in $(OBJ) $(TEXT_OBJS) build/sk_gpu.o; do \
 	    if [ $$o -nt build/libsk_capi.a ]; then fresh=0; fi; \
 	  done; \
 	  if [ $$fresh -eq 1 ]; then exit 0; fi; \
 	fi; \
 	rm -f build/libsk_capi.a; \
-	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu.o; \
+	ar rcs build/libsk_capi.a $(OBJ) $(TEXT_OBJS) build/sk_gpu.o; \
 	echo gpu > build/sk_capi_backend
 
 # Pin supplies Skia objects + font. Replace the shim so the C ABI matches
@@ -197,11 +213,11 @@ lib-skia: build/fonts.o build/sheenbidi.o build/image.o build/image_dec.o build/
 
 # Test the selected paint archive. Keep assertions active.
 build/test_%: tests/test_%.c lib
-	@extra=""; \
+	@extra="$(TEXT_LIBS)"; \
 	if [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend; then \
 	  extra="$(SKIA_LIBS)"; \
 	elif [ -f build/sk_capi_backend ] && grep -qx gpu build/sk_capi_backend; then \
-	  extra="$(GPU_LIBS)"; \
+	  extra="$(TEXT_LIBS) $(GPU_LIBS)"; \
 	fi; \
 	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $< -Lbuild -lsk_capi $$extra -lpthread -lm -o $@
 

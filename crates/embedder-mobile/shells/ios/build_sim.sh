@@ -36,7 +36,7 @@ mkdir -p "$OUT/obj"
 # SDK and compiler changes invalidate native objects.
 key="$(printf '%s\n' "$TARGET" "$SDK" "$(xcrun clang --version)" "$ROOT" "$ROOT"/crates/runtime/src/*.c "$ROOT"/crates/runtime/src/net_apple.m)"
 if [ ! -f "$OUT/native-key" ] || [ "$(cat "$OUT/native-key")" != "$key" ]; then
-  rm -f "$OUT"/obj/*.o
+  rm -f "$OUT"/obj/*.o "$OUT"/obj/text/*.o
   printf '%s\n' "$key" > "$OUT/native-key"
 fi
 HEADERS=("$ROOT"/crates/runtime/include/*.h "$ROOT"/crates/runtime/src/*.h
@@ -112,6 +112,10 @@ for src in "$ROOT"/crates/ffi-skia/src/image.c "$ROOT"/crates/ffi-skia/src/image
   fi
 done
 
+printf -v text_flags '%q ' "${CFLAGS[@]}"
+make -C "$ROOT/crates/ffi-skia" portable-text TEXT_DIR="$OUT/obj/text" \
+  CC="xcrun clang" CXX="xcrun clang++" TEXT_FLAGS="$text_flags"
+
 # Shell (ObjC, ARC).
 for src in "$ROOT"/crates/embedder-mobile/shells/ios/main.m \
            "$ROOT"/crates/embedder-mobile/shells/ios/ScuzzShell.m \
@@ -129,7 +133,7 @@ done
 mkdir -p "$APP"
 "${CLANG[@]}" "${CFLAGS[@]}" -fobjc-arc \
   -framework UIKit -framework Foundation -framework CoreGraphics \
-  "$OUT"/obj/*.o -o "$APP/$NAME"
+  "$OUT"/obj/*.o "$OUT"/obj/text/*.o -lc++ -o "$APP/$NAME"
 
 # Bundle metadata.
 cp "$ROOT/crates/embedder-mobile/shells/ios/Info.plist" "$APP/Info.plist"
@@ -138,6 +142,9 @@ plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Info.plist"
 plutil -replace CFBundleDisplayName -string "$NAME" "$APP/Info.plist"
 plutil -replace CFBundleName -string "$NAME" "$APP/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Info.plist"
+mkdir -p "$APP/licenses"
+cp "$ROOT/third_party/fonts/"*-LICENSE "$ROOT/third_party/skia/SheenBidi-LICENSE" \
+  "$ROOT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE" "$APP/licenses/"
 codesign --force --sign - --timestamp=none "$APP"
 
 echo "built $APP"

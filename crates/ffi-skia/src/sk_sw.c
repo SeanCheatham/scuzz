@@ -4,6 +4,9 @@
 #include "png_enc.h"
 #include "sk_gpu.h"
 #include "sk_utf8.h"
+#ifndef __EMSCRIPTEN__
+#include "sk_native_text.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -707,21 +710,43 @@ float sk_font_measure_string(const char *text, float font_px) {
 #ifdef __EMSCRIPTEN__
   return text ? web_text_width(text, (int)strlen(text), font_px > 0.f ? font_px : 8.f, 0, web_text_direction(text, (int)strlen(text)), 0, 0, 0) : 0.f;
 #else
-  const char *p;
-  int n = 0;
-  float px = font_px > 0.f ? font_px : 8.f;
-  if (!text)
-    return 0.f;
-  for (p = text; *p;) {
-    int clen = sk_utf8_clen(p);
-    if (clen < 1)
-      clen = 1;
-    p += clen;
-    n++;
-  }
-  return (float)n * (float)sw_advance(px);
+  return text ? sk_native_text_measure(sk_text_range(text, strlen(text)), font_px) : 0.f;
 #endif
 }
+
+#ifndef __EMSCRIPTEN__
+typedef struct { SkCanvas *canvas; SkColor color; } NativeTextPaint;
+
+static void native_text_coverage(void *data, int x, int y, int count, const uint8_t *coverage) {
+  NativeTextPaint *paint = data;
+  SkSurface *surface = paint->canvas->surface;
+  for (int i = 0; i < count;) {
+    SkColor color = paint->color;
+    color.a = (uint8_t)((unsigned)color.a * coverage[i] / 255);
+    if (surface->gpu) {
+      int end = i + 1;
+      while (end < count && coverage[end] == coverage[i]) end++;
+      if (color.a) sk_gpu_fill_rect(surface->target, x + i, y, x + end, y + 1,
+        paint->canvas->clip_x0, paint->canvas->clip_y0, paint->canvas->clip_x1, paint->canvas->clip_y1,
+        color.r, color.g, color.b, color.a);
+      i = end;
+    } else {
+      put_pixel(surface, x + i, y, color);
+      i++;
+    }
+  }
+}
+
+static void draw_native_span(SkCanvas *canvas, SkTextRange range, float x, float y,
+                              const SkPaint *paint, int style) {
+  if (!canvas || !canvas->surface || !paint) return;
+  if (!canvas->surface->gpu) cpu_paint_ops++;
+  NativeTextPaint data = {canvas, paint->color};
+  sk_native_text_draw(range, paint->text_size, style,
+    (double)x * canvas->scale + canvas->tx, (double)y * canvas->scale + canvas->ty, canvas->scale,
+    canvas->clip_x0, canvas->clip_y0, canvas->clip_x1, canvas->clip_y1, native_text_coverage, &data);
+}
+#endif
 
 static void draw_styled_string(SkCanvas *canvas, const char *text, float x, float y,
                                 const SkPaint *paint, int style, int direction, int joins, int arabic) {
@@ -734,6 +759,12 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
   const char *p;
   if (!canvas || !canvas->surface || !paint || !text || !(canvas->scale > 0.f) || !isfinite(x) || !isfinite(y))
     return;
+#ifndef __EMSCRIPTEN__
+  if (!(style & SK_TEXT_MONO)) {
+    draw_native_span(canvas, sk_text_range(text, strlen(text)), x, y, paint, style);
+    return;
+  }
+#endif
   if (canvas->surface->gpu) {
     sk_gpu_draw_text(canvas->surface->target, text, x, y, paint->text_size,
                      paint->color.r, paint->color.g, paint->color.b,
@@ -923,7 +954,10 @@ void sk_font_text_positions(SkTextRange range, float font_px, int style, float *
   if (bytes) leading[bytes] = trailing[bytes] = trailing[bytes - 1];
   free(layout.runs);
 #else
-  (void)style;
+  if (!(style & SK_TEXT_MONO)) {
+    sk_native_text_positions(range, font_px, leading, trailing);
+    return;
+  }
   float x = 0.f, advance = (float)sw_advance(font_px);
   for (size_t i = 0; i < bytes;) {
     unsigned char c = (unsigned char)text[i];
@@ -944,13 +978,7 @@ void sk_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks) {
 #ifdef __EMSCRIPTEN__
   if (bytes <= INT32_MAX) web_cluster_breaks(text, (int)bytes, breaks);
 #else
-  for (size_t i = 0; i < bytes;) {
-    unsigned char c = (unsigned char)text[i];
-    size_t length = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 1;
-    if (length > bytes - i) length = 1;
-    breaks[i] = 1;
-    i += length;
-  }
+  sk_native_text_breaks(text, bytes, breaks);
 #endif
 }
 
@@ -962,7 +990,10 @@ void sk_font_metrics(float font_px, int style, float *ascent, float *descent) {
   if (ascent) *ascent = metrics[0];
   if (descent) *descent = metrics[1];
 #else
-  (void)style;
+  if (!(style & SK_TEXT_MONO)) {
+    sk_native_text_metrics(font_px, ascent, descent);
+    return;
+  }
   if (ascent) *ascent = font_px;
   if (descent) *descent = 1.f;
 #endif
@@ -990,6 +1021,7 @@ void sk_font_span_metrics(SkTextRange range, float font_px, int style, float *as
   free(layout.runs);
 #else
   (void)text; (void)bytes;
+  if (!(style & SK_TEXT_MONO)) sk_native_text_span_metrics(range, font_px, style, &metrics[0], &metrics[1]);
 #endif
   if (ascent) *ascent = metrics[0];
   if (descent) *descent = metrics[1];
@@ -1008,7 +1040,7 @@ float sk_font_measure_span(SkTextRange range, float font_px, int style) {
   free(layout.runs);
   return width;
 #else
-  (void)style;
+  if (!(style & SK_TEXT_MONO)) return sk_native_text_measure(range, font_px);
   size_t i = 0, count = 0;
   while (i < bytes && text[i]) {
     int n = sk_utf8_clen(text + i);
@@ -1039,11 +1071,14 @@ void sk_canvas_draw_span(SkCanvas *canvas, SkTextRange range,
   }
   free(layout.runs);
 #else
-  char *copy = malloc(bytes + 1);
-  if (!copy) return;
-  memcpy(copy, text, bytes); copy[bytes] = 0;
-  draw_styled_string(canvas, copy, x, y, paint, style, -1, 0, 0);
-  free(copy);
+  if (!(style & SK_TEXT_MONO)) draw_native_span(canvas, range, x, y, paint, style);
+  else {
+    char *copy = malloc(bytes + 1);
+    if (!copy) return;
+    memcpy(copy, text, bytes); copy[bytes] = 0;
+    draw_styled_string(canvas, copy, x, y, paint, style, -1, 0, 0);
+    free(copy);
+  }
 #endif
   if (style & SK_TEXT_UNDERLINE) {
     float width = sk_font_measure_span(range, paint->text_size, style);
@@ -1143,7 +1178,23 @@ int sk_encode_png_to_file(const SkSurface *surface, const char *path) {
 }
 
 float sk_font_measure_string_mono(const char *text, float font_px) {
+#ifdef __EMSCRIPTEN__
   return sk_font_measure_string(text, font_px);
+#else
+  const char *p;
+  int n = 0;
+  float px = font_px > 0.f ? font_px : 8.f;
+  if (!text)
+    return 0.f;
+  for (p = text; *p;) {
+    int clen = sk_utf8_clen(p);
+    if (clen < 1)
+      clen = 1;
+    p += clen;
+    n++;
+  }
+  return (float)n * (float)sw_advance(px);
+#endif
 }
 
 void sk_canvas_draw_string_mono(SkCanvas *canvas, const char *text, float x,

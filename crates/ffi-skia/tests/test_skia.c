@@ -163,7 +163,7 @@ static void assert_text_equivalent(const char *source, const char *const *pieces
 }
 
 static void test_paragraph_ranges(void) {
-  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
   const char *prefix[] = {"אבגדהוז ", "אבגדהוז\n", ("\xe2\x80\xab" "abcdefg "),
     "abcdefg ", "abcdefg \xe2\x81\xa7", "אבגדהוז ", "abcdefg "};
   const char *line[] = {"AB אב", "AB אב", "AB אב", "אב AB", "AB אב", "12: AB אב!", "12 אב AB!"};
@@ -198,7 +198,7 @@ static void test_paragraph_ranges(void) {
 }
 
 static void test_paragraph_brackets(void) {
-  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
   const char *source = "WWWWWW אב[ אבגדה ] AB", *prefix = "WWWWWW אב[ ";
   const char *first = "אבגדה ]", *last = " AB";
   SkTextRange range = sk_text_slice(source, strlen(source), strlen(prefix), strlen(source));
@@ -224,8 +224,17 @@ static void test_paragraph_brackets(void) {
 }
 
 static void test_shaped_text(void) {
-  if (sk_font_measure_string("i", 28) == sk_font_measure_string("W", 28)) return;
+  assert(sk_font_measure_string("i", 28) < sk_font_measure_string("W", 28));
+  /* Line separators have no glyph bounds or advance. */
+  const char *lines = "AB\nAB\rAB";
+  float ascent, descent, line_ascent, line_descent;
+  sk_font_span_metrics(sk_text_range(lines, strlen(lines)), 28, 0, &ascent, &descent);
+  sk_font_span_metrics(sk_text_range("AB", 2), 28, 0, &line_ascent, &line_descent);
+  assert(ascent == line_ascent && descent == line_descent);
+  assert(fabsf(sk_font_measure_string(lines, 28) - 3 * sk_font_measure_string("AB", 28)) < .001f);
   uint8_t breaks[16];
+  sk_text_cluster_breaks("A\n\rB", 4, breaks);
+  for (int i = 0; i <= 4; i++) assert(breaks[i]);
   sk_text_cluster_breaks("é", 3, breaks);
   assert(breaks[0] && !breaks[1] && !breaks[2] && breaks[3]);
   sk_text_cluster_breaks("fi", 2, breaks);
@@ -268,7 +277,7 @@ static void test_shaped_text(void) {
 }
 
 static void test_font_fallback(void) {
-  if (sk_font_measure_string("i", 32) == sk_font_measure_string("W", 32)) return;
+  assert(sk_font_measure_string("i", 32) < sk_font_measure_string("W", 32));
   /* The pinned font files give these advances at weight 400 and size 32. */
   const char *source[] = {"नमस्ते", "कि", "क्षि", "สวัสดี", "ปู่", "中文漢字", "日本語", "ࡰ"};
   const float widths[] = {67.584f, 32.864f, 31.232f, 72.064f, 19.36f, 128.f, 96.f, 7.616f};

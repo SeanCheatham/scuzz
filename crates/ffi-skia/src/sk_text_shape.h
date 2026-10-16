@@ -6,6 +6,7 @@
 #include <SheenBidi/SheenBidi.h>
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -49,7 +50,7 @@ struct ShapedText {
 
 inline ShapedText shape_text(SkTextRange range, float size, FontProvider shape_font) {
   ShapedText result;
-  if (!range.source || range.start >= range.end || !sk_text_valid(range) || range.bytes > INT_MAX) return result;
+  if (!range.source || range.start >= range.end || !sk_text_valid(range) || range.bytes > INT_MAX || !std::isfinite(size)) return result;
   const char *text = range.source;
   size_t bytes = range.bytes;
   SBCodepointSequence sequence = {SBStringEncodingUTF8, const_cast<char *>(text), bytes};
@@ -108,6 +109,8 @@ inline ShapedText shape_text(SkTextRange range, float size, FontProvider shape_f
     const hb_glyph_position_t *position = hb_buffer_get_glyph_positions(buffer, nullptr);
     float x = result.width, y = 0.f;
     for (unsigned i = 0; i < count; i++) {
+      size_t source_byte = static_cast<size_t>(cluster_base + info[i].cluster);
+      if (text[source_byte] == '\n' || text[source_byte] == '\r') continue;
       result.glyphs.push_back(static_cast<uint16_t>(info[i].codepoint));
       result.clusters.push_back(static_cast<unsigned>(cluster_base + info[i].cluster - range.start));
       result.fonts.push_back(index);
@@ -187,7 +190,8 @@ inline ShapedText shape_text(SkTextRange range, float size, FontProvider shape_f
 
 inline bool advances_caret(SBCodepoint codepoint) {
   hb_unicode_general_category_t category = hb_unicode_general_category(hb_unicode_funcs_get_default(), codepoint);
-  return category != HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK &&
+  return codepoint != '\n' && codepoint != '\r' &&
+    category != HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK &&
     category != HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK &&
     category != HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK &&
     category != HB_UNICODE_GENERAL_CATEGORY_FORMAT;
@@ -240,6 +244,8 @@ inline void cluster_breaks(const char *text, size_t bytes, uint8_t *breaks, Font
   breaks[0] = breaks[bytes] = 1;
   ShapedText shaped = shape_text(sk_text_range(text, bytes), 14.f, shape_font);
   for (unsigned cluster : shaped.clusters) if (cluster <= bytes) breaks[cluster] = 1;
+  if (text) for (size_t i = 0; i < bytes; i++)
+    if (text[i] == '\n' || text[i] == '\r') breaks[i] = breaks[i + 1] = 1;
 }
 
 

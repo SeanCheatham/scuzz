@@ -125,7 +125,7 @@ static void check_scale(int gpu) {
     if (inside && x == 33) { assert(abs(p[0] - 40) <= 2); assert(abs(p[2] - 88) <= 2); }
   }
 
-  /* Compare transformed bitmap text with independent pixel replication. */
+  /* Compare a text transform with the same glyphs at twice the size. */
   uint8_t original[64 * 64 * 4];
   sk_paint_set_text_size(paint, 14);
   float advance = sk_font_measure_string("AB", 14);
@@ -139,17 +139,24 @@ static void check_scale(int gpu) {
   sk_canvas_draw_string(canvas, "AB", 2, 24, paint);
   sk_canvas_restore(canvas);
   data = pixels(surface);
-  const char *backend = getenv("SCUZZ_SKIA");
-  int bitmap = backend && (!strcmp(backend, "gpu") || !strcmp(backend, "sk_sw"));
+  SkSurface *reference = sk_surface_make_raster_n32_premul(64, 64);
+  assert(reference);
+  SkCanvas *reference_canvas = sk_surface_get_canvas(reference);
+  sk_canvas_clear(reference_canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_paint_set_text_size(paint, 28);
+  sk_canvas_draw_string(reference_canvas, "AB", 4, 48, paint);
+  const uint8_t *expected = pixels(reference);
   int before = 0, after = 0;
   for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
     const uint8_t *p = data + (y * 64 + x) * 4;
-    const uint8_t *q = original + ((y / 2) * 64 + x / 2) * 4;
-    if (bitmap) assert(!memcmp(p, q, 4));
+    const uint8_t *q = expected + (y * 64 + x) * 4;
+    for (int channel = 0; channel < 4; channel++) assert(abs(p[channel] - q[channel]) <= 1);
     if (original[(y * 64 + x) * 4 + 3]) before++;
     if (p[3]) { after++; assert(y >= 20 && y < 52 && x < 64); }
   }
   assert(before > 20 && after > before * 2);
+  sk_surface_unref(reference);
+  sk_paint_set_text_size(paint, 14);
 
   /* Zero scale excludes paint. Clear still uses the device clip. */
   sk_canvas_save(canvas);
@@ -173,6 +180,14 @@ static void check_scale(int gpu) {
   data = pixels(surface);
   for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
     assert(data[(y * 64 + x) * 4 + 3] == (x >= 8 && x < 20 && y >= 8 && y < 20 ? 255 : 0));
+  sk_canvas_restore(canvas);
+  /* The visible stem of a large glyph fills only the clip. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  sk_canvas_clip_rect(canvas, 8, 8, 12, 12);
+  assert(sk_canvas_scale(canvas, (float)INT_MAX, 0, 0));
+  sk_canvas_draw_string(canvas, "H", -2, 5, paint);
+  check_box(surface, 8, 8, 20, 20, 255);
   sk_canvas_restore(canvas);
   sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
   sk_canvas_draw_rect(canvas, 6, 6, 4, 4, paint);

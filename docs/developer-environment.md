@@ -134,8 +134,11 @@ The ffi-skia build replaces the archive's interface objects with the local imple
 It records the selected renderer in `build/sk_capi_backend`.
 No Skia source tree is stored in the repository.
 
-The CPU archive contains Skia objects, HarfBuzz, and embedded fonts.
-The paint build fetches matching HarfBuzz headers and pinned SheenBidi source.
+The CPU archive contains Skia objects and HarfBuzz.
+All native renderers use the verified embedded font files.
+The software and OpenGL builds compile standalone HarfBuzz from its pinned source.
+They use its glyph outlines and the shared native shaper.
+The paint build also fetches pinned SheenBidi source.
 `third_party/skia/PIN` supplies source revisions and SHA-256 values.
 The build verifies each source archive before it extracts files.
 The build keeps these sources under `crates/ffi-skia/build/`.
@@ -147,7 +150,8 @@ Native Skia embeds these files. Web packages supply them as font assets.
 The release includes their SIL Open Font License files.
 Native application packages include the font and text shaper licenses.
 The macOS bundle contains these files before signing.
-Linux links C++, math, zlib, and bzip2 libraries.
+Each native renderer needs the C++ library.
+Skia on Linux also links math, zlib, and bzip2 libraries.
 macOS also links CoreFoundation, CoreGraphics, CoreText, Foundation, and Carbon.
 The archive build disables WOFF2 and rejects undefined Brotli symbols.
 `scripts/package_release.sh` includes the pinned host archive unless `SCUZZ_SKIA=sk_sw`.

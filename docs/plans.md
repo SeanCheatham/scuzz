@@ -28,15 +28,16 @@ Run native runtime, sanitizer, renderer, browser, and affected package checks.
 Rebuild the CLI and check its GUI manual.
 Run a finite Android emulator check. Keep unavailable Apple execution explicit.
 
-Status: Native software and OpenGL text use code-point cells.
-The software span measure counts UTF-8 code points and ignores proportional font styles.
-The default Skia path and browser Canvas path support proportional shaping.
-The shared text API carries source ranges and visible line context.
-The checkout includes pinned font data, HarfBuzz metadata, and SheenBidi source.
-The shared native shaper supplies font selection, script runs, clusters, and carets.
-The default Skia path uses this shaper.
-The pinned HarfBuzz API supplies glyph outlines. Use it for the portable raster path.
-The native build verifies the Latin and monospace font files by SHA-256.
-The default Skia path uses these files. It does not select fonts from the host.
+Status: Native software and OpenGL use the shared native shaper.
+The portable font provider uses verified Latin and fallback faces.
+The glyph raster path uses HarfBuzz outlines and clipped coverage rows.
+Measure, paint, clusters, and caret positions use the same glyphs.
+Editor and monospace text keep fixed cells.
+Line separators have no glyph bounds or advance.
+The native build verifies the Latin and monospace files by SHA-256.
 The build supplies standalone HarfBuzz source from its pinned archive.
-The portable font provider and glyph raster paths remain open.
+Software runtime UI checks and all three renderer paint checks pass.
+Android arm64 and x86_64 builds pass. The APK includes font and shaper licenses.
+Sanitizer checks are in progress.
+Independent glyph controls, wider runtime parity, browser checks, package checks,
+and Android execution remain open. Apple SDK execution is unavailable on this host.

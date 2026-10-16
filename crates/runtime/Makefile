@@ -57,12 +57,13 @@ lib: $(BUILDDIR)/libscuzz_rt.a
 $(BUILDDIR)/libscuzz_rt.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-# The Skia CPU archive needs C++, zlib, bzip2, and macOS text frameworks.
+# Native text needs C++. Skia also needs zlib, bzip2, and macOS text frameworks.
 # CoreFoundation runs AppKit work on the macOS main thread.
-SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_SKIA)/build/sk_capi_backend && \
+TEXT_LINK := $(if $(filter Darwin,$(UNAME_S)),-lc++,-lstdc++)
+SKIA_LINK = $(TEXT_LINK) $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_SKIA)/build/sk_capi_backend && \
 	if [ "$$(uname -s)" = Darwin ]; then \
-	  echo -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
-	else echo -lstdc++ -lm -lz -lbz2; fi)
+	  echo -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
+	else echo -lm -lz -lbz2; fi)
 GPU_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx gpu $(FFI_SKIA)/build/sk_capi_backend && \
 	if [ "$$(uname -s)" = Darwin ]; then echo -framework OpenGL; else echo -lEGL -lGLESv2; fi)
 ifeq ($(UNAME_S),Darwin)

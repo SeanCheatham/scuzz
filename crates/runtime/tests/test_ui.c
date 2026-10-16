@@ -20183,7 +20183,7 @@ static SzText *test_text_pair(SzText *a, SzText *b) {
 }
 
 static void test_shaped_field_geometry(void) {
-  if (sk_font_measure_string("i", 14) == sk_font_measure_string("W", 14)) return;
+  assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
   SzSignalStr *value = sz_signal_str("אב");
   SzView *field = sz_view_text_field(value, "Name");
   sz_view_layout(field, 320, 100, sz_theme_default());
@@ -20236,7 +20236,7 @@ static void test_shaped_field_geometry(void) {
 }
 
 static void test_shaped_text_wrapping(void) {
-  if (sk_font_measure_string("i", 14) == sk_font_measure_string("W", 14)) return;
+  assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
   const char *source = "ééé";
   SzText *text = test_text_span(source);
   float width = sk_font_measure_span(sk_text_range(source, 3), 14, 0);
@@ -20842,7 +20842,7 @@ static void test_select_scope_and_journal(void) {
 }
 
 static void test_fallback_text_layout(void) {
-  if (sk_font_measure_string("i", 14) == sk_font_measure_string("W", 14)) return;
+  assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
   const char *source[] = {"क्षि", "ปู่", "中文漢字"};
   for (int i = 0; i < 3; i++) {
     SzText *span = test_text_span(source[i]);
@@ -20944,7 +20944,7 @@ static void test_styled_text_values(void) {
 }
 
 static void test_font_change_joining(void) {
-  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
   const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م", "\xe2\x80\xadمع", ("\xe2\x80\xad" "fiم"), "م", "م", "م", "م"};
   const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9", "م\xe2\x80\xac", "م\xe2\x80\xac", "مممممممممر", "مممممممممد", "\xe2\x81\xa7\xe2\x81\xa9ر", "\xe2\x81\xa7\xe2\x81\xa9ر"};
   const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ", "\xe2\x80\xadﻢﻌ\xe2\x80\xac", "fiﻢ", "ﻡ...", "ﻣ", "ﻡ", "ﻡ"};
@@ -21033,7 +21033,7 @@ static void test_font_change_joining(void) {
 }
 
 static void test_font_change_direction(void) {
-  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
   const char *first[] = {"אבג", "אבג", "אבג", "אב AB", "ab אב", "אב", "A\nאב", "אבגדהוז אב"};
   const char *second[] = {"דהו", "דהו", "דהו", " CD", " גד", "גדהוזחטיכלמנסע", "גדהו", "גדהו"};
   int first_style[] = {0, SK_TEXT_BOLD, SK_TEXT_ITALIC, 0, 0, 0, 0, 0};
@@ -21110,7 +21110,7 @@ static void test_font_change_direction(void) {
 }
 
 static void test_wrapped_paragraph_direction(void) {
-  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
   SzText *prefix = test_text_span("אבגדהוז ");
   SzText *latin = test_text_span("AB ");
   SzText *hebrew = test_text_span("אב");
@@ -21157,7 +21157,7 @@ static void test_wrapped_paragraph_direction(void) {
 }
 
 static void test_rich_paragraph_ellipsis(void) {
-  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
   const char *sources[] = {"שלום שלום שלום שלום", "שלום ABCDEF אב עוד",
     "WWWWWW אבגד AB tail", "مرحبا بالعالم مرحبا", "AVAVAVAVAVAVAVAVAV"};
   SzTheme theme = *sz_theme_default();
@@ -21197,7 +21197,7 @@ static void test_rich_paragraph_ellipsis(void) {
 }
 
 static void test_plain_paragraph_direction(void) {
-  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
   const char *prefix[] = {"אבגדהוזחטיכלמנסע ", "אבגדהוזחטיכלמנסע\n",
     ("\xe2\x80\xab" "AAAAAAAAAAAAAAAA "), "AAAAAAAAAAAAAAAA ",
     "AAAAAAAAAAAAAAAA \xe2\x81\xa7", "אבגדהוזחטיכלמנסע ", "AAAAAAAAAAAAAAAA ", "אבגדהוזחטיכלמנסע "};

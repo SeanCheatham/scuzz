@@ -79,11 +79,12 @@ cp -a "$ROOT/crates/ffi-skia/build/sheenbidi/Headers" "$ROOT/crates/ffi-skia/bui
   "$OUT/crates/ffi-skia/build/sheenbidi/"
 cp -f "$ROOT/crates/ffi-skia/build/sheenbidi/.stamp" "$OUT/crates/ffi-skia/build/sheenbidi/.stamp"
 touch "$OUT/crates/ffi-skia/build/sheenbidi/.stamp"
-make -C "$ROOT/crates/ffi-skia" build/harfbuzz/arabic_joining.h build/harfbuzz/HarfBuzz-LICENSE
+make -C "$ROOT/crates/ffi-skia" build/harfbuzz/arabic_joining.h build/harfbuzz/HarfBuzz-LICENSE build/harfbuzz/.source-stamp
 mkdir -p "$OUT/crates/ffi-skia/build/harfbuzz"
-cp -a "$ROOT/crates/ffi-skia/build/harfbuzz/"*.h "$OUT/crates/ffi-skia/build/harfbuzz/"
+cp -a "$ROOT/crates/ffi-skia/build/harfbuzz/"*.h "$ROOT/crates/ffi-skia/build/harfbuzz/Source" "$ROOT/crates/ffi-skia/build/harfbuzz/.source-stamp" "$OUT/crates/ffi-skia/build/harfbuzz/"
 cp -f "$ROOT/crates/ffi-skia/build/harfbuzz/.stamp" "$ROOT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE"   "$OUT/crates/ffi-skia/build/harfbuzz/"
 touch "$OUT/crates/ffi-skia/build/harfbuzz/.stamp"
+touch "$OUT/crates/ffi-skia/build/harfbuzz/.source-stamp"
 touch "$OUT/crates/ffi-skia/build/harfbuzz/arabic_joining.h" "$OUT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE"
 if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
   echo "==> SCUZZ_SKIA=sk_sw - release keeps in-tree sk_sw only"
