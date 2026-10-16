@@ -7619,6 +7619,11 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_ANIMATED_SIZE:
+#ifdef __EMSCRIPTEN__
+    sz_web_size_transition(v, v->animation_value, v->animation_height,
+      v->animation_target, v->animation_target_height,
+      v->animation_duration - v->animation_step, v->motion_suppressed);
+#endif
     if (!size_collapsed(v)) paint_children_clipped(v, c, theme);
     break;
   case SZ_VIEW_CLIP:
@@ -8858,7 +8863,7 @@ static int focus_hidden(const SzView *v) {
 static void dump_transition_nodes(SzView *view, FILE *file, int *index) {
   if (!view) return;
   if (view->kind == SZ_VIEW_ANIMATED_OPACITY) {
-    fprintf(file, "%s{\"i\":%d,\"value\":%d,\"target\":%d,\"remaining\":%d,\"suppressed\":%s}",
+    fprintf(file, "%s{\"i\":%d,\"kind\":\"opacity\",\"value\":%d,\"target\":%d,\"remaining\":%d,\"suppressed\":%s}",
       *index ? "," : "", *index, view->animation_value, view->animation_target,
       view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
     (*index)++;

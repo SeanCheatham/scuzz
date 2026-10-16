@@ -716,6 +716,30 @@ async function checkMotionUnicode(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function openMotionPage(page, url) {
+  await page.addInitScript(() => {
+    const frames = new Map(); let next = 0;
+    const browserFrame = window.requestAnimationFrame.bind(window);
+    window.motionBrowserFrame = () => new Promise(browserFrame);
+    window.requestAnimationFrame = callback => { frames.set(++next, callback); return next; };
+    window.cancelAnimationFrame = id => frames.delete(id);
+    window.motionStep = () => {
+      const callbacks = [...frames.values()]; frames.clear();
+      window.motionCallbacks = callbacks.length;
+      callbacks.forEach(callback => callback(performance.now()));
+    };
+  });
+  await page.goto(url);
+  const deadline = Date.now() + 30000;
+  while (!await page.evaluate(() => {
+    window.motionStep(); return Module.ready && Module.webFrame?.transitions.length === 1;
+  })) {
+    assert(Date.now() < deadline, 'motion application starts');
+    await page.waitForTimeout(10);
+  }
+  await page.evaluate(() => document.fonts.ready);
+}
+
 async function checkMotion(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -723,27 +747,7 @@ async function checkMotion(browserType, url, mobile) {
       deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile, reducedMotion: 'no-preference'});
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.stack));
-    await page.addInitScript(() => {
-      const frames = new Map(); let next = 0;
-      const browserFrame = window.requestAnimationFrame.bind(window);
-      window.motionBrowserFrame = () => new Promise(browserFrame);
-      window.requestAnimationFrame = callback => { frames.set(++next, callback); return next; };
-      window.cancelAnimationFrame = id => frames.delete(id);
-      window.motionStep = () => {
-        const callbacks = [...frames.values()]; frames.clear();
-        window.motionCallbacks = callbacks.length;
-        callbacks.forEach(callback => callback(performance.now()));
-      };
-    });
-    await page.goto(url);
-    const deadline = Date.now() + 30000;
-    while (!await page.evaluate(() => {
-      window.motionStep(); return Module.ready && Module.webFrame?.transitions.length === 1;
-    })) {
-      assert(Date.now() < deadline, 'motion application starts');
-      await page.waitForTimeout(10);
-    }
-    await page.evaluate(() => document.fonts.ready);
+    await openMotionPage(page, url);
     const frame = () => page.evaluate(() => Module.webFrame.transitions[0]);
     const advance = async count => {
       const values = [];
@@ -831,6 +835,126 @@ async function checkMotion(browserType, url, mobile) {
     assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Count: 2')));
     assert.deepEqual(errors, []);
     console.log(`web motion: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
+async function checkSizeMotion(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 1400},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile, reducedMotion: 'no-preference'});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await openMotionPage(page, url);
+    const state = () => page.evaluate(() => Module.webFrame.transitions.find(item => item.kind === 'size'));
+    const advance = async count => {
+      const frames = [];
+      for (let i = 0; i < count; i++) {
+        const deadline = Date.now() + 30000;
+        while (!await page.evaluate(() => {
+          const before = Module.webFrame; window.motionStep(); return before !== Module.webFrame;
+        })) {
+          assert(Date.now() < deadline, 'size transition paints a frame');
+          await page.waitForTimeout(10);
+        }
+        frames.push(await state());
+      }
+      return frames;
+    };
+    const click = async name => page.getByRole('button', {name, exact: true}).evaluate(node => node.click());
+    const show = page.getByRole('checkbox', {name: 'Show size content', exact: true});
+    const group = page.getByRole('group', {name: 'Size bounds', exact: true});
+    const name = page.getByRole('textbox', {name: 'Size name', exact: true});
+    const after = page.getByRole('main', {name: 'Application', exact: true}).getByText('After size sample', {exact: true});
+    await page.getByRole('checkbox', {name: 'Show size sample', exact: true}).evaluate(node => node.click());
+    await advance(1);
+    assert.deepEqual([(await state()).width, (await state()).height], [80, 60]);
+    const firstBox = await group.boundingBox(), firstAfter = await after.boundingBox();
+    const gap = firstAfter.y - firstBox.y - firstBox.height;
+    const geometry = async (width, height) => {
+      const box = await group.boundingBox(), below = await after.boundingBox();
+      assert(Math.abs(box.width - width) < .01 && Math.abs(box.height - height) < .01,
+        JSON.stringify({box, width, height}));
+      assert(Math.abs(below.y - box.y - height - gap) < .01, 'the next label follows the current height');
+      const pixels = await page.evaluate(box => {
+        const scale = Module.webFrame.scale;
+        const canvas = Module.canvas, ctx = canvas.getContext('2d');
+        const pixel = (x, y) => Array.from(ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data);
+        return {inside: pixel((box.x + box.width - 2) * scale, (box.y + 2) * scale),
+          outside: pixel((box.x + box.width + 2) * scale, (box.y + 2) * scale), paper: pixel(0, 0)};
+      }, box);
+      assert.deepEqual(pixels.inside, [225, 235, 245, 255]);
+      assert.deepEqual(pixels.outside, pixels.paper);
+    };
+    await geometry(80, 60);
+    const point = [firstBox.x + 4, firstBox.y + firstBox.height + 2];
+    if (mobile) await page.touchscreen.tap(...point); else await page.mouse.click(...point);
+    await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Size count: 0')));
+    await name.fill('Kept size input');
+    await name.evaluate(node => { node.setSelectionRange(2, 5); node.dispatchEvent(new Event('select')); });
+    const original = await name.elementHandle();
+    await click('Grow size');
+    await name.evaluate(node => { node.blur(); node.focus(); });
+    const grown = [];
+    for (let i = 0; i < 3; i++) {
+      const frame = (await advance(1))[0]; grown.push([frame.width, frame.height, frame.remaining]);
+      await geometry(frame.width, frame.height);
+    }
+    assert.deepEqual(grown, [[100, 75, 7], [120, 90, 6], [140, 105, 5]]);
+    assert(await name.evaluate(node => document.activeElement === node));
+    assert.deepEqual(await name.evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ['Kept size input', 2, 5]);
+    await click('Narrow size');
+    const narrowed = await advance(8);
+    assert.deepEqual(narrowed.map(frame => [frame.width, frame.height]),
+      [[128, 96], [115, 86], [103, 77], [90, 68], [78, 58], [65, 49], [53, 39], [40, 30]]);
+    await geometry(40, 30);
+    assert(await original.evaluate(node => node === document.querySelector('input[aria-label="Size name"]')));
+    await click('Wide size');
+    const wide = await advance(8);
+    assert(wide.every(frame => frame.height === 30));
+    assert.equal(wide.at(-1).width, 240);
+    await click('Tall size');
+    const tall = await advance(8);
+    assert(tall.every(frame => frame.width === 240));
+    assert.equal(tall.at(-1).height, 180);
+    await geometry(240, 180);
+    await click('Size add'); await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Size count: 1')));
+    await click('Collapse size'); await advance(8);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [0, 0, 0]);
+    assert.equal(await name.count(), 0); assert.equal(await group.count(), 0);
+    assert.equal(await original.evaluate(node => node === document.activeElement), false);
+    await click('Grow size'); await advance(8);
+    assert.equal(await name.inputValue(), 'Kept size input');
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Size count: 1')));
+    await click('Shrink size'); await advance(2);
+    assert.deepEqual([(await state()).width, (await state()).height], [200, 150]);
+    const frozen = await state();
+    await page.waitForTimeout(100);
+    assert.deepEqual(await state(), frozen, 'elapsed time does not advance a transition');
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.equal(await state(), undefined); assert.equal(await name.count(), 0);
+    await click('Grow size'); await advance(1);
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [240, 180, 0]);
+    assert.equal(await name.inputValue(), 'Kept size input');
+    await click('Shrink size'); await advance(2);
+    await page.evaluate(() => {
+      window.motionPreferenceChange = undefined;
+      Module.motionPreference.addEventListener('change', () => window.motionPreferenceChange = Module.motionPreference.matches, {once: true});
+    });
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.evaluate(() => window.motionBrowserFrame());
+    await page.waitForFunction(() => window.motionPreferenceChange === true);
+    await advance(1);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [80, 60, 0]);
+    assert((await state()).suppressed);
+    await click('Collapse size'); await advance(1);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [0, 0, 0]);
+    assert.equal(await name.count(), 0);
+    assert.deepEqual(errors, []);
+    console.log(`web size motion: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }
 }
 
@@ -2317,7 +2441,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

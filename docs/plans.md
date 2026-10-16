@@ -18,4 +18,4 @@ Run sanitizer, browser, renderer, and integration checks.
 
 Transform transitions and native operating-system motion preferences remain open.
 
-Status: The native constructor and pump clock pass focused checks. Geometry and pixel checks cover scales 1 and 2. Retargeting, pause, reduction, zero size, hidden content, range limits, and retained input pass. A deliberate clipping defect fails the pixel check. A zero-size parent suppresses child transitions. The full native suite is active. The Scuzz API, evaluator mount, motion application, browser output, sanitizer checks, renderer checks, exact replay, and integration remain.
+Status: The full native suite passes. Geometry and pixel checks cover scales 1 and 2. A deliberate clipping defect fails the pixel check. The Scuzz API, evaluator mount, motion application, and browser output are present. Size and opacity checks pass in Chromium, Firefox, and WebKit. Chromium and WebKit mobile emulation pass. The motion campaign and all 14 exact native and evaluator replays pass. Sanitizer, renderer, and full integration checks remain.

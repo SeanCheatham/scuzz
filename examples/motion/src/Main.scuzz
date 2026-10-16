@@ -1,6 +1,14 @@
 def overlapSample(): View =
   View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.background(Color.rgb(255, 255, 255), View.semantics("Opacity sample", View.opacity(50, View.sized(120, 80, View.stack([View.sized(100, 80, View.background(Color.rgb(255, 0, 0), View.text(""))), View.positioned(20, 0, View.sized(100, 80, View.background(Color.rgb(0, 0, 255), View.text(""))))]))))))
 
+def changeSize(width: Signal[Int], height: Signal[Int], w: Int, h: Int): Unit =
+  for {
+    _ = Signal.set(width, w)
+  } yield Signal.set(height, h)
+
+def sizeSample(width: Signal[Int], height: Signal[Int], visible: Signal[Int], name: Signal[String], count: Signal[Int], countText: Signal[String], widthText: Signal[String], heightText: Signal[String]): View =
+  View.column([View.heading(2, View.text("Size transitions")), View.wrap([View.button("Grow size", _ => changeSize(width, height, 240, 180)), View.button("Shrink size", _ => changeSize(width, height, 80, 60)), View.button("Narrow size", _ => changeSize(width, height, 40, 30)), View.button("Collapse size", _ => changeSize(width, height, 0, 0)), View.button("Wide size", _ => Signal.set(width, 240)), View.button("Tall size", _ => Signal.set(height, 180))]), View.checkbox(visible, "Show size content"), View.bindText(widthText), View.bindText(heightText), View.bindText(countText), View.visibility(visible, View.animatedSize(width, height, 8, View.semantics("Size bounds", View.background(Color.rgb(225, 235, 245), View.column([View.text("Size content"), View.textField(name, "Size name"), View.button("Size add", _ => Signal.set(count, Signal.get(count) + 1))]))))), View.text("After size sample")])
+
 @main def main: IO[Unit] =
   for {
     opacity = Signal.make(100)
@@ -8,7 +16,16 @@ def overlapSample(): View =
     visible = Signal.make(1)
     count = Signal.make(0)
     name = Signal.make("Retained input")
+    sizeShown = Signal.make(0)
+    sizeVisible = Signal.make(1)
+    boxWidth = Signal.make(80)
+    boxHeight = Signal.make(60)
+    sizeName = Signal.make("Retained size input")
+    sizeCount = Signal.make(0)
+    sizeCountText = Signal.map(sizeCount, n => s"Size count: $n")
+    sizeWidthText = Signal.map(boxWidth, n => s"Width target: $n")
+    sizeHeightText = Signal.map(boxHeight, n => s"Height target: $n")
     targetText = Signal.map(opacity, n => s"Target: $n")
     countText = Signal.map(count, n => s"Count: $n")
-    _ <- Ui.run(_ => View.column([View.text("Opacity transitions"), View.wrap([View.button("Fade out", _ => Signal.set(opacity, 0)), View.button("Fade in", _ => Signal.set(opacity, 100)), View.button("Half", _ => Signal.set(opacity, 50))]), View.checkbox(reduced, "Reduce motion"), View.checkbox(visible, "Show content"), View.bindText(targetText), View.bindText(countText), View.visibility(visible, View.reducedMotion(reduced, View.animatedOpacity(opacity, 8, View.column([View.text("Retained content"), View.textField(name, "Name"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))])))), overlapSample()]))
+    _ <- Ui.run(_ => View.column([View.text("Opacity transitions"), View.wrap([View.button("Fade out", _ => Signal.set(opacity, 0)), View.button("Fade in", _ => Signal.set(opacity, 100)), View.button("Half", _ => Signal.set(opacity, 50))]), View.checkbox(reduced, "Reduce motion"), View.checkbox(visible, "Show content"), View.bindText(targetText), View.bindText(countText), View.visibility(visible, View.reducedMotion(reduced, View.animatedOpacity(opacity, 8, View.column([View.text("Retained content"), View.textField(name, "Name"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))])))), overlapSample(), View.checkbox(sizeShown, "Show size sample"), View.showWhen(sizeShown, 1, View.reducedMotion(reduced, sizeSample(boxWidth, boxHeight, sizeVisible, sizeName, sizeCount, sizeCountText, sizeWidthText, sizeHeightText)))]))
   } yield ()

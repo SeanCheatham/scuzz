@@ -2457,7 +2457,58 @@ build = package / 'build'
 source = build / 'fuzz/ev'
 ui = name in ('editor', 'layout', 'list', 'controls', 'split', 'choices', 'disclosure', 'inline', 'tooltips', 'shaping', 'themes', 'text', 'measured', 'select', 'motion')
 cases = {
-    'motion': [('pending', [
+    'motion': [('size-pending', [
+        {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('size-retarget', [
+        {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 3},
+        {'op': 'tap', 'id': 'button:Narrow size'}, {'op': 'pump', 'k': 1},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('size-axes', [
+        {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Wide size'}, {'op': 'pump', 'k': 8},
+        {'op': 'tap', 'id': 'button:Tall size'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('size-collapse', [
+        {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept size input'},
+        {'op': 'tap', 'id': 'button:Size add'},
+        {'op': 'tap', 'id': 'button:Collapse size'}, {'op': 'pump', 'k': 8},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('size-hidden', [
+        {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 2},
+        {'op': 'tap', 'id': 'checkbox:Show size content'},
+        {'op': 'tap', 'id': 'button:Narrow size'}, {'op': 'pump', 'k': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size content'},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('size-reduced', [
+        {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 2},
+        {'op': 'reduceMotion', 'value': True}, {'op': 'pump', 'k': 1}]),
+        ('size-retained', [
+        {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept size input'},
+        {'op': 'tap', 'id': 'button:Size add'},
+        {'op': 'tap', 'id': 'button:Shrink size'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('size-scale', [
+        {'op': 'resize', 'width': 360, 'height': 1400, 'scale': 2},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('pending', [
         {'op': 'tap', 'id': 'button:Fade out'}, {'op': 'pump', 'k': 2},
         {'op': 'lifecycle', 'phase': 'pause'}]),
         ('retarget', [
@@ -2891,7 +2942,26 @@ for label, events in cases:
         evaluated = json.loads((output / 'eval.json').read_text())
         for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y'):
             assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
+        if label.startswith('size-'):
+            transition = next(item for item in native['transitions'] if item['kind'] == 'size')
+            expected = {'size-pending': (120, 90, 240, 180, 6),
+                'size-retarget': (128, 96, 40, 30, 7), 'size-axes': (240, 90, 240, 180, 6),
+                'size-collapse': (0, 0, 0, 0, 0), 'size-hidden': (40, 30, 40, 30, 0),
+                'size-reduced': (240, 180, 240, 180, 0), 'size-retained': (200, 150, 80, 60, 6),
+                'size-scale': (120, 90, 240, 180, 6)}[label]
+            assert tuple(transition[key] for key in ('width', 'height', 'targetWidth', 'targetHeight', 'remaining')) == expected, transition
+            values = {item.get('name'): item.get('value') for item in native['signals']}
+            assert (values['boxWidth'], values['boxHeight']) == expected[2:4], values
+            retained = label in ('size-collapse', 'size-retained')
+            assert values['sizeName'] == ('Kept size input' if retained else 'Retained size input'), values
+            assert values['sizeCount'] == (1 if retained else 0), values
+            fields = [item for item in native['fields'] if item['label'] == 'Size name']
+            assert len(fields) == (0 if label == 'size-collapse' else 1), native['fields']
+            assert native['reducedMotion'] == (label == 'size-reduced'), native
+            print(f'motion {label}: exact size steps, targets, input, and scope pass', flush=True)
+            continue
         transition = native['transitions'][0]
+        assert transition['kind'] == 'opacity', transition
         expected = {'pending': (75, 0, 6), 'retarget': (72, 100, 6),
                     'input-batch': (88, 50, 6), 'reduced': (0, 0, 0),
                     'retained': (0, 0, 0), 'hide': (100, 100, 0)}[label]
@@ -3727,6 +3797,7 @@ PY_RANGE
   "$SCUZZ" check examples/motion
   "$SCUZZ" package --target web --out-dir "$web_tmp/motion output" examples/motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' motion
+  node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' size-motion
   python3 - "$web_tmp/motion Unicode" <<'PY_MOTION_UTF8'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])

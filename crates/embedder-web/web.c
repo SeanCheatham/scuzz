@@ -58,10 +58,18 @@ EM_JS(void, sz_web_control_id, (uintptr_t view, int role, const char *label, con
     checked, opacity, tabStop: Boolean(tab_stop), x, y, w, h, ink, selection, font, line_h, inset, gutter, clip: clipped ? [cx, cy, cw, ch] : null});
 });
 EM_JS(void, web_transition, (uintptr_t view, int value, int target, int remaining, int suppressed), {
-  Module.webFrame.transitions.push({id: Number(view), value, target, remaining, suppressed: Boolean(suppressed)});
+  Module.webFrame.transitions.push({id: Number(view), kind: 'opacity', value, target, remaining, suppressed: Boolean(suppressed)});
 });
 void sz_web_transition(SzView *view, int value, int target, int remaining, int suppressed) {
   web_transition(sz_view_id(view), value, target, remaining, suppressed);
+}
+
+EM_JS(void, web_size_transition, (uintptr_t view, int width, int height, int target_width, int target_height, int remaining, int suppressed), {
+  Module.webFrame.transitions.push({id: Number(view), kind: 'size', width, height,
+    targetWidth: target_width, targetHeight: target_height, remaining, suppressed: Boolean(suppressed)});
+});
+void sz_web_size_transition(SzView *view, int width, int height, int target_width, int target_height, int remaining, int suppressed) {
+  web_size_transition(sz_view_id(view), width, height, target_width, target_height, remaining, suppressed);
 }
 
 EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t active, int count), {

@@ -1,0 +1,2 @@
+[fuzz]
+events = ["resize 640 1400 1", "tap checkbox:Show size sample", "tap button:Grow size", "pump 2", "tap button:Narrow size", "pump 8", "tap button:Tall size", "tap button:Wide size", "pump 8", "text 1 Kept size input", "tap button:Size add", "tap button:Collapse size", "pump 8", "tap checkbox:Show size content", "tap button:Grow size", "tap checkbox:Show size content", "tap checkbox:Reduce motion", "tap button:Shrink size", "tap checkbox:Reduce motion", "tap button:Grow size", "pump 2", "lifecycle pause", "pump 3", "lifecycle resume", "pump 8"]

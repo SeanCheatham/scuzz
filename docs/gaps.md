@@ -134,7 +134,10 @@ Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.
 Renderer checks cover overlap, nested layers, clips, transparency, and GPU orientation.
 Runtime checks cover retargeting, hidden cancellation, pause, reduction, and recorded pumps.
-Layout and transform transitions remain open.
+Size transitions use the shared pump clock and retain child state.
+Native and browser checks cover exact steps, retargeting, clipping, input, reduction, and zero size.
+Native and evaluator replays compare exact timelines and claims.
+Intrinsic-size, position, and transform transitions remain open.
 Native operating-system motion preference detection and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 

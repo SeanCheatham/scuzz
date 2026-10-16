@@ -329,6 +329,17 @@ Overlapping child paint stays opaque inside that layer. Nested opacity multiplie
 Software and OpenGL layers use one surface-sized buffer or target for each active layer.
 The default Skia renderer manages its own layer storage.
 
+Use `View.animatedSize(width, height, pumps, child)` for a size transition.
+Both dimensions use `Signal[Int]` values in logical pixels.
+Display clamps each dimension to 0 through the signed 32-bit maximum.
+The constructor does not write either Signal.
+Both dimensions use one linear pump count. A target change starts from the current size.
+The current size controls layout, paint clipping, and pointer bounds.
+Incoming constraints limit the displayed box.
+Zero size excludes child focus and accessibility. Child state stays available.
+Hidden or reduced content snaps to its target. Pause preserves the current size.
+Recorded output includes current size, target size, and remaining pumps.
+
 Use `View.reducedMotion(reduced, child)` to reduce motion in a subtree.
 A nonzero Signal snaps explicit transitions and removes built-in motion steps.
 An ancestor or session preference stays effective inside nested wrappers.
