@@ -95,3 +95,55 @@ def settledSizeKeepsInputScope(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "sizeShown") == 0 || Timeline.signalInt(t, i, "sizeVisible") == 0 || !Timeline.a11yHas(t, i, """pumps:size:Size bounds=0
 """) || (Timeline.signalInt(t, i, "boxWidth") > 0 && Timeline.signalInt(t, i, "boxHeight") > 0) == Timeline.a11yHas(t, i, "textfield:Size name"))
 
+def contentStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "contentShown") == 0 && Timeline.signalInt(t, i, "contentVisible") == 1 && Timeline.signalInt(t, i, "contentMode") == 0 && Timeline.signalInt(t, i, "contentPresent") == 1 && Timeline.signalInt(t, i, "contentCount") == 0 && Timeline.signalStrHas(t, i, "contentName", "Retained content input"))
+
+def growChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Grow content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 1
+})
+
+def shrinkChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Shrink content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 0
+})
+
+def detailChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Detail content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 2
+})
+
+def emptyChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Empty content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 3
+})
+
+def contentAddChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Content add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentCount") == Timeline.signalInt(t, before, "contentCount") + 1
+})
+
+def contentPresenceFollowsMode(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentMode") == 3 == (Timeline.signalInt(t, i, "contentPresent") == 0))
+
+def contentLabelsFollowValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.a11yHas(t, i, Str.concat("text:Content count: ", Str.fromInt(Timeline.signalInt(t, i, "contentCount")))))
+
+def reducedContentSizeHasNoPendingPumps(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.signalInt(t, i, "contentVisible") == 0 || Timeline.signalInt(t, i, "reduced") == 0 || Timeline.a11yHas(t, i, """pumps:contentSize:Content bounds=0
+"""))
+
+def measuredContentKeepsInputScope(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.signalInt(t, i, "contentVisible") == 0 || Timeline.a11yHas(t, i, """contentSize:Content bounds=0.000,0.000
+""") || Timeline.signalInt(t, i, "contentMode") != 3 == Timeline.a11yHas(t, i, "textfield:Content name"))
+
+private def contentHeightEnd(mode: Int): String =
+  if (mode == 1) """,160.000
+""" else if (mode == 2) """,120.000
+""" else if (mode == 3) """,0.000
+""" else """,100.000
+"""
+
+def contentUsesMeasuredHeight(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.signalInt(t, i, "contentVisible") == 0 || Timeline.a11yHas(t, i, "target:contentSize:Content bounds=") && Timeline.a11yHas(t, i, contentHeightEnd(Timeline.signalInt(t, i, "contentMode"))))
+

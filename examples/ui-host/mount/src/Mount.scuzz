@@ -58,10 +58,10 @@ def mountViewOnly(kind: String, v: View): View =
   if (kind == "View.center") View.center(v) else if (kind == "View.scroll") View.scroll(v) else if (kind == "View.scrollH") View.scrollH(v) else if (kind == "View.card") View.card(v) else if (kind == "View.placeholder") View.placeholder(v) else if (kind == "View.unconstrainedBox") View.unconstrainedBox(v) else if (kind == "View.stretch") View.stretch(v) else if (kind == "View.clip") View.clip(v) else if (kind == "View.ellipsis") View.ellipsis(v) else if (kind == "View.ignorePointer") View.ignorePointer(v) else if (kind == "View.absorbPointer") View.absorbPointer(v) else if (kind == "View.excludeSemantics") View.excludeSemantics(v) else View.focusGroup(v)
 
 def isIntView(kind: String): Bool =
-  kind == "View.expanded" || kind == "View.background" || kind == "View.padding" || kind == "View.textColor" || kind == "View.fontSize" || kind == "View.opacity" || kind == "View.maxLines" || kind == "View.gap" || kind == "View.radius"
+  kind == "View.animatedContentSize" || kind == "View.expanded" || kind == "View.background" || kind == "View.padding" || kind == "View.textColor" || kind == "View.fontSize" || kind == "View.opacity" || kind == "View.maxLines" || kind == "View.gap" || kind == "View.radius"
 
 def mountIntView(kind: String, n: Int, v: View): View =
-  if (kind == "View.expanded") View.expanded(n, v) else if (kind == "View.background") View.background(n, v) else if (kind == "View.padding") View.padding(n, v) else if (kind == "View.textColor") View.textColor(n, v) else if (kind == "View.opacity") View.opacity(n, v) else if (kind == "View.maxLines") View.maxLines(n, v) else if (kind == "View.gap") View.gap(n, v) else if (kind == "View.radius") View.radius(n, v) else View.fontSize(n, v)
+  if (kind == "View.animatedContentSize") View.animatedContentSize(n, v) else if (kind == "View.expanded") View.expanded(n, v) else if (kind == "View.background") View.background(n, v) else if (kind == "View.padding") View.padding(n, v) else if (kind == "View.textColor") View.textColor(n, v) else if (kind == "View.opacity") View.opacity(n, v) else if (kind == "View.maxLines") View.maxLines(n, v) else if (kind == "View.gap") View.gap(n, v) else if (kind == "View.radius") View.radius(n, v) else View.fontSize(n, v)
 
 def isIntIntView(kind: String): Bool =
   kind == "View.minSize" || kind == "View.sized" || kind == "View.positioned" || kind == "View.aspectRatio" || kind == "View.fraction" || kind == "View.maxSize" || kind == "View.align" || kind == "View.border"

@@ -137,7 +137,11 @@ Runtime checks cover retargeting, hidden cancellation, pause, reduction, and rec
 Size transitions use the shared pump clock and retain child state.
 Native and browser checks cover exact steps, retargeting, clipping, input, reduction, and zero size.
 Native and evaluator replays compare exact timelines and claims.
-Intrinsic-size, position, and transform transitions remain open.
+Content-size transitions measure the child with incoming constraints and keep fractional dimensions.
+Native checks cover wrapped text, constraints, exact steps, clipping, and retained input.
+Browser checks cover pixels, following content, retargeting, hidden cancellation, reduction, and input state.
+Native and evaluator replays compare exact content-size timelines and claims.
+Position and transform transitions remain open.
 Native operating-system motion preference detection and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 

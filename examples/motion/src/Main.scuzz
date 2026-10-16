@@ -9,6 +9,11 @@ def changeSize(width: Signal[Int], height: Signal[Int], w: Int, h: Int): Unit =
 def sizeSample(width: Signal[Int], height: Signal[Int], visible: Signal[Int], name: Signal[String], count: Signal[Int], countText: Signal[String], widthText: Signal[String], heightText: Signal[String]): View =
   View.column([View.heading(2, View.text("Size transitions")), View.wrap([View.button("Grow size", _ => changeSize(width, height, 240, 180)), View.button("Shrink size", _ => changeSize(width, height, 80, 60)), View.button("Narrow size", _ => changeSize(width, height, 40, 30)), View.button("Collapse size", _ => changeSize(width, height, 0, 0)), View.button("Wide size", _ => Signal.set(width, 240)), View.button("Tall size", _ => Signal.set(height, 180))]), View.checkbox(visible, "Show size content"), View.bindText(widthText), View.bindText(heightText), View.bindText(countText), View.visibility(visible, View.animatedSize(width, height, 8, View.semantics("Size bounds", View.background(Color.rgb(225, 235, 245), View.column([View.text("Size content"), View.textField(name, "Size name"), View.button("Size add", _ => Signal.set(count, Signal.get(count) + 1))]))))), View.text("After size sample")])
 
+def contentSample(mode: Signal[Int], present: Signal[Int], visible: Signal[Int], name: Signal[String], count: Signal[Int], countText: Signal[String]): View =
+  View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.heading(2, View.text("Content-size transitions")), View.wrap([View.button("Grow content", _ => Signal.set(mode, 1)), View.button("Shrink content", _ => Signal.set(mode, 0)), View.button("Detail content", _ => Signal.set(mode, 2)), View.button("Empty content", _ => Signal.set(mode, 3))]), View.checkbox(visible, "Show measured content"), View.bindText(countText), View.visibility(visible, View.animatedContentSize(8, View.semantics("Content bounds", View.offstage(present, View.background(Color.rgb(225, 235, 245), View.column([View.text("Content summary"), View.textField(name, "Content name"), View.showWhen(mode, 1, View.text("""First detail
+Second detail
+Third detail""")), View.showWhen(mode, 2, View.text("One detail")), View.button("Content add", _ => Signal.set(count, Signal.get(count) + 1))])))))), View.text("After content sample")]))
+
 @main def main: IO[Unit] =
   for {
     opacity = Signal.make(100)
@@ -22,10 +27,17 @@ def sizeSample(width: Signal[Int], height: Signal[Int], visible: Signal[Int], na
     boxHeight = Signal.make(60)
     sizeName = Signal.make("Retained size input")
     sizeCount = Signal.make(0)
+    contentShown = Signal.make(0)
+    contentVisible = Signal.make(1)
+    contentMode = Signal.make(0)
+    contentPresent = Signal.map(contentMode, n => if (n == 3) 0 else 1)
+    contentName = Signal.make("Retained content input")
+    contentCount = Signal.make(0)
+    contentCountText = Signal.map(contentCount, n => s"Content count: $n")
     sizeCountText = Signal.map(sizeCount, n => s"Size count: $n")
     sizeWidthText = Signal.map(boxWidth, n => s"Width target: $n")
     sizeHeightText = Signal.map(boxHeight, n => s"Height target: $n")
     targetText = Signal.map(opacity, n => s"Target: $n")
     countText = Signal.map(count, n => s"Count: $n")
-    _ <- Ui.run(_ => View.column([View.text("Opacity transitions"), View.wrap([View.button("Fade out", _ => Signal.set(opacity, 0)), View.button("Fade in", _ => Signal.set(opacity, 100)), View.button("Half", _ => Signal.set(opacity, 50))]), View.checkbox(reduced, "Reduce motion"), View.checkbox(visible, "Show content"), View.bindText(targetText), View.bindText(countText), View.visibility(visible, View.reducedMotion(reduced, View.animatedOpacity(opacity, 8, View.column([View.text("Retained content"), View.textField(name, "Name"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))])))), overlapSample(), View.checkbox(sizeShown, "Show size sample"), View.showWhen(sizeShown, 1, View.reducedMotion(reduced, sizeSample(boxWidth, boxHeight, sizeVisible, sizeName, sizeCount, sizeCountText, sizeWidthText, sizeHeightText)))]))
+    _ <- Ui.run(_ => View.column([View.text("Opacity transitions"), View.wrap([View.button("Fade out", _ => Signal.set(opacity, 0)), View.button("Fade in", _ => Signal.set(opacity, 100)), View.button("Half", _ => Signal.set(opacity, 50))]), View.checkbox(reduced, "Reduce motion"), View.checkbox(visible, "Show content"), View.bindText(targetText), View.bindText(countText), View.visibility(visible, View.reducedMotion(reduced, View.animatedOpacity(opacity, 8, View.column([View.text("Retained content"), View.textField(name, "Name"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))])))), overlapSample(), View.checkbox(sizeShown, "Show size sample"), View.showWhen(sizeShown, 1, View.reducedMotion(reduced, sizeSample(boxWidth, boxHeight, sizeVisible, sizeName, sizeCount, sizeCountText, sizeWidthText, sizeHeightText))), View.checkbox(contentShown, "Show content sample"), View.showWhen(contentShown, 1, View.reducedMotion(reduced, contentSample(contentMode, contentPresent, contentVisible, contentName, contentCount, contentCountText)))]))
   } yield ()

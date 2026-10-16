@@ -2457,7 +2457,64 @@ build = package / 'build'
 source = build / 'fuzz/ev'
 ui = name in ('editor', 'layout', 'list', 'controls', 'split', 'choices', 'disclosure', 'inline', 'tooltips', 'shaping', 'themes', 'text', 'measured', 'select', 'motion')
 cases = {
-    'motion': [('size-pending', [
+    'motion': [('content-pending', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('content-retarget', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 3},
+        {'op': 'tap', 'id': 'button:Detail content'}, {'op': 'pump', 'k': 1},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('content-collapse', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept content input'},
+        {'op': 'tap', 'id': 'button:Content add'},
+        {'op': 'tap', 'id': 'button:Empty content'}, {'op': 'pump', 'k': 8},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('content-hidden', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 2},
+        {'op': 'tap', 'id': 'checkbox:Show measured content'},
+        {'op': 'tap', 'id': 'button:Detail content'}, {'op': 'pump', 'k': 1},
+        {'op': 'tap', 'id': 'checkbox:Show measured content'},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('content-reduced', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 2},
+        {'op': 'reduceMotion', 'value': True}, {'op': 'pump', 'k': 1}]),
+        ('content-retained', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept content input'},
+        {'op': 'tap', 'id': 'button:Content add'},
+        {'op': 'tap', 'id': 'button:Shrink content'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('content-scale', [
+        {'op': 'resize', 'width': 360, 'height': 2000, 'scale': 2},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('content-paused-target', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'},
+        {'op': 'tap', 'id': 'button:Detail content'}, {'op': 'pump', 'k': 3}]),
+        ('content-resize', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'button:Grow content'}, {'op': 'pump', 'k': 8},
+        {'op': 'resize', 'width': 300, 'height': 2000, 'scale': 1},
+        {'op': 'pump', 'k': 2}, {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('size-pending', [
         {'op': 'resize', 'width': 640, 'height': 1400, 'scale': 1},
         {'op': 'tap', 'id': 'checkbox:Show size sample'},
         {'op': 'tap', 'id': 'button:Grow size'}, {'op': 'pump', 'k': 2},
@@ -2942,6 +2999,27 @@ for label, events in cases:
         evaluated = json.loads((output / 'eval.json').read_text())
         for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y'):
             assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
+        if label.startswith('content-'):
+            transition = next(item for item in native['transitions'] if item['kind'] == 'contentSize')
+            expected = {'content-pending': (616, 115, 616, 160, 6),
+                'content-retarget': (616, 122.1875, 616, 120, 7),
+                'content-collapse': (0, 0, 0, 0, 0), 'content-hidden': (616, 120, 616, 120, 0),
+                'content-reduced': (616, 160, 616, 160, 0), 'content-retained': (616, 145, 616, 100, 6),
+                'content-scale': (336, 115, 336, 160, 6), 'content-paused-target': (616, 115, 616, 120, 8),
+                'content-resize': (531, 160, 276, 160, 6)}[label]
+            assert tuple(transition[key] for key in ('width', 'height', 'targetWidth', 'targetHeight', 'remaining')) == expected, transition
+            values = {item.get('name'): item.get('value') for item in native['signals']}
+            mode = {'content-retarget': 2, 'content-hidden': 2, 'content-paused-target': 2,
+                'content-collapse': 3, 'content-retained': 0}.get(label, 1)
+            assert values['contentMode'] == mode and values['contentPresent'] == (0 if mode == 3 else 1), values
+            retained = label in ('content-collapse', 'content-retained')
+            assert values['contentName'] == ('Kept content input' if retained else 'Retained content input'), values
+            assert values['contentCount'] == (1 if retained else 0), values
+            fields = [item for item in native['fields'] if item['label'] == 'Content name']
+            assert len(fields) == (0 if label == 'content-collapse' else 1), native['fields']
+            assert native['reducedMotion'] == (label == 'content-reduced'), native
+            print(f'motion {label}: measured size, exact steps, retained input, and cancellation pass', flush=True)
+            continue
         if label.startswith('size-'):
             transition = next(item for item in native['transitions'] if item['kind'] == 'size')
             expected = {'size-pending': (120, 90, 240, 180, 6),
@@ -3798,6 +3876,7 @@ PY_RANGE
   "$SCUZZ" package --target web --out-dir "$web_tmp/motion output" examples/motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' size-motion
+  node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' content-motion
   python3 - "$web_tmp/size limit" <<'PY_SIZE_LIMIT'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])

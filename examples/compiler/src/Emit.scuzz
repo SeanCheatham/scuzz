@@ -2088,7 +2088,7 @@ def viewDrop1Rt(f: String): String =
   if (f == "View.richText") "sz_view_rich_text" else if (f == "View.code") "sz_lang_view_code" else if (f == "View.text") "sz_lang_view_text" else if (f == "View.avatar") "sz_lang_view_avatar" else ""
 
 def viewI64PtrRt(f: String): String =
-  if (f == "View.expanded") "sz_lang_view_expanded" else if (f == "View.heading") "sz_lang_view_heading" else if (f == "View.background") "sz_lang_view_background" else if (f == "View.padding") "sz_lang_view_padding" else if (f == "View.textColor") "sz_lang_view_text_color" else if (f == "View.fontSize") "sz_lang_view_font_size" else ""
+  if (f == "View.animatedContentSize") "sz_view_animated_content_size" else if (f == "View.expanded") "sz_lang_view_expanded" else if (f == "View.heading") "sz_lang_view_heading" else if (f == "View.background") "sz_lang_view_background" else if (f == "View.padding") "sz_lang_view_padding" else if (f == "View.textColor") "sz_lang_view_text_color" else if (f == "View.fontSize") "sz_lang_view_font_size" else ""
 
 def viewI64I64PtrRt(f: String): String =
   if (f == "View.maxSize") "sz_lang_view_max_size" else if (f == "View.minSize") "sz_lang_view_min_size" else if (f == "View.sized") "sz_lang_view_sized" else if (f == "View.positioned") "sz_lang_view_positioned" else if (f == "View.aspectRatio") "sz_lang_view_aspect_ratio" else if (f == "View.fraction") "sz_lang_view_fraction" else ""
@@ -6784,6 +6784,7 @@ def declsT5(): String =
 declare ptr @sz_lang_view_radio_group(ptr, ptr)
 declare ptr @sz_view_animated_opacity(ptr, i64, ptr)
 declare ptr @sz_view_animated_size(ptr, ptr, i64, ptr)
+declare ptr @sz_view_animated_content_size(i64, ptr)
 declare ptr @sz_view_reduced_motion(ptr, ptr)"""), join(decl("ptr @sz_lang_view_merge_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_tooltip(ptr, ptr)"), join(decl("ptr @sz_lang_view_badge(ptr, ptr)"), join(decl("ptr @sz_lang_view_visibility(ptr, ptr)"), join(decl("ptr @sz_lang_view_offstage(ptr, ptr)"), join(decl("ptr @sz_lang_view_icon_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_fab(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_outlined_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_text_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_action_chip(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_each(ptr)"), decl("ptr @sz_lang_view_each_map(ptr, ptr, ptr)"))))))))))))))))))))))
 
 def declsT6(): String =

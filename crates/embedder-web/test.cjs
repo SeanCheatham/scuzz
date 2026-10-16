@@ -982,6 +982,115 @@ async function checkSizeMotion(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkContentMotion(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 2000},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile, reducedMotion: 'no-preference'});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await openMotionPage(page, url);
+    const state = () => page.evaluate(() => Module.webFrame.transitions.find(item => item.kind === 'contentSize'));
+    const advance = async count => {
+      const frames = [];
+      for (let i = 0; i < count; i++) {
+        const deadline = Date.now() + 30000;
+        while (!await page.evaluate(() => {
+          const before = Module.webFrame; window.motionStep(); return before !== Module.webFrame;
+        })) {
+          assert(Date.now() < deadline, 'content-size transition paints a frame');
+          await page.waitForTimeout(10);
+        }
+        frames.push(await state());
+      }
+      return frames;
+    };
+    const click = name => page.getByRole('button', {name, exact: true}).evaluate(node => node.click());
+    const name = page.getByRole('textbox', {name: 'Content name', exact: true});
+    const group = page.getByRole('group', {name: 'Content bounds', exact: true});
+    const after = page.getByRole('main', {name: 'Application', exact: true}).getByText('After content sample', {exact: true});
+    const show = page.getByRole('checkbox', {name: 'Show measured content', exact: true});
+    await page.getByRole('checkbox', {name: 'Show content sample', exact: true}).evaluate(node => node.click());
+    await advance(1);
+    const width = mobile ? 366 : 616;
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [width, 100, 0]);
+    const initial = await group.boundingBox(), below = await after.boundingBox();
+    const gap = below.y - initial.y - 100;
+    const geometry = async height => {
+      const box = await group.boundingBox(), next = await after.boundingBox();
+      assert(Math.abs(next.y - box.y - height - gap) < .01, 'following content uses the animated height');
+      const pixels = await page.evaluate(({box, height}) => {
+        const scale = Module.webFrame.scale, ctx = Module.canvas.getContext('2d');
+        const pixel = (x, y) => Array.from(ctx.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data);
+        return {inside: pixel(box.x + box.width - 2, box.y + height - 2),
+          outside: pixel(box.x + box.width - 2, box.y + height + 2), paper: pixel(0, 0)};
+      }, {box, height});
+      assert.deepEqual(pixels.inside, [225, 235, 245, 255]);
+      assert.deepEqual(pixels.outside, pixels.paper);
+    };
+    await geometry(100);
+    await name.fill('Kept content input');
+    await name.evaluate(node => { node.setSelectionRange(2, 5); node.dispatchEvent(new Event('select')); });
+    const original = await name.elementHandle();
+    await click('Grow content');
+    const grown = [];
+    for (let i = 0; i < 3; i++) {
+      const frame = (await advance(1))[0]; grown.push([frame.width, frame.height, frame.targetHeight, frame.remaining]);
+      await geometry(frame.height);
+    }
+    assert.deepEqual(grown, [[width, 107.5, 160, 7], [width, 115, 160, 6], [width, 122.5, 160, 5]]);
+    assert(await name.evaluate(node => document.activeElement === node));
+    assert.deepEqual(await name.evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ['Kept content input', 2, 5]);
+    const button = await page.getByRole('button', {name: 'Content add', exact: true}).boundingBox();
+    const point = [button.x + button.width / 2, initial.y + 145];
+    if (mobile) await page.touchscreen.tap(...point); else await page.mouse.click(...point);
+    await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Content count: 0')));
+    await click('Detail content');
+    const retarget = await advance(8);
+    assert.deepEqual(retarget.map(frame => frame.height), [128.75, 127.5, 126.25, 125, 123.75, 122.5, 121.25, 120]);
+    await geometry(120);
+    assert(await original.evaluate(node => node === document.querySelector('input[aria-label="Content name"]')));
+    assert.deepEqual(await name.evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ['Kept content input', 2, 5]);
+    await click('Content add'); await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Content count: 1')));
+    await click('Empty content'); await advance(8);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [0, 0, 0]);
+    assert.equal(await name.count(), 0); assert.equal(await group.count(), 0);
+    assert.equal(await original.evaluate(node => node === document.activeElement), false);
+    await click('Shrink content'); await advance(8);
+    assert.equal(await name.inputValue(), 'Kept content input');
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Content count: 1')));
+    await click('Grow content'); await advance(2);
+    const frozen = await state();
+    await page.waitForTimeout(100);
+    assert.deepEqual(await state(), frozen, 'elapsed time does not advance measured size');
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.equal(await state(), undefined); assert.equal(await name.count(), 0);
+    await click('Detail content'); await advance(1);
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [width, 120, 0]);
+    assert.equal(await name.inputValue(), 'Kept content input');
+    await click('Grow content'); await advance(2);
+    await page.evaluate(() => {
+      window.motionPreferenceChange = undefined;
+      Module.motionPreference.addEventListener('change', () => window.motionPreferenceChange = Module.motionPreference.matches, {once: true});
+    });
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.evaluate(() => window.motionBrowserFrame());
+    await page.waitForFunction(() => window.motionPreferenceChange === true);
+    await advance(1);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [width, 160, 0]);
+    assert((await state()).suppressed);
+    await geometry(160);
+    await click('Empty content'); await advance(1);
+    assert.deepEqual([(await state()).width, (await state()).height, (await state()).remaining], [0, 0, 0]);
+    assert.equal(await name.count(), 0);
+    assert.deepEqual(errors, []);
+    console.log(`web content-size motion: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkSelect(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2465,7 +2574,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }
