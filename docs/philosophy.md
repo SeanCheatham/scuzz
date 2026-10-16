@@ -254,7 +254,7 @@ Heap values use reference counts. There is no collector. Constructor patterns bo
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** is the pinned Skia CPU prebuilt. `SCUZZ_SKIA=sk_sw` is the explicit opt-out. `SCUZZ_SKIA=gpu` rasterizes on OpenGL. It does not paint on the CPU. Structural dumps stay the same. The channel delta against `sk_sw` stays within 2. Impeller stays deferred. Callers depend only on `sk_capi.h`. Editor glyphs use an embedded DejaVu Sans Mono face. `View.text` stays the proportional embedded sans.
+No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** is the pinned Skia CPU prebuilt. `SCUZZ_SKIA=sk_sw` is the explicit opt-out. `SCUZZ_SKIA=gpu` composites on OpenGL. It keeps its color buffer on the GPU. Shared native code shapes text and computes glyph coverage. Structural dumps stay the same. The channel delta against `sk_sw` stays within 2. Impeller stays deferred. Callers depend only on `sk_capi.h`. Editor glyphs use an embedded DejaVu Sans Mono face. `View.text` stays the proportional embedded sans.
 
 ### IO and impurity
 
@@ -630,7 +630,7 @@ The ellipsis uses the final visible span style.
 Browser copying keeps source spaces and explicit line breaks across styles.
 Synthetic ellipsis marks do not add source characters to copied text.
 
-The default native Skia renderer shapes proportional text with HarfBuzz.
+The native renderers use one HarfBuzz shaper for proportional text.
 SheenBidi supplies direction and script runs within each displayed line.
 Native proportional ranges and browser ranges keep direction and embedding context from the complete source paragraph.
 Plain and rich text keep this context when they paint an ellipsis.
@@ -658,8 +658,8 @@ Pinned Noto fonts supply fallback for Arabic, Devanagari, Thai, and Simplified C
 Font selection keeps source clusters together. Text line boxes contain fallback marks.
 Web packages include the same fonts. Font loading updates layout and keeps input state.
 Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
-The software and OpenGL native renderers retain their code-point cells.
-They do not supply these proportional shaping guarantees.
+Software and OpenGL use the same font selection, script runs, clusters, and carets.
+They rasterize HarfBuzz glyph outlines inside the visible clip.
 See the [HarfBuzz shaping model](https://harfbuzz.github.io/getting-started.html).
 
 Use `View.tooltip(message, child)` for short help.
