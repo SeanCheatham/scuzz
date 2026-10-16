@@ -12,4 +12,4 @@ Check native pixels, browser source ranges, and inline actions.
 Use the shaping application and exact native and evaluator replay.
 Run renderer, runtime, sanitizer, browser, package, and clean UI checks.
 
-Status: Normal, ASan, and UBSan runtime checks pass. Skia, software, and OpenGL paint checks pass. The 25 style and source-cluster cases preserve glyph coverage. The full web slice passes. Shaping and wrapped-action checks pass in all five browser configurations. Package checks are in progress. Complete application replay and clean UI integration checks.
+Status: Normal, ASan, and UBSan runtime checks pass. Skia, software, and OpenGL paint checks pass. The 25 style and source-cluster cases preserve glyph coverage. The full web slice passes. Shaping and wrapped-action checks pass in all five browser configurations. The package slice passes. Clean UI integration checks are in progress. Complete application replay and the remaining UI checks.
