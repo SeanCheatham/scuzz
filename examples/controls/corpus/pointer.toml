@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap button:Open", "xy 120 276", "xy 90 250", "tap button:Review details", "xy 150 340", "tap button:Back", "xy 30 30"]

@@ -4,6 +4,24 @@ Open work and implementation order. Design locks: [`philosophy.md`](philosophy.m
 
 Edit this file when the order changes. Remove completed work. Keep only the next slice in `plans.md`.
 
+## UI framework capability
+
+Improve shared UI capabilities for web, desktop, and mobile applications.
+Headless remains a required peer for layout, input, and verification.
+
+Select work from these application needs:
+
+1. Screen-reader support and keyboard behavior for remaining composite controls.
+   Add editable option search when an application needs it.
+2. Wider font coverage, shaping across styled spans, wrapped paragraph direction, and bidi caret affinity.
+3. Layout and transform transitions with replay and cancellation.
+   Add native operating-system motion preference detection.
+
+Use working applications to check each capability.
+Check native and evaluator behavior with the same inputs.
+Keep browser, mobile, and assistive technology proof limits explicit.
+The complete framework goal needs more than one layout constructor.
+
 ## First: language and verification guarantees
 
 Prioritize application correctness before local choice feedback.

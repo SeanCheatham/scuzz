@@ -23,13 +23,14 @@ for src in "$ROOT"/crates/runtime/src/*.c; do
   case "$name" in net|net_request) continue ;; esac
   "${EMCC[@]}" "${FLAGS[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" -o "$OBJ/rt_$name.o"
 done
-for name in sk_sw png_enc sk_gpu_none sk_mono sk_color; do
+for name in image image_dec sk_sw png_enc sk_gpu_none sk_mono sk_color; do
   "${EMCC[@]}" "${FLAGS[@]}" -std=c11 -I"$ROOT/crates/ffi-skia/include" \
     -I"$ROOT/crates/ffi-skia/src" -c "$ROOT/crates/ffi-skia/src/$name.c" -o "$OBJ/$name.o"
 done
 for name in web net_stub; do
   "${EMCC[@]}" "${FLAGS[@]}" "${INCLUDES[@]}" -c "$ROOT/crates/embedder-web/$name.c" -o "$OBJ/$name.o"
 done
+python3 "$ROOT/scripts/fetch_fonts.py" "$ROOT/crates/ffi-skia/build/fonts" --web "$OUT/fonts"
 cp "$ROOT/crates/embedder-web/index.html" "$OUT/index.html"
 "${EMCC[@]}" "${FLAGS[@]}" "$OBJ"/*.o -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=8388608 \
   -sEXPORTED_RUNTIME_METHODS=ccall -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576 -sENVIRONMENT=web \
@@ -47,6 +48,8 @@ wasm_path = out / "app.wasm"
 html_path = out / "index.html"
 js = js_path.read_text()
 html = html_path.read_text()
+font_version = hashlib.sha256((out / "fonts/fonts.css").read_bytes()).hexdigest()[:16]
+html = html.replace('href="./fonts/fonts.css"', f'href="./fonts/fonts.css?v={font_version}"')
 wasm_load = 'locateFile("app.wasm")'
 html_load = 'src="./app.js"'
 if wasm_load not in js:

@@ -1,0 +1,7 @@
+[package]
+name = "disclosure"
+
+[ui]
+default_runtime = "headless"
+headless_size = [640, 720]
+headless_scale = 1.0

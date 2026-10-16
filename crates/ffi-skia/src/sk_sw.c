@@ -1,4 +1,5 @@
 #include "sk_capi.h"
+#include <limits.h>
 #include "png_enc.h"
 #include "sk_gpu.h"
 #include "sk_utf8.h"
@@ -6,10 +7,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <math.h>
 #endif
+
+struct SkImage {
+  int width, height;
+  uint8_t *pixels;
+  void *gpu_image;
+};
 
 struct SkPaint {
   SkColor color;
@@ -21,6 +29,10 @@ typedef struct {
   int y0;
   int x1;
   int y1;
+  uint8_t *pixels;
+  SkGpuTarget *target;
+  uint8_t alpha;
+  int layer;
 } SwClip;
 
 struct SkCanvas {
@@ -102,6 +114,8 @@ SkSurface *sk_surface_make_gpu_n32_premul(int width, int height) {
 void sk_surface_unref(SkSurface *surface) {
   if (!surface)
     return;
+  while (surface->canvas.save_n > 0 || surface->canvas.save_dropped > 0)
+    sk_canvas_restore(&surface->canvas);
   if (surface->gpu)
     sk_gpu_target_free(surface->target);
   free(surface->canvas.saves);
@@ -233,44 +247,72 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
       put_pixel(canvas->surface, ix, iy, paint->color);
 }
 
-void sk_canvas_save(SkCanvas *canvas) {
-  SwClip *top;
-  if (!canvas)
-    return;
+static int sw_save(SkCanvas *canvas) {
+  if (!canvas) return 0;
   if (canvas->save_n >= canvas->save_cap) {
     int cap = canvas->save_cap ? canvas->save_cap * 2 : 16;
-    SwClip *s =
-        (SwClip *)realloc(canvas->saves, (size_t)cap * sizeof(SwClip));
-    if (!s) {
-      canvas->save_dropped++;
-      return;
-    }
+    SwClip *s = realloc(canvas->saves, (size_t)cap * sizeof *s);
+    if (!s) return 0;
     canvas->saves = s;
     canvas->save_cap = cap;
   }
-  top = &canvas->saves[canvas->save_n];
-  top->x0 = canvas->clip_x0;
-  top->y0 = canvas->clip_y0;
-  top->x1 = canvas->clip_x1;
-  top->y1 = canvas->clip_y1;
-  canvas->save_n++;
+  SwClip *top = &canvas->saves[canvas->save_n++];
+  *top = (SwClip){.x0 = canvas->clip_x0, .y0 = canvas->clip_y0,
+    .x1 = canvas->clip_x1, .y1 = canvas->clip_y1};
+  return 1;
+}
+
+void sk_canvas_save(SkCanvas *canvas) {
+  if (canvas && !sw_save(canvas)) canvas->save_dropped++;
+}
+
+int sk_canvas_save_layer_alpha(SkCanvas *canvas, uint8_t alpha) {
+  if (!canvas || !canvas->surface || canvas->save_dropped) return 0;
+  SkSurface *s = canvas->surface;
+  uint8_t *pixels = NULL;
+  SkGpuTarget *target = NULL;
+  if (s->gpu) target = sk_gpu_target_new(s->width, s->height);
+  else pixels = calloc((size_t)s->width * (size_t)s->height, 4);
+  if ((!pixels && !target) || !sw_save(canvas)) {
+    free(pixels); sk_gpu_target_free(target); return 0;
+  }
+  SwClip *top = &canvas->saves[canvas->save_n - 1];
+  top->layer = 1; top->alpha = alpha;
+  top->pixels = s->pixels; top->target = s->target;
+  s->pixels = pixels; s->target = target;
+  return 1;
 }
 
 void sk_canvas_restore(SkCanvas *canvas) {
-  SwClip *top;
-  if (!canvas)
-    return;
-  if (canvas->save_n <= 0) {
-    if (canvas->save_dropped > 0)
-      canvas->save_dropped--;
-    return;
+  if (!canvas) return;
+  if (canvas->save_dropped > 0) { canvas->save_dropped--; return; }
+  if (canvas->save_n <= 0) return;
+  SwClip top = canvas->saves[--canvas->save_n];
+  canvas->clip_x0 = top.x0; canvas->clip_y0 = top.y0;
+  canvas->clip_x1 = top.x1; canvas->clip_y1 = top.y1;
+  if (!top.layer) return;
+  SkSurface *s = canvas->surface;
+  uint8_t *pixels = s->pixels;
+  SkGpuTarget *target = s->target;
+  s->pixels = top.pixels; s->target = top.target;
+  if (s->gpu) {
+    sk_gpu_draw_target(s->target, target, top.alpha / 255.f,
+      top.x0, top.y0, top.x1, top.y1);
+    sk_gpu_target_free(target);
+  } else {
+    for (int y = top.y0; y < top.y1; y++) {
+      for (int x = top.x0; x < top.x1; x++) {
+        size_t offset = ((size_t)y * s->width + x) * 4;
+        const uint8_t *src = pixels + offset;
+        uint8_t *dst = s->pixels + offset;
+        unsigned alpha = (src[3] * top.alpha + 127u) / 255u;
+        for (int c = 0; c < 4; c++)
+          dst[c] = (uint8_t)((src[c] * top.alpha + 127u) / 255u +
+            (dst[c] * (255u - alpha) + 127u) / 255u);
+      }
+    }
+    free(pixels);
   }
-  canvas->save_n--;
-  top = &canvas->saves[canvas->save_n];
-  canvas->clip_x0 = top->x0;
-  canvas->clip_y0 = top->y0;
-  canvas->clip_x1 = top->x1;
-  canvas->clip_y1 = top->y1;
 }
 
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
@@ -397,21 +439,48 @@ const uint8_t sk_font8[95][8] = {
 
 #ifdef __EMSCRIPTEN__
 /* Use the same browser font for text measurement and rasterization. */
-EM_JS(float, web_text_width, (const char *text, float size), {
-  const canvas = Module.scuzzTextCanvas || (Module.scuzzTextCanvas = document.createElement('canvas'));
-  const context = canvas.getContext('2d', {willReadFrequently: true});
-  context.font = size + 'px monospace';
-  return context.measureText(UTF8ToString(Number(text))).width;
+EM_JS(int, web_text_direction, (const char *text, int bytes), {
+  const source = UTF8ToString(Number(text), bytes);
+  let ascii = true;
+  for (let i = 0; i < source.length; i++) if (source.charCodeAt(i) > 127) { ascii = false; break; }
+  if (ascii) return 0;
+  const cache = Module.scuzzDirections || (Module.scuzzDirections = new Map());
+  if (cache.has(source)) return cache.get(source);
+  let probe = Module.scuzzDirectionProbe;
+  if (!probe) {
+    probe = Module.scuzzDirectionProbe = document.createElement('span');
+    probe.dir = 'auto'; probe.setAttribute('aria-hidden', 'true');
+    Object.assign(probe.style, {position: 'fixed', visibility: 'hidden', width: '0', height: '0', overflow: 'hidden'});
+    document.body.append(probe);
+  }
+  probe.textContent = source;
+  const rtl = Number(getComputedStyle(probe).direction === 'rtl');
+  if (source.length <= 256) {
+    if (cache.size >= 128) cache.delete(cache.keys().next().value);
+    cache.set(source, rtl);
+  }
+  return rtl;
 });
 
-EM_JS(void, web_text_pixels, (const char *text, float size, int width, int height, uint8_t *pixels), {
+EM_JS(float, web_text_width, (const char *text, int bytes, float size, int style, int rtl), {
+  const canvas = Module.scuzzTextCanvas || (Module.scuzzTextCanvas = document.createElement('canvas'));
+  const context = canvas.getContext('2d', {willReadFrequently: true});
+  context.direction = rtl ? 'rtl' : 'ltr'; context.textAlign = 'left';
+  context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
+  const source = UTF8ToString(Number(text), bytes);
+  Module.loadTextFonts(source);
+  return context.measureText(source).width;
+});
+
+EM_JS(void, web_text_pixels, (const char *text, float size, int style, int width, int height, float x, float y, uint8_t *pixels, int rtl), {
   const canvas = Module.scuzzTextCanvas;
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext('2d', {willReadFrequently: true});
-  context.font = size + 'px monospace';
+  context.direction = rtl ? 'rtl' : 'ltr'; context.textAlign = 'left';
+  context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
   context.fillStyle = '#ffffff';
-  context.fillText(UTF8ToString(Number(text)), 0, size);
+  context.fillText(UTF8ToString(Number(text)), x, y);
   HEAPU8.set(context.getImageData(0, 0, width, height).data, Number(pixels));
 });
 #endif
@@ -425,7 +494,7 @@ static int sw_advance(float font_px) {
 
 float sk_font_measure_string(const char *text, float font_px) {
 #ifdef __EMSCRIPTEN__
-  return text ? web_text_width(text, font_px > 0.f ? font_px : 8.f) : 0.f;
+  return text ? web_text_width(text, (int)strlen(text), font_px > 0.f ? font_px : 8.f, 0, web_text_direction(text, (int)strlen(text))) : 0.f;
 #else
   const char *p;
   int n = 0;
@@ -443,8 +512,8 @@ float sk_font_measure_string(const char *text, float font_px) {
 #endif
 }
 
-void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
-                           const SkPaint *paint) {
+static void draw_styled_string(SkCanvas *canvas, const char *text, float x, float y,
+                                const SkPaint *paint, int style) {
   float size, scale;
   int advance, baseline, cx, row, col, sr, sc;
   const char *p;
@@ -454,26 +523,30 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
     sk_gpu_draw_text(canvas->surface->target, text, x, y, paint->text_size,
                      paint->color.r, paint->color.g, paint->color.b,
                      paint->color.a, canvas->clip_x0, canvas->clip_y0,
-                     canvas->clip_x1, canvas->clip_y1);
+                     canvas->clip_x1, canvas->clip_y1, style);
     return;
   }
   cpu_paint_ops++;
   size = paint->text_size > 0.f ? paint->text_size : 8.f;
 #ifdef __EMSCRIPTEN__
   {
-    int width = (int)ceilf(web_text_width(text, size)) + 2;
-    int height = (int)ceilf(size * 2.f);
-    if (width > canvas->surface->width + (int)size * 2)
-      width = canvas->surface->width + (int)size * 2;
+    float ascent, descent;
+    sk_font_span_metrics(text, strlen(text), size, style, &ascent, &descent);
+    float advance_width = web_text_width(text, (int)strlen(text), size, style, web_text_direction(text, (int)strlen(text)));
+    int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - size)));
+    int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + size)));
+    int top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(y - ascent)));
+    int bottom = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, ceilf(y + descent)));
+    int width = right - left, height = bottom - top;
     if (width < 1 || height < 1) return;
     uint8_t *pixels = malloc((size_t)width * height * 4);
     if (!pixels) return;
-    web_text_pixels(text, size, width, height, pixels);
+    web_text_pixels(text, size, style, width, height, x - left, y - top, pixels, web_text_direction(text, (int)strlen(text)));
     for (int row = 0; row < height; row++) {
       for (int col = 0; col < width; col++) {
         SkColor color = paint->color;
         color.a = (uint8_t)((unsigned)color.a * pixels[(row * width + col) * 4 + 3] / 255);
-        put_pixel(canvas->surface, (int)x + col, (int)(y - size) + row, color);
+        put_pixel(canvas->surface, left + col, top + row, color);
       }
     }
     free(pixels);
@@ -501,8 +574,11 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
         uint8_t bits = glyph[row];
         for (col = 0; col < 8; col++) {
           /* Font bytes are LSB-left in this table. */
-          if (bits & (uint8_t)(1u << col))
-            put_pixel(canvas->surface, cx + col, gy + row, paint->color);
+          if (bits & (uint8_t)(1u << col)) {
+            int gx = cx + col + ((style & 2) ? (7 - row) / 4 : 0);
+            put_pixel(canvas->surface, gx, gy + row, paint->color);
+            if (style & 1) put_pixel(canvas->surface, gx + 1, gy + row, paint->color);
+          }
         }
       }
     } else {
@@ -514,13 +590,187 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
           col = (int)((float)sc / scale);
           if (col > 7)
             col = 7;
-          if (glyph[row] & (uint8_t)(1u << col))
-            put_pixel(canvas->surface, cx + sc, gy + sr, paint->color);
+          if (glyph[row] & (uint8_t)(1u << col)) {
+            int gx = cx + sc + ((style & 2) ? (advance - sr) / 5 : 0);
+            put_pixel(canvas->surface, gx, gy + sr, paint->color);
+            if (style & 1) put_pixel(canvas->surface, gx + 1, gy + sr, paint->color);
+          }
         }
       }
     }
     cx += advance;
     p += clen;
+  }
+}
+
+void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
+                           const SkPaint *paint) {
+  draw_styled_string(canvas, text, x, y, paint, 0);
+}
+
+#ifdef __EMSCRIPTEN__
+EM_JS(void, web_font_metrics, (float size, int style, float *out), {
+  const canvas = Module.scuzzTextCanvas || (Module.scuzzTextCanvas = document.createElement('canvas'));
+  const context = canvas.getContext('2d', {willReadFrequently: true});
+  context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
+  const metrics = context.measureText('Mg');
+  HEAPF32[Number(out) / 4] = metrics.fontBoundingBoxAscent ?? size;
+  HEAPF32[Number(out) / 4 + 1] = metrics.fontBoundingBoxDescent ?? size * 0.25;
+});
+#endif
+
+#ifdef __EMSCRIPTEN__
+EM_JS(void, web_cluster_breaks, (const char *text, int bytes, uint8_t *breaks), {
+  const source = UTF8ToString(Number(text), bytes);
+  Module.loadTextFonts(source);
+  const segmenter = Module.scuzzSegmenter || (Module.scuzzSegmenter = new Intl.Segmenter('und', {granularity: 'grapheme'}));
+  const encoder = new TextEncoder();
+  let offset = 0;
+  for (const {segment} of segmenter.segment(source)) {
+    HEAPU8[Number(breaks) + offset] = 1;
+    offset += encoder.encode(segment).length;
+  }
+  HEAPU8[Number(breaks) + bytes] = 1;
+});
+#endif
+
+#ifdef __EMSCRIPTEN__
+EM_JS(void, web_text_positions, (const char *text, int bytes, float size, float *leading, float *trailing), {
+  const source = UTF8ToString(Number(text), bytes);
+  let probe = Module.scuzzPositionProbe;
+  if (!probe) {
+    probe = Module.scuzzPositionProbe = document.createElement('span');
+    probe.dir = 'auto'; probe.setAttribute('aria-hidden', 'true');
+    Object.assign(probe.style, {position: 'fixed', left: '0', top: '0', visibility: 'hidden', whiteSpace: 'pre', pointerEvents: 'none'});
+    document.body.append(probe);
+  }
+  probe.style.font = size + 'px ' + Module.scuzzFontStack; probe.textContent = source;
+  const origin = probe.getBoundingClientRect().left;
+  const range = document.createRange(), node = probe.firstChild;
+  let byte = 0, unit = 0, last = 0;
+  for (const point of source) {
+    range.setStart(node, unit); range.collapse(true);
+    const a = range.getBoundingClientRect().left - origin;
+    unit += point.length;
+    range.setStart(node, unit); range.collapse(true);
+    last = range.getBoundingClientRect().left - origin;
+    const length = new TextEncoder().encode(point).length;
+    for (let i = 0; i < length; i++) {
+      HEAPF32[Number(leading) / 4 + byte + i] = a;
+      HEAPF32[Number(trailing) / 4 + byte + i] = last;
+    }
+    byte += length;
+  }
+  HEAPF32[Number(leading) / 4 + bytes] = last;
+  HEAPF32[Number(trailing) / 4 + bytes] = last;
+});
+#endif
+
+void sk_font_text_positions(const char *text, size_t bytes, float font_px, float *leading, float *trailing) {
+  if (!leading || !trailing || bytes > INT32_MAX) return;
+  memset(leading, 0, (bytes + 1) * sizeof(float));
+  memset(trailing, 0, (bytes + 1) * sizeof(float));
+  if (!text) return;
+#ifdef __EMSCRIPTEN__
+  web_text_positions(text, (int)bytes, font_px, leading, trailing);
+#else
+  float x = 0.f, advance = (float)sw_advance(font_px);
+  for (size_t i = 0; i < bytes;) {
+    unsigned char c = (unsigned char)text[i];
+    size_t length = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 1;
+    if (length > bytes - i) length = 1;
+    for (size_t j = 0; j < length; j++) { leading[i + j] = x; trailing[i + j] = x + advance; }
+    x += advance; i += length;
+  }
+  leading[bytes] = trailing[bytes] = x;
+#endif
+}
+
+void sk_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks) {
+  if (!breaks || bytes == SIZE_MAX) return;
+  memset(breaks, 0, bytes + 1);
+  breaks[0] = breaks[bytes] = 1;
+  if (!text) return;
+#ifdef __EMSCRIPTEN__
+  if (bytes <= INT32_MAX) web_cluster_breaks(text, (int)bytes, breaks);
+#else
+  for (size_t i = 0; i < bytes;) {
+    unsigned char c = (unsigned char)text[i];
+    size_t length = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 1;
+    if (length > bytes - i) length = 1;
+    breaks[i] = 1;
+    i += length;
+  }
+#endif
+}
+
+void sk_font_metrics(float font_px, int style, float *ascent, float *descent) {
+  if (font_px <= 0.f) font_px = 8.f;
+#ifdef __EMSCRIPTEN__
+  float metrics[2];
+  web_font_metrics(font_px, style, metrics);
+  if (ascent) *ascent = metrics[0];
+  if (descent) *descent = metrics[1];
+#else
+  (void)style;
+  if (ascent) *ascent = font_px;
+  if (descent) *descent = 1.f;
+#endif
+}
+
+#ifdef __EMSCRIPTEN__
+EM_JS(void, web_span_metrics, (const char *text, int bytes, float size, int style, float *out), {
+  const context = Module.scuzzTextCanvas.getContext('2d');
+  context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
+  const metrics = context.measureText(UTF8ToString(Number(text), bytes));
+  HEAPF32[Number(out) / 4] = Math.max(0, metrics.actualBoundingBoxAscent);
+  HEAPF32[Number(out) / 4 + 1] = Math.max(0, metrics.actualBoundingBoxDescent);
+});
+#endif
+
+void sk_font_span_metrics(const char *text, size_t bytes, float font_px, int style, float *ascent, float *descent) {
+  float metrics[2];
+  sk_font_metrics(font_px, style, &metrics[0], &metrics[1]);
+#ifdef __EMSCRIPTEN__
+  if (text && bytes <= INT_MAX) web_span_metrics(text, (int)bytes, font_px > 0.f ? font_px : 8.f, style, metrics);
+#else
+  (void)text; (void)bytes;
+#endif
+  if (ascent) *ascent = metrics[0];
+  if (descent) *descent = metrics[1];
+}
+
+float sk_font_measure_span(const char *text, size_t bytes, float font_px, int style) {
+  if (!text) return 0.f;
+  if (font_px <= 0.f) font_px = 8.f;
+#ifdef __EMSCRIPTEN__
+  return web_text_width(text, (int)bytes, font_px, style, web_text_direction(text, (int)bytes));
+#else
+  (void)style;
+  size_t i = 0, count = 0;
+  while (i < bytes && text[i]) {
+    int n = sk_utf8_clen(text + i);
+    if (n < 1 || (size_t)n > bytes - i) n = 1;
+    i += (size_t)n;
+    count++;
+  }
+  return (float)count * (float)sw_advance(font_px);
+#endif
+}
+
+void sk_canvas_draw_span(SkCanvas *canvas, const char *text, size_t bytes,
+                         float x, float y, const SkPaint *paint, int style) {
+  if (!text || bytes == SIZE_MAX || !paint) return;
+  char *copy = malloc(bytes + 1);
+  if (!copy) return;
+  memcpy(copy, text, bytes);
+  copy[bytes] = 0;
+  draw_styled_string(canvas, copy, x, y, paint, style);
+  free(copy);
+  if (style & SK_TEXT_UNDERLINE) {
+    float width = sk_font_measure_span(text, bytes, paint->text_size, style);
+    sk_canvas_draw_rect(canvas, x, y + paint->text_size * 0.1f, width,
+                         fmaxf(1.f, paint->text_size / 16.f), paint);
   }
 }
 
@@ -621,4 +871,83 @@ float sk_font_measure_string_mono(const char *text, float font_px) {
 void sk_canvas_draw_string_mono(SkCanvas *canvas, const char *text, float x,
                                 float y, const SkPaint *paint) {
   sk_canvas_draw_string(canvas, text, x, y, paint);
+}
+
+SkImage *sk_image_make_rgba(const uint8_t *pixels, int width, int height) {
+  if (!pixels || width < 1 || height < 1 || width > 4096 || height > 4096)
+    return NULL;
+  SkImage *image = (SkImage *)calloc(1, sizeof *image);
+  if (!image)
+    return NULL;
+  image->pixels = (uint8_t *)malloc((size_t)width * height * 4);
+  if (!image->pixels) {
+    free(image);
+    return NULL;
+  }
+  image->width = width;
+  image->height = height;
+  memcpy(image->pixels, pixels, (size_t)width * height * 4);
+  return image;
+}
+void sk_image_unref(SkImage *image) {
+  if (!image)
+    return;
+  if (image->gpu_image)
+    sk_gpu_image_free(image->gpu_image);
+  free(image->pixels);
+  free(image);
+}
+int sk_image_width(const SkImage *image) { return image ? image->width : 0; }
+int sk_image_height(const SkImage *image) { return image ? image->height : 0; }
+
+void sk_canvas_draw_image(SkCanvas *canvas, const SkImage *image, float x,
+                          float y, float w, float h, float opacity) {
+  if (!canvas || !canvas->surface || !image || !(w > 0.f) || !(h > 0.f) ||
+      !(opacity > 0.f) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h))
+    return;
+  if (opacity > 1.f)
+    opacity = 1.f;
+  if (canvas->surface->gpu) {
+    SkImage *cached = (SkImage *)image;
+    if (!cached->gpu_image)
+      cached->gpu_image = sk_gpu_image_new(image->pixels, image->width, image->height);
+    sk_gpu_draw_image(canvas->surface->target, cached->gpu_image, x, y, w, h,
+                       opacity, canvas->clip_x0, canvas->clip_y0,
+                       canvas->clip_x1, canvas->clip_y1);
+    return;
+  }
+  SkSurface *surface = canvas->surface;
+  float left = fmaxf(0.f, fmaxf((float)canvas->clip_x0, x));
+  float top = fmaxf(0.f, fmaxf((float)canvas->clip_y0, y));
+  float right = fminf((float)surface->width, fminf((float)canvas->clip_x1, x + w));
+  float bottom = fminf((float)surface->height, fminf((float)canvas->clip_y1, y + h));
+  if (!(right > left) || !(bottom > top))
+    return;
+  int x0 = (int)ceilf(left - 0.5f), y0 = (int)ceilf(top - 0.5f);
+  int x1 = (int)ceilf(right - 0.5f), y1 = (int)ceilf(bottom - 0.5f);
+  cpu_paint_ops++;
+  for (int dy = y0; dy < y1; dy++) {
+    float sy = fminf(image->height - 1.f, fmaxf(0.f, (dy + 0.5f - y) * image->height / h - 0.5f));
+    int iy = (int)sy, jy = iy + 1 < image->height ? iy + 1 : iy;
+    float fy = sy - iy;
+    for (int dx = x0; dx < x1; dx++) {
+      float sx = fminf(image->width - 1.f, fmaxf(0.f, (dx + 0.5f - x) * image->width / w - 0.5f));
+      int ix = (int)sx, jx = ix + 1 < image->width ? ix + 1 : ix;
+      float fx = sx - ix;
+      const uint8_t *a = image->pixels + ((size_t)iy * image->width + ix) * 4;
+      const uint8_t *b = image->pixels + ((size_t)iy * image->width + jx) * 4;
+      const uint8_t *c = image->pixels + ((size_t)jy * image->width + ix) * 4;
+      const uint8_t *d = image->pixels + ((size_t)jy * image->width + jx) * 4;
+      uint8_t rgba[4];
+      for (int channel = 0; channel < 4; channel++) {
+        float upper = a[channel] + (b[channel] - a[channel]) * fx;
+        float lower = c[channel] + (d[channel] - c[channel]) * fx;
+        rgba[channel] = (uint8_t)((upper + (lower - upper) * fy) * opacity + 0.5f);
+      }
+      uint8_t *pixel = surface->pixels + ((size_t)dy * surface->width + dx) * 4;
+      unsigned inverse = 255u - rgba[3];
+      for (int channel = 0; channel < 4; channel++)
+        pixel[channel] = (uint8_t)(rgba[channel] + (pixel[channel] * inverse + 127u) / 255u);
+    }
+  }
 }

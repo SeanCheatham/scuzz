@@ -64,8 +64,14 @@ chmod +x "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh" "$OUT/script
 
 # Skia pin + prebuilt for UI text (default backend). Opt out: SCUZZ_SKIA=sk_sw.
 # fetch_skia.sh substitutes {triple} so Linux/macOS releases get the matching asset.
+cp -f "$ROOT/scripts/fetch_fonts.py" "$OUT/scripts/fetch_fonts.py"
+mkdir -p "$OUT/third_party/fonts"
+cp -f "$ROOT/third_party/fonts/"* "$OUT/third_party/fonts/"
+python3 "$ROOT/scripts/fetch_fonts.py" "$ROOT/crates/ffi-skia/build/fonts"
+cp -f "$ROOT/crates/ffi-skia/build/fonts/"*.ttf "$OUT/third_party/fonts/"
 mkdir -p "$OUT/third_party/skia"
 cp -f "$ROOT/third_party/skia/PIN" "$OUT/third_party/skia/PIN"
+cp -f "$ROOT/third_party/skia/SheenBidi-LICENSE" "$OUT/third_party/skia/SheenBidi-LICENSE"
 if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
   echo "==> SCUZZ_SKIA=sk_sw - release keeps in-tree sk_sw only"
 else

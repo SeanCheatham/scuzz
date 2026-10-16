@@ -313,6 +313,37 @@ Desktop windows are resizable. A window resize sends the shared resize event. Th
 
 A `View.button` press, a button that becomes shown, a `View.tabs` change, and a `View.each` insert each paint for four pumps. The new tab panel uses the same appear step as a button that becomes shown. The next pump paints the settled tree. A static tree paints one frame and waits. The clock is `pump`. Do not read wall-clock time. Headless and Desktop paint the same frames. The structural dump records the step. The timeline records the hit on the pump that took the input. The session dump keeps that hit. Do not add a spring, a motion language, blur, or a gradient.
 
+Use `View.animatedOpacity(value, pumps, child)` for an opacity transition.
+The value is a `Signal[Int]`. Display clamps it to 0 through 100.
+The constructor does not write the Signal. Initial display uses its current value.
+The pump count is positive and fits a signed 32-bit integer.
+Each painted pump advances one linear step. Layout and input do not advance it.
+Structural timeline text records `opacity:label=value`, `target:opacity:label=value`, and `pumps:opacity:label=remaining`.
+Frame labels use a descendant name. They stop at a complete UTF-8 character within 64 bytes.
+A changed target starts from the displayed value. It does not restart from an endpoint.
+Hidden content snaps to its target. Removed content releases its transition state.
+Pause preserves the displayed value. Resume advances one pump without time catch-up.
+Opacity preserves layout, focus, input, and accessibility. Use visibility to remove input.
+Both static and animated opacity composite the child as one transparent layer.
+Overlapping child paint stays opaque inside that layer. Nested opacity multiplies.
+Software and OpenGL layers use one surface-sized buffer or target for each active layer.
+The default Skia renderer manages its own layer storage.
+
+Use `View.reducedMotion(reduced, child)` to reduce motion in a subtree.
+A nonzero Signal snaps explicit transitions and removes built-in motion steps.
+An ancestor or session preference stays effective inside nested wrappers.
+Headless and native sessions accept `SCUZZ_UI_REDUCED_MOTION=1`.
+The browser follows `prefers-reduced-motion` and listens for changes.
+Native operating-system preference detection remains open.
+The shared `reduceMotion` input records preference changes.
+
+Script input paints one pump while an explicit transition has pending steps.
+Built-in four-pump motion finishes before the next scripted input.
+Live journals set `manualPumps` to true and record painted pumps explicitly.
+Consecutive painted pumps share one count. Multiple inputs can precede one pump.
+Journal replay does not add implicit pumps. Script input does not enter a live journal.
+The existing quiescence bound stays effective. A long unfinished transition trips that bound.
+
 **The tree owns views.** A `View` is reference counted. Its parent releases it. A `View` parameter transfers to its parent without an extra retain. A `List[View]` holds views for `View.each`, which mounts the list at layout and frees the views it replaces. Releasing an unmounted `Signal[List[View]]` list releases its View references. Two writes between layouts release the intermediate list. A list another holder still reads keeps its views. Do not mount a view pulled out of a list signal by hand.
 
 A tap closure runs its synchronous part in the tap. Its `IO` runs on the scheduler after the injected script. Claims see the synchronous part at the tap state and the `IO` result at the last state.
@@ -504,9 +535,264 @@ One `*.scuzz_scenario` file per project that uses scenarios. Multiple named scen
 
 Scuzz Style is the default UI design language. Use warm paper, dark text, square controls, and clear borders. Use yellow for primary actions. Use dark rust for accent text. Headless, Desktop, and Mobile use the same paint path. Color ratios do not prove full accessibility conformance.
 
+Construct immutable themes with `Theme.light()`, `Theme.dark()`, or `Theme.colors`.
+`Theme.colors` takes background, surface, foreground, primary, on-primary, border, muted, accent, and selection colors.
+Use ARGB integers or `Color.rgb` and `Color.rgba` values.
+Apply a theme with `View.theme(theme, child)`.
+The wrapper paints its background inside its frame.
+The nearest wrapper supplies the colors for controls, text, and tooltips.
+Nested themes do not change sibling colors.
+The color constructors use the default font size, spacing, and control height.
+Use `Theme.metrics(theme, fontSize, lineGap, padding, gap, controlHeight)` to change these values.
+This function returns a new Theme. It preserves the source Theme and its colors.
+Use logical pixels. Font size must be positive. Spacing values must be nonnegative.
+Control height must fit the font size plus the line gap. Invalid metrics stop the program.
+Nested themes supply their own metrics. Device scale stays separate.
+Layout, paint, carets, editor input, and scrolling use the same metrics.
+Measured lists invalidate row heights when these metrics change.
+Browser caret, focus, and selection colors follow the same palette.
+Theme values do not follow operating-system appearance changes.
+The zero-argument Theme color functions return default palette values.
+
+Build immutable styled text with `Text.span(string)` and `Text.concat(list)`.
+Use `Text.color(color, text)` and `Text.size(size, text)` to change span attributes.
+Use `Text.bold`, `Text.italic`, `Text.underline`, and `Text.monospace` for other styles.
+Each function returns a new value. It preserves its source.
+Apply a style to a concatenated value to change all its spans.
+Use `Text.plain(text)` to read the complete source string.
+Use `View.richText(text)` to display one paragraph.
+Words wrap across span boundaries. Mixed sizes use one baseline per line.
+Line boxes contain font descenders and underlines.
+Default sizes and colors follow the nearest View and Theme wrappers.
+Explicit span sizes use logical pixels. Explicit span colors override the inherited color.
+Use `View.maxLines` and `View.ellipsis` to limit display.
+The ellipsis uses the final visible span style.
+Browser copying keeps source spaces and explicit line breaks across styles.
+Synthetic ellipsis marks do not add source characters to copied text.
+
+The default native Skia renderer shapes proportional text with HarfBuzz.
+SheenBidi supplies direction and script runs within each displayed line.
+Measurement and paint use the same positioned glyphs.
+The embedded face supplies kerning, ligatures, combining marks, and Arabic forms.
+Wrapping and ellipsis keep shaped source clusters together.
+Plain text measurement and paint use complete lines.
+Field carets, pointer input, and selection use shaped source positions.
+Left and Right move a field caret in the visual direction.
+Composition paints the complete preview without changing the committed Signal.
+Source strings keep their original UTF-8 bytes.
+Editor cells and native monospace spans keep their cell layout.
+The browser uses its font shaper and source positions from DOM text ranges.
+Pinned Noto fonts supply fallback for Devanagari, Thai, and Simplified Chinese.
+Font selection keeps source clusters together. Text line boxes contain fallback marks.
+Web packages include the same fonts. Font loading updates layout and keeps input state.
+Other script coverage, shaping across styled spans, wrapped paragraph direction, and full bidi caret affinity remain open.
+The software and OpenGL native renderers retain their code-point cells.
+They do not supply these proportional shaping guarantees.
+See the [HarfBuzz shaping model](https://harfbuzz.github.io/getting-started.html).
+
+Use `View.tooltip(message, child)` for short help.
+Hover or keyboard focus opens the help. Focus stays on the child control.
+The tooltip has no Tab stop. The nearest nested tooltip supplies the description.
+The pointer can move from the trigger onto the popup without closing it.
+Escape clears a field composition first. It then dismisses visible tooltips.
+A later Escape closes an open dialog.
+Dismissal stays effective until both hover and focus leave the trigger.
+The popup wraps inside the viewport and uses the nearest Theme.
+Empty messages have no popup or browser description.
+Browser controls reference the help through `aria-describedby`.
+The help remains a description when the popup is closed.
+Follow the [W3C hover and focus guidance](https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html).
+Real screen-reader and physical-device checks remain open.
+
 `View.indexBook` groups named pages around a persistent index.
 The [Counter walkthrough](#counter-walkthrough) uses tabs.
 The editor uses unnumbered landmarks and updates source marks while its source editor is hidden.
+
+Container constructors take one `List[View]` for their children.
+Use list literals for fixed children. Use `List.map` for data-driven children.
+Native and evaluator construction use the same flat list.
+Evaluate list elements from left to right.
+They have no fixed child count limit.
+The container retains each child before it releases a temporary list.
+Do not mount one View in two parents.
+
+`View.autoGrid` selects equal column slots from the parent width.
+It uses the shared grid path on all runtimes.
+Its minimum cell width, gaps, and padding use the theme scale.
+Resize changes the column count.
+Children excluded by `View.showWhen` use no slot.
+An unbounded width uses one column.
+
+`View.adaptive(minWidth, compact, wide)` selects from the parent width.
+The width limit uses logical pixels and the current theme scale.
+Use compact below the limit. Use wide at the limit and with unbounded width.
+Only the selected branch has layout, paint, input, and accessibility.
+Resize clears focus in the hidden branch.
+Construct separate Views for both branches. Keep shared Signals outside them.
+
+Tab and Shift+Tab move focus through visible controls in tree order.
+Use `View.overlay(open, label, child)` for a named modal dialog.
+The label supplies its accessible name. An empty label uses Dialog.
+Focus moves to the first control when the dialog opens.
+Layout focus changes update the soft keyboard request.
+A keyboard-dismiss event stays effective while focus stays on the same control.
+A dialog with no control takes focus itself.
+Focus stays inside the top dialog. Escape closes that dialog.
+Closing returns focus to its opener. A removed opener uses the first visible control.
+Use `View.card` for the dialog surface.
+Card text and empty card space keep the dialog open.
+An interactive wrapper around a card keeps its action.
+Backdrop taps outside the card close the dialog.
+Wheel, touch scroll, hover, and secondary input stay inside the top dialog.
+A dialog scope change cancels the current pointer gesture.
+Browser dialogs expose their name and modal state. Background content stays outside the browser accessibility tree.
+Enter and Space activate the focused control.
+Use `View.slider(value, label, minimum, maximum, step)` for a named integer slider.
+The bounds use signed Int values. Minimum must not exceed maximum. Step must be positive.
+Allowed values start at minimum and advance by step without exceeding maximum.
+The last allowed step supplies the upper endpoint. Equal bounds give one value.
+Display clamps and snaps the Signal value. Construction does not write the Signal.
+Input writes an allowed value. Half-step ties select the higher value.
+Slider arrows change the value by one step. Home and End select the endpoints.
+PageUp and PageDown change the value by ten steps.
+The browser uses the shared runtime for keys and pointer input.
+Its accessible value uses decimal text across the full Int range.
+Keyboard behavior uses the [W3C slider pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/).
+Use `View.split(fraction, label, start, end)` for two resizable panes.
+The label names the primary pane and its vertical separator. An empty label uses Primary pane.
+The fraction is a percent from 0 through 100. Display clamps the value without writing it.
+Tab visits the primary pane, separator, and secondary pane in that order.
+Left and Right change the primary pane by one percent. Home and End select the endpoints.
+Enter collapses the primary pane or restores its previous nonzero size.
+A collapsed pane retains state. It has no paint, input, focus, or accessibility content.
+Pointer drag starts on the handle. Pane controls keep their input.
+The browser exposes the separator name, value, orientation, and controlled primary region.
+Keyboard behavior uses the [W3C window splitter pattern](https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/).
+Use `Text.action(key, text)` to mark an underlined action in styled text.
+The key uses the full signed Int range. An outer action replaces actions inside its text.
+Styles and concatenation preserve action keys. Each concatenated occurrence keeps a separate identity.
+Use `View.actionText(text, onAction)` to receive the key.
+Handlers support lambdas, named functions, and captured function values.
+A handler can update Signals or return IO through the existing UI callback path.
+`View.richText` displays the same text without action targets.
+Each visible action has one button and one Tab stop across all its wrapped fragments.
+Enter and Space activate it. Pointer input uses its source fragments.
+Gaps between fragments and synthetic ellipsis dots do not activate actions.
+Empty and completely elided actions have no input or accessibility target.
+Text selection and copying preserve the source across style and action boundaries.
+Browser action buttons remain in source order inside their text block.
+Keyboard behavior uses the [W3C button pattern](https://www.w3.org/WAI/ARIA/apg/patterns/button/).
+Use `View.expansionTile(open, label, child)` for collapsible content.
+Only the header toggles the open Signal. Enter and Space activate the focused header.
+A nonzero Signal shows the body. An empty label uses Details.
+The body keeps its own visibility conditions. Passive body input does not toggle the header.
+Nested controls keep their input. Body text remains selectable in the browser.
+Closing preserves committed field state. A focused body returns focus to its header.
+Closing does not move focus from an outside control.
+The browser exposes a button with its expanded state and controlled content region.
+Keyboard behavior uses the [W3C disclosure pattern](https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/).
+Use `View.select(selected, label, options)` for compact single selection.
+Options use `Signal[List[String]]`. Give the control and each option a nonempty label.
+The selected Signal holds a zero-based index. Construction preserves the Signal.
+An invalid index displays no selected text. An empty list has no input or Tab stop.
+The control has one focus stop. Popup options use stable index identities within one list.
+A new list cancels pending input and closes the popup. It resets type-ahead and scroll.
+The control keeps its identity, focus, and selected Signal. The application owns index changes.
+A new list uses new option identities. An old pointer press cannot select a replacement option.
+The popup keeps at most nine row Views, including partially visible rows.
+Arrows open the popup and move a pending index. Home and End use the endpoints.
+PageUp and PageDown move ten options. Navigation stops at each endpoint.
+Enter, Space, Tab, and explicit focus transfer commit the pending index.
+Escape, a second control activation, and outside pointer input cancel it.
+Outside pointer input closes the popup and consumes that input.
+A newer external Signal value replaces pending input. Stale focus transfer cannot overwrite it.
+Type-ahead matches option prefixes. Repeated characters cycle through matching options.
+ASCII matching ignores case. Other UTF-8 bytes match exactly.
+The prefix expires after one second. Input journals record the time for exact replay.
+Search keeps input time monotonic when it changes event order. Explicit replay rejects backwards time.
+Wheel and touch input scroll the popup. Scrolling keeps the pending option visible.
+Popup input stays inside the active dialog. Escape closes the popup before the dialog.
+Browser semantics use a named combobox, a linked listbox, and indexed options.
+The browser keeps focus on the combobox and reports the pending active option.
+Editable selection and full Unicode case folding remain open.
+
+Use `View.segmented(selected, label, choices)` for equal-width choices.
+Choices use `List[String]`. The selected Signal holds an index that starts at zero.
+Each choice uses the shared radio input and selection paint.
+The label names the group. An empty label uses Choices.
+Construction preserves the Signal. An index outside the list selects no choice.
+An empty list has no input target. A single choice uses one target.
+The group has one Tab stop. Use the selected choice, or the first choice when none is selected.
+Arrows select the next or previous choice and wrap at the ends.
+Home and End select the first and last choices. Enter and Space select the focused choice.
+Repeated labels keep separate identities. Keys stay inside the named group.
+Text input on a focused radio does not edit a background field.
+Browser semantics use a named radio group and a checked state for each choice.
+Use the [W3C radio group pattern](https://www.w3.org/WAI/ARIA/apg/patterns/radio/).
+Use `View.radioGroup(label, child)` to name a radio group.
+Its radios share one Signal. Arrows select radios inside that group.
+Each group has one Tab stop: the focused, selected, or first visible radio.
+A tab list has one current Tab stop. Left and Right move tab focus.
+Enter or Space selects its panel. Tab moves into the panel.
+A text-only panel is a Tab stop. A panel that starts with a control skips this stop.
+Focus groups preserve View identity when labels repeat.
+Focus traversal has no fixed control limit.
+Plain Tab inserts two spaces in an editor. Ctrl+Tab moves focus out.
+Headless and native hosts use the shared focus path.
+The browser uses DOM focus with shared Tab, editor, radio, and modal key handling.
+Tab can leave the browser application when no next control exists.
+
+`View.measuredList(estimate, items, key, render)` measures mounted row heights.
+Give it a bounded height. The estimate uses logical pixels.
+The runtime uses that estimate until it measures a row at the available width.
+Each row uses at least one logical pixel of height.
+Keep a height index for prefix sums and scroll lookup.
+Do not construct offscreen rows to measure the complete list.
+The scroll extent changes as the runtime measures rows.
+Preserve the visible item by key when its measurements or list position change.
+Resize invalidates cached heights. Mounted rows keep their Views and Signals.
+Follow the focused row when data or width changes.
+Fill the last viewport when row heights are less than their estimates.
+Compute row positions relative to the viewport to preserve pixel precision.
+Fixed and measured lists use the same row ownership and input paths.
+
+`View.virtualList(rowHeight, items, key, render)` uses fixed row heights.
+Give it a bounded height. Row height uses logical pixels and theme scale.
+Use `Signal[List[A]]` for items and `A => Int` for unique keys.
+The renderer receives a `Signal[A]` with the current item.
+Use `Signal.map` and `View.bindText` to show item changes.
+Keep mounted rows and their Signals when their keys stay in the viewport.
+Follow the focused row when a data change moves its key.
+Construct one extra row on each side of the viewport.
+Release row Views and Signals when rows leave that window.
+Track row Signals directly. Include Signals created by later row layout callbacks.
+Detach derived Signals through direct links when their source is released.
+Use the derived Signal owner for callbacks that run later.
+Index constructor names by Signal kind and name.
+The last name assignment wins within each Signal kind.
+Keep persistent application state outside the renderer.
+Do not keep a row input Signal after its row leaves the viewport.
+Reject duplicate keys before the row window changes.
+Use the shared scroll, input, and paint paths.
+View IDs increase at construction. Do not reuse an ID after a View is released.
+Ignore browser events and pointer targets with a released ID.
+
+`View.expanded(weight, child)` divides remaining row width or column height.
+Subtract fixed children, padding, and gaps before this division.
+Use the ratio of each weight to the sum of the shown child weights.
+Values below one use a weight of one.
+`View.stretch` preserves an expanded child's weight.
+Use intrinsic layout when the main axis has no bound or fixed children exceed its space.
+
+Decode image bytes with `Image.decode`.
+Return `Result[String, Image]` for invalid data and decode limits.
+Keep image file and network reads in IO.
+Keep decoded image pixels immutable.
+The IO compiler decodes images without a UI renderer.
+`View.image` retains the image and shares its paint cache across Views.
+Use the image label for accessibility. Use a separate Text View for a caption.
+Preserve the image aspect ratio and center it in a tight slot.
+Use linear sampling and source-over alpha on each renderer.
 
 Pass layout constraints from parents to children.
 Return measured sizes to parents.

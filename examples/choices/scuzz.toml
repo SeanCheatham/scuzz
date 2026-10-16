@@ -1,0 +1,7 @@
+[package]
+name = "choices"
+
+[ui]
+default_runtime = "headless"
+headless_size = [640, 600]
+headless_scale = 1.0

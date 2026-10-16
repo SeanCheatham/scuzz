@@ -364,7 +364,7 @@ def emitDirStored(outDir: String, fp: String, ok: Bool): IO[Unit] =
   if (!ok) IO.fail("check") else Fs.mkdirs(outDir).flatMap(_ => Fs.write(fpPath(outDir), fp).flatMap(_ => Fs.delete(fpVerifyPath(outDir)).handleErrorWith(_ => IO.pure(()))))
 
 def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir).flatMap(_ => emitVerifyStamp(outDir, toml, own)))
+  Fs.delete(fpVerifyPath(outDir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.delete(fpPath(outDir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir))))
 
 def emitDirVerifyLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => ensureNative(Manifest.parse(toml).hasUi).flatMap(_ => fpVerifyText(toml, files).flatMap(fp => emitDirVerifyHit(dir, outDir, files, toml, fp))))
@@ -1142,7 +1142,10 @@ def pkgMacGot(result: (Int, String, String)): IO[Unit] =
   }
 
 def pkgHostCopy(name: String, exe: String, dest: String, id: String): IO[Unit] =
-  Fs.mkdirs(dest).flatMap(_ => pkgHostCp(name, exe, dest, id))
+  Fs.mkdirs(dest).flatMap(_ => crateHome().flatMap(h => runLine(pkgHostLicenseCmd(h, joinSlash(dest, "licenses"))).flatMap(r => linkOnlyGot(r).flatMap(_ => pkgHostCp(name, exe, dest, id)))))
+
+def pkgHostLicenseCmd(h: String, dest: String): String =
+  Str.concat("mkdir -p ", Str.concat(shQuote(dest), Str.concat(" && cp ", Str.concat(List.join(List.map(["third_party/fonts/devanagari-LICENSE", "third_party/fonts/thai-LICENSE", "third_party/fonts/sc-LICENSE", "third_party/skia/SheenBidi-LICENSE"], file => shQuote(crateAt(h, file))), " "), Str.concat(" ", shQuote(dest))))))
 
 def pkgHostCp(name: String, exe: String, dest: String, id: String): IO[Unit] =
   runLine(Str.concat("cp ", Str.concat(shQuote(exe), Str.concat(" ", shQuote(joinSlash(dest, name)))))).flatMap(r => pkgHostChmod(r, name, dest, id))

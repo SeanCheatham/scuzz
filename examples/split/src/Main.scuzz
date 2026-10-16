@@ -1,0 +1,10 @@
+@main def main: IO[Unit] =
+  for {
+    fraction = Signal.make(40)
+    primary = Signal.make("")
+    secondary = Signal.make("")
+    count = Signal.make(0)
+    fractionText = Signal.map(fraction, n => s"Primary size: $n%")
+    countText = Signal.map(count, n => s"Count: $n")
+    _ <- Ui.run(_ => View.column([View.sized(600, 240, View.split(fraction, Str.concat("Tool", "s"), View.column([View.heading(2, View.text("Tools")), View.textField(primary, "Primary note"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))]), View.column([View.heading(2, View.text("Preview")), View.textField(secondary, "Secondary note"), View.bindText(countText)]))), View.bindText(fractionText), View.button("Reset panes", _ => Signal.set(fraction, 40)), View.button("Hide tools", _ => Signal.set(fraction, 0)), View.button("Hide preview", _ => Signal.set(fraction, 100))]))
+  } yield ()

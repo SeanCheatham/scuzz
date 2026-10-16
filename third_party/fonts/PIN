@@ -1,0 +1,23 @@
+[
+  {
+    "name": "devanagari",
+    "revision": "2bc5d431b584d89e646214bf6cfa75494e76ceea",
+    "path": "ofl/notosansdevanagari/NotoSansDevanagari[wdth,wght].ttf",
+    "sha256": "14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e",
+    "unicode_range": "U+0900-097F,U+A8E0-A8FF,U+11B00-11B5F"
+  },
+  {
+    "name": "thai",
+    "revision": "8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5",
+    "path": "ofl/notosansthai/NotoSansThai[wdth,wght].ttf",
+    "sha256": "5a1c559bb539583c8a1fd99d1c5b9491e5e14478c9cd2bd0970d5c3096cc9ef8",
+    "unicode_range": "U+0E00-0E7F"
+  },
+  {
+    "name": "sc",
+    "revision": "a85815a42757630ce188fdad368c2dfc444d4773",
+    "path": "ofl/notosanssc/NotoSansSC[wght].ttf",
+    "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+    "unicode_range": "U+2E80-2FFF,U+3000-30FF,U+31C0-31EF,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FF00-FFEF,U+20000-2FA1F"
+  }
+]

@@ -163,7 +163,7 @@ static size_t g_kind_count[SZ_RC_KIND_COUNT];
 static const char *k_kind_names[SZ_RC_KIND_COUNT] = {
     "raw",      "string", "list",     "adt",      "box",  "map",
     "io",       "stream", "resource", "error",    "ref",  "queue",
-    "deferred", "either", "pair", "builder", "netsock", "view", "float-box"};
+    "deferred", "either", "pair", "builder", "netsock", "view", "float-box", "image"};
 
 static uint32_t kind_idx(uint32_t kind) {
   return kind < SZ_RC_KIND_COUNT ? kind : (uint32_t)SZ_RC_RAW;
@@ -561,6 +561,9 @@ void *sz_alloc_zero(size_t size) {
 }
 
 static void (*g_view_drop)(void *);
+static _Atomic(void (*)(void *)) g_image_drop;
+
+void sz_rc_set_image_drop(void (*fn)(void *)) { atomic_store(&g_image_drop, fn); }
 
 void sz_rc_set_view_drop(void (*fn)(void *)) { g_view_drop = fn; }
 
@@ -1092,6 +1095,12 @@ void sz_release(void *ptr) {
   case SZ_RC_NETSOCK:
     sz_net_sock_on_free((SzNetSock *)ptr);
     break;
+  case SZ_RC_IMAGE: {
+    void (*drop)(void *) = atomic_load(&g_image_drop);
+    if (drop)
+      drop(ptr);
+    break;
+  }
   case SZ_RC_VIEW:
     if (g_view_drop)
       g_view_drop(ptr);

@@ -1,0 +1,22 @@
+def languageOptions(): List[String] =
+  ["Alpha", "Alpine", "Beta", "Bravo", "中文"]
+
+def replacementOptions(): List[String] =
+  ["Gamma", "Delta", "Same", "Same"]
+
+@main def main: IO[Unit] =
+  for {
+    options = Signal.make(languageOptions())
+    items = Signal.make(List.tabulate(130, n => s"Item$n"))
+    noOptions = Signal.make([]: List[String])
+    choice = Signal.make(-1)
+    item = Signal.make(0)
+    count = Signal.make(0)
+    empty = Signal.make(-1)
+    dialog = Signal.make(0)
+    name = Signal.make("Keep this text")
+    choiceText = Signal.map(choice, n => s"Choice: $n")
+    itemText = Signal.map(item, n => s"Item: $n")
+    countText = Signal.map(count, n => s"Count: $n")
+    _ <- Ui.run(_ => View.stack([View.column([View.text("Choose an option"), View.select(choice, "Language", options), View.bindText(choiceText), View.select(item, "Items", items), View.bindText(itemText), View.select(empty, "Empty", noOptions), View.textField(name, "Name"), View.wrap([View.button("Set Beta", _ => Signal.set(choice, 2)), View.button("Set Last", _ => Signal.set(item, 129)), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1)), View.button("Settings", _ => Signal.set(dialog, 1))]), View.bindText(countText), View.wrap([View.button("Replace options", _ => Signal.set(options, replacementOptions())), View.button("Clear options", _ => Signal.set(options, [])), View.button("Restore options", _ => Signal.set(options, languageOptions()))])]), View.overlay(dialog, "Settings", View.card(View.column([View.select(choice, "Dialog choice", options), View.button("Close", _ => Signal.set(dialog, 0))])))]))
+  } yield ()

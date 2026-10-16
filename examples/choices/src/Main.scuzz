@@ -1,0 +1,17 @@
+@main def main: IO[Unit] =
+  for {
+    layout = Signal.make(1)
+    density = Signal.make(0)
+    repeated = Signal.make(2)
+    single = Signal.make(99)
+    empty = Signal.make(99)
+    name = Signal.make("")
+    layoutText = Signal.map(layout, n => s"Layout: $n")
+    densityText = Signal.map(density, n => s"Density: $n")
+    repeatedText = Signal.map(repeated, n => s"Repeated: $n")
+    _ <- Ui.run(_ => View.column([View.heading(2, View.text("Layout")), View.segmented(layout, Str.concat("Lay", "out"), ["List", "Grid", "Columns"]), View.bindText(layoutText), View.text("Density"), View.segmented(density, "Density", List.map(["Compact", "Normal", "Roomy", "Wide"], text => Str.concat("", text))), View.bindText(densityText), View.text("Repeated labels"), View.segmented(repeated, "Repeated labels", ["Same", "Same", "Same"]), View.bindText(repeatedText), View.segmented(single, "One choice", ["Only choice"]), View.segmented(empty, "No choices", []), View.textField(name, "Name"), View.button("Reset", _ => for {
+  _ = Signal.set(layout, 1)
+  _ = Signal.set(density, 0)
+  _ = Signal.set(repeated, 2)
+} yield ())]))
+  } yield ()

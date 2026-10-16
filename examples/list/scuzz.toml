@@ -1,0 +1,7 @@
+[package]
+name = "list"
+
+[ui]
+default_runtime = "headless"
+headless_size = [640, 480]
+headless_scale = 1.0

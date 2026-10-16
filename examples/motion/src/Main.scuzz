@@ -1,0 +1,14 @@
+def overlapSample(): View =
+  View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.background(Color.rgb(255, 255, 255), View.semantics("Opacity sample", View.opacity(50, View.sized(120, 80, View.stack([View.sized(100, 80, View.background(Color.rgb(255, 0, 0), View.text(""))), View.positioned(20, 0, View.sized(100, 80, View.background(Color.rgb(0, 0, 255), View.text(""))))]))))))
+
+@main def main: IO[Unit] =
+  for {
+    opacity = Signal.make(100)
+    reduced = Signal.make(0)
+    visible = Signal.make(1)
+    count = Signal.make(0)
+    name = Signal.make("Retained input")
+    targetText = Signal.map(opacity, n => s"Target: $n")
+    countText = Signal.map(count, n => s"Count: $n")
+    _ <- Ui.run(_ => View.column([View.text("Opacity transitions"), View.wrap([View.button("Fade out", _ => Signal.set(opacity, 0)), View.button("Fade in", _ => Signal.set(opacity, 100)), View.button("Half", _ => Signal.set(opacity, 50))]), View.checkbox(reduced, "Reduce motion"), View.checkbox(visible, "Show content"), View.bindText(targetText), View.bindText(countText), View.visibility(visible, View.reducedMotion(reduced, View.animatedOpacity(opacity, 8, View.column([View.text("Retained content"), View.textField(name, "Name"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))])))), overlapSample()]))
+  } yield ()

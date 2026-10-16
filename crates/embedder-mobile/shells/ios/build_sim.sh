@@ -102,7 +102,7 @@ for src in "$ROOT"/crates/runtime/src/*.c; do
 done
 
 # sk_sw backend (CPU raster; the mobile renderer).
-for src in "$ROOT"/crates/ffi-skia/src/sk_color.c "$ROOT"/crates/ffi-skia/src/sk_sw.c "$ROOT"/crates/ffi-skia/src/png_enc.c \
+for src in "$ROOT"/crates/ffi-skia/src/image.c "$ROOT"/crates/ffi-skia/src/image_dec.c "$ROOT"/crates/ffi-skia/src/sk_color.c "$ROOT"/crates/ffi-skia/src/sk_sw.c "$ROOT"/crates/ffi-skia/src/png_enc.c \
            "$ROOT"/crates/ffi-skia/src/sk_gpu_none.c "$ROOT"/crates/ffi-skia/src/sk_mono.c; do
   obj="$OUT/obj/sk_$(basename "${src%.c}").o"
   if needs_compile "$src" "$obj"; then

@@ -1,0 +1,9 @@
+[package]
+name = "layout"
+version = "0.1.0"
+description = "Automatic grid layout with resize and shared input."
+
+[ui]
+default_runtime = "headless"
+headless_size = [640, 480]
+headless_scale = 1.0

@@ -1,0 +1,14 @@
+def paragraph(n: Int): Text =
+  Text.concat([Text.span(s"Count: $n. "), Text.bold(Text.span("One paragraph ")), Text.span("can keep a word across styles: inter"), Text.color(Color.rgb(160, 55, 35), Text.italic(Text.span("face"))), Text.span(". Use "), Text.monospace(Text.span("Text.concat")), Text.span(" for spans. "), Text.underline(Text.span("Source text keeps spaces and λ🙂.")), Text.span("""
+The next line keeps its explicit break.
+""")])
+
+@main def main: IO[Unit] =
+  for {
+    count = Signal.make(0)
+    values = Signal.map(count, n => [n])
+    draft = Signal.make("")
+    code = Text.color(Color.rgb(160, 55, 35), Text.monospace(Text.span(Str.concat("Text.concat([", Str.concat(Str.repeat("Text.span(\"source\"), ", 39), "Text.span(\"source\")])")))))
+    title = Text.concat([Text.bold(Text.size(28, Text.span("Styled "))), Text.italic(Text.size(18, Text.span("text")))])
+    _ <- Ui.run(_ => View.column([View.expanded(1, View.scroll(View.column([View.heading(1, View.richText(title)), View.excludeSemantics(View.richText(Text.span("· · ·"))), View.each(values, n => View.richText(paragraph(n))), View.scrollH(View.richText(code)), View.text("Two-line preview"), View.ellipsis(View.maxLines(2, View.richText(paragraph(100)))), View.textField(draft, "Draft"), View.button("Increment", _ => Signal.set(count, Signal.get(count) + 1))])))]))
+  } yield ()

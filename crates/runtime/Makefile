@@ -23,12 +23,12 @@ SSL_LINK := -lssl -lcrypto
 endif
 INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include -I$(MOBILE)/include $(SSL_INCLUDES)
 SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/stream.c \
-	src/theme.c src/signal.c src/view.c src/ui.c \
+	src/theme.c src/signal.c src/image.c src/text.c src/text_layout.c src/view.c src/ui.c \
 	src/ui_script.c src/lang_ui.c \
 	src/list.c src/map.c src/fs.c src/sys.c src/clock.c src/hash.c src/hex.c src/base64.c src/bytes.c src/random.c src/uuid.c src/net.c \
 	src/net_http.c src/net_request.c src/net_sock.c src/json.c src/testrt.c src/impurity.c
 BUILDDIR ?= build
-OBJ := $(SRC:src/%.c=$(BUILDDIR)/%.o)
+OBJ := $(SRC:src/%.c=$(BUILDDIR)/%.o) $(BUILDDIR)/image_dec.o
 
 .PHONY: all clean test test-asan test-ubsan lib lib-asan ffi-skia
 
@@ -44,8 +44,13 @@ FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 ffi-skia:
 	@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
-$(BUILDDIR)/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h | $(BUILDDIR)
+$(BUILDDIR)/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h src/image.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILDDIR)/text.o $(BUILDDIR)/text_layout.o $(BUILDDIR)/view.o $(BUILDDIR)/test_ui: src/text.h
+
+$(BUILDDIR)/image_dec.o: $(FFI_SKIA)/src/image_dec.c $(FFI_SKIA)/src/image_dec.h $(FFI_SKIA)/src/stb_image.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -I$(FFI_SKIA)/src -c $< -o $@
 
 lib: $(BUILDDIR)/libscuzz_rt.a
 

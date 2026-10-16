@@ -44,6 +44,10 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
 
 void sk_canvas_save(SkCanvas *canvas) { scuzz_skia_canvas_save(canvas); }
 
+int sk_canvas_save_layer_alpha(SkCanvas *canvas, uint8_t alpha) {
+  return scuzz_skia_canvas_save_layer_alpha(canvas, alpha);
+}
+
 void sk_canvas_restore(SkCanvas *canvas) { scuzz_skia_canvas_restore(canvas); }
 
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
@@ -66,6 +70,31 @@ float sk_paint_get_text_size(const SkPaint *paint) {
   return scuzz_skia_paint_get_text_size(paint);
 }
 
+void sk_font_text_positions(const char *text, size_t bytes, float font_px, float *leading, float *trailing) {
+  scuzz_skia_font_text_positions(text, bytes, font_px, leading, trailing);
+}
+
+void sk_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks) {
+  scuzz_skia_text_cluster_breaks(text, bytes, breaks);
+}
+
+void sk_font_metrics(float font_px, int style, float *ascent, float *descent) {
+  scuzz_skia_font_metrics(font_px, style, ascent, descent);
+}
+
+void sk_font_span_metrics(const char *text, size_t bytes, float font_px, int style, float *ascent, float *descent) {
+  scuzz_skia_font_span_metrics(text, bytes, font_px, style, ascent, descent);
+}
+
+float sk_font_measure_span(const char *text, size_t bytes, float font_px, int style) {
+  return scuzz_skia_font_measure_span(text, bytes, font_px, style);
+}
+
+void sk_canvas_draw_span(SkCanvas *canvas, const char *text, size_t bytes,
+                         float x, float y, const SkPaint *paint, int style) {
+  scuzz_skia_canvas_draw_span(canvas, text, bytes, x, y, paint, style);
+}
+
 float sk_font_measure_string(const char *text, float font_px) {
   return scuzz_skia_font_measure_string(text, font_px);
 }
@@ -86,4 +115,15 @@ int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes,
 
 int sk_encode_png_to_file(const SkSurface *surface, const char *path) {
   return scuzz_skia_encode_png_to_file(surface, path);
+}
+
+SkImage *sk_image_make_rgba(const uint8_t *pixels, int width, int height) {
+  return (SkImage *)scuzz_skia_image_make(pixels, width, height);
+}
+void sk_image_unref(SkImage *image) { scuzz_skia_image_unref(image); }
+int sk_image_width(const SkImage *image) { return scuzz_skia_image_width(image); }
+int sk_image_height(const SkImage *image) { return scuzz_skia_image_height(image); }
+void sk_canvas_draw_image(SkCanvas *canvas, const SkImage *image, float x,
+                          float y, float w, float h, float opacity) {
+  scuzz_skia_canvas_draw_image(canvas, image, x, y, w, h, opacity);
 }

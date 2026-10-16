@@ -6,6 +6,7 @@
 
 #include "ui_script.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -38,6 +39,8 @@ static void fill_cfg(SzUiConfig *cfg, int width, int height) {
   cfg->width = width;
   cfg->height = height;
   cfg->title = sz_ui_default_title();
+  const char *reduced = getenv("SCUZZ_UI_REDUCED_MOTION");
+  cfg->reduced_motion = reduced && !strcmp(reduced, "1");
   sz_ui_resolve_headless_size(&cfg->width, &cfg->height, &scale);
   cfg->scale = scale;
 #ifdef __EMSCRIPTEN__
@@ -72,6 +75,10 @@ SzView *sz_lang_view_text_button(SzString *label, SzViewTapFn tap, void *env) {
   return sz_view_text_button(label ? sz_string_cstr(label) : "", tap, env);
 }
 
+SzView *sz_lang_view_action_text(const SzText *text, SzViewTapFn tap, void *env) {
+  return sz_view_action_text(text, tap, env);
+}
+
 SzView *sz_lang_view_vertical_divider(void) { return sz_view_vertical_divider(); }
 
 SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label) {
@@ -82,7 +89,9 @@ SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label) {
   return sz_view_radio(sig, value, label ? sz_string_cstr(label) : "");
 }
 
-SzView *sz_lang_view_slider(SzSignalInt *sig) { return sz_view_slider(sig); }
+SzView *sz_lang_view_slider(SzSignalInt *sig, SzString *label, int64_t minimum, int64_t maximum, int64_t step) {
+  return sz_view_slider(sig, sz_string_cstr(label), minimum, maximum, step);
+}
 
 SzView *sz_lang_view_progress(SzSignalInt *sig) { return sz_view_progress(sig); }
 
@@ -136,9 +145,20 @@ SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
   return sz_view_radio_list_tile(sig, value, title ? sz_string_cstr(title) : "");
 }
 
-SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *left, SzString *right) {
-  return sz_view_segmented(sig, left ? sz_string_cstr(left) : "",
-                           right ? sz_string_cstr(right) : "");
+SzView *sz_lang_view_select(SzSignalInt *sig, SzString *label, SzSignalList *choices) {
+  return sz_view_select(sig, sz_string_cstr(label), choices);
+}
+
+SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *label, SzList *choices) {
+  int64_t count = sz_list_len(choices);
+  if (count > INT_MAX) sz_panic("Too many segmented choices");
+  const char **labels = count ? sz_alloc((size_t)count * sizeof(*labels)) : NULL;
+  int i = 0;
+  for (const SzList *cell = choices; cell; cell = cell->tail)
+    labels[i++] = sz_string_cstr(cell->head);
+  SzView *view = sz_view_segmented(sig, sz_string_cstr(label), labels, (int)count);
+  sz_free(labels);
+  return view;
 }
 
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child) {
@@ -183,6 +203,10 @@ SzView *sz_lang_view_placeholder(SzView *child) {
   return sz_view_placeholder(child);
 }
 
+SzView *sz_lang_view_radio_group(SzString *label, SzView *child) {
+  return sz_view_radio_group(label ? sz_string_cstr(label) : "", child);
+}
+
 SzView *sz_lang_view_semantics(SzString *label, SzView *child) {
   return sz_view_semantics(label ? sz_string_cstr(label) : "", child);
 }
@@ -222,6 +246,10 @@ SzView *sz_lang_view_row(void) { return sz_view_row(); }
 SzView *sz_lang_view_wrap(void) { return sz_view_wrap(); }
 SzView *sz_lang_view_breadcrumb(void) { return sz_view_breadcrumb(); }
 SzView *sz_lang_view_grid(int64_t cols) { return sz_view_grid((int)cols); }
+SzView *sz_lang_view_auto_grid(int64_t min_width) {
+  int width = min_width < 1 ? 1 : min_width > INT_MAX ? INT_MAX : (int)min_width;
+  return sz_view_auto_grid(width);
+}
 
 SzView *sz_lang_view_stack(void) { return sz_view_stack(); }
 
@@ -232,7 +260,9 @@ SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env) {
 
 SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
 SzView *sz_lang_view_scroll_h(SzView *child) { return sz_view_scroll_h(child); }
-SzView *sz_lang_view_expanded(SzView *child) { return sz_view_expanded(child); }
+SzView *sz_lang_view_expanded(int64_t weight, SzView *child) {
+  return sz_view_expanded(weight, child);
+}
 SzView *sz_lang_view_center(SzView *child) { return sz_view_center(child); }
 SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child) {
   return sz_view_positioned((int)x, (int)y, child);
@@ -249,6 +279,9 @@ SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child) {
 
 SzView *sz_lang_view_max_size(int64_t w, int64_t h, SzView *child) {
   return sz_view_max_size((int)w, (int)h, child);
+}
+SzView *sz_lang_view_theme(const SzTheme *theme, SzView *child) {
+  return sz_view_theme(theme, child);
 }
 SzView *sz_lang_view_text_color(int64_t argb, SzView *child) {
   return sz_view_text_color((uint32_t)argb, child);
@@ -274,21 +307,20 @@ SzView *sz_lang_view_editor(SzSignalStr *text) {
   return sz_view_editor(text);
 }
 
-SzView *sz_lang_view_split(SzSignalInt *frac, SzView *start, SzView *end) {
-  return sz_view_split(frac, start, end);
+SzView *sz_lang_view_split(SzSignalInt *frac, SzString *label, SzView *start, SzView *end) {
+  return sz_view_split(frac, sz_string_cstr(label), start, end);
 }
 
-SzView *sz_lang_view_overlay(SzSignalInt *open, SzView *child) {
-  return sz_view_overlay(open, child);
+SzView *sz_lang_view_overlay(SzSignalInt *open, SzString *label, SzView *child) {
+  return sz_view_overlay(open, sz_string_cstr(label), child);
 }
 
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb) {
   return sz_view_icon((char)glyph, (uint32_t)argb);
 }
 
-SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption) {
-  return sz_view_image((int)w, (int)h, (uint32_t)argb,
-                       caption ? sz_string_cstr(caption) : "");
+SzView *sz_lang_view_image(SzImage *image, SzString *label) {
+  return sz_view_image(image, label ? sz_string_cstr(label) : "");
 }
 
 SzView *sz_lang_view_link(SzString *label, SzString *route) {
@@ -303,8 +335,12 @@ SzView *sz_lang_view_nav_tile(int64_t glyph, SzString *title, SzString *route) {
 
 /* Codegen declares this as returning ptr: Scuzz Unit is a null pointer.
    Do not change the return type to void. */
-void *sz_lang_view_add_child(SzView *parent, SzView *child) {
-  sz_view_add_child(parent, child);
+void *sz_lang_view_add_children(SzView *parent, const SzList *children) {
+  for (const SzList *cell = children; cell; cell = cell->tail) {
+    SzView *child = cell->head;
+    sz_retain(child);
+    sz_view_add_child(parent, child);
+  }
   return NULL;
 }
 
@@ -325,16 +361,14 @@ static SzUiSession *web_live_session;
 
 static void web_live_frame(void) {
   SzUiSession *session = web_live_session;
-  int steps;
   if (!session || !sz_ui_session_alive(session)) {
     emscripten_cancel_main_loop();
     sz_web_stop();
     web_live_session = NULL;
     return;
   }
-  /* Four motion steps and the settled pump. Finish them before this frame
-   * returns. An idle wait then sees a still loop. */
-  for (steps = 0; steps < 5 && sz_ui_session_needs_paint(session); steps++) {
+  /* Present one pump at each browser frame boundary. */
+  if (sz_ui_session_needs_paint(session)) {
     if (!sz_ui_pump_sync(session)) {
       if (!sz_ui_session_alive(session)) {
         emscripten_cancel_main_loop();
@@ -563,4 +597,20 @@ SzView *sz_lang_view_code(SzString *text) {
 SzView *sz_lang_view_heading(int64_t level, SzView *child) {
   if (level < 1 || level > 6) sz_panic("Heading level must be 1 through 6");
   return sz_view_heading((int)level, child);
+}
+
+SzView *sz_lang_view_adaptive(int64_t min_width, SzView *compact, SzView *wide) {
+  return sz_view_adaptive(min_width, compact, wide);
+}
+
+SzView *sz_lang_view_virtual_list(int64_t row_height, SzSignalList *items,
+                                  SzViewKeyFn key, void *key_env,
+                                  SzViewRowFn render, void *render_env) {
+  return sz_view_virtual_list(row_height, items, key, key_env, render, render_env);
+}
+
+SzView *sz_lang_view_measured_list(int64_t estimate, SzSignalList *items,
+                                  SzViewKeyFn key, void *key_env,
+                                  SzViewRowFn render, void *render_env) {
+  return sz_view_measured_list(estimate, items, key, key_env, render, render_env);
 }

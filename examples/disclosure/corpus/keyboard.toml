@@ -1,0 +1,2 @@
+[fuzz]
+events = ["key Tab", "key Enter", "key Tab", "type Ada", "key Tab", "key Enter", "key Tab", "key Space", "key Tab", "type kept", "key Tab", "key Enter", "key Space", "key Enter", "tap button:Open details", "tap checkbox:Show conditional body", "tap expansion:Conditional", "tap expansion:Conditional"]

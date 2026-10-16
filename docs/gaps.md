@@ -18,13 +18,13 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Unproven.** Full corpus replay plus bounded search fits a frequent decision loop. Evaluator timelines remain equal to compiled timelines on new generated proposals. Index-based state alignment remains clear when a proposal adds or removes steps.
 
-**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 27.40 s from editor launch to the visible question. The evaluator host is cached. Frozen card preparation takes 3.98 s. Restart restores the saved cards in 743 ms. Cached card navigation takes 61 ms. Cached workload navigation takes 67 ms. Cached step navigation takes 61 ms. The 250 ms navigation target is met. Each value is one Headless sample. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It does not measure a cold host build. The warm run starts a new editor process and reuses the saved card identities and evidence. The editor mutation campaign runs at the same time.
+**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 7.9118 s from editor launch to the visible question. The evaluator host is cached. Frozen card preparation takes 3.450 s. Restart restores the saved cards in 1102.1 ms. Cached card navigation takes 160.2 ms. Cached workload navigation takes 107.0 ms. Cached step navigation takes 106.7 ms. The 250 ms navigation target is met. Each value is one Headless sample. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It does not measure a cold host build. The warm run starts a new editor process and reuses the saved card identities and evidence.
 
-The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor SHA-256 is `8b98ef68457917acb0d9498ffd5a1046a80f12ce679c8a3a73f2d5a635fcda0f`. The evaluator host SHA-256 is `cb8d264b1dcabee9995f75e290fed230feae5c5dd97fb4cbb8a50f931c2f5a23`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
+The host runs Linux 7.0.0-38-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `69667ac7e8f132eb9ecbf4ce711790ef7bdefc3e6356c199113f407aae7734bf`. The editor SHA-256 is `9fe494395f11c3288e21bb27b913369727a1e48f1119aa5e2f3e726d1474dd3e`. The evaluator host SHA-256 is `16805cfd9d847ed3b0d2895dd621d543f9d5d98577b33f81d1dbc97ba93f9447`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
 
-**Finite parity.** CI compares exact timelines and claims for generated type-checker and code-generation drives. An IO proof keeps user signals visible and hides internal storage. Editor idle, queue-cache, and protocol replay have equal timelines and claims. The editor corpus has 228 passing entries. Its 22 claim drivers run. Three sometimes labels and four UI triggers remain unreached. These finite checks do not prove all programs equal. One sequential editor comparison takes 12.32 s for idle, 16.35 s for queue-cache, and 15.43 s for protocol replay on the evaluator. These intervals include host startup. The samples use Linux 7.0.0-38-generic. Compiled runs take 0.05 s, 0.21 s, and 0.20 s. The 20 s probe deadline and Linux memory limit apply.
+**Finite parity.** CI compares exact timelines and claims for generated type-checker and code-generation drives. An IO proof keeps user signals visible and hides internal storage. Editor idle, queue-cache, and protocol replay have equal timelines and claims. The editor corpus has 228 passing entries. Its 22 claim drivers run. Three sometimes labels and four UI triggers remain unreached. These finite checks do not prove all programs equal. One sequential editor comparison takes 20.75 s for idle, 23.93 s for queue-cache, and 23.40 s for protocol replay on the evaluator. These intervals include host startup. The samples use Linux 7.0.0-38-generic. Compiled runs take 0.06 s, 0.21 s, and 0.21 s. The 20 s probe deadline and Linux memory limit apply.
 
-**Constructor and View parity.** A constructor proof checks both declaration orders, defaults, named arguments, records, and match fields. Its evaluator and native timelines and claims are equal. A Headless proof checks direct, list, and nested View signals with a button action. Its timelines and claims are equal. The Docs corpus has 10 passing entries. Its evaluator idle check does not select compiled fallback.
+**Constructor and View parity.** A constructor proof checks both declaration orders, defaults, named arguments, records, and match fields. Its evaluator and native timelines and claims are equal. A Headless proof checks direct, list, and nested View signals with a button action. Its timelines and claims are equal. The Docs corpus has 10 passing entries. Its idle native and evaluator timelines differ for View-valued list Signals. Native output uses handles. Evaluator output contains View graphs. The campaign uses compiled probes. Exact replay for these Signals remains open.
 
 **Compiler scope proof.** Inline bindings use names from their expression scopes. Renaming includes local function calls. Nested matches use the checked scalar result type. Generated compiler proofs check repeated names in separate match arms, nested expressions, closure captures, aliases, and heap results. The generated proofs also check generic record access and wildcard fields with heap values. These finite checks do not prove all binding scopes correct.
 
@@ -75,6 +75,62 @@ Allocation counts do not measure CPU time. These samples do not establish a gene
 The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. iOS `Net.httpGetToFile` compiles, but the current Net proof app does not launch with the SDK scene-lifecycle requirement. Its runtime proof stays open. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
 
 ## Known gaps
+
+### UI framework capability
+
+Real device checks for responsive layouts remain open.
+Real device checks for virtual lists remain open.
+Real mobile device bitmap checks remain open.
+Image color profiles, orientation metadata, and animated formats remain open.
+Browser accessibility and real screen-reader checks remain incomplete.
+Keyboard checks cover a form, named radio groups, manual tabs, nested dialogs, named range sliders, and editors.
+Range checks cover signed 64-bit bounds, stepped values, pointer input, and browser accessibility data.
+Physical-device and real screen-reader checks for sliders remain open.
+Split-pane checks cover keys, collapse, restore, retained state, and named browser separators.
+Physical-device and real screen-reader checks for split panes remain open.
+Dialog checks cover initial focus, focus return, removed openers, and empty dialogs.
+Browser checks cover named modal groups and background exclusion.
+Pointer checks cover card surfaces, scroll boundaries, hover, secondary input, and cancelled gestures.
+Shared runtime checks cover repeated labels and 100 focus targets.
+Segmented choice checks cover names, equal widths, keys, repeated labels, and browser radio states.
+Empty, single, and 100-choice groups have shared runtime checks.
+Physical-device and real screen-reader checks for segmented choices remain open.
+Select checks cover pending input, commit, cancel, type-ahead, dialogs, and bounded popup rows.
+Native checks cover empty, invalid, repeated, and 1000-option lists.
+Browser checks cover combobox relations, active options, keys, wheel input, touch input, and viewport changes.
+Physical-device and real screen-reader checks for select controls remain open.
+Reactive option checks cover replacement, empty lists, recovery, retained fields, and stale pointer input.
+Editable options and full Unicode case folding remain open.
+Compiled UI corpus replay under ASan remains open.
+The runtime C sanitizer suite checks UI constructors and input.
+Expansion checks cover header input, body conditions, nested fields, focus return, and linked browser regions.
+Physical-device and real screen-reader checks for expansion controls remain open.
+Tooltip checks cover focus, hover, popup input, Escape, composition, clipping, themes, and browser descriptions.
+Native and evaluator checks compare exact visibility, timelines, and claims.
+Physical-device and real screen-reader checks for tooltips remain open.
+Keyboard behavior for other composite controls remains unproven.
+Inline action checks cover wrapped fragments, Int keys, callbacks, focus, source copying, and browser button order.
+Physical-device and real screen-reader checks for inline actions remain open.
+Default native Skia checks cover kerning, ligatures, combining accents, Arabic joining, and mixed-direction lines.
+Source cluster checks cover wrapping and ellipsis. Field checks cover shaped carets and pointer positions.
+Pinned Noto fonts supply native and browser fallback for Devanagari, Thai, and Simplified Chinese.
+Finite checks cover source clusters, mark bounds, CJK field positions, and composition.
+Browser checks cover delayed font loading, retained focus, source copying, and font advances.
+The CJK font download uses 17.8 MB before compression. Smaller font delivery remains open.
+Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
+Other script coverage, shaping across styled spans, wrapped paragraph direction, and full bidi caret affinity remain open.
+Native software and OpenGL renderers keep code-point cells. Their proportional shaping remains open.
+Real-device styled text checks remain open.
+Opacity transitions use the shared pump clock and retain input state.
+Renderer checks cover overlap, nested layers, clips, transparency, and GPU orientation.
+Runtime checks cover retargeting, hidden cancellation, pause, reduction, and recorded pumps.
+Layout and transform transitions remain open.
+Native operating-system motion preference detection and real-device motion checks remain open.
+Operating-system theme selection and real-device theme checks remain open.
+
+Use the UI work order in `vision.md`.
+Prove each capability with an application, shared input, and exact native and evaluator replay.
+Keep these gaps open until the corresponding runtime behavior and platform checks pass.
 
 ### Local choice feedback
 

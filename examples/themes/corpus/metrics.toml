@@ -1,0 +1,2 @@
+[fuzz]
+events = ["type 1 Grace", "tap checkbox:Updates Light", "tap checkbox:Updates Custom"]

@@ -2,5 +2,5 @@
   for {
     count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
-    _ <- Ui.run(_ => View.column(View.bindText(label), View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))))
+    _ <- Ui.run(_ => View.column([View.bindText(label), View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))]))
   } yield ()

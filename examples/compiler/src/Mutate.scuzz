@@ -932,10 +932,10 @@ def oneSrc(src: String): List[(String, String)] =
   ("Main", src) :: noFiles()
 
 def srcTwoBtn(): String =
-  "@main def main: IO[Unit] =\n  Ui.run(_ => View.column(View.button(\"A\", _ => Signal.set(a, 3)), View.button(\"B\", _ => Signal.set(b, 4))))\n"
+  "@main def main: IO[Unit] =\n  Ui.run(_ => View.column([View.button(\"A\", _ => Signal.set(a, 3)), View.button(\"B\", _ => Signal.set(b, 4))]))\n"
 
 def srcArithBtn(): String =
-  "@main def main: IO[Unit] =\n  Ui.run(_ => View.column(View.button(\"A\", _ => Signal.set(a, Signal.get(a) + 3)), View.button(\"B\", _ => Signal.set(b, 4))))\n"
+  "@main def main: IO[Unit] =\n  Ui.run(_ => View.column([View.button(\"A\", _ => Signal.set(a, Signal.get(a) + 3)), View.button(\"B\", _ => Signal.set(b, 4))]))\n"
 
 def fileSrc(files: List[(String, String)]): String =
   if (List.isEmpty(files)) "" else fileSrcHd(List.at(files, 0))

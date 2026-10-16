@@ -24,11 +24,11 @@ This Counter displays a number and a button. Each click adds one to the number.
   for {
     count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
-    _ <- Ui.run(_ => View.column(
+    _ <- Ui.run(_ => View.column([
       View.text("Counter"),
       View.bindText(label),
       View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
-    ))
+    ]))
   } yield ()
 ```
 

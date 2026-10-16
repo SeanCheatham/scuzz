@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap slider:Temperature (°C)", "key Home", "key ArrowUp", "key PageUp", "key End", "tap slider:Precise count", "key End", "key ArrowLeft", "key PageDown", "key Home", "key ArrowUp"]

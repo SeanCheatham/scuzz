@@ -1,0 +1,8 @@
+@main def main: IO[Unit] =
+  for {
+    count = Signal.make(0)
+    name = Signal.make("אב")
+    countText = Signal.map(count, n => s"Count: $n")
+    valueText = Signal.map(name, value => s"Value: $value")
+    _ <- Ui.run(_ => View.column([View.text("AV fi é"), View.fontSize(24, View.text("السلام عليكم")), View.fontSize(24, View.text("اب AB 12")), View.fontSize(24, View.text("ab אב 12")), View.richText(Text.bold(Text.span("لا"))), View.richText(Text.italic(Text.span("é fi"))), View.maxSize(80, 0, View.text("éééééééééé")), View.maxSize(60, 0, View.maxLines(1, View.ellipsis(View.richText(Text.span("éééééééééé"))))), View.actionText(Text.action(11, Text.span("تفاصيل")), key => Signal.set(count, Signal.get(count) + key)), View.textField(name, "Name"), View.wrap([View.button("Set Arabic", _ => Signal.set(name, "لا")), View.button("Set Latin", _ => Signal.set(name, "AV fi é")), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))]), View.bindText(countText), View.bindText(valueText), View.sized(280, 48, View.scrollH(View.text(Str.repeat("M", 400)))), View.richText(Text.span("नमस्ते สวัสดี 中文漢字")), View.text("क्षि ปู่ 中文")]))
+  } yield ()

@@ -1,0 +1,36 @@
+record Item(id: Int, text: String)
+
+def itemKey(item: Item): Int =
+  item.id
+
+def itemTitle(item: Item): String =
+  s"Item ${item.id}"
+
+def itemText(item: Item): String =
+  item.text
+
+def firstItem(items: List[Item]): Int =
+  List.head(items) match {
+    case Some(item) => item.id
+    case None => -1
+  }
+
+def lastItem(items: List[Item]): Int =
+  firstItem(List.reverse(items))
+
+def itemRow(item: Signal[Item]): View =
+  for {
+    title = Signal.map(item, itemTitle)
+    text = Signal.map(item, itemText)
+    draft = Signal.make("")
+  } yield View.card(View.column([View.bindText(title), View.bindText(text), View.textField(draft, "Note")]))
+
+@main def main: IO[Unit] =
+  for {
+    items = Signal.make(List.map(List.range(0, 10000), i => Item(i, if (i % 3 == 0) "A short row." else if (i % 3 == 1) "This row has more text. Resize the window to change its line count. The list measures its height at the available width." else "This row has several lines. The list keeps the current item in place while other row heights change. A note stays with a mounted row when the list order changes. Rows outside the window release their local state. Keep persistent notes outside the renderer.")))
+    first = Signal.map(items, firstItem)
+    last = Signal.map(items, lastItem)
+    firstText = Signal.map(first, n => s"First: $n")
+    lastText = Signal.map(last, n => s"Last: $n")
+    _ <- Ui.run(_ => View.column([View.text("Measured rows"), View.row([View.bindText(firstText), View.bindText(lastText)]), View.row([View.button("Reverse", _ => Signal.set(items, List.reverse(Signal.get(items)))), View.button("Remove first", _ => Signal.set(items, List.drop(Signal.get(items), 1)))]), View.expanded(1, View.measuredList(160, items, itemKey, itemRow))]))
+  } yield ()

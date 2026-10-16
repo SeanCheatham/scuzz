@@ -5,6 +5,8 @@
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkData.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkSamplingOptions.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkImageInfo.h"
@@ -12,10 +14,22 @@
 #include "include/core/SkStream.h"
 #include "include/core/SkSurface.h"
 #include "include/core/SkTypeface.h"
+#include "include/core/SkFontMetrics.h"
+#include "include/core/SkFontArguments.h"
+#include <array>
+#include <algorithm>
 #include "include/encode/SkPngEncoder.h"
 #include "include/ports/SkFontMgr_data.h"
 #include "include/ports/SkFontMgr_empty.h"
 
+#include <hb.h>
+#include <hb-ot.h>
+#include <SheenBidi/SheenBidi.h>
+
+#include <climits>
+#include <memory>
+#include <map>
+#include <vector>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -95,6 +109,275 @@ static SkFont make_mono_font(float size) {
   return SkFont(mono_typeface(), px);
 }
 
+static hb_blob_t *font_table(hb_face_t *, hb_tag_t tag, void *data) {
+  auto *typeface = static_cast<SkTypeface *>(data);
+  sk_sp<SkData> table = typeface->copyTableData(tag);
+  if (!table || table->size() > UINT_MAX) return hb_blob_get_empty();
+  auto *bytes = static_cast<const char *>(table->data());
+  unsigned length = static_cast<unsigned>(table->size());
+  return hb_blob_create(bytes, length, HB_MEMORY_MODE_READONLY, table.release(),
+    [](void *ptr) { static_cast<SkData *>(ptr)->unref(); });
+}
+
+extern "C" {
+extern const unsigned char scuzz_font_devanagari[], scuzz_font_thai[], scuzz_font_sc[];
+extern const unsigned int scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len;
+}
+
+static sk_sp<SkTypeface> text_typeface(unsigned index) {
+  if (!index) return default_typeface();
+  static std::array<sk_sp<SkTypeface>, 3> faces;
+  static std::array<std::once_flag, 3> once;
+  std::call_once(once[index - 1], [index] {
+    const unsigned char *data[] = {scuzz_font_devanagari, scuzz_font_thai, scuzz_font_sc};
+    const unsigned lengths[] = {scuzz_font_devanagari_len, scuzz_font_thai_len, scuzz_font_sc_len};
+    auto bytes = SkData::MakeWithoutCopy(data[index - 1], lengths[index - 1]);
+    auto manager = SkFontMgr_New_Custom_Empty();
+    auto face = manager->makeFromData(bytes);
+    if (!face) std::abort();
+    SkFontArguments::VariationPosition::Coordinate coordinates[] = {
+      {SkSetFourByteTag('w','g','h','t'), 400.f}, {SkSetFourByteTag('w','d','t','h'), 100.f}};
+    SkFontArguments arguments;
+    arguments.setVariationDesignPosition({coordinates, 2});
+    auto normal = face->makeClone(arguments);
+    if (!normal) std::abort();
+    faces[index - 1] = normal;
+  });
+  return faces[index - 1];
+}
+
+static hb_font_t *shape_font(unsigned index = 0) {
+  using Font = std::unique_ptr<hb_font_t, decltype(&hb_font_destroy)>;
+  static std::array<Font, 4> fonts = {Font(nullptr, hb_font_destroy), Font(nullptr, hb_font_destroy),
+    Font(nullptr, hb_font_destroy), Font(nullptr, hb_font_destroy)};
+  static std::array<std::once_flag, 4> once;
+  std::call_once(once[index], [index] {
+    sk_sp<SkTypeface> typeface = text_typeface(index);
+    if (!typeface) std::abort();
+    typeface->ref();
+    hb_face_t *face = hb_face_create_for_tables(font_table, typeface.get(),
+      [](void *ptr) { static_cast<SkTypeface *>(ptr)->unref(); });
+    hb_font_t *font = hb_font_create(face);
+    hb_face_destroy(face);
+    hb_ot_font_set_funcs(font);
+    if (index) {
+      hb_variation_t variations[] = {{HB_TAG('w','g','h','t'), 400.f}, {HB_TAG('w','d','t','h'), 100.f}};
+      hb_font_set_variations(font, variations, 2);
+    }
+    hb_font_make_immutable(font);
+    fonts[index].reset(font);
+  });
+  return fonts[index].get();
+}
+
+static bool font_covers(unsigned index, const char *text, size_t bytes) {
+  SBCodepointSequence sequence = {SBStringEncodingUTF8, const_cast<char *>(text), bytes};
+  hb_font_t *font = shape_font(index);
+  for (SBUInteger offset = 0; offset < bytes;) {
+    SBCodepoint cp = SBCodepointSequenceGetCodepointAt(&sequence, &offset);
+    auto category = hb_unicode_general_category(hb_unicode_funcs_get_default(), cp);
+    if (category == HB_UNICODE_GENERAL_CATEGORY_FORMAT || cp == '\n' || cp == '\r' ||
+        (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF)) continue;
+    hb_codepoint_t glyph;
+    if (!hb_font_get_nominal_glyph(font, cp, &glyph)) return false;
+  }
+  return true;
+}
+
+static unsigned select_font(const char *text, size_t bytes) {
+  for (unsigned index = 0; index < 4; index++)
+    if (font_covers(index, text, bytes)) return index;
+  return 0;
+}
+
+struct ShapedText {
+  std::vector<SkGlyphID> glyphs;
+  std::vector<unsigned> clusters, fonts;
+  std::vector<float> starts, ends;
+  std::vector<bool> rtl;
+  std::vector<SkPoint> positions;
+  float width = 0.f;
+};
+
+static ShapedText shape_text(const char *text, size_t bytes, float size) {
+  ShapedText result;
+  if (!text || !bytes || bytes > INT_MAX) return result;
+  SBCodepointSequence sequence = {SBStringEncodingUTF8, const_cast<char *>(text), bytes};
+  SBAlgorithmRef algorithm = SBAlgorithmCreate(&sequence);
+  SBScriptLocatorRef locator = SBScriptLocatorCreate();
+  if (!algorithm || !locator) {
+    if (locator) SBScriptLocatorRelease(locator);
+    if (algorithm) SBAlgorithmRelease(algorithm);
+    return result;
+  }
+  std::vector<SBScriptAgent> scripts;
+  SBScriptLocatorLoadCodepoints(locator, &sequence);
+  while (SBScriptLocatorMoveNext(locator)) scripts.push_back(*SBScriptLocatorGetAgent(locator));
+  SBScriptLocatorRelease(locator);
+  hb_buffer_t *buffer = hb_buffer_create();
+  auto shape = [&](SBUInteger start, SBUInteger length, SBScript script, bool rtl, unsigned index) {
+    hb_font_t *font = shape_font(index);
+    unsigned units = hb_face_get_upem(hb_font_get_face(font));
+    float scale = (size > 0.f ? size : 8.f) / static_cast<float>(units ? units : 1);
+    hb_buffer_clear_contents(buffer);
+    hb_buffer_add_utf8(buffer, text, static_cast<int>(bytes), static_cast<unsigned>(start),
+      static_cast<int>(length));
+    /* Use one language on each host. The process locale does not select glyphs. */
+    hb_buffer_set_language(buffer, hb_language_from_string("und", -1));
+    hb_buffer_set_direction(buffer, rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+    hb_buffer_set_script(buffer, hb_script_from_iso15924_tag(SBScriptGetUnicodeTag(script)));
+    hb_shape(font, buffer, nullptr, 0);
+    unsigned count = 0;
+    const hb_glyph_info_t *info = hb_buffer_get_glyph_infos(buffer, &count);
+    const hb_glyph_position_t *position = hb_buffer_get_glyph_positions(buffer, nullptr);
+    float x = result.width, y = 0.f;
+    for (unsigned i = 0; i < count; i++) {
+      result.glyphs.push_back(static_cast<SkGlyphID>(info[i].codepoint));
+      result.clusters.push_back(info[i].cluster);
+      result.fonts.push_back(index);
+      result.starts.push_back(x);
+      result.ends.push_back(x + position[i].x_advance * scale);
+      result.rtl.push_back(rtl);
+      result.positions.push_back({x + position[i].x_offset * scale, y - position[i].y_offset * scale});
+      x += position[i].x_advance * scale;
+      y -= position[i].y_advance * scale;
+    }
+    result.width = x;
+  };
+  auto append = [&](SBUInteger start, SBUInteger length, SBScript script, bool rtl) {
+    if (font_covers(0, text + start, length)) {
+      shape(start, length, script, rtl, 0);
+      return;
+    }
+    /* Keep the shaper's source clusters together when coverage is partial. */
+    hb_buffer_clear_contents(buffer);
+    hb_buffer_add_utf8(buffer, text, static_cast<int>(bytes), start, length);
+    hb_buffer_set_direction(buffer, rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+    hb_buffer_set_script(buffer, hb_script_from_iso15924_tag(SBScriptGetUnicodeTag(script)));
+    hb_buffer_set_language(buffer, hb_language_from_string("und", -1));
+    hb_shape(shape_font(), buffer, nullptr, 0);
+    unsigned count;
+    const auto *info = hb_buffer_get_glyph_infos(buffer, &count);
+    std::vector<unsigned> boundaries = {static_cast<unsigned>(start), static_cast<unsigned>(start + length)};
+    for (unsigned i = 0; i < count; i++) boundaries.push_back(info[i].cluster);
+    std::sort(boundaries.begin(), boundaries.end());
+    boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
+    struct Part { unsigned start, end, font; };
+    std::vector<Part> parts;
+    for (size_t i = 1; i < boundaries.size(); i++) {
+      unsigned a = boundaries[i - 1], b = boundaries[i];
+      unsigned font = select_font(text + a, b - a);
+      if (!parts.empty() && parts.back().font == font) parts.back().end = b;
+      else parts.push_back({a, b, font});
+    }
+    if (rtl) std::reverse(parts.begin(), parts.end());
+    for (const auto &part : parts) shape(part.start, part.end - part.start, script, rtl, part.font);
+  };
+  for (SBUInteger offset = 0; offset < bytes;) {
+    SBParagraphRef paragraph = SBAlgorithmCreateParagraph(algorithm, offset, bytes - offset, SBLevelDefaultLTR);
+    if (!paragraph) break;
+    SBUInteger length = SBParagraphGetLength(paragraph);
+    SBLineRef line = length ? SBParagraphCreateLine(paragraph, offset, length) : nullptr;
+    if (line) {
+      const SBRun *runs = SBLineGetRunsPtr(line);
+      SBUInteger count = SBLineGetRunCount(line);
+      for (SBUInteger i = 0; i < count; i++) {
+        const SBRun &run = runs[i];
+        std::vector<SBScriptAgent> parts;
+        for (const auto &script : scripts) {
+          SBUInteger start = std::max(run.offset, script.offset);
+          SBUInteger end = std::min(run.offset + run.length, script.offset + script.length);
+          if (end > start) parts.push_back({start, end - start, script.script});
+        }
+        if (run.level & 1) {
+          for (auto p = parts.rbegin(); p != parts.rend(); ++p) append(p->offset, p->length, p->script, true);
+        } else {
+          for (const auto &p : parts) append(p.offset, p.length, p.script, false);
+        }
+      }
+      SBLineRelease(line);
+    }
+    SBParagraphRelease(paragraph);
+    if (!length) break;
+    offset += length;
+  }
+  hb_buffer_destroy(buffer);
+  SBAlgorithmRelease(algorithm);
+  return result;
+}
+
+static bool advances_caret(SBCodepoint codepoint) {
+  hb_unicode_general_category_t category = hb_unicode_general_category(hb_unicode_funcs_get_default(), codepoint);
+  return category != HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK &&
+    category != HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK &&
+    category != HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK &&
+    category != HB_UNICODE_GENERAL_CATEGORY_FORMAT;
+}
+
+void scuzz_skia_font_text_positions(const char *text, size_t bytes, float font_px,
+                                    float *leading, float *trailing) {
+  if (!leading || !trailing || bytes > INT_MAX) return;
+  std::fill(leading, leading + bytes + 1, 0.f);
+  std::fill(trailing, trailing + bytes + 1, 0.f);
+  ShapedText shaped = shape_text(text, bytes, font_px);
+  struct Cluster { float left, right; bool rtl; };
+  std::map<unsigned, Cluster> clusters;
+  for (size_t i = 0; i < shaped.clusters.size(); i++) {
+    unsigned byte = shaped.clusters[i];
+    auto inserted = clusters.emplace(byte, Cluster{shaped.starts[i], shaped.ends[i], shaped.rtl[i]});
+    Cluster &cluster = inserted.first->second;
+    cluster.left = std::min(cluster.left, shaped.starts[i]);
+    cluster.right = std::max(cluster.right, shaped.ends[i]);
+  }
+  SBCodepointSequence sequence = {SBStringEncodingUTF8, const_cast<char *>(text), bytes};
+  for (auto i = clusters.begin(); i != clusters.end(); ++i) {
+    auto next = std::next(i);
+    SBUInteger start = i->first, end = next == clusters.end() ? bytes : next->first;
+    if (start >= end || end > bytes) continue;
+    unsigned bases = 0, step = 0;
+    for (SBUInteger p = start; p < end;) bases += advances_caret(SBCodepointSequenceGetCodepointAt(&sequence, &p));
+    bool mark_only = bases == 0;
+    if (mark_only) bases = 1;
+    float a = i->second.rtl ? i->second.right : i->second.left;
+    float b = i->second.rtl ? i->second.left : i->second.right;
+    for (SBUInteger p = start; p < end;) {
+      SBUInteger byte = p;
+      SBCodepoint codepoint = SBCodepointSequenceGetCodepointAt(&sequence, &p);
+      float before = a + (b - a) * static_cast<float>(step) / bases;
+      if (advances_caret(codepoint) || (mark_only && byte == start)) step++;
+      float after = a + (b - a) * static_cast<float>(step) / bases;
+      while (byte < p) { leading[byte] = before; trailing[byte] = after; byte++; }
+    }
+  }
+  if (bytes) leading[bytes] = trailing[bytes] = trailing[bytes - 1];
+}
+
+void scuzz_skia_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks) {
+  if (!breaks || bytes == SIZE_MAX) return;
+  std::memset(breaks, 0, bytes + 1);
+  breaks[0] = breaks[bytes] = 1;
+  ShapedText shaped = shape_text(text, bytes, 14.f);
+  for (unsigned cluster : shaped.clusters) if (cluster <= bytes) breaks[cluster] = 1;
+}
+
+static float shaped_width(const char *text, size_t bytes, float size) {
+  return shape_text(text, bytes, size).width;
+}
+
+static void draw_shaped(CapCanvas *canvas, const char *text, size_t bytes,
+                        float x, float y, const SkFont &font, const SkPaint &paint) {
+  ShapedText shaped = shape_text(text, bytes, font.getSize());
+  for (size_t start = 0; start < shaped.glyphs.size();) {
+    size_t end = start + 1;
+    while (end < shaped.glyphs.size() && shaped.fonts[end] == shaped.fonts[start]) end++;
+    SkFont selected = font;
+    selected.setTypeface(text_typeface(shaped.fonts[start]));
+    canvas->raw->drawGlyphs(static_cast<int>(end - start), shaped.glyphs.data() + start,
+      shaped.positions.data() + start, {x, y}, selected, paint);
+    start = end;
+  }
+}
+
 void *scuzz_skia_surface_make(int width, int height) {
   if (width <= 0 || height <= 0)
     return nullptr;
@@ -171,8 +454,7 @@ void scuzz_skia_canvas_draw_string(void *canvas, const char *text, float x,
   if (!c || !c->raw || !p || !text)
     return;
   SkFont font = make_font(p->text_size);
-  c->raw->drawSimpleText(text, std::strlen(text), SkTextEncoding::kUTF8, x, y,
-                         font, p->paint);
+  draw_shaped(c, text, std::strlen(text), x, y, font, p->paint);
 }
 
 void scuzz_skia_canvas_draw_string_mono(void *canvas, const char *text, float x,
@@ -190,6 +472,13 @@ void scuzz_skia_canvas_save(void *canvas) {
   auto *c = static_cast<CapCanvas *>(canvas);
   if (c && c->raw)
     c->raw->save();
+}
+
+int scuzz_skia_canvas_save_layer_alpha(void *canvas, uint8_t alpha) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  if (!c || !c->raw) return 0;
+  c->raw->saveLayerAlpha(nullptr, alpha);
+  return 1;
 }
 
 void scuzz_skia_canvas_restore(void *canvas) {
@@ -241,11 +530,64 @@ float scuzz_skia_paint_get_text_size(const void *paint) {
   return p ? p->text_size : 8.f;
 }
 
+static SkFont styled_font(float size, int style) {
+  SkFont font = (style & 4) ? make_mono_font(size) : make_font(size);
+  font.setEmbolden((style & 1) != 0);
+  if (style & 2) font.setSkewX(-0.2f);
+  return font;
+}
+
+void scuzz_skia_font_metrics(float font_px, int style, float *ascent, float *descent) {
+  SkFontMetrics metrics;
+  styled_font(font_px, style).getMetrics(&metrics);
+  if (ascent) *ascent = std::max(0.f, -metrics.fAscent);
+  if (descent) *descent = std::max(0.f, metrics.fDescent);
+}
+
+void scuzz_skia_font_span_metrics(const char *text, size_t bytes, float font_px, int style,
+                                 float *ascent, float *descent) {
+  float a = 0.f, d = 0.f;
+  if (style & 4) scuzz_skia_font_metrics(font_px, style, &a, &d);
+  else {
+    ShapedText shaped = shape_text(text, bytes, font_px);
+    SkFont font = styled_font(font_px, style);
+    for (size_t i = 0; i < shaped.glyphs.size(); i++) {
+      font.setTypeface(text_typeface(shaped.fonts[i]));
+      SkRect bounds;
+      font.getBounds(&shaped.glyphs[i], 1, &bounds, nullptr);
+      a = std::max(a, -bounds.top() - shaped.positions[i].y());
+      d = std::max(d, bounds.bottom() + shaped.positions[i].y());
+    }
+  }
+  if (ascent) *ascent = a;
+  if (descent) *descent = d;
+}
+
+float scuzz_skia_font_measure_span(const char *text, size_t bytes, float font_px, int style) {
+  if (!text) return 0.f;
+  return style & 4 ? styled_font(font_px, style).measureText(text, bytes, SkTextEncoding::kUTF8) :
+    shaped_width(text, bytes, font_px);
+}
+
+void scuzz_skia_canvas_draw_span(void *canvas, const char *text, size_t bytes,
+                                float x, float y, const void *paint, int style) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  auto *p = static_cast<const CapPaint *>(paint);
+  if (!c || !c->raw || !p || !text) return;
+  SkFont font = styled_font(p->text_size, style);
+  if (style & 4) c->raw->drawSimpleText(text, bytes, SkTextEncoding::kUTF8, x, y, font, p->paint);
+  else draw_shaped(c, text, bytes, x, y, font, p->paint);
+  if (style & 8) {
+    float width = scuzz_skia_font_measure_span(text, bytes, p->text_size, style);
+    c->raw->drawRect(SkRect::MakeXYWH(x, y + p->text_size * 0.1f, width,
+                                    std::max(1.f, p->text_size / 16.f)), p->paint);
+  }
+}
+
 float scuzz_skia_font_measure_string(const char *text, float font_px) {
   if (!text)
     return 0.f;
-  SkFont font = make_font(font_px);
-  return font.measureText(text, std::strlen(text), SkTextEncoding::kUTF8);
+  return shaped_width(text, std::strlen(text), font_px);
 }
 
 float scuzz_skia_font_measure_string_mono(const char *text, float font_px) {
@@ -289,4 +631,37 @@ int scuzz_skia_encode_png_to_file(const void *surface, const char *path) {
   bool ok = stream.write(bytes, len);
   std::free(bytes);
   return ok ? 1 : 0;
+}
+
+void *scuzz_skia_image_make(const uint8_t *pixels, int width, int height) {
+  if (!pixels || width < 1 || height < 1 || width > 4096 || height > 4096)
+    return nullptr;
+  auto data = SkData::MakeWithCopy(pixels, (size_t)width * height * 4);
+  auto image = SkImages::RasterFromData(
+      SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kPremul_SkAlphaType),
+      data, (size_t)width * 4);
+  return image ? new sk_sp<SkImage>(image) : nullptr;
+}
+void scuzz_skia_image_unref(void *image) {
+  delete static_cast<sk_sp<SkImage> *>(image);
+}
+int scuzz_skia_image_width(const void *image) {
+  auto value = static_cast<const sk_sp<SkImage> *>(image);
+  return value && *value ? (*value)->width() : 0;
+}
+int scuzz_skia_image_height(const void *image) {
+  auto value = static_cast<const sk_sp<SkImage> *>(image);
+  return value && *value ? (*value)->height() : 0;
+}
+void scuzz_skia_canvas_draw_image(void *canvas, const void *image, float x,
+                                  float y, float w, float h, float opacity) {
+  auto target = static_cast<CapCanvas *>(canvas);
+  auto value = static_cast<const sk_sp<SkImage> *>(image);
+  if (!target || !target->raw || !value || !*value || !(w > 0.f) ||
+      !(h > 0.f) || !(opacity > 0.f))
+    return;
+  SkPaint paint;
+  paint.setAlphaf(opacity > 1.f ? 1.f : opacity);
+  target->raw->drawImageRect(*value, SkRect::MakeXYWH(x, y, w, h),
+                            SkSamplingOptions(SkFilterMode::kLinear), &paint);
 }

@@ -4,24 +4,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scuzz</title>
 <link rel="icon" href="data:,">
+<link rel="stylesheet" href="./fonts/fonts.css">
 <style>
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #f5efdf; }
 canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: pinch-zoom; }
 #text-layer { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
 #text-layer .text span { position: absolute; white-space: pre; color: transparent;
   pointer-events: auto; user-select: text; -webkit-user-select: text; cursor: text; }
-#text-layer .text span::selection { background: #f4d35e; color: #24211c; }
+#text-layer .text span::selection { background: var(--selection, #f4d35e); color: var(--ink, #24211c); }
 #app { position: relative; width: 100%; height: 100%; }
 .control { position: absolute; display: block; box-sizing: border-box; margin: 0; padding: 0;
   border: 0; background: transparent; color: transparent; cursor: pointer; pointer-events: auto; }
-.control:focus-visible { outline: 2px solid #24211c; outline-offset: -4px; }
+#text-layer .text .inline-action { pointer-events: none; user-select: text; }
+#text-layer .text .inline-action, #text-layer .text .inline-action span { cursor: pointer; }
+.inline-action:focus-visible { outline: none !important; }
+.control:focus-visible { outline: 2px solid var(--ink, #24211c); outline-offset: -4px; }
+.tooltip { z-index: 10; position: absolute; overflow: hidden; color: transparent; pointer-events: auto; cursor: default; }
 .semantic-group { position: absolute; pointer-events: none; }
-.panel:focus-visible { outline: 2px solid #24211c; outline-offset: -4px; }
-.control.edit { font: 14px/20px monospace; padding: 8px; color: transparent; caret-color: #24211c;
+.control[role="combobox"], .control[role="option"] { touch-action: none; }
+.panel:focus-visible { outline: 2px solid var(--ink, #24211c); outline-offset: -4px; }
+.control.edit { text-align: left; font: 14px/20px "Scuzz devanagari", "Scuzz thai", "Scuzz sc", monospace; padding: 8px; color: transparent; caret-color: var(--ink, #24211c);
   background: transparent; border: 1px solid transparent; resize: none; cursor: text; border-radius: 0;
   overflow: auto; overscroll-behavior: contain; white-space: pre; }
-.control.edit::selection { background: #f4d35e; color: transparent; }
-.control.edit.ime { color: #24211c; }
+.control.edit::selection { background: var(--selection, #f4d35e); color: transparent; }
+.control.edit.ime { color: var(--ink, #24211c); }
 @media (pointer: coarse) { .control.edit { font-size: 16px; } }
 #feedback { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #status { position: absolute; top: 1rem; left: 1rem; font: 16px sans-serif; }
@@ -39,6 +45,33 @@ const encoder = new TextEncoder();
 var Module = {
   canvas: document.getElementById('canvas'),
   nodes: new Map(),
+  scuzzFontStack: '"Scuzz devanagari", "Scuzz thai", "Scuzz sc", monospace',
+  loadTextFonts(source) {
+    this.fontLoads ||= new Map();
+    this.fontRanges ||= [...document.fonts].filter(face => face.family.includes('Scuzz ')).map(face => ({
+      family: face.family,
+      ranges: face.unicodeRange.split(',').map(range => {
+        const ends = range.trim().slice(2).split('-').map(value => parseInt(value, 16));
+        return [ends[0], ends[1] ?? ends[0]];
+      })
+    }));
+    for (const font of this.fontRanges) {
+      if (this.fontLoads.has(font.family)) continue;
+      const character = [...source].find(character => {
+        const cp = character.codePointAt(0);
+        return font.ranges.some(([start, end]) => cp >= start && cp <= end);
+      });
+      if (character === undefined) continue;
+      const promise = document.fonts.load('400 16px ' + font.family, character);
+      this.fontLoads.set(font.family, promise);
+      promise.then(() => {
+        if (Module.ready) Module.ccall('sz_web_fonts_changed', null, [], []);
+      }).catch(error => console.error('Font load failed:', error));
+    }
+  },
+  cssColor(argb) {
+    return `rgba(${(argb >>> 16) & 255}, ${(argb >>> 8) & 255}, ${argb & 255}, ${(argb >>> 24) / 255})`;
+  },
   onRuntimeInitialized() { status.hidden = true; },
   onAbort() { Module.ready = false; status.hidden = false; status.textContent = 'The application could not start. Reload to retry.'; },
   printErr(text) { console.error(text); },
@@ -72,17 +105,57 @@ var Module = {
   makeControl(item) {
     const editing = item.role === 3 || item.role === 41;
     const pictured = item.role === 4 || item.role === 49;
-    const node = document.createElement(item.route !== null ? 'a' : editing ? (item.role === 3 ? 'input' : 'textarea') : item.role === 8 ? 'input' : pictured ? 'div' : 'button');
-    node.className = 'control';
+    const node = document.createElement(item.inline ? 'span' : item.route !== null ? 'a' : editing ? (item.role === 3 ? 'input' : 'textarea') : (item.role === 8 || item.role === 42 || item.role === 55 || item.role === 57 || pictured) ? 'div' : 'button');
+    node.className = 'control' + (item.inline ? ' inline-action' : '');
     if (node.tagName === 'BUTTON') node.type = 'button';
+    if (item.inline) {
+      node.setAttribute('role', 'button');
+      node.addEventListener('keydown', event => {
+        if (!['Enter', ' '].includes(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
+        event.preventDefault();
+        Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key === ' ' ? 'Space' : event.key, 0, Number(event.repeat)]);
+      });
+      node.addEventListener('pointerdown', event => { node.dragOrigin = [event.clientX, event.clientY]; node.inlineDrag = false; });
+      node.addEventListener('pointerup', event => {
+        if (node.dragOrigin) node.inlineDrag = (event.clientX - node.dragOrigin[0]) ** 2 + (event.clientY - node.dragOrigin[1]) ** 2 > 36;
+        node.dragOrigin = null;
+      });
+      node.addEventListener('pointercancel', () => { node.dragOrigin = null; node.inlineDrag = true; });
+    }
     node.addEventListener('focus', () => {
+      if (node.item.role === 57) {
+        Module.nodes.get(node.item.related)?.focus();
+        return;
+      }
       Module.ccall('sz_web_focus', null, ['number'], [node.item.id]);
       if (editing) Module.syncEdit(node, 2);
     });
+    if (item.role === 55) {
+      node.addEventListener('keydown', event => {
+        if (event.ctrlKey || event.metaKey || event.key === 'Tab') return;
+        const known = ['Enter', ' ', 'Escape', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp', 'Backspace'];
+        if (!known.includes(event.key) && (event.altKey || [...event.key].length !== 1)) return;
+        event.preventDefault();
+        Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'],
+          [event.key === ' ' ? 'Space' : event.key, (event.shiftKey ? 1 : 0) | (event.altKey ? 8 : 0), Number(event.repeat)]);
+      });
+    }
     if (editing) {
       node.classList.add('edit');
+      if (item.role === 3) node.dir = 'auto';
       node.spellcheck = false;
       if (item.role === 41) node.wrap = 'off';
+      node.addEventListener('keydown', event => {
+        if (node.item.role !== 41 || event.key !== 'Tab' || event.metaKey || event.altKey) return;
+        event.preventDefault();
+        Module.syncEdit(node, 2);
+        const mods = (event.shiftKey ? 1 : 0) | (event.ctrlKey ? 2 : 0);
+        Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, mods, Number(event.repeat)]);
+        if (event.ctrlKey) {
+          const id = Module.ccall('sz_web_focused', 'number', [], []);
+          Module.nodes.get(id)?.focus({preventScroll: true});
+        }
+      });
       node.addEventListener('compositionstart', () => { node.composing = true; node.classList.add('ime'); });
       node.addEventListener('compositionupdate', event => Module.syncEdit(node, 1, event.data));
       node.addEventListener('compositionend', () => {
@@ -96,14 +169,50 @@ var Module = {
       node.addEventListener('select', () => { if (!node.composing) Module.syncEdit(node, 2); });
       node.addEventListener('keyup', () => { if (!node.composing) Module.syncEdit(node, 2); });
       node.addEventListener('click', () => Module.syncEdit(node, 2));
-    } else if (item.role === 8) {
-      node.type = 'range'; node.min = '0'; node.max = '100';
-      node.addEventListener('input', () => Module.ccall('sz_web_slider', null, ['number', 'number'], [node.item.id, Number(node.value)]));
+    } else if (item.role === 8 || item.role === 42) {
+      node.setAttribute('role', item.role === 42 ? 'separator' : 'slider');
+      if (item.role === 42) { node.setAttribute('aria-orientation', 'vertical'); node.style.cursor = 'col-resize'; }
+      node.style.touchAction = 'none';
+      const pointer = (x, y, phase) => Module.ccall('sz_web_pointer', null,
+        ['number', 'number', 'number'], [x, y, phase]);
+      node.addEventListener('keydown', event => {
+        if (!(node.item.role === 42 ? ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'] : ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']).includes(event.key) ||
+            event.ctrlKey || event.metaKey || event.altKey) return;
+        event.preventDefault();
+        Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, 0, Number(event.repeat)]);
+      });
+      node.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || node.dragging != null) return;
+        event.preventDefault();
+        node.dragging = event.pointerId;
+        node.point = [event.clientX, event.clientY];
+        pointer(...node.point, 1);
+        node.focus({preventScroll: true});
+        node.setPointerCapture(event.pointerId);
+      });
+      node.addEventListener('pointermove', event => {
+        if (node.dragging !== event.pointerId) return;
+        event.preventDefault();
+        node.point = [event.clientX, event.clientY];
+        pointer(...node.point, 2);
+      });
+      const end = event => {
+        if (node.dragging !== event.pointerId) return;
+        event.preventDefault();
+        node.dragging = null;
+        if (event.type === 'pointerup') node.point = [event.clientX, event.clientY];
+        pointer(...node.point, 3);
+        if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+      };
+      for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) node.addEventListener(name, end);
     } else if (pictured) {
       node.setAttribute('role', 'img');
       node.style.cursor = 'default';
     } else {
       node.addEventListener('click', event => {
+        if ((node.item.role === 55 || node.item.role === 57) && event.detail) { event.preventDefault(); return; }
+        if (node.item.inline && event.detail && node.inlineDrag) { event.preventDefault(); return; }
+        if (node.item.inline) node.focus({preventScroll: true});
         if (node.tagName === 'A' && (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)) return;
         const route = node.item?.route || '';
         if (node.tagName === 'A' && (route.startsWith('http://') || route.startsWith('https://'))) return;
@@ -111,12 +220,21 @@ var Module = {
         Module.ccall('sz_web_activate', 'number', ['number'], [node.item.id]);
       });
       node.addEventListener('keydown', event => {
+        if ([9, 24, 32].includes(node.item.role) &&
+            ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) &&
+            !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, 0, 0]);
+          const id = Module.ccall('sz_web_focused', 'number', [], []);
+          Module.nodes.get(id)?.focus({preventScroll: true});
+          return;
+        }
         const tab = node.item.role === 45;
         if ((!node.item.route && !tab) || event.ctrlKey || event.metaKey || event.altKey) return;
         const links = [...(tab ? node.closest('[role="tablist"]').querySelectorAll('[role="tab"]') : layer.querySelectorAll('a'))];
         let next = links.indexOf(node);
-        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (next + 1) % links.length;
-        else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = (next + links.length - 1) % links.length;
+        if ((!tab && event.key === 'ArrowDown') || event.key === 'ArrowRight') next = (next + 1) % links.length;
+        else if ((!tab && event.key === 'ArrowUp') || event.key === 'ArrowLeft') next = (next + links.length - 1) % links.length;
         else if (event.key === 'Home') next = 0;
         else if (event.key === 'End') next = links.length - 1;
         else if (event.key === ' ') { event.preventDefault(); node.click(); return; }
@@ -136,58 +254,101 @@ var Module = {
     frame.items.forEach(item => {
       live.add(item.id);
       let node = Module.nodes.get(item.id);
-      const kind = item.group ? 'group' : item.lines ? 'text' : item.route !== null ? 'link' : String(item.role);
+      const kind = item.tooltip ? 'tooltip' : item.group ? 'group' : item.lines ? 'text' : item.route !== null ? 'link' : String(item.role);
       if (node && node.kind !== kind) { node.remove(); Module.nodes.delete(item.id); node = null; }
       if (!node) {
-        node = item.lines || item.group ? document.createElement('div') : Module.makeControl(item);
+        node = item.tooltip || item.lines || item.group ? document.createElement('div') : Module.makeControl(item);
         node.kind = kind; node.dataset.view = item.id;
         node.id = 'view-' + item.id;
         if (item.group) node.className = 'semantic-group';
-        if (item.group && item.role === 47) {
-          node.classList.add('panel'); node.tabIndex = 0;
+        if (item.group && (item.role === 47 || item.role === 43)) {
+          node.classList.add('panel'); node.tabIndex = item.role === 43 ? -1 : 0;
           node.addEventListener('focus', () => Module.ccall('sz_web_focus', null, ['number'], [node.item.id]));
         }
         Module.nodes.set(item.id, node);
       }
       node.item = item;
+      node.style.opacity = String((item.opacity ?? 100) / 100);
+    });
+    const place = (parent, child) => {
+      const index = positions.get(parent) || 0;
+      if (parent.children[index] !== child) parent.insertBefore(child, parent.children[index] || null);
+      positions.set(parent, index + 1);
+    };
+    frame.items.forEach(item => {
+      const node = Module.nodes.get(item.id);
+      if (item.ink !== undefined) {
+        node.style.setProperty('--ink', Module.cssColor(item.ink));
+        node.style.setProperty('--selection', Module.cssColor(item.selection));
+      }
       const parent = item.parent ? Module.nodes.get(item.parent) : layer;
       const ox = item.parent ? parent.item.x : 0;
       const oy = item.parent ? parent.item.y : 0;
-      const index = positions.get(parent) || 0;
-      if (parent.children[index] !== node) parent.insertBefore(node, parent.children[index] || null);
-      positions.set(parent, index + 1);
-      if (item.group) {
+      if (!item.inline) place(parent, node);
+      if (item.tooltip) {
+        node.className = 'tooltip';
+        node.setAttribute('role', 'tooltip');
+        node.textContent = item.label;
         node.hidden = item.hidden;
-        node.setAttribute('role', {46: 'tablist', 47: 'tabpanel', 48: 'region', 51: 'navigation'}[item.role]);
+        node.style.left = item.x / scale + 'px'; node.style.top = item.y / scale + 'px';
+        node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
+      } else if (item.group) {
+        node.hidden = item.hidden;
+        node.style.zIndex = item.role === 56 ? '2' : '';
+        if (item.role === 47) node.tabIndex = item.tabStop ? 0 : -1;
+        node.setAttribute('role', {35: 'group', 43: 'dialog', 46: 'tablist', 47: 'tabpanel', 48: 'region', 51: 'navigation', 53: 'radiogroup', 54: 'region', 56: 'listbox'}[item.role]);
         node.setAttribute('aria-label', item.label);
-        if (item.related) node.setAttribute('aria-labelledby', 'view-' + item.related);
+        if (item.role === 43) node.setAttribute('aria-modal', 'true');
+        if (item.related && item.role !== 56) node.setAttribute('aria-labelledby', 'view-' + item.related);
         node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
         node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
       } else if (item.lines) {
+        // Text fragments use the containing group coordinates.
+        item.x = ox; item.y = oy;
         node.className = 'text';
         if (item.level) { node.setAttribute('role', 'heading'); node.setAttribute('aria-level', item.level); }
         else { node.removeAttribute('role'); node.removeAttribute('aria-level'); }
         let lineIndex = 0;
+        const actions = new Set();
+        node.fragments ||= [];
         item.lines.forEach(line => {
-          let span = node.children[lineIndex++];
-          if (!span) { span = document.createElement('span'); node.append(span); }
+          let span = node.fragments[lineIndex];
+          if (!span) { span = document.createElement('span'); span.append(document.createTextNode('')); node.fragments[lineIndex] = span; }
+          lineIndex++;
+          const action = line.action ? Module.nodes.get(line.action) : null;
+          if (action && !actions.has(action)) { place(node, action); actions.add(action); }
+          place(action || node, span);
+          const originX = action ? action.item.x : ox;
+          const originY = action ? action.item.y : oy;
+          span.dir = 'auto';
           if (span.textContent !== line.text) span.textContent = line.text;
-          span.block = frame.texts.indexOf(item); span.sourceStart = line.start;
-          if (!baselines.has(line.font)) {
-            context.font = line.font / scale + 'px monospace';
+          span.block = frame.texts.indexOf(item); span.sourceStart = line.start; span.sourceEnd = line.end; span.synthetic = Boolean(line.synthetic);
+          const style = line.style || 0;
+          const fontStyle = ((style & 2) ? 'italic ' : '') + ((style & 1) ? 'bold ' : '') + line.font / scale + 'px ' + Module.scuzzFontStack;
+          if (!baselines.has(fontStyle)) {
+            context.font = fontStyle;
             const metrics = context.measureText('M');
-            baselines.set(line.font, ((metrics.fontBoundingBoxAscent ?? line.font * 0.8 / scale) - (metrics.fontBoundingBoxDescent ?? line.font * 0.2 / scale)) / 2);
+            baselines.set(fontStyle, ((metrics.fontBoundingBoxAscent ?? line.font * 0.8 / scale) - (metrics.fontBoundingBoxDescent ?? line.font * 0.2 / scale)) / 2);
           }
-          const top = line.y / scale - line.line_h / scale / 2 - baselines.get(line.font);
-          span.style.left = (line.x - ox) / scale + 'px'; span.style.top = top - oy / scale + 'px';
-          span.style.font = line.font / scale + 'px monospace'; span.style.lineHeight = line.line_h / scale + 'px';
+          const top = line.y / scale - line.line_h / scale / 2 - baselines.get(fontStyle);
+          span.style.left = (line.x - originX) / scale + 'px'; span.style.top = top - originY / scale + 'px';
+          span.style.width = line.width / scale + 'px'; span.style.height = line.line_h / scale + 'px';
+          span.style.font = fontStyle; span.style.lineHeight = line.line_h / scale + 'px';
+          span.style.textDecorationLine = (style & 8) ? 'underline' : 'none';
+          span.style.textDecorationColor = 'transparent';
+          if (line.ink !== undefined) span.style.setProperty('--ink', Module.cssColor(line.ink));
           clip(span, line.x, top * scale, line.width, line.line_h, line.clip, scale);
         });
-        while (node.children.length > lineIndex) node.lastChild.remove();
+        while (node.fragments.length > lineIndex) node.fragments.pop().remove();
+        for (const parent of [node, ...actions])
+          while (parent.children.length > (positions.get(parent) || 0)) parent.lastChild.remove();
       } else {
         node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
         node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
         node.setAttribute('aria-label', item.label);
+        if (item.description) node.setAttribute('aria-describedby', 'view-' + item.description);
+        else node.removeAttribute('aria-describedby');
+        node.tabIndex = item.tabStop ? 0 : -1;
         if (item.route !== null) {
           const http = item.route.startsWith('http://') || item.route.startsWith('https://');
           node.href = http ? item.route : '#stage=' + encodeURIComponent(item.route);
@@ -201,26 +362,72 @@ var Module = {
           node.setAttribute('role', 'tab');
           node.setAttribute('aria-selected', Boolean(item.checked));
           node.setAttribute('aria-controls', 'view-' + item.related);
-          node.tabIndex = item.checked ? 0 : -1;
+          node.tabIndex = item.tabStop ? 0 : -1;
+        } else if (item.role === 55) {
+          node.setAttribute('role', 'combobox');
+          node.setAttribute('aria-haspopup', 'listbox');
+          node.setAttribute('aria-controls', 'view-' + item.related);
+          node.setAttribute('aria-expanded', Boolean(item.checked));
+          node.setAttribute('aria-disabled', item.optionCount === 0);
+          if (item.checked && item.active) node.setAttribute('aria-activedescendant', 'view-' + item.active);
+          else node.removeAttribute('aria-activedescendant');
+          node.textContent = item.value;
+        } else if (item.role === 57) {
+          node.setAttribute('role', 'option');
+          node.setAttribute('aria-selected', Boolean(item.checked));
+          node.setAttribute('aria-posinset', item.optionIndex + 1);
+          node.setAttribute('aria-setsize', item.optionCount);
+          node.textContent = item.label;
         } else if (item.role === 3 || item.role === 41) {
+          node.style.fontSize = item.font / scale + 'px';
+          node.style.lineHeight = item.line_h / scale + 'px';
+          node.style.paddingLeft = (item.inset + item.gutter) / scale + 'px';
+          node.style.paddingRight = item.inset / scale + 'px';
+          const top = item.role === 3 ? Math.max(0, (item.h - item.line_h) / 2) : item.inset;
+          node.style.paddingTop = top / scale + 'px';
+          node.style.paddingBottom = top / scale + 'px';
           if (!node.composing && node.value !== item.value) node.value = item.value;
           node.committed = item.value;
           node.placeholder = item.role === 3 ? item.label : '';
-        } else if (item.role === 8) {
-          node.value = item.checked;
+        } else if (item.role === 8 || item.role === 42) {
+          if (item.role === 42) node.setAttribute('aria-controls', 'view-' + item.related);
+          node.setAttribute('aria-valuemin', item.range.minimum);
+          node.setAttribute('aria-valuemax', item.range.maximum);
+          node.setAttribute('aria-valuenow', item.range.value);
+          node.setAttribute('aria-valuetext', item.range.value);
         } else {
-          if (node.textContent !== item.label) node.textContent = item.label;
+          if (!item.inline && node.textContent !== item.label) node.textContent = item.label;
           const roles = {7: 'checkbox', 9: 'radio', 11: 'switch', 22: 'checkbox', 23: 'switch', 24: 'radio', 31: 'checkbox', 32: 'radio'};
           if (roles[item.role]) { node.setAttribute('role', roles[item.role]); node.setAttribute('aria-checked', Boolean(item.checked)); }
-          if (item.role === 17) node.setAttribute('aria-expanded', Boolean(item.checked));
+          if (item.role === 17) {
+            node.setAttribute('aria-expanded', Boolean(item.checked));
+            if (item.related) node.setAttribute('aria-controls', 'view-' + item.related);
+          }
         }
         clip(node, item.x, item.y, item.w, item.h, item.clip, scale);
+        if (item.inline) {
+          const paths = [];
+          for (const [x, y, w, h] of item.boxes) {
+            const left = Math.max(x, item.clip ? item.clip[0] : x);
+            const top = Math.max(y, item.clip ? item.clip[1] : y);
+            const right = Math.min(x + w, item.clip ? item.clip[0] + item.clip[2] : x + w);
+            const bottom = Math.min(y + h, item.clip ? item.clip[1] + item.clip[3] : y + h);
+            if (right <= left || bottom <= top) continue;
+            const a = (left - item.x) / scale, b = (top - item.y) / scale;
+            const c = (right - item.x) / scale, d = (bottom - item.y) / scale;
+            paths.push(`M ${a} ${b} H ${c} V ${d} H ${a} Z`);
+          }
+          node.style.clipPath = paths.length ? `path("${paths.join(' ')}")` : 'inset(100%)';
+        }
       }
     });
     for (const [id, node] of Module.nodes) if (!live.has(id)) { node.remove(); Module.nodes.delete(id); }
-    // A removed node drops focus to the body. Move focus to the text layer so
-    // keyboard users keep their place inside the application.
-    if (focused && focused !== Module.canvas && focused !== layer && !focused.isConnected) layer.focus();
+    const modal = frame.items.find(item => item.group && item.role === 43)?.id || 0;
+    if (modal !== Module.modalId || (focused && focused !== Module.canvas && focused !== layer && !focused.isConnected)) {
+      const id = Module.ccall('sz_web_focused', 'number', [], []);
+      (Module.nodes.get(id) || layer).focus({preventScroll: true});
+    }
+    Module.modalId = modal;
     Module.textBlocks = frame.texts;
     const section = frame.sections.find(section => section.selected);
     if (section) {
@@ -238,14 +445,79 @@ function clip(node, x, y, width, height, bounds, scale) {
   // Offscreen controls remain in the focus order. Focus scrolls their shared container.
   node.removeAttribute('aria-hidden');
 }
+document.addEventListener('pointerdown', event => {
+  Module.selectSuppressClick = false;
+  if (!Module.ready || event.button !== 0) return;
+  const target = event.target.closest?.('[role="combobox"], [role="option"]');
+  const open = Module.webFrame.items.find(item => item.role === 55 && item.checked);
+  if (!target && !open) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  if (event.isPrimary === false) {
+    if (Module.selectPointer !== undefined)
+      Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [event.clientX, event.clientY, 4]);
+    Module.selectPointer = undefined; Module.selectSuppressClick = true;
+    return;
+  }
+  const owner = open ? Module.nodes.get(open.id) : target;
+  owner?.focus({preventScroll: true});
+  Module.selectPointer = event.pointerId;
+  Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [event.clientX, event.clientY, 1]);
+}, true);
+for (const [type, phase] of [['pointermove', 2], ['pointerup', 3], ['pointercancel', 4]]) {
+  document.addEventListener(type, event => {
+    if (Module.selectPointer === undefined || Module.selectPointer !== event.pointerId) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [event.clientX, event.clientY, phase]);
+    if (phase === 3 || phase === 4) { Module.selectPointer = undefined; Module.selectSuppressClick = true; }
+  }, true);
+}
+document.addEventListener('click', event => {
+  if (Module.selectSuppressClick && event.detail) {
+    event.preventDefault(); event.stopImmediatePropagation(); Module.selectSuppressClick = false;
+  }
+}, true);
 window.addEventListener('hashchange', () => Module.readRoute());
 window.addEventListener('popstate', () => Module.readRoute());
 window.addEventListener('resize', () => Module.resizeViewport());
 window.visualViewport?.addEventListener('resize', () => Module.resizeViewport());
 document.addEventListener('keydown', event => {
+  if (!Module.ready || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
+      !['Tab', 'Escape'].includes(event.key) ||
+      (!Module.ccall('sz_web_modal', 'number', [], []) &&
+       (event.key === 'Tab' || !Module.webFrame.items.some(item => item.tooltip && !item.hidden)))) return;
+  event.preventDefault();
+  Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'],
+    [event.key, event.shiftKey ? 1 : 0, Number(event.repeat)]);
+  const id = Module.ccall('sz_web_focused', 'number', [], []);
+  (Module.nodes.get(id) || Module.canvas).focus({preventScroll: true});
+});
+document.addEventListener('keydown', event => {
+  if (!Module.ready || event.defaultPrevented || event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey ||
+      !document.getElementById('app').contains(event.target)) return;
+  if (event.target.item) Module.ccall('sz_web_focus', null, ['number'], [event.target.item.id]);
+  if (!Module.ccall('sz_web_tab', 'number', ['number'], [Number(event.shiftKey)])) return;
+  event.preventDefault();
+  const id = Module.ccall('sz_web_focused', 'number', [], []);
+  (Module.nodes.get(id) || Module.canvas).focus({preventScroll: true});
+});
+document.addEventListener('keydown', event => {
   if (!Module.ready || event.defaultPrevented || event.target !== Module.canvas || event.ctrlKey || event.metaKey || event.altKey || event.key === 'Tab') return;
   if (!getSelection().isCollapsed) return;
   if (Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, event.shiftKey ? 1 : 0, Number(event.repeat)])) event.preventDefault();
+});
+layer.addEventListener('pointermove', event => {
+  if (!Module.ready || event.pointerType === 'touch' || event.buttons) return;
+  Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [event.clientX, event.clientY, 2]);
+});
+document.getElementById('app').addEventListener('pointerleave', event => {
+  if (!Module.ready || event.pointerType === 'touch' || event.buttons) return;
+  Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [-1, -1, 2]);
+});
+document.getElementById('app').addEventListener('focusout', event => {
+  queueMicrotask(() => {
+    if (Module.ready && !document.getElementById('app').contains(document.activeElement))
+      Module.ccall('sz_web_focus', null, ['number'], [0]);
+  });
 });
 let touchX;
 let touchY;
@@ -301,8 +573,10 @@ document.addEventListener('copy', event => {
   const pieces = [];
   for (let i = first.block; i <= last.block; i++) {
     const text = Module.textBlocks[i].text;
-    pieces.push(text.slice(i === first.block ? first.sourceStart + range.startOffset : 0,
-      i === last.block ? last.sourceStart + range.endOffset : text.length));
+    let end = i === last.block ? Math.min(last.sourceEnd, last.sourceStart + range.endOffset) : text.length;
+    if (i === last.block && !last.synthetic && !last.nextElementSibling &&
+        range.endOffset === last.textContent.length && !text.slice(end).trim()) end = text.length;
+    pieces.push(text.slice(i === first.block ? Math.min(first.sourceEnd, first.sourceStart + range.startOffset) : 0, end));
   }
   event.clipboardData.setData('text/plain', pieces.join('\n')); event.preventDefault();
 });

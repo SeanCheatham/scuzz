@@ -501,7 +501,7 @@ def orderedListElem(f: String, ty: Ty): String =
   Type.show(if (f == "List.sort") Type.elem(ty) else ty)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.")) resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, kitOf(funs, f))
+  if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.")) resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.virtualList" || f == "View.measuredList") resolveVirtualList(args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, kitOf(funs, f))
 
 def resolveScenarioCtx(funs: Ftab, span: (String, Int)): Out =
   resolveScenarioCtx2(ftabGet(funs.tab, "setup"), span)
@@ -513,7 +513,35 @@ def resolveScenarioCtx3(d: Fun, span: (String, Int)): Out =
   if (!isIo(d.ret)) bad("setup must return IO", span) else ok(ioOk(d.ret))
 
 def resolveKnownKit(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), kit: KitSig): Out =
-  if (List.isEmpty(args) && !List.isEmpty(kit.params)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (!Kits.arityOf(kit.kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit.kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownTy(f, Kits.wantOfSig(kit, List.len(args)), kit.ret, args, env, funs, ens, span)
+  if (List.isEmpty(args) && !List.isEmpty(kit.params)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (!Kits.arityOf(kit.kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit.kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkViewLiteral(f, args, checkKnownTy(f, Kits.wantOfSig(kit, List.len(args)), kit.ret, args, env, funs, ens, span), span)
+
+def checkViewLiteral(f: String, args: List[Expr], out: Out, span: (String, Int)): Out =
+  if (hasErr(out)) out else if (f == "View.slider") checkSliderLiteral(args, out, span) else if (f != "View.heading") out else stripNamed(List.at(args, 0)) match {
+  case Expr.EInt(level, offset) => if (level < 1 || level > 6) bad("View.heading level must be 1 through 6", (span._1, offset)) else out
+  case _ => out
+}
+
+def viewIntLiteral(e: Expr): Option[(Int, Int)] =
+  stripNamed(e) match {
+    case Expr.EInt(value, offset) => Option.Some((value, offset))
+    case Expr.EUn(op, inner, offset) => if (op != "-") Option.None else viewIntLiteral(inner) match {
+  case Option.Some((value, _)) => Option.Some((0 - value, offset))
+  case Option.None => Option.None
+}
+    case _ => Option.None
+  }
+
+def checkSliderLiteral(args: List[Expr], out: Out, span: (String, Int)): Out =
+  viewIntLiteral(List.at(args, 4)) match {
+    case Option.Some((step, offset)) => if (step <= 0) bad("View.slider step must be positive", (span._1, offset)) else checkSliderBounds(args, out, span)
+    case Option.None => checkSliderBounds(args, out, span)
+  }
+
+def checkSliderBounds(args: List[Expr], out: Out, span: (String, Int)): Out =
+  (viewIntLiteral(List.at(args, 2)), viewIntLiteral(List.at(args, 3))) match {
+    case (Option.Some((minimum, _)), Option.Some((maximum, offset))) => if (minimum > maximum) bad("View.slider minimum must not exceed maximum", (span._1, offset)) else out
+    case _ => out
+  }
 
 def enOfCase(ens: List[En], ctor: String): String =
   ens match {
@@ -715,6 +743,21 @@ def isSigList(t: Ty): Bool =
 
 def eachElemOf(t: Ty): String =
   Type.show(Type.elem(Type.elem(t)))
+
+def resolveVirtualList(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.len(args) != 4) bad("View.virtualList needs height, items, key, and renderer", span) else resolveVirtualHeight(infer(stripNamed(List.at(args, 0)), env, funs, ens), args, env, funs, ens, span)
+
+def resolveVirtualHeight(height: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(height)) height else if (!tyEqEn(tyStr(height), "Int", ens)) argMismatch("View.virtualList", "Int", tyStr(height), span) else resolveVirtualItems(infer(stripNamed(List.at(args, 1)), env, funs, ens), args, env, funs, ens, span)
+
+def resolveVirtualItems(items: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(items)) items else if (!isSigList(items.ty)) argMismatch("View.virtualList", "Signal[List[A]]", tyStr(items), span) else resolveVirtualKey(inferExpected(stripNamed(List.at(args, 2)), Str.concat(eachElemOf(items.ty), " => Int"), env, funs, ens), eachElemOf(items.ty), args, env, funs, ens, span)
+
+def resolveVirtualKey(key: Out, elem: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(key)) key else if (!tyEqEn(tyStr(key), Str.concat(elem, " => Int"), ens)) argMismatch("View.virtualList key", Str.concat(elem, " => Int"), tyStr(key), span) else resolveVirtualRow(inferExpected(stripNamed(List.at(args, 3)), Str.concat("Signal[", Str.concat(elem, "] => View")), env, funs, ens), elem, ens, span)
+
+def resolveVirtualRow(row: Out, elem: String, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(row)) row else if (tyEqEn(tyStr(row), Str.concat("Signal[", Str.concat(elem, "] => View")), ens)) ok("View") else argMismatch("View.virtualList renderer", Str.concat("Signal[", Str.concat(elem, "] => View")), tyStr(row), span)
 
 def resolveViewEach(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(args)) ok(funTyFrom(kitParams("View.each", funs), kitRet("View.each", funs))) else resolveViewEach2(infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens, span)
@@ -2836,7 +2879,7 @@ def knownTys(ts0: List[Ty], ens: List[En], ts: List[String]): Bool =
   if (List.isEmpty(ts0)) true else knownTy(List.at(ts0, 0), ens, ts) && knownTys(List.tail(ts0), ens, ts)
 
 def builtinTyName(n: String): Bool =
-  n == "Any" || n == "Bool" || n == "Builder" || n == "Bytes" || n == "Deferred" || n == "Fiber" || n == "Float" || n == "IO" || n == "Int" || n == "Json" || n == "List" || n == "Map" || n == "Option" || n == "Queue" || n == "Ref" || n == "Resource" || n == "Result" || n == "Set" || n == "Signal" || n == "Stream" || n == "String" || n == "Tcp" || n == "Timeline" || n == "Udp" || n == "Unit" || n == "Verdict" || n == "View"
+  n == "Any" || n == "Bool" || n == "Builder" || n == "Bytes" || n == "Deferred" || n == "Fiber" || n == "Float" || n == "IO" || n == "Image" || n == "Int" || n == "Json" || n == "List" || n == "Map" || n == "Option" || n == "Queue" || n == "Ref" || n == "Resource" || n == "Result" || n == "Set" || n == "Signal" || n == "Stream" || n == "String" || n == "Tcp" || n == "Text" || n == "Theme" || n == "Timeline" || n == "Udp" || n == "Unit" || n == "Verdict" || n == "View"
 
 def builtinTyArity(n: String): Int =
   if (n == "Map" || n == "Result") 2 else if (n == "List" || n == "Option" || n == "Set" || n == "Ref" || n == "Queue" || n == "Deferred" || n == "Fiber" || n == "Stream" || n == "Resource" || n == "Signal") 1 else 0

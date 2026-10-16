@@ -9,52 +9,28 @@ def mount(v: Value, p: EvProg): View =
   }
 
 def mountKind(kind: String, args: List[Value], p: EvProg): View =
-  if (isBox(kind)) mountBox(kind, args, p) else if (kind == "View.grid") mountGrid(intAt(args, 0), List.tail(args), p) else if (isViewOnly(kind)) mountViewOnly(kind, viewAt(args, 0, p)) else if (isIntView(kind)) mountIntView(kind, intAt(args, 0), viewAt(args, 1, p)) else if (isIntIntView(kind)) mountIntIntView(kind, intAt(args, 0), intAt(args, 1), viewAt(args, 2, p)) else if (isSigIntStr(kind)) mountSigIntStr(kind, sigInt(args, 0), strAt(args, 1)) else if (isSigIntView(kind)) mountSigIntView(kind, sigInt(args, 0), viewAt(args, 1, p)) else if (isTap(kind)) mountTap(kind, strAt(args, 0), List.at(args, 1), p) else mountKind2(kind, args, p)
+  if (kind == "View.richText") mountRichText(List.at(args, 0)) else if (kind == "View.theme") mountTheme(List.at(args, 0), viewAt(args, 1, p)) else if (kind == "View.virtualList" || kind == "View.measuredList") mountVirtualList(kind, args, p) else if (kind == "View.adaptive") View.adaptive(intAt(args, 0), viewAt(args, 1, p), viewAt(args, 2, p)) else if (isBox(kind)) mountBox(kind, args, p) else if (kind == "View.grid" || kind == "View.autoGrid") mountGrid(kind, intAt(args, 0), List.tail(args), p) else if (isViewOnly(kind)) mountViewOnly(kind, viewAt(args, 0, p)) else if (isIntView(kind)) mountIntView(kind, intAt(args, 0), viewAt(args, 1, p)) else if (isIntIntView(kind)) mountIntIntView(kind, intAt(args, 0), intAt(args, 1), viewAt(args, 2, p)) else if (isSigIntStr(kind)) mountSigIntStr(kind, sigInt(args, 0), strAt(args, 1)) else if (isSigIntView(kind)) mountSigIntView(kind, sigInt(args, 0), viewAt(args, 1, p)) else if (isTap(kind)) mountTap(kind, strAt(args, 0), List.at(args, 1), p) else mountKind2(kind, args, p)
 
 def mountKind2(kind: String, args: List[Value], p: EvProg): View =
-  if (kind == "View.text") View.text(strAt(args, 0)) else if (kind == "View.code") View.code(strAt(args, 0)) else if (kind == "View.avatar") View.avatar(strAt(args, 0)) else if (kind == "View.bindText") View.bindText(sigStr(args, 0)) else if (kind == "View.editor") View.editor(sigStr(args, 0)) else if (kind == "View.textField") View.textField(sigStr(args, 0), strAt(args, 1)) else if (kind == "View.heading") View.heading(intAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.divider") View.divider() else if (kind == "View.verticalDivider") View.verticalDivider() else if (kind == "View.list") View.list() else if (kind == "View.link") View.link(strAt(args, 0), strAt(args, 1)) else if (kind == "View.icon") View.icon(intAt(args, 0), intAt(args, 1)) else if (kind == "View.navTile") View.navTile(intAt(args, 0), strAt(args, 1), strAt(args, 2)) else if (kind == "View.image") View.image(intAt(args, 0), intAt(args, 1), intAt(args, 2), strAt(args, 3)) else mountKind3(kind, args, p)
+  if (kind == "View.text") View.text(strAt(args, 0)) else if (kind == "View.code") View.code(strAt(args, 0)) else if (kind == "View.avatar") View.avatar(strAt(args, 0)) else if (kind == "View.bindText") View.bindText(sigStr(args, 0)) else if (kind == "View.editor") View.editor(sigStr(args, 0)) else if (kind == "View.textField") View.textField(sigStr(args, 0), strAt(args, 1)) else if (kind == "View.heading") View.heading(intAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.divider") View.divider() else if (kind == "View.verticalDivider") View.verticalDivider() else if (kind == "View.list") View.list() else if (kind == "View.link") View.link(strAt(args, 0), strAt(args, 1)) else if (kind == "View.icon") View.icon(intAt(args, 0), intAt(args, 1)) else if (kind == "View.navTile") View.navTile(intAt(args, 0), strAt(args, 1), strAt(args, 2)) else if (kind == "View.image") mountImage(List.at(args, 0), strAt(args, 1)) else mountKind3(kind, args, p)
 
 def mountKind3(kind: String, args: List[Value], p: EvProg): View =
-  if (kind == "View.section") View.section(strAt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.appShell") View.appShell(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.appBar") View.appBar(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.semantics") View.semantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.mergeSemantics") View.mergeSemantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.tooltip") View.tooltip(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.slider") View.slider(sigInt(args, 0)) else if (kind == "View.progress") View.progress(sigInt(args, 0)) else if (kind == "View.circularProgress") View.circularProgress(sigInt(args, 0)) else if (kind == "View.radio") View.radio(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.choiceChip") View.choiceChip(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.radioListTile") View.radioListTile(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.showWhen") View.showWhen(sigInt(args, 0), intAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.split") View.split(sigInt(args, 0), viewAt(args, 1, p), viewAt(args, 2, p)) else if (kind == "View.segmented") View.segmented(sigInt(args, 0), strAt(args, 1), strAt(args, 2)) else if (kind == "View.expansionTile") View.expansionTile(sigInt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.onSecondary") View.onSecondary(viewAt(args, 0, p), _ => tap(List.at(args, 1), p)) else if (kind == "View.inkWell") View.inkWell(strAt(args, 0), _ => tap(List.at(args, 1), p), viewAt(args, 2, p)) else if (kind == "View.listTile") View.listTile(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.each") mountEach(args, p) else View.text(Str.concat("evaluator: no mount for ", kind))
+  if (kind == "View.animatedOpacity") View.animatedOpacity(sigInt(args, 0), intAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.actionText") mountActionText(List.at(args, 0), List.at(args, 1), p) else if (kind == "View.overlay") View.overlay(sigInt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.section") View.section(strAt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.appShell") View.appShell(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.appBar") View.appBar(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.radioGroup") View.radioGroup(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.semantics") View.semantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.mergeSemantics") View.mergeSemantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.tooltip") View.tooltip(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.slider") View.slider(sigInt(args, 0), strAt(args, 1), intAt(args, 2), intAt(args, 3), intAt(args, 4)) else if (kind == "View.progress") View.progress(sigInt(args, 0)) else if (kind == "View.circularProgress") View.circularProgress(sigInt(args, 0)) else if (kind == "View.radio") View.radio(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.choiceChip") View.choiceChip(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.radioListTile") View.radioListTile(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.showWhen") View.showWhen(sigInt(args, 0), intAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.split") View.split(sigInt(args, 0), strAt(args, 1), viewAt(args, 2, p), viewAt(args, 3, p)) else if (kind == "View.select") View.select(sigInt(args, 0), strAt(args, 1), Signal.mapN("$mirror", sigVal(List.at(args, 2)), value => List.map(Eval.listOf(value), v => Eval.strOf(v)))) else if (kind == "View.segmented") View.segmented(sigInt(args, 0), strAt(args, 1), List.map(Eval.listOf(List.at(args, 2)), v => Eval.strOf(v))) else if (kind == "View.expansionTile") View.expansionTile(sigInt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.onSecondary") View.onSecondary(viewAt(args, 0, p), _ => tap(List.at(args, 1), p)) else if (kind == "View.inkWell") View.inkWell(strAt(args, 0), _ => tap(List.at(args, 1), p), viewAt(args, 2, p)) else if (kind == "View.listTile") View.listTile(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.each") mountEach(args, p) else View.text(Str.concat("evaluator: no mount for ", kind))
 
 def isBox(kind: String): Bool =
   kind == "View.column" || kind == "View.row" || kind == "View.stack" || kind == "View.wrap" || kind == "View.breadcrumb"
 
 def mountBox(kind: String, args: List[Value], p: EvProg): View =
-  boxOf(kind, List.map(args, a => mount(a, p)))
+  boxOf(kind, List.map(Eval.listOf(List.at(args, 0)), a => mount(a, p)))
 
-def boxOf(kind: String, xs: List[View]): View =
-  if (List.len(xs) > 8 && nests(kind)) box8(kind, List.take(xs, 7), boxOf(kind, List.drop(xs, 7))) else if (List.len(xs) > 8) View.text(Str.concat("evaluator: ", Str.concat(kind, " takes at most 8 children"))) else boxN(kind, xs)
+def boxOf(kind: String, children: List[View]): View =
+  if (kind == "View.column") View.column(children) else if (kind == "View.row") View.row(children) else if (kind == "View.stack") View.stack(children) else if (kind == "View.wrap") View.wrap(children) else View.breadcrumb(children)
 
-def nests(kind: String): Bool =
-  kind == "View.column" || kind == "View.row" || kind == "View.stack"
+def mountGrid(kind: String, cols: Int, args: List[Value], p: EvProg): View =
+  gridOf(kind, cols, List.map(Eval.listOf(List.at(args, 0)), a => mount(a, p)))
 
-def box8(kind: String, xs: List[View], last: View): View =
-  boxN(kind, List.append(xs, last))
-
-def boxN(kind: String, xs: List[View]): View =
-  if (kind == "View.column") columnN(xs) else if (kind == "View.row") rowN(xs) else if (kind == "View.stack") stackN(xs) else if (kind == "View.wrap") wrapN(xs) else breadcrumbN(xs)
-
-def columnN(xs: List[View]): View =
-  if (List.len(xs) == 0) View.column() else if (List.len(xs) == 1) View.column(List.at(xs, 0)) else if (List.len(xs) == 2) View.column(List.at(xs, 0), List.at(xs, 1)) else if (List.len(xs) == 3) View.column(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2)) else if (List.len(xs) == 4) View.column(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3)) else if (List.len(xs) == 5) View.column(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4)) else if (List.len(xs) == 6) View.column(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5)) else if (List.len(xs) == 7) View.column(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6)) else View.column(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6), List.at(xs, 7))
-
-def rowN(xs: List[View]): View =
-  if (List.len(xs) == 0) View.row() else if (List.len(xs) == 1) View.row(List.at(xs, 0)) else if (List.len(xs) == 2) View.row(List.at(xs, 0), List.at(xs, 1)) else if (List.len(xs) == 3) View.row(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2)) else if (List.len(xs) == 4) View.row(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3)) else if (List.len(xs) == 5) View.row(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4)) else if (List.len(xs) == 6) View.row(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5)) else if (List.len(xs) == 7) View.row(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6)) else View.row(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6), List.at(xs, 7))
-
-def stackN(xs: List[View]): View =
-  if (List.len(xs) == 0) View.stack() else if (List.len(xs) == 1) View.stack(List.at(xs, 0)) else if (List.len(xs) == 2) View.stack(List.at(xs, 0), List.at(xs, 1)) else if (List.len(xs) == 3) View.stack(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2)) else if (List.len(xs) == 4) View.stack(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3)) else if (List.len(xs) == 5) View.stack(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4)) else if (List.len(xs) == 6) View.stack(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5)) else if (List.len(xs) == 7) View.stack(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6)) else View.stack(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6), List.at(xs, 7))
-
-def wrapN(xs: List[View]): View =
-  if (List.len(xs) == 0) View.wrap() else if (List.len(xs) == 1) View.wrap(List.at(xs, 0)) else if (List.len(xs) == 2) View.wrap(List.at(xs, 0), List.at(xs, 1)) else if (List.len(xs) == 3) View.wrap(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2)) else if (List.len(xs) == 4) View.wrap(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3)) else if (List.len(xs) == 5) View.wrap(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4)) else if (List.len(xs) == 6) View.wrap(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5)) else if (List.len(xs) == 7) View.wrap(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6)) else View.wrap(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6), List.at(xs, 7))
-
-def breadcrumbN(xs: List[View]): View =
-  if (List.len(xs) == 0) View.breadcrumb() else if (List.len(xs) == 1) View.breadcrumb(List.at(xs, 0)) else if (List.len(xs) == 2) View.breadcrumb(List.at(xs, 0), List.at(xs, 1)) else if (List.len(xs) == 3) View.breadcrumb(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2)) else if (List.len(xs) == 4) View.breadcrumb(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3)) else if (List.len(xs) == 5) View.breadcrumb(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4)) else if (List.len(xs) == 6) View.breadcrumb(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5)) else if (List.len(xs) == 7) View.breadcrumb(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6)) else View.breadcrumb(List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6), List.at(xs, 7))
-
-def mountGrid(cols: Int, args: List[Value], p: EvProg): View =
-  gridN(cols, List.map(args, a => mount(a, p)))
-
-def gridN(cols: Int, xs: List[View]): View =
-  if (List.len(xs) == 0) View.grid(cols) else if (List.len(xs) == 1) View.grid(cols, List.at(xs, 0)) else if (List.len(xs) == 2) View.grid(cols, List.at(xs, 0), List.at(xs, 1)) else if (List.len(xs) == 3) View.grid(cols, List.at(xs, 0), List.at(xs, 1), List.at(xs, 2)) else if (List.len(xs) == 4) View.grid(cols, List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3)) else if (List.len(xs) == 5) View.grid(cols, List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4)) else if (List.len(xs) == 6) View.grid(cols, List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5)) else if (List.len(xs) == 7) View.grid(cols, List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6)) else if (List.len(xs) == 8) View.grid(cols, List.at(xs, 0), List.at(xs, 1), List.at(xs, 2), List.at(xs, 3), List.at(xs, 4), List.at(xs, 5), List.at(xs, 6), List.at(xs, 7)) else View.text("evaluator: View.grid takes at most 8 children")
+def gridOf(kind: String, cols: Int, children: List[View]): View =
+  if (kind == "View.autoGrid") View.autoGrid(cols, children) else View.grid(cols, children)
 
 def applyClo(f: Value, x: Value, p: EvProg): Value =
   Eval.applyValue(f, x :: [], Eval.envOf(p), p, 0)
@@ -76,16 +52,16 @@ def mountTap(kind: String, label: String, f: Value, p: EvProg): View =
   if (kind == "View.button") View.button(label, _ => tap(f, p)) else if (kind == "View.iconButton") View.iconButton(label, _ => tap(f, p)) else if (kind == "View.fab") View.fab(label, _ => tap(f, p)) else if (kind == "View.outlinedButton") View.outlinedButton(label, _ => tap(f, p)) else if (kind == "View.textButton") View.textButton(label, _ => tap(f, p)) else View.actionChip(label, _ => tap(f, p))
 
 def isViewOnly(kind: String): Bool =
-  kind == "View.center" || kind == "View.scroll" || kind == "View.scrollH" || kind == "View.expanded" || kind == "View.card" || kind == "View.placeholder" || kind == "View.unconstrainedBox" || kind == "View.focusGroup" || kind == "View.stretch" || kind == "View.clip" || kind == "View.ellipsis" || kind == "View.ignorePointer" || kind == "View.absorbPointer" || kind == "View.excludeSemantics"
+  kind == "View.center" || kind == "View.scroll" || kind == "View.scrollH" || kind == "View.card" || kind == "View.placeholder" || kind == "View.unconstrainedBox" || kind == "View.focusGroup" || kind == "View.stretch" || kind == "View.clip" || kind == "View.ellipsis" || kind == "View.ignorePointer" || kind == "View.absorbPointer" || kind == "View.excludeSemantics"
 
 def mountViewOnly(kind: String, v: View): View =
-  if (kind == "View.center") View.center(v) else if (kind == "View.scroll") View.scroll(v) else if (kind == "View.scrollH") View.scrollH(v) else if (kind == "View.expanded") View.expanded(v) else if (kind == "View.card") View.card(v) else if (kind == "View.placeholder") View.placeholder(v) else if (kind == "View.unconstrainedBox") View.unconstrainedBox(v) else if (kind == "View.stretch") View.stretch(v) else if (kind == "View.clip") View.clip(v) else if (kind == "View.ellipsis") View.ellipsis(v) else if (kind == "View.ignorePointer") View.ignorePointer(v) else if (kind == "View.absorbPointer") View.absorbPointer(v) else if (kind == "View.excludeSemantics") View.excludeSemantics(v) else View.focusGroup(v)
+  if (kind == "View.center") View.center(v) else if (kind == "View.scroll") View.scroll(v) else if (kind == "View.scrollH") View.scrollH(v) else if (kind == "View.card") View.card(v) else if (kind == "View.placeholder") View.placeholder(v) else if (kind == "View.unconstrainedBox") View.unconstrainedBox(v) else if (kind == "View.stretch") View.stretch(v) else if (kind == "View.clip") View.clip(v) else if (kind == "View.ellipsis") View.ellipsis(v) else if (kind == "View.ignorePointer") View.ignorePointer(v) else if (kind == "View.absorbPointer") View.absorbPointer(v) else if (kind == "View.excludeSemantics") View.excludeSemantics(v) else View.focusGroup(v)
 
 def isIntView(kind: String): Bool =
-  kind == "View.background" || kind == "View.padding" || kind == "View.textColor" || kind == "View.fontSize" || kind == "View.opacity" || kind == "View.maxLines" || kind == "View.gap" || kind == "View.radius"
+  kind == "View.expanded" || kind == "View.background" || kind == "View.padding" || kind == "View.textColor" || kind == "View.fontSize" || kind == "View.opacity" || kind == "View.maxLines" || kind == "View.gap" || kind == "View.radius"
 
 def mountIntView(kind: String, n: Int, v: View): View =
-  if (kind == "View.background") View.background(n, v) else if (kind == "View.padding") View.padding(n, v) else if (kind == "View.textColor") View.textColor(n, v) else if (kind == "View.opacity") View.opacity(n, v) else if (kind == "View.maxLines") View.maxLines(n, v) else if (kind == "View.gap") View.gap(n, v) else if (kind == "View.radius") View.radius(n, v) else View.fontSize(n, v)
+  if (kind == "View.expanded") View.expanded(n, v) else if (kind == "View.background") View.background(n, v) else if (kind == "View.padding") View.padding(n, v) else if (kind == "View.textColor") View.textColor(n, v) else if (kind == "View.opacity") View.opacity(n, v) else if (kind == "View.maxLines") View.maxLines(n, v) else if (kind == "View.gap") View.gap(n, v) else if (kind == "View.radius") View.radius(n, v) else View.fontSize(n, v)
 
 def isIntIntView(kind: String): Bool =
   kind == "View.minSize" || kind == "View.sized" || kind == "View.positioned" || kind == "View.aspectRatio" || kind == "View.fraction" || kind == "View.maxSize" || kind == "View.align" || kind == "View.border"
@@ -100,10 +76,10 @@ def mountSigIntStr(kind: String, s: Signal[Int], label: String): View =
   if (kind == "View.checkbox") View.checkbox(s, label) else if (kind == "View.switch") View.switch(s, label) else if (kind == "View.chip") View.chip(s, label) else if (kind == "View.filterChip") View.filterChip(s, label) else if (kind == "View.inputChip") View.inputChip(s, label) else if (kind == "View.checkboxListTile") View.checkboxListTile(s, label) else View.switchListTile(s, label)
 
 def isSigIntView(kind: String): Bool =
-  kind == "View.tabs" || kind == "View.indexBook" || kind == "View.badge" || kind == "View.visibility" || kind == "View.offstage" || kind == "View.overlay"
+  kind == "View.reducedMotion" || kind == "View.tabs" || kind == "View.indexBook" || kind == "View.badge" || kind == "View.visibility" || kind == "View.offstage"
 
 def mountSigIntView(kind: String, s: Signal[Int], v: View): View =
-  if (kind == "View.tabs") View.tabs(s, v) else if (kind == "View.indexBook") View.indexBook(s, v) else if (kind == "View.badge") View.badge(s, v) else if (kind == "View.visibility") View.visibility(s, v) else if (kind == "View.offstage") View.offstage(s, v) else View.overlay(s, v)
+  if (kind == "View.reducedMotion") View.reducedMotion(s, v) else if (kind == "View.tabs") View.tabs(s, v) else if (kind == "View.indexBook") View.indexBook(s, v) else if (kind == "View.badge") View.badge(s, v) else if (kind == "View.visibility") View.visibility(s, v) else View.offstage(s, v)
 
 def viewAt(args: List[Value], i: Int, p: EvProg): View =
   mount(List.at(args, i), p)
@@ -119,6 +95,16 @@ def sigInt(args: List[Value], i: Int): Signal[Int] =
 
 def sigStr(args: List[Value], i: Int): Signal[String] =
   Eval.sigStr(List.at(args, i))
+
+def mountVirtualList(kind: String, args: List[Value], p: EvProg): View =
+  for {
+    items = Signal.mapN("$mirror", sigVal(List.at(args, 1)), v => Eval.listOf(v))
+    key = v => Eval.intOf(applyClo(List.at(args, 2), v, p))
+    row = s => mountVirtualRow(s, List.at(args, 3), Eval.withLiveSignals(p))
+  } yield if (kind == "View.measuredList") View.measuredList(intAt(args, 0), items, key, row) else View.virtualList(intAt(args, 0), items, key, row)
+
+def mountVirtualRow(item: Signal[Value], render: Value, p: EvProg): View =
+  mount(applyClo(render, Eval.sigLiveInput(item), p), p)
 
 def mountEach(args: List[Value], p: EvProg): View =
   View.each(Signal.mapN("$mirror", sigVal(List.at(args, 0)), v => Eval.listOf(v)), v => eachOne(v, cloAt(args), p))
@@ -141,6 +127,31 @@ def rowPlain(x: Value): View =
 def sigVal(sv: Value): Signal[Value] =
   sv match {
     case Value.VSig(_, _, s, _, _) => s
+    case Value.VLiveSig(s, _, _) => s
     case _ => Signal.make(Value.VList([]))
   }
 
+def mountImage(value: Value, label: String): View =
+  value match {
+    case Value.VImage(image) => View.image(image, label)
+    case _ => View.text("evaluator: invalid image")
+  }
+
+def mountTheme(value: Value, child: View): View =
+  value match {
+    case Value.VTheme(theme) => View.theme(theme, child)
+    case _ => View.text("evaluator: invalid theme")
+  }
+
+def mountRichText(value: Value): View =
+  value match {
+    case Value.VText(text) => View.richText(text)
+    case _ => View.text("evaluator: invalid text")
+  }
+
+
+def mountActionText(value: Value, action: Value, p: EvProg): View =
+  value match {
+    case Value.VText(text) => View.actionText(text, key => tapVal(applyClo(action, Value.VInt(key), p)))
+    case _ => View.text("evaluator: invalid text")
+  }

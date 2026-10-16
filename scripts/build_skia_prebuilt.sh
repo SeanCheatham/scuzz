@@ -96,10 +96,15 @@ PKG="${WORK}/pkg"
 rm -rf "${PKG}"
 mkdir -p "${PKG}/fonts" "${PKG}/obj"
 cp -f "${FONT_TTF}" "${PKG}/fonts/DejaVuSans.ttf"
+cp -f "${ROOT}/third_party/skia/SheenBidi-LICENSE" "${PKG}/SheenBidi-LICENSE"
+cp -f "${ROOT}/third_party/fonts/"* "${PKG}/fonts/"
+
+make -C "${ROOT}/crates/ffi-skia" build/sheenbidi.o build/fonts.o
 
 echo "==> compile paint interface, bridge, and embedded font"
 c++ -std=c++17 -O2 -fPIC -c "${SHIM}" -o "${PKG}/obj/sk_capi_skia.o" \
-  -I"${SKIA}" \
+  -I"${SKIA}" -I"${SKIA}/third_party/externals/harfbuzz/src" \
+  -I"${ROOT}/crates/ffi-skia/build/sheenbidi/Headers" \
   -DSK_RELEASE \
   -DSCUZZ_SKIA_EMBEDDED_FONT
 
@@ -119,6 +124,8 @@ for dep in "${SKIA_STATIC_LIBS[@]}"; do
 done
 
 SHIM_OBJS=(
+  "${ROOT}/crates/ffi-skia/build/fonts.o"
+  "${ROOT}/crates/ffi-skia/build/sheenbidi.o"
   "${PKG}/obj/sk_capi_skia.o"
   "${PKG}/obj/sk_capi_skia_bridge.o"
   "${PKG}/obj/scuzz_embedded_font.o"
@@ -179,7 +186,7 @@ fi
   echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"${PKG}/VERSION"
 
-tar -C "${PKG}" -czf "${OUT_DIR}/${ASSET}" libsk_capi.a fonts VERSION
+tar -C "${PKG}" -czf "${OUT_DIR}/${ASSET}" libsk_capi.a fonts VERSION SheenBidi-LICENSE
 echo "build_skia_prebuilt: wrote ${OUT_DIR}/${ASSET}"
 ls -lh "${OUT_DIR}/${ASSET}"
 

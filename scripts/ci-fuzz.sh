@@ -1485,8 +1485,8 @@ python3 - <<PY
 from pathlib import Path
 p = Path("$chrome_dir") / "src" / "Main.scuzz"
 text = p.read_text()
-old = 'View.row(View.minSize(80, 36, View.button("+1"'
-new = 'View.row(View.minSize(80, 36, View.button("skip", _ => IO.pure(()))), View.minSize(80, 36, View.button("+1"'
+old = 'View.row([View.minSize(80, 36, View.button("+1"'
+new = 'View.row([View.minSize(80, 36, View.button("skip", _ => IO.pure(()))), View.minSize(80, 36, View.button("+1"'
 if old not in text:
     raise SystemExit("chrome decoy: +1 button site missing")
 p.write_text(text.replace(old, new, 1))
@@ -1524,11 +1524,11 @@ cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
   for {
     count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
-    _ <- Ui.run(_ => View.column(
+    _ <- Ui.run(_ => View.column([
       View.text("Bug"),
       View.bindText(label),
-      View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
-    ))
+      View.row([View.button("boom", _ => Fs.read("/definitely/missing"))])
+    ]))
   } yield ()
 EOF
 if fuzz --iterations 8 /tmp/scuzz-fuzzbug; then
@@ -1550,11 +1550,11 @@ cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
   for {
     count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
-    _ <- Ui.run(_ => View.column(
+    _ <- Ui.run(_ => View.column([
       View.text("Bug"),
       View.bindText(label),
-      View.row(View.button("boom", _ => Signal.set(count, Signal.get(count) + 1)))
-    ))
+      View.row([View.button("boom", _ => Signal.set(count, Signal.get(count) + 1))])
+    ]))
   } yield ()
 EOF
 if ! fuzz --iterations 0 /tmp/scuzz-fuzzbug; then
@@ -1571,11 +1571,11 @@ cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
   for {
     count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
-    _ <- Ui.run(_ => View.column(
+    _ <- Ui.run(_ => View.column([
       View.text("Bug"),
       View.bindText(label),
-      View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
-    ))
+      View.row([View.button("boom", _ => Fs.read("/definitely/missing"))])
+    ]))
   } yield ()
 EOF
 if fuzz --iterations 0 /tmp/scuzz-fuzzbug; then

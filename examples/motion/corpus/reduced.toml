@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap checkbox:Reduce motion", "tap button:Fade out", "tap button:Add", "tap button:Fade in", "tap checkbox:Reduce motion", "tap button:Half", "reduceMotion true", "tap button:Fade out", "reduceMotion false", "tap button:Fade in"]

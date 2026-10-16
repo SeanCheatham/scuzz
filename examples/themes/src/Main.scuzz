@@ -1,0 +1,10 @@
+def form(label: String, name: Signal[String], checked: Signal[Int]): View =
+  View.column([View.text(label), View.textField(name, label), View.checkbox(checked, s"Updates $label"), View.button("Apply", _ => Signal.set(checked, 1))])
+
+@main def main: IO[Unit] =
+  for {
+    name = Signal.make("")
+    checked = Signal.make(0)
+    custom = Theme.metrics(Theme.colors(Color.rgb(20, 40, 60), Color.rgb(30, 50, 70), Color.rgb(240, 245, 250), Color.rgb(100, 220, 210), Color.rgb(10, 30, 40), Color.rgb(180, 210, 220), Color.rgb(180, 200, 210), Color.rgb(255, 180, 120), Color.rgb(60, 100, 120)), 22, 10, 16, 12, 52)
+    _ <- Ui.run(_ => View.theme(Theme.dark(), View.column([View.expanded(1, View.scroll(View.column([form("Dark", name, checked), View.theme(Theme.metrics(Theme.light(), 12, 4, 6, 4, 28), View.card(form("Light", name, checked))), View.theme(custom, View.card(form("Custom", name, checked))), View.text("Dark footer")])))])))
+  } yield ()

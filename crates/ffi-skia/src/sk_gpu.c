@@ -443,7 +443,7 @@ static int push_px(float **verts, int *n, int *cap, const SkGpuTarget *t, int x,
 
 void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
                       float size, uint8_t r, uint8_t g, uint8_t b, uint8_t a,
-                      int cx0, int cy0, int cx1, int cy1) {
+                      int cx0, int cy0, int cx1, int cy1, int style) {
   float px;
   float scale;
   float col[4];
@@ -487,9 +487,12 @@ void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
         uint8_t bits = glyph[row];
         for (bit = 0; bit < 8; bit++) {
           if (bits & (uint8_t)(1u << bit)) {
-            if (!push_px(&verts, &n, &cap, target, cx + bit, gy + row, cx0, cy0,
+            if (!push_px(&verts, &n, &cap, target, cx + bit + ((style & 2) ? (7 - row) / 4 : 0), gy + row, cx0, cy0,
                          cx1, cy1))
               goto draw;
+            if ((style & 1) && !push_px(&verts, &n, &cap, target,
+                cx + bit + 1 + ((style & 2) ? (7 - row) / 4 : 0), gy + row,
+                cx0, cy0, cx1, cy1)) goto draw;
           }
         }
       }
@@ -505,9 +508,12 @@ void sk_gpu_draw_text(SkGpuTarget *target, const char *text, float x, float y,
           if (bit > 7)
             bit = 7;
           if (glyph[row] & (uint8_t)(1u << bit)) {
-            if (!push_px(&verts, &n, &cap, target, cx + sc, gy + sr, cx0, cy0,
+            if (!push_px(&verts, &n, &cap, target, cx + sc + ((style & 2) ? (advance - sr) / 5 : 0), gy + sr, cx0, cy0,
                          cx1, cy1))
               goto draw;
+            if ((style & 1) && !push_px(&verts, &n, &cap, target,
+                cx + sc + 1 + ((style & 2) ? (advance - sr) / 5 : 0), gy + sr,
+                cx0, cy0, cx1, cy1)) goto draw;
           }
         }
       }
@@ -564,4 +570,124 @@ const uint8_t *sk_gpu_read(SkGpuTarget *target, size_t *out_size) {
   if (out_size)
     *out_size = nbytes;
   return target->read;
+}
+
+#if defined(__APPLE__)
+#define IMAGE_GLSL "#version 120\n"
+#else
+#define IMAGE_GLSL "#version 100\nprecision mediump float;\n"
+#endif
+
+static GLuint g_image_prog;
+static GLint g_image_ndc, g_image_uv, g_image_texture, g_image_opacity;
+
+static int image_program(void) {
+  if (g_image_prog)
+    return 1;
+  GLuint vs = compile_shader(GL_VERTEX_SHADER, IMAGE_GLSL
+      "attribute vec2 a_ndc; attribute vec2 a_uv; varying vec2 v_uv;\n"
+      "void main(){gl_Position=vec4(a_ndc,0.0,1.0);v_uv=a_uv;}\n");
+  GLuint fs = compile_shader(GL_FRAGMENT_SHADER, IMAGE_GLSL
+      "uniform sampler2D u_texture; uniform float u_opacity; varying vec2 v_uv;\n"
+      "void main(){gl_FragColor=texture2D(u_texture,v_uv)*u_opacity;}\n");
+  if (!vs || !fs) {
+    if (vs) glDeleteShader(vs);
+    if (fs) glDeleteShader(fs);
+    return 0;
+  }
+  GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glLinkProgram(program);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  GLint ok = 0;
+  glGetProgramiv(program, GL_LINK_STATUS, &ok);
+  if (!ok) {
+    glDeleteProgram(program);
+    return 0;
+  }
+  g_image_ndc = glGetAttribLocation(program, "a_ndc");
+  g_image_uv = glGetAttribLocation(program, "a_uv");
+  g_image_texture = glGetUniformLocation(program, "u_texture");
+  g_image_opacity = glGetUniformLocation(program, "u_opacity");
+  g_image_prog = program;
+  return 1;
+}
+
+void *sk_gpu_image_new(const uint8_t *pixels, int width, int height) {
+  if (!pixels || width < 1 || height < 1 || !gpu_ready() || !image_program())
+    return NULL;
+  GLint max_size = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_size);
+  if (width > max_size || height > max_size)
+    return NULL;
+  GLuint *image = (GLuint *)malloc(sizeof *image);
+  if (!image)
+    return NULL;
+  glGenTextures(1, image);
+  glBindTexture(GL_TEXTURE_2D, *image);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, pixels);
+  if (!*image || glGetError() != GL_NO_ERROR) {
+    glDeleteTextures(1, image);
+    free(image);
+    return NULL;
+  }
+  return image;
+}
+
+void sk_gpu_image_free(void *image) {
+  if (!image)
+    return;
+  if (gpu_ready())
+    glDeleteTextures(1, (GLuint *)image);
+  free(image);
+}
+
+static void gpu_draw_texture(SkGpuTarget *target, const void *image, float x, float y,
+                       float w, float h, float opacity,
+                       int cx0, int cy0, int cx1, int cy1, int flip) {
+  if (!target || !image || !(w > 0.f) || !(h > 0.f) || !(opacity > 0.f) ||
+      !gpu_ready() || !image_program())
+    return;
+  bind_target(target);
+  if (!set_scissor(target, cx0, cy0, cx1, cy1))
+    return;
+  float left = x / target->w * 2.f - 1.f;
+  float right = (x + w) / target->w * 2.f - 1.f;
+  float top = 1.f - y / target->h * 2.f;
+  float bottom = 1.f - (y + h) / target->h * 2.f;
+  float positions[8] = {left, top, right, top, left, bottom, right, bottom};
+  float top_v = flip ? 1.f : 0.f, bottom_v = flip ? 0.f : 1.f;
+  const float uv[8] = {0.f, top_v, 1.f, top_v, 0.f, bottom_v, 1.f, bottom_v};
+  glUseProgram(g_image_prog);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, *(const GLuint *)image);
+  glUniform1i(g_image_texture, 0);
+  glUniform1f(g_image_opacity, opacity > 1.f ? 1.f : opacity);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  glEnableVertexAttribArray((GLuint)g_image_ndc);
+  glEnableVertexAttribArray((GLuint)g_image_uv);
+  glVertexAttribPointer((GLuint)g_image_ndc, 2, GL_FLOAT, GL_FALSE, 0, positions);
+  glVertexAttribPointer((GLuint)g_image_uv, 2, GL_FLOAT, GL_FALSE, 0, uv);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
+void sk_gpu_draw_image(SkGpuTarget *target, const void *image, float x,
+                       float y, float w, float h, float opacity,
+                       int cx0, int cy0, int cx1, int cy1) {
+  gpu_draw_texture(target, image, x, y, w, h, opacity, cx0, cy0, cx1, cy1, 0);
+}
+
+void sk_gpu_draw_target(SkGpuTarget *target, const SkGpuTarget *source, float opacity,
+                        int cx0, int cy0, int cx1, int cy1) {
+  if (!source) return;
+  gpu_draw_texture(target, &source->tex, 0, 0, source->w, source->h, opacity,
+                    cx0, cy0, cx1, cy1, 1);
 }

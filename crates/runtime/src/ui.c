@@ -132,6 +132,9 @@ typedef struct ReloadCode {
 } ReloadCode;
 
 struct SzUiSession {
+  int64_t input_time, input_origin, input_origin_time;
+  int input_origin_ready;
+
   SzUiConfig cfg;
   SzView *root;
   SkSurface *surface;
@@ -153,6 +156,7 @@ struct SzUiSession {
   SzView *pointer_scroll;
   SzView *pointer_slider;
   SzView *pointer_field;
+  uintptr_t pointer_scroll_id, pointer_slider_id, pointer_field_id, pointer_scope_id, pointer_option_id;
   SzUiRebuildFn rebuild;
   void *rebuild_env;
   char *watch_path;
@@ -163,6 +167,8 @@ struct SzUiSession {
   int inject_playing;
   /* Script tail: hide a live dump until the four steps and the settled pump end. */
   int settle_motion;
+  int record_depth, record_pumps, record_script_motion;
+  size_t record_pumps_start;
   char *record_path;
   /* JSON record: event objects so far; the file rewrites on each event. */
   char *record_events;
@@ -252,6 +258,7 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
       s->cfg.scale = ds;
   }
   s->root = root;
+  sz_view_reduce_motion(root, s->cfg.reduced_motion);
   s->owns_view = 0;
   s->theme = sz_theme_default();
   s->lifecycle = SZ_LIFECYCLE_RESUME;
@@ -311,6 +318,8 @@ int sz_ui_session_replace_root(SzUiSession *session, SzView *root) {
   if (session->owns_view)
     sz_view_free(session->root);
   session->root = root;
+  sz_view_reduce_motion(root, session->cfg.reduced_motion);
+  sz_view_pause_motion(root, session->lifecycle != SZ_LIFECYCLE_RESUME);
   session_mark_dirty(session);
   session->keyboard_visible = 0;
   return 1;
@@ -447,6 +456,8 @@ int sz_ui_session_set_record(SzUiSession *session, const char *path) {
   session->record_events = NULL;
   session->record_events_len = 0;
   session->record_events_cap = 0;
+  session->record_pumps = 0;
+  session->record_pumps_start = 0;
   /* Truncate so each process is one session. */
   f = fopen(path, "w");
   if (!f)
@@ -599,7 +610,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   fputs(",\"taps\":[", f);
   n_buttons = sz_ui_collect_buttons(session, buttons, 64);
   for (i = 0; i < n_buttons; i++) {
-    SzRect fr = sz_view_frame(buttons[i]);
+    SzRect fr = sz_view_control_frame(buttons[i]);
     fprintf(f, "%s{\"i\":%d,\"label\":", i ? "," : "", i);
     fputs_json_str(f, sz_view_a11y_label(buttons[i]));
     fprintf(f, ",\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f}", (double)fr.x,
@@ -690,7 +701,12 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
               overlays[i] == top ? "true" : "false",
               sz_view_overlay_is_open(overlays[i]) ? "true" : "false");
   }
-  fputs("],\"scrolls\":[", f);
+  fputs("],\"selects\":", f);
+  sz_view_selects_dump_json(session ? session->root : NULL, f);
+  fputs(",\"transitions\":", f);
+  sz_view_transitions_dump_json(session ? session->root : NULL, f);
+  fprintf(f, ",\"reducedMotion\":%s", session && session->cfg.reduced_motion ? "true" : "false");
+  fputs(",\"scrolls\":[", f);
   n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
   for (i = 0; i < n_scrolls; i++) {
     fprintf(f, "%s{\"i\":%d,\"label\":", i ? "," : "", i);
@@ -1092,8 +1108,11 @@ static void json_append_escaped(char **buf, size_t *len, size_t *cap,
 /* Append one event object and rewrite the record file. */
 static void record_json_event(SzUiSession *session, char *obj) {
   FILE *f;
-  if (!obj)
-    return;
+  if (!obj) return;
+  if (!session || !session->record_path || session->record_depth || session->inject_playing) {
+    sz_free(obj); return;
+  }
+  session->record_pumps = 0;
   if (session->record_events_len > 0)
     sz_dump_append(&session->record_events, &session->record_events_len,
                    &session->record_events_cap, ",");
@@ -1103,10 +1122,35 @@ static void record_json_event(SzUiSession *session, char *obj) {
   f = fopen(session->record_path, "w");
   if (!f)
     return;
-  fputs("{\"v\":1,\"kind\":\"inject\",\"events\":[", f);
+  fputs("{\"v\":1,\"kind\":\"inject\",\"manualPumps\":true,\"events\":[", f);
   fputs(session->record_events, f);
   fputs("]}\n", f);
   fclose(f);
+}
+
+void sz_ui_session_script_begin(SzUiSession *session) {
+  if (session) session->record_depth++;
+}
+
+void sz_ui_session_script_end(SzUiSession *session) {
+  if (session && session->record_depth > 0) session->record_depth--;
+}
+
+static void record_painted_pump(SzUiSession *session) {
+  if (!session || !session->record_path || session->record_depth || session->inject_playing || session->record_script_motion) return;
+  int count = 1;
+  size_t start = session->record_events_len;
+  if (session->record_pumps > 0 && session->record_pumps < INT_MAX) {
+    count = session->record_pumps + 1;
+    start = session->record_pumps_start;
+    session->record_events_len = start;
+    session->record_events[start] = 0;
+  }
+  char event[64];
+  snprintf(event, sizeof event, "{\"op\":\"pump\",\"k\":%d}", count);
+  record_json_event(session, sz_strdup(event));
+  session->record_pumps = count;
+  session->record_pumps_start = start;
 }
 
 /* `{"op":"<op>","i":N}` on a tap-target hit. A miss records a point:
@@ -1200,6 +1244,8 @@ static void record_live_event_json(SzUiSession *session,
     record_json_event(session,
                       jrec_str_event("lifecycle", "phase",
                                      lifecycle_name(ev->lifecycle)));
+  } else if (ev->kind == SZ_INPUT_REDUCED_MOTION) {
+    record_json_event(session, sz_strdup(ev->reduced_motion ? "{\"op\":\"reduceMotion\",\"value\":true}" : "{\"op\":\"reduceMotion\",\"value\":false}"));
   } else if (ev->kind == SZ_INPUT_KEYBOARD) {
     char *buf = NULL;
     size_t len = 0, cap = 0;
@@ -1434,11 +1480,41 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
 }
 
 /* Live OS path: record then inject. Tests call this to simulate drain. */
+void sz_ui_session_input_time(SzUiSession *session, int64_t milliseconds) {
+  if (!session || !session->root || milliseconds < session->input_time || milliseconds < 0)
+    sz_panic("UI input time must not move backwards");
+  session->input_time = milliseconds;
+  sz_view_input_time(session->root, milliseconds);
+}
+
+static void record_select_input_time(SzUiSession *session, const SzInputEvent *event) {
+  if (event->kind != SZ_INPUT_KEY && event->kind != SZ_INPUT_TEXT && event->kind != SZ_INPUT_TEXT_EDIT) return;
+  sz_view_prepare_input(session->root);
+  SzView *focused = sz_view_focused(session->root);
+  if (!focused || sz_view_kind(focused) != SZ_VIEW_SELECT) return;
+  int64_t now = sz_clock_monotonic_ms_sync();
+  if (!session->input_origin_ready) {
+    session->input_origin_ready = 1;
+    session->input_origin = now;
+    session->input_origin_time = session->input_time;
+  }
+  int64_t elapsed = now > session->input_origin ? now - session->input_origin : 0;
+  int64_t time = elapsed > INT64_MAX - session->input_origin_time ? INT64_MAX : session->input_origin_time + elapsed;
+  if (time < session->input_time) time = session->input_time;
+  sz_ui_session_input_time(session, time);
+  if (session->record_path) {
+    char entry[96];
+    snprintf(entry, sizeof entry, "{\"op\":\"inputTime\",\"ms\":%lld}", (long long)time);
+    record_json_event(session, sz_strdup(entry));
+  }
+}
+
 int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event) {
   int chord = 0;
   int ok;
   if (!session || !event)
     return 0;
+  record_select_input_time(session, event);
   if (event->kind == SZ_INPUT_KEY)
     chord = clipboard_chord(event->key, event->key_mods);
   if (chord) {
@@ -1542,6 +1618,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     char *delta = NULL;
     if (take_inject(session, &delta)) {
       session->inject_playing = 1;
+      session->record_script_motion = 1;
       sz_ui_script_play_json(session, delta);
       sz_free(delta);
       session->inject_playing = 0;
@@ -1557,6 +1634,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
   pthread_mutex_lock(&session->bridge_lock);
   need_dump = need_dump || session->dirty || session->bridge_head != NULL;
   pthread_mutex_unlock(&session->bridge_lock);
+  if (need_dump) record_painted_pump(session);
   if (!need_dump) {
     session->pumps += 1;
     if (sz_testrt_oracles_armed()) {
@@ -1595,11 +1673,15 @@ int sz_ui_pump_sync(SzUiSession *session) {
   if (need_dump && session->debug_dump_path &&
       session->cfg.kind == SZ_UI_RUNTIME_MOBILE && !defer_debug_dump(session))
     sz_ui_session_write_dump(session, session->debug_dump_path);
+  uintptr_t focus_before_paint = sz_view_id(sz_view_focused(session->root));
   if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
   if (scale != 1.f)
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
+  if (session->lifecycle == SZ_LIFECYCLE_RESUME &&
+      focus_before_paint != sz_view_id(sz_view_focused(session->root)))
+    sync_keyboard(session);
   pthread_mutex_lock(&session->bridge_lock);
   /* A post during paint leaves bridge work. Keep dirty so the next pump
    * and quiesce sample that work. */
@@ -1665,6 +1747,8 @@ int sz_ui_pump_sync(SzUiSession *session) {
     sz_property_session_step();
   }
   session->last_hit_fresh = 0;
+  if (!session->inject_playing && !session->record_depth &&
+      !sz_view_motion_pending(session->root)) session->record_script_motion = 0;
   /* A step that this pump painted asks for the next pump. */
   if (need_dump && session->root && sz_view_motion_pending(session->root))
     session_mark_dirty(session);
@@ -1681,16 +1765,16 @@ void sz_ui_pump_after_event(SzUiSession *session) {
   int steps;
   if (!session || !sz_ui_session_alive(session))
     return;
-  /* Four motion steps and the settled pump. Finish them before this
-   * call returns. A quiet event pumps once. */
+  /* Explicit transitions keep their next input boundary. Other motion
+   * finishes in four steps and one settled pump. */
   session->settle_motion = 1;
   for (steps = 0; steps < 5; steps++) {
     if (!sz_ui_pump_sync(session))
       sz_panic("Ui.run: script pump failed");
     if (!sz_ui_session_alive(session))
       break;
-    if (!session->root || !sz_view_motion_pending(session->root))
-      break;
+    if (!session->root || sz_view_transition_pending(session->root) ||
+        !sz_view_motion_pending(session->root)) break;
   }
   session->settle_motion = 0;
 }
@@ -1707,10 +1791,38 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   sz_view_layout(session->root, (float)session->cfg.width,
                  (float)session->cfg.height, session->theme);
 
+  SzView *scope = sz_view_input_scope(session->root);
+  if (session->pointer_down && event->pointer_phase != SZ_POINTER_DOWN &&
+      session->pointer_scope_id != sz_view_id(scope)) {
+    session->pointer_scroll = session->pointer_slider = session->pointer_field = NULL;
+    sz_view_set_pressed_at(session->root, 0, 0, 0);
+    if (event->pointer_phase == SZ_POINTER_UP)
+      session->pointer_down = 0;
+    session_mark_dirty(session);
+    return 1;
+  }
+  if (session->pointer_down) {
+    session->pointer_scroll = sz_view_find(scope, session->pointer_scroll_id);
+    session->pointer_slider = sz_view_find(scope, session->pointer_slider_id);
+    session->pointer_field = sz_view_find(scope, session->pointer_field_id);
+    if ((session->pointer_slider_id && !session->pointer_slider) ||
+        (session->pointer_field_id && !session->pointer_field) ||
+        (session->pointer_scroll_id && !session->pointer_scroll)) {
+      session->pointer_scope_id = 0;
+      sz_view_set_pressed_at(session->root, 0, 0, 0);
+      if (event->pointer_phase == SZ_POINTER_UP) session->pointer_down = 0;
+      session_mark_dirty(session);
+      return 1;
+    }
+  }
+
   switch (event->pointer_phase) {
   case SZ_POINTER_DOWN: {
     SzView *hit = sz_view_hit_test(session->root, event->x, event->y);
+    if (hit && sz_view_kind(hit) == SZ_VIEW_TOOLTIP) return 1;
     session->pointer_down = 1;
+    session->pointer_scope_id = sz_view_id(scope);
+    session->pointer_option_id = hit && sz_view_kind(hit) == SZ_VIEW_SELECT_OPTION ? sz_view_id(hit) : 0;
     sz_view_set_pressed_at(session->root, event->x, event->y, button == 1);
     session->pointer_button = button;
     session->pointer_x = event->x;
@@ -1723,10 +1835,14 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->pointer_slider = NULL;
       session->pointer_scroll = NULL;
     } else if (hit && sz_view_kind(hit) == SZ_VIEW_SLIDER) {
+      sz_view_focus(session->root, hit);
+      sync_keyboard(session);
       session->pointer_slider = hit;
       session->pointer_scroll = NULL;
       sz_view_slider_set_at(hit, event->x);
     } else if (hit && sz_view_kind(hit) == SZ_VIEW_SPLIT) {
+      sz_view_focus(session->root, hit);
+      sync_keyboard(session);
       session->pointer_slider = hit;
       session->pointer_scroll = NULL;
       sz_view_split_set_at(hit, event->x);
@@ -1742,6 +1858,9 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->pointer_scroll =
           sz_view_scroll_at(session->root, event->x, event->y);
     }
+    session->pointer_scroll_id = sz_view_id(session->pointer_scroll);
+    session->pointer_slider_id = sz_view_id(session->pointer_slider);
+    session->pointer_field_id = sz_view_id(session->pointer_field);
     session_mark_dirty(session);
     return 1;
   }
@@ -1842,6 +1961,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     }
     if (dx * dx + dy * dy <= tap_slop2) {
       SzView *hit = sz_view_hit_test(session->root, event->x, event->y);
+      if (session->pointer_option_id && session->pointer_option_id != sz_view_id(hit)) return 1;
       int fired = sz_view_handle_tap(session->root, event->x, event->y);
       session_set_last_hit(session, event->x, event->y, fired ? hit : NULL);
       if (fired)
@@ -2001,12 +2121,18 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
         event->lifecycle != SZ_LIFECYCLE_STOP)
       return 0;
     session->lifecycle = event->lifecycle;
+    sz_view_pause_motion(session->root, event->lifecycle != SZ_LIFECYCLE_RESUME);
     if (event->lifecycle == SZ_LIFECYCLE_PAUSE ||
         event->lifecycle == SZ_LIFECYCLE_STOP) {
       session->keyboard_visible = 0;
       if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
         sz_mobile_set_keyboard(0);
     }
+    session_mark_dirty(session);
+    return 1;
+  case SZ_INPUT_REDUCED_MOTION:
+    session->cfg.reduced_motion = event->reduced_motion != 0;
+    sz_view_reduce_motion(session->root, session->cfg.reduced_motion);
     session_mark_dirty(session);
     return 1;
   case SZ_INPUT_KEYBOARD:
@@ -2021,6 +2147,7 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
 }
 
 int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
+  if (session && session->root) sz_view_input_time(session->root, session->input_time);
   int result = inject_event(session, event);
   if (session && session->root) copy_requests(session);
   return result;
@@ -2031,11 +2158,17 @@ int sz_ui_session_activate_view(SzUiSession *session, SzView *target) {
   float x, y;
   if (!session || !target || !session->root)
     return 0;
+  uintptr_t target_id = sz_view_id(target);
   sz_view_layout(session->root, (float)session->cfg.width,
                  (float)session->cfg.height, session->theme);
-  fr = sz_view_frame(target);
+  target = sz_view_find(session->root, target_id);
+  if (!target) return 0;
+  fr = sz_view_control_frame(target);
   x = fr.x + fr.w * 0.5f;
   y = fr.y + fr.h * 0.5f;
+  SzView *scope = sz_view_input_scope(session->root);
+  if (scope && sz_view_kind(scope) == SZ_VIEW_SELECT && target != scope && !sz_view_find(scope, sz_view_id(target)))
+    target = scope;
   if (!sz_view_activate(session->root, target, x, y))
     return 0;
   copy_requests(session);
@@ -2199,6 +2332,9 @@ int sz_ui_session_set_title(SzUiSession *session, const char *title) {
   sz_free(session->title_owned);
   session->title_owned = n;
   session->cfg.title = n;
+#ifdef __EMSCRIPTEN__
+  if (session->cfg.kind == SZ_UI_RUNTIME_WEB) sz_web_set_title(n);
+#endif
   session_mark_dirty(session);
   return 1;
 }
@@ -2568,9 +2704,14 @@ void sz_ui_session_finish(SzUiSession *session) {
 
 void sz_ui_session_focus_view(SzUiSession *session, SzView *view) {
   if (!session) return;
+  uintptr_t id = sz_view_id(view);
+  uintptr_t before = sz_view_id(sz_view_focused(session->root));
   sz_view_layout(session->root, (float)session->cfg.width,
                  (float)session->cfg.height, session->theme);
+  view = sz_view_find(session->root, id);
+  if (id && !view) return;
   sz_view_focus(session->root, view);
+  if (before != sz_view_id(sz_view_focused(session->root))) sync_keyboard(session);
   session_mark_dirty(session);
 }
 

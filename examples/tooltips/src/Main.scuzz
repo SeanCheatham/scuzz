@@ -1,0 +1,9 @@
+@main def main: IO[Unit] =
+  for {
+    count = Signal.make(0)
+    open = Signal.make(0)
+    shown = Signal.make(1)
+    name = Signal.make("")
+    countText = Signal.map(count, n => s"Saved: $n")
+    _ <- Ui.run(_ => View.stack([View.column([View.tooltip("Save the current document", View.button("Save", _ => Signal.set(count, Signal.get(count) + 1))), View.button("Next", _ => Signal.set(count, Signal.get(count) + 10)), View.tooltip("Enter your full name", View.textField(name, "Name")), View.button("Open details", _ => Signal.set(open, 1)), View.tooltip("Outer help", View.tooltip("Inner help", View.button("Nested", _ => Signal.set(count, Signal.get(count) + 100)))), View.checkbox(shown, "Show help"), View.showWhen(shown, 1, View.theme(Theme.dark(), View.tooltip("This long description wraps inside the viewport. It keeps accented text such as café. The help remains available while the control has focus or the pointer stays over the popup.", View.button("Long help", _ => Signal.set(count, Signal.get(count) + 1000))))), View.tooltip("", View.button("Empty help", _ => Signal.set(count, Signal.get(count) + 10000))), View.bindText(countText)]), View.overlay(open, "Details", View.center(View.card(View.column([View.text("Tooltip focus stays on its control."), View.tooltip("Close the details dialog", View.button("Close", _ => Signal.set(open, 0)))]))))]))
+  } yield ()

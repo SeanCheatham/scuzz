@@ -1,0 +1,19 @@
+def controlsStayAvailable(t: Timeline): Verdict =
+  Verdict.and(Verdict.alwaysHas(t, "button:Reverse"), Verdict.alwaysHas(t, "button:Remove first"))
+
+def listSizeStaysValid(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalListLen(t, i, "items") >= 0 && Timeline.signalListLen(t, i, "items") <= 10000)
+
+def reverseKeepsItems(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Reverse", __tup => __tup match {
+  case (a, b) => Timeline.signalListLen(t, a, "items") == Timeline.signalListLen(t, b, "items") && Timeline.signalInt(t, b, "first") == Timeline.signalInt(t, a, "last") && Timeline.signalInt(t, b, "last") == Timeline.signalInt(t, a, "first")
+})
+
+def removeChangesSize(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Remove first", __tup => __tup match {
+  case (a, b) => Timeline.signalListLen(t, b, "items") == (if (Timeline.signalListLen(t, a, "items") > 0) Timeline.signalListLen(t, a, "items") - 1 else 0)
+})
+
+def startsWithAllItems(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalListLen(t, i, "items") == 10000 && Timeline.signalInt(t, i, "first") == 0 && Timeline.signalInt(t, i, "last") == 9999)
+

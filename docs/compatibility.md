@@ -95,7 +95,16 @@ App Transport Security permits local networking. Use HTTPS for remote services.
 ## Browser target
 
 The browser target uses the shared Signals, View layout, and software paint
-path. Browser font measurement and rasterization use the same monospace font.
+path. Browser font measurement and rasterization use the same font stack.
+Pinned Noto fonts supply Devanagari, Thai, and Simplified Chinese fallback.
+Other characters use the browser monospace font.
+Font files load when their Unicode ranges occur.
+The three files use 18.6 MB before compression. The CJK file uses 17.8 MB.
+Font loading updates layout and preserves input state.
+The browser chooses the base direction from the first strong source character.
+DOM text ranges supply field source positions.
+Text wrapping and ellipsis keep browser grapheme clusters together.
+The browser needs `Intl.Segmenter`.
 Emscripten keeps the 64-bit runtime layout and lowers the module to wasm32.
 The package stamps `app.js` and `app.wasm` with one content version.
 The page loads that pair together.

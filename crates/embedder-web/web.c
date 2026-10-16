@@ -2,6 +2,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <string.h>
+#include <stdio.h>
 
 static SzUiSession *active;
 static SzString *snapshot;
@@ -29,41 +30,137 @@ void sz_web_live_loop(void (*frame)(void)) {
 }
 
 EM_JS(void, sz_web_frame_begin, (float scale), {
-  Module.webFrame = {scale, texts: [], sections: [], items: [], groups: []};
+  Module.webFrame = {scale, texts: [], sections: [], items: [], groups: [], transitions: []};
 });
-EM_JS(void, sz_web_group_begin, (SzView *view, int role, const char *label, SzView *related, int hidden, float x, float y, float w, float h), {
+EM_JS(void, sz_web_group_begin_id, (uintptr_t view, int role, const char *label, uintptr_t related, int hidden, float x, float y, float w, float h, int tab_stop), {
   const f = Module.webFrame;
   f.items.push({id: Number(view), role, label: UTF8ToString(Number(label)), related: Number(related),
-    group: true, hidden: Boolean(hidden), x, y, w, h, parent: f.groups.at(-1)});
+    group: true, tabStop: Boolean(tab_stop), hidden: Boolean(hidden), x, y, w, h, parent: f.groups.at(-1)});
   f.groups.push(Number(view));
 });
 EM_JS(void, sz_web_group_end, (), { Module.webFrame.groups.pop(); });
-EM_JS(void, sz_web_text_begin, (SzView *view, const char *text, int level), {
-  const item = {id: Number(view), text: UTF8ToString(Number(text)), level, lines: [], parent: Module.webFrame.groups.at(-1)};
+EM_JS(void, sz_web_text_begin_id, (uintptr_t view, const char *text, int level, uint32_t ink, uint32_t selection, int opacity), {
+  const item = {id: Number(view), text: UTF8ToString(Number(text)), level, ink, selection, opacity, lines: [], parent: Module.webFrame.groups.at(-1)};
   Module.webFrame.texts.push(item);
   Module.webFrame.items.push(item);
 });
-EM_JS(void, sz_web_control, (SzView *view, int role, const char *label, const char *route,
-    const char *copy, const char *value, SzView *related, int checked, float x, float y, float w, float h,
-    int clipped, float cx, float cy, float cw, float ch), {
+EM_JS(void, sz_web_control_id, (uintptr_t view, int role, const char *label, const char *route,
+    const char *copy, const char *value, uintptr_t related, int checked, float x, float y, float w, float h,
+    int clipped, float cx, float cy, float cw, float ch, uint32_t ink, uint32_t selection, float font, float line_h, float inset, float gutter, int tab_stop, int opacity), {
   Module.webFrame.items.push({id: Number(view), role, label: UTF8ToString(Number(label)),
     related: Number(related), parent: Module.webFrame.groups.at(-1),
     route: route ? UTF8ToString(Number(route)) : null,
     copy: copy ? UTF8ToString(Number(copy)) : null, value: UTF8ToString(Number(value)),
-    checked, x, y, w, h, clip: clipped ? [cx, cy, cw, ch] : null});
+    checked, opacity, tabStop: Boolean(tab_stop), x, y, w, h, ink, selection, font, line_h, inset, gutter, clip: clipped ? [cx, cy, cw, ch] : null});
 });
-EM_JS(void, sz_web_copy, (SzView *view, const char *text), {
+EM_JS(void, web_transition, (uintptr_t view, int value, int target, int remaining, int suppressed), {
+  Module.webFrame.transitions.push({id: Number(view), value, target, remaining, suppressed: Boolean(suppressed)});
+});
+void sz_web_transition(SzView *view, int value, int target, int remaining, int suppressed) {
+  web_transition(sz_view_id(view), value, target, remaining, suppressed);
+}
+
+EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t active, int count), {
+  const item = Module.webFrame.items.at(-1);
+  item.active = Number(active); item.optionCount = count;
+  Module.webFrame.items.push({id: Number(popup), group: true, role: 56, label: item.label,
+    parent: item.parent, related: Number(owner), hidden: !item.checked, x: 0, y: 0, w: 0, h: 0});
+});
+void sz_web_select_state(SzView *view, SzView *popup, SzView *active, int count) {
+  web_select_state(sz_view_id(view), sz_view_id(popup), sz_view_id(active), count);
+}
+EM_JS(void, web_select_list, (uintptr_t popup, float x, float y, float w, float h), {
+  const item = Module.webFrame.items.find(item => item.id === Number(popup));
+  if (item) Object.assign(item, {x, y, w, h, hidden: false});
+});
+void sz_web_select_list(SzView *view, SzView *popup, SzRect frame) {
+  (void)view;
+  web_select_list(sz_view_id(popup), frame.x, frame.y, frame.w, frame.h);
+}
+EM_JS(void, web_select_option, (uintptr_t popup, int index, int count), {
+  const item = Module.webFrame.items.at(-1);
+  item.parent = Number(popup); item.optionIndex = index; item.optionCount = count;
+});
+void sz_web_select_option(SzView *option, SzView *view, int index, int count) {
+  (void)option;
+  web_select_option(sz_view_id(sz_view_select_popup(view)), index, count);
+}
+
+EM_JS(void, web_tooltip_id, (uintptr_t id, const char *text, float x, float y, float w, float h, int open), {
+  Module.webFrame.items.push({id: Number(id), tooltip: true, label: UTF8ToString(Number(text)),
+    x, y, w, h, hidden: !open});
+});
+void sz_web_tooltip(SzView *view, const char *text, SzRect frame, int open) {
+  web_tooltip_id(sz_view_id(view), text, frame.x, frame.y, frame.w, frame.h, open);
+}
+EM_JS(void, web_description, (uintptr_t id), {
+  Module.webFrame.items.at(-1).description = Number(id);
+});
+EM_JS(void, sz_web_copy_id, (uintptr_t view, const char *text), {
   Module.copyText(Number(view), UTF8ToString(Number(text)));
 });
+void sz_web_group_begin(SzView *view, int role, const char *label, SzView *related,
+                         int hidden, float x, float y, float w, float h) {
+  sz_web_group_begin_id(sz_view_id(view), role, label, sz_view_id(related), hidden, x, y, w, h, sz_view_tab_stop(view));
+}
+void sz_web_text_begin(SzView *view, const char *text, int level, uint32_t ink, uint32_t selection) {
+  sz_web_text_begin_id(sz_view_id(view), text, level, ink, selection, sz_view_paint_opacity(view));
+}
+EM_JS(void, web_slider_range, (const char *minimum, const char *maximum, const char *value), {
+  Module.webFrame.items.at(-1).range = {minimum: UTF8ToString(Number(minimum)),
+    maximum: UTF8ToString(Number(maximum)), value: UTF8ToString(Number(value))};
+});
+void sz_web_control(SzView *view, int role, const char *label, const char *route,
+                    const char *copy, const char *value, SzView *related,
+                    int checked, float x, float y, float w, float h,
+                    int clipped, float cx, float cy, float cw, float ch, uint32_t ink, uint32_t selection, float font, float line_h, float inset, float gutter) {
+  sz_web_control_id(sz_view_id(view), role, label, route, copy, value,
+                    sz_view_id(related), checked, x, y, w, h, clipped, cx, cy, cw, ch, ink, selection, font, line_h, inset, gutter, sz_view_tab_stop(view), sz_view_paint_opacity(view));
+  web_description(sz_view_id(sz_view_tooltip_owner(view)));
+  if (role == SZ_A11Y_SLIDER || role == SZ_A11Y_SPLIT) {
+    char minimum[32], maximum[32], current[32];
+    snprintf(minimum, sizeof minimum, "%lld", (long long)(role == SZ_A11Y_SPLIT ? 0 : sz_view_slider_minimum(view)));
+    snprintf(maximum, sizeof maximum, "%lld", (long long)(role == SZ_A11Y_SPLIT ? 100 : sz_view_slider_maximum(view)));
+    snprintf(current, sizeof current, "%lld", (long long)(role == SZ_A11Y_SPLIT ? sz_view_split_frac(view) : sz_view_slider_value(view)));
+    web_slider_range(minimum, maximum, current);
+  }
+}
+void sz_web_copy(SzView *view, const char *text) {
+  sz_web_copy_id(sz_view_id(view), text);
+}
+EM_JS(void, sync_editor_tab, (uintptr_t id, const char *value, int start, int end), {
+  const node = Module.nodes.get(Number(id));
+  if (!node) return;
+  const text = UTF8ToString(Number(value));
+  const bytes = new TextEncoder().encode(text);
+  const decoder = new TextDecoder();
+  node.value = text;
+  node.committed = text;
+  node.setSelectionRange(decoder.decode(bytes.subarray(0, start)).length,
+    decoder.decode(bytes.subarray(0, end)).length);
+});
+
+EM_JS(void, web_inline_action, (uintptr_t parent, const SzRect *boxes, int count), {
+  const item = Module.webFrame.items.at(-1);
+  item.parent = Number(parent);
+  item.inline = true;
+  const start = Number(boxes) / 4;
+  item.boxes = Array.from({length: count}, (_, i) =>
+    Array.from({length: 4}, (_, j) => HEAPF32[start + i * 4 + j]));
+});
+void sz_web_inline_action(SzView *text, const SzRect *boxes, int count) {
+  web_inline_action(sz_view_id(text), boxes, count);
+}
+
 EM_JS(void, sz_web_text_line, (const char *source, int start, int end,
     const char *text, float x, float y, float width, float font, float line_h,
-    int clipped, float cx, float cy, float cw, float ch), {
+    int clipped, float cx, float cy, float cw, float ch, uint32_t ink, int style, int synthetic, uintptr_t action), {
   const f = Module.webFrame;
   const base = Number(source);
   f.texts[f.texts.length - 1].lines.push({
     start: start ? UTF8ToString(base, start).length : 0,
     end: end ? UTF8ToString(base, end).length : 0,
-    text: UTF8ToString(Number(text)), x, y, width, font, line_h,
+    text: UTF8ToString(Number(text)), x, y, width, font, line_h, ink, style, synthetic: Boolean(synthetic), action: Number(action),
     clip: clipped ? [cx, cy, cw, ch] : null
   });
 });
@@ -141,10 +238,20 @@ EMSCRIPTEN_KEEPALIVE int sz_web_navigate(const char *title) {
   return 1;
 }
 
+EM_JS(void, sz_web_set_title, (const char *title), {
+  document.title = UTF8ToString(Number(title));
+});
+
 void sz_web_start(SzUiSession *session) {
   active = session;
   EM_ASM({ Module.ready = true; document.title = UTF8ToString(Number($0)); }, sz_ui_session_title(session));
-  EM_ASM({ Module.readRoute(); });
+  EM_ASM({
+    Module.motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => Module.ccall('sz_web_reduced_motion', null, ['number'], [Number(Module.motionPreference.matches)]);
+    Module.motionPreference.addEventListener('change', update);
+    update();
+    Module.readRoute();
+  });
   resize(0, NULL, NULL);
   emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, 0, resize);
   emscripten_set_mousedown_callback("#canvas", NULL, 0, mouse);
@@ -157,6 +264,10 @@ EMSCRIPTEN_KEEPALIVE const char *sz_web_snapshot(void) {
   if (snapshot) sz_release(snapshot);
   snapshot = active ? sz_view_a11y_dump(sz_ui_session_root(active)) : NULL;
   return snapshot ? sz_string_cstr(snapshot) : "";
+}
+
+EMSCRIPTEN_KEEPALIVE int sz_web_motion_pending(void) {
+  return active && sz_view_motion_pending(sz_ui_session_root(active));
 }
 
 EMSCRIPTEN_KEEPALIVE unsigned sz_web_pumps(void) {
@@ -173,6 +284,12 @@ void sz_web_stop(void) {
   snapshot = NULL;
 }
 
+EMSCRIPTEN_KEEPALIVE int sz_web_tab(int backwards) {
+  if (!active || !sz_view_focus_next(sz_ui_session_root(active), backwards, 0)) return 0;
+  sz_ui_session_invalidate(active);
+  return 1;
+}
+
 EMSCRIPTEN_KEEPALIVE int sz_web_key(const char *key, int mods, int repeat) {
   if (!active) return 0;
   SzInputEvent input = {0};
@@ -180,7 +297,12 @@ EMSCRIPTEN_KEEPALIVE int sz_web_key(const char *key, int mods, int repeat) {
   input.key = key;
   input.key_mods = mods;
   input.key_repeat = repeat;
-  return sz_ui_session_live_inject(active, &input);
+  int handled = sz_ui_session_live_inject(active, &input);
+  SzView *focused = sz_view_focused(sz_ui_session_root(active));
+  if (!strcmp(key, "Tab") && focused && sz_view_kind(focused) == SZ_VIEW_EDITOR)
+    sync_editor_tab(sz_view_id(focused), sz_view_editor_value(focused),
+                    sz_view_editor_sel_start(focused), sz_view_editor_sel_end(focused));
+  return handled;
 }
 
 EMSCRIPTEN_KEEPALIVE int sz_web_activate(double id) {
@@ -188,9 +310,23 @@ EMSCRIPTEN_KEEPALIVE int sz_web_activate(double id) {
   return view ? sz_ui_session_activate_view(active, view) : 0;
 }
 
+EMSCRIPTEN_KEEPALIVE void sz_web_reduced_motion(int reduced) {
+  if (!active) return;
+  SzInputEvent event = {.kind = SZ_INPUT_REDUCED_MOTION, .reduced_motion = reduced};
+  sz_ui_session_live_inject(active, &event);
+}
+
+EMSCRIPTEN_KEEPALIVE int sz_web_modal(void) {
+  return active && sz_view_has_open_overlay(sz_ui_session_root(active));
+}
+
+EMSCRIPTEN_KEEPALIVE double sz_web_focused(void) {
+  return active ? (double)sz_view_id(sz_view_focused(sz_ui_session_root(active))) : 0;
+}
+
 EMSCRIPTEN_KEEPALIVE void sz_web_focus(double id) {
   SzView *view = active ? sz_view_web_find(sz_ui_session_root(active), (uintptr_t)id) : NULL;
-  if (view) sz_ui_session_focus_view(active, view);
+  if (active && (view || id == 0)) sz_ui_session_focus_view(active, view);
 }
 
 EMSCRIPTEN_KEEPALIVE void sz_web_copy_done(double id, int success) {
@@ -214,6 +350,10 @@ EMSCRIPTEN_KEEPALIVE void sz_web_edit(double id, const char *value, int start, i
   if (mode != 1) sz_ui_session_set_sel(active, -1, start, end);
 }
 
+EMSCRIPTEN_KEEPALIVE void sz_web_fonts_changed(void) {
+  if (active) sz_ui_session_invalidate(active);
+}
+
 EMSCRIPTEN_KEEPALIVE void sz_web_resize(void) { resize(0, NULL, NULL); }
 
 EMSCRIPTEN_KEEPALIVE void sz_web_pointer(double x, double y, int phase) {
@@ -225,12 +365,4 @@ EMSCRIPTEN_KEEPALIVE void sz_web_pointer(double x, double y, int phase) {
   input.pointer_button = 1;
   input.pointer_phase = phase;
   sz_ui_session_live_inject(active, &input);
-}
-
-EMSCRIPTEN_KEEPALIVE void sz_web_slider(double id, int value) {
-  SzView *view = active ? sz_view_web_find(sz_ui_session_root(active), (uintptr_t)id) : NULL;
-  if (!view || sz_view_kind(view) != SZ_VIEW_SLIDER) return;
-  SzRect frame = sz_view_frame(view);
-  sz_view_slider_set_at(view, frame.x + frame.w * value / 100.f);
-  sz_ui_session_focus_view(active, view);
 }

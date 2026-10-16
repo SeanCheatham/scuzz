@@ -70,12 +70,14 @@ enum {
   SZ_RC_NETSOCK = 16,
   SZ_RC_VIEW = 17,
   SZ_RC_FLOAT_BOX = 18,
-  SZ_RC_KIND_COUNT = 19
+  SZ_RC_IMAGE = 19,
+  SZ_RC_KIND_COUNT = 20
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 /* view.c registers this callback on the first View. A program without Views
  * does not link View code. The last release calls fn, then frees the block. */
 void sz_rc_set_view_drop(void (*fn)(void *ptr));
+void sz_rc_set_image_drop(void (*fn)(void *ptr));
 void sz_retain(void *ptr);
 void sz_release(void *ptr);
 /* RC kind of `ptr`. A non-RC pointer is `SZ_RC_KIND_COUNT`. */

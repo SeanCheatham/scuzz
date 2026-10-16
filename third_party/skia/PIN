@@ -14,3 +14,11 @@
 skia_branch=chrome/m131
 url=https://github.com/SeanCheatham/scuzz/releases/download/skia-cpu-v0.3/skia-{triple}-cpu.tar.gz
 hdr_url=https://github.com/SeanCheatham/scuzz/releases/download/skia-cpu-v0.3/skia-include.tar.gz
+
+# HarfBuzz headers match the archive build.
+harfbuzz_revision=a070f9ebbe88dc71b248af9731dd49ec93f4e6e6
+harfbuzz_sha256=fb75091959c13368e8554248a0e734657dc3c34048a1cb818cb551179ac791ff
+
+# SheenBidi supplies Unicode line and script runs.
+sheenbidi_revision=cfe430e7375a7845b679adae9d51dac6deaa8858
+sheenbidi_sha256=9546f423820d4618c704a30c51c191b0b002aa79100e0ec34cb2cf461fd6353e

@@ -1,0 +1,17 @@
+def formsStayAvailable(t: Timeline): Verdict =
+  Verdict.and(Verdict.alwaysHas(t, "text:Dark"), Verdict.and(Verdict.alwaysHas(t, "text:Light"), Verdict.alwaysHas(t, "text:Custom")))
+
+def applySelectsUpdates(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Apply", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "checked") == 1
+})
+
+def selectionStaysValid(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "checked") >= 0 && Timeline.signalInt(t, i, "checked") <= 1)
+
+def startsWithoutUpdates(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "checked") == 0)
+
+def checksFollowSharedState(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "checked") == 1 == Timeline.a11yHas(t, i, "checkbox:Updates Dark=1") && Timeline.signalInt(t, i, "checked") == 1 == Timeline.a11yHas(t, i, "checkbox:Updates Light=1") && Timeline.signalInt(t, i, "checked") == 1 == Timeline.a11yHas(t, i, "checkbox:Updates Custom=1"))
+

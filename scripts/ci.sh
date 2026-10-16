@@ -16,6 +16,7 @@ JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 unset SCUZZ_SNAPSHOT_PATH SCUZZ_FUZZ_DUMP SCUZZ_UI_RUNTIME SCUZZ_UI_WIDTH \
   SCUZZ_UI_HEIGHT SCUZZ_UI_SCALE SCUZZ_LIVE_FRAMES SCUZZ_MOBILE_SHELL \
   SCUZZ_UI_RECORD SCUZZ_UI_DEBUG_DUMP SCUZZ_UI_SCRIPT SCUZZ_UI_INJECT \
+  SCUZZ_UI_REDUCED_MOTION \
   SCUZZ_UI_TAP SCUZZ_UI_TEXT SCUZZ_SKIA || true
 
 need_scuzz() {
@@ -856,7 +857,39 @@ import time
 
 prefix = Path(sys.argv[1])
 home = prefix / "share/scuzz"
+fonts = json.loads((home / "third_party/fonts/PIN").read_text())
+for font in fonts:
+    name = font["name"]
+    data = (home / "third_party/fonts" / (name + ".ttf")).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == font["sha256"]
+    assert (home / "third_party/fonts" / (name + "-LICENSE")).read_bytes() == (Path("third_party/fonts") / (name + "-LICENSE")).read_bytes()
+import tempfile
+with tempfile.TemporaryDirectory(prefix="scuzz fonts ") as temporary:
+    destination = Path(temporary)
+    proof = """import runpy, sys, urllib.request
+from unittest.mock import patch
+script, destination = sys.argv[1:]
+sys.argv = [script, destination, '--assembly', destination + '/fonts.S', '--web', destination + '/web']
+with patch.object(urllib.request, 'urlopen', side_effect=RuntimeError('font proof forbids downloads')):
+    runpy.run_path(script, run_name='__main__')
+"""
+    subprocess.run([sys.executable, "-c", proof, str(home / "scripts/fetch_fonts.py"), temporary], check=True, timeout=30)
+    for font in fonts:
+        name = font["name"]
+        asset = name + "-" + font["sha256"][:16] + ".ttf"
+        assert hashlib.sha256((destination / "web" / asset).read_bytes()).hexdigest() == font["sha256"]
+    subprocess.run(['clang', '-c', str(destination / 'fonts.S'), '-o', str(destination / 'fonts.o')], check=True, timeout=30)
+print('Release fonts: pinned bytes, licenses, offline reuse, and data assembly pass', flush=True)
 root = Path("/tmp/scuzz-release-app")
+package_out = root / "build/native package"
+subprocess.run([str(prefix / "bin/scuzz"), "package", "--out-dir", str(package_out), str(root)], check=True, timeout=180)
+licenses = package_out / "package/host"
+if sys.platform == "darwin":
+    licenses = licenses / "scuzz-release-app.app/Contents/Resources"
+licenses = licenses / "licenses"
+for source in [*(home / "third_party/fonts" / (font["name"] + "-LICENSE") for font in fonts), home / "third_party/skia/SheenBidi-LICENSE"]:
+    assert (licenses / source.name).read_bytes() == source.read_bytes()
+print('Native package: font and text shaper licenses pass', flush=True)
 out = root / "build/ide-host"
 out.mkdir(parents=True, exist_ok=True)
 inject = out / "inject.json"
@@ -953,6 +986,35 @@ with open("examples/counter/build/debug.json") as f:
 assert any(s.get("name") == "count" and s.get("value") == 1 for s in d["signals"])
 assert d.get("last_hit", {}).get("desc") == "button:+1"
 PY
+  "$SCUZZ" exec examples/counter reduceMotion true lifecycle pause
+  python3 - <<'PY_MOTION'
+import json, time
+from pathlib import Path
+path = Path('examples/counter/build/debug.json')
+deadline = time.monotonic() + 10
+while True:
+    try:
+        dump = json.loads(path.read_text())
+        if dump['reducedMotion'] and dump['session']['lifecycle'] == 'pause': break
+    except (OSError, ValueError): pass
+    assert time.monotonic() < deadline, 'CLI motion preference and pause reach the session'
+    time.sleep(.05)
+PY_MOTION
+  "$SCUZZ" exec examples/counter lifecycle resume reduceMotion false
+  python3 - <<'PY_MOTION'
+import json, time
+from pathlib import Path
+path = Path('examples/counter/build/debug.json')
+deadline = time.monotonic() + 10
+while True:
+    try:
+        dump = json.loads(path.read_text())
+        if not dump['reducedMotion'] and dump['session']['lifecycle'] == 'resume': break
+    except (OSError, ValueError): pass
+    assert time.monotonic() < deadline, 'CLI resume and motion preference reach the session'
+    time.sleep(.05)
+print('CLI motion: preference, pause, and resume reach the live session', flush=True)
+PY_MOTION
   "$SCUZZ" exec examples/counter snapshot "$ROOT/examples/counter/build/live.png"
   for i in $(seq 1 50); do [ -f examples/counter/build/live.png ] && break; sleep 0.2; done
   test -f examples/counter/build/live.png
@@ -963,6 +1025,92 @@ PY
   "$SCUZZ" run --target headless --exec "" examples/studio
   test -f examples/studio/build/snapshot.png
   "$SCUZZ" fuzz --iterations 0 examples/studio
+  "$SCUZZ" check examples/layout
+  "$SCUZZ" fuzz --iterations 16 examples/layout
+  prove_evaluator_replay layout
+  "$SCUZZ" check examples/list
+  "$SCUZZ" fuzz --iterations 16 examples/list
+  prove_evaluator_replay list
+  "$SCUZZ" check examples/controls
+  "$SCUZZ" fuzz --iterations 16 examples/controls
+  prove_evaluator_replay controls
+  "$SCUZZ" check examples/split
+  "$SCUZZ" fuzz --iterations 16 examples/split
+  prove_evaluator_replay split
+  "$SCUZZ" check examples/motion
+  "$SCUZZ" fuzz --iterations 16 examples/motion
+  prove_evaluator_replay motion
+  "$SCUZZ" check examples/select
+  "$SCUZZ" fuzz --iterations 16 examples/select
+  prove_evaluator_replay select
+  "$SCUZZ" check examples/choices
+  "$SCUZZ" fuzz --iterations 16 examples/choices
+  prove_evaluator_replay choices
+  "$SCUZZ" check examples/disclosure
+  "$SCUZZ" fuzz --iterations 16 examples/disclosure
+  prove_evaluator_replay disclosure
+  "$SCUZZ" check examples/inline
+  "$SCUZZ" fuzz --iterations 16 examples/inline
+  prove_evaluator_replay inline
+  "$SCUZZ" check examples/tooltips
+  "$SCUZZ" fuzz --iterations 16 examples/tooltips
+  prove_evaluator_replay tooltips
+  "$SCUZZ" check examples/shaping
+  "$SCUZZ" fuzz --iterations 16 examples/shaping
+  prove_evaluator_replay shaping
+  "$SCUZZ" check examples/themes
+  "$SCUZZ" fuzz --iterations 16 examples/themes
+  prove_evaluator_replay themes
+  "$SCUZZ" check examples/text
+  "$SCUZZ" fuzz --iterations 16 examples/text
+  prove_evaluator_replay text
+  "$SCUZZ" check examples/measured
+  "$SCUZZ" fuzz --iterations 16 examples/measured
+  prove_evaluator_replay measured
+  python3 - <<'PY_LAYOUT'
+import json, os, pathlib, subprocess
+
+package = pathlib.Path("examples/layout")
+for width, scale, columns in [(640, 1, 3), (300, 1, 2), (180, 1, 1), (640, 2, 3)]:
+    output = package / "build" / f"resize-{width}-{scale}.json"
+    events = [{"op": "resize", "width": width, "height": 480, "scale": scale},
+              {"op": "tap", "id": "button:Third"}]
+    script = json.dumps({"v": 1, "kind": "inject", "events": events})
+    subprocess.run([os.environ["SCUZZ"], "run", "--target", "headless", "--exec",
+                    script, "--dump", str(output), str(package)], check=True, timeout=60)
+    dump = json.loads(output.read_text())
+    buttons = {button["label"]: button for button in dump["taps"]}
+    assert len({buttons[label]["x"] for label in ["First", "Second", "Third"]}) == columns, dump
+    assert next(value["value"] for value in dump["signals"] if value.get("name") == "selected") == 3
+    assert all(0 <= b["x"] and b["x"] + b["w"] <= width * scale and
+               0 <= b["y"] and b["y"] + b["h"] <= 480 * scale for b in dump["taps"]), dump
+    assert "image:Color sample" in dump["views"], dump
+print("Automatic grid: resize columns, scale, and input pass")
+PY_LAYOUT
+  python3 - <<'PY_CACHE'
+import json,os,pathlib,subprocess,tempfile
+repo=pathlib.Path.cwd();cli=pathlib.Path(os.environ['SCUZZ'])
+with tempfile.TemporaryDirectory(prefix='scuzz-ui-cache-') as directory:
+ root=pathlib.Path(directory);(root/'src').mkdir()
+ (root/'scuzz.toml').write_text('[package]\nname="cache-proof"\n[ui]\ndefault_runtime="headless"\nheadless_size=[320,240]\n')
+ (root/'src/Main.scuzz').write_text('def message(): IO[String] = IO.pure("live")\n\n@main def main: IO[Unit] = message().flatMap(text => Ui.run(_ => View.column([View.text(text)])))\n')
+ (root/'setup.scuzz_scenario').write_text('def setup(): IO[Unit] = IO.pure(())\n\ndef Main.message(): IO[String] = IO.pure("simulation")\n')
+ (root/'claim.scuzz_verify').write_text('def simulationTitle(t: Timeline): Verdict = Verdict.alwaysHas(t, \"text:simulation\")\n')
+ script=root/'idle.toml';script.write_text('[fuzz]\nevents=[]\n')
+ def run(*args):
+  subprocess.run([str(cli),*map(str,args)],check=True,timeout=180,stdout=subprocess.DEVNULL)
+ run('fmt',root)
+ run('run','--target','headless','--exec','','--dump',root/'live.json',root)
+ assert json.loads((root/'live.json').read_text())['views']==['text:live']
+ run('build','--verify',root)
+ assert not (root/'build/fingerprint').exists()
+ assert not (root/'build/fingerprint.verify').exists()
+ run('fuzz','--replay',script,root)
+ summary=json.loads((root/'build/fuzz/summary.json').read_text())
+ assert summary['status']=='passed'
+ assert 'simulationTitle' in str(summary['scope']['claims']),summary
+ print('UI cache: unlinked verification invalidates both stamps; replay links the scenario output')
+PY_CACHE
   python3 - <<'PY'
 import json
 with open("examples/studio/build/fuzz/summary.json") as f:
@@ -1189,11 +1337,11 @@ shutil.rmtree(root, ignore_errors=True)
     active = Signal.make(1)
     seen = Signal.make(0)
     catalog = Signal.make([Json.Obj([("id", Json.Str("one")), ("size", Json.Int(5680522464)), ("cached", Json.Bool(false)), ("profiles", Json.Arr([Json.Null(), Json.Str("cpu")]))])])
-    _ <- IO.ensure(Ui.run(_ => View.column(View.bindText(Signal.map(active, n => Str.fromInt(n))), View.each(catalog, m => View.text(Json.getStr(m, "id", ""))), View.button("Observe", _ => IO.pure(()).map(_ => for {
+    _ <- IO.ensure(Ui.run(_ => View.column([View.bindText(Signal.map(active, n => Str.fromInt(n))), View.each(catalog, m => View.text(Json.getStr(m, "id", ""))), View.button("Observe", _ => IO.pure(()).map(_ => for {
   local = Signal.make(1)
   derived = Signal.map(local, n => n + 1)
   _ = Signal.set(seen, Signal.get(active) + Signal.get(derived) - 2)
-} yield ())))), IO.pure(()).map(_ => Signal.set(active, 0)))
+} yield ()))])), IO.pure(()).map(_ => Signal.set(active, 0)))
   } yield ()
 ''')
 (root / "lifecycle.scuzz_verify").write_text('''def activeAtInput(t: Timeline): Verdict =
@@ -1505,7 +1653,7 @@ try:
    try:
     deadline = time.monotonic()+10
     while not (root / 'received').exists() and time.monotonic()<deadline:
-     assert child.poll() is None
+     assert child.poll() is None, (model, sig, child.returncode, child.communicate())
      time.sleep(.01)
     assert (root / 'received').exists()
     pid = int((root / 'pid').read_text())
@@ -2282,8 +2430,284 @@ name = sys.argv[3]
 package = repo / 'examples' / name
 build = package / 'build'
 source = build / 'fuzz/ev'
-ui = name == 'editor'
+ui = name in ('editor', 'layout', 'list', 'controls', 'split', 'choices', 'disclosure', 'inline', 'tooltips', 'shaping', 'themes', 'text', 'measured', 'select', 'motion')
 cases = {
+    'motion': [('pending', [
+        {'op': 'tap', 'id': 'button:Fade out'}, {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('retarget', [
+            {'op': 'tap', 'id': 'button:Fade out'}, {'op': 'pump', 'k': 3},
+            {'op': 'tap', 'id': 'button:Fade in'}, {'op': 'pump', 'k': 2},
+            {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('input-batch', [
+            {'op': 'tap', 'id': 'button:Fade out'}, {'op': 'tap', 'id': 'button:Half'},
+            {'op': 'pump', 'k': 2}, {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('reduced', [
+            {'op': 'tap', 'id': 'button:Fade out'}, {'op': 'pump', 'k': 2},
+            {'op': 'reduceMotion', 'value': True}, {'op': 'pump', 'k': 1}]),
+        ('retained', [
+            {'op': 'tap', 'id': 'button:Fade out'}, {'op': 'pump', 'k': 8},
+            {'op': 'text', 'i': 0, 'value': 'Kept'}, {'op': 'tap', 'id': 'button:Add'},
+            {'op': 'pump', 'k': 5}]),
+        ('hide', [
+            {'op': 'tap', 'id': 'button:Fade out'}, {'op': 'pump', 'k': 2},
+            {'op': 'tap', 'id': 'checkbox:Show content'}, {'op': 'pump', 'k': 1},
+            {'op': 'tap', 'id': 'button:Fade in'}, {'op': 'pump', 'k': 1},
+            {'op': 'tap', 'id': 'checkbox:Show content'}, {'op': 'pump', 'k': 1}])],
+    'select': [('options', [
+        {'op': 'tap', 'id': 'button:Set Beta'},
+        {'op': 'tap', 'id': 'button:Replace options'},
+        {'op': 'tap', 'id': 'combobox:Language'}, {'op': 'key', 'key': 'End'},
+        {'op': 'key', 'key': 'Enter'}]),
+        ('empty', [
+        {'op': 'tap', 'id': 'button:Set Beta'},
+        {'op': 'tap', 'id': 'button:Clear options'}]),
+        ('restore', [
+        {'op': 'tap', 'id': 'button:Set Beta'},
+        {'op': 'tap', 'id': 'button:Clear options'},
+        {'op': 'tap', 'id': 'button:Restore options'},
+        {'op': 'tap', 'id': 'combobox:Language'}, {'op': 'key', 'key': 'End'},
+        {'op': 'key', 'key': 'Enter'}]),
+        ('pending', [
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'End'},
+        {'op': 'resize', 'width': 300, 'height': 400, 'scale': 2}]),
+        ('cancel', [
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'End'},
+        {'op': 'key', 'key': 'Escape'}]),
+        ('keys', [
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'End'},
+            {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'End'}, {'op': 'key', 'key': 'PageUp'},
+            {'op': 'key', 'key': 'Enter'}]),
+        ('timeout', [
+            {'op': 'key', 'key': 'Tab'}, {'op': 'inputTime', 'ms': 0},
+            {'op': 'key', 'key': 'B'}, {'op': 'inputTime', 'ms': 1001},
+            {'op': 'key', 'key': 'r'}, {'op': 'key', 'key': 'Enter'}]),
+        ('dialog', [
+            {'op': 'tap', 'id': 'button:Settings'}, {'op': 'key', 'key': 'End'},
+            {'op': 'resize', 'width': 300, 'height': 400, 'scale': 2},
+            {'op': 'key', 'key': 'Escape'}, {'op': 'key', 'key': 'Home'},
+            {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Escape'}])],
+    'text': [('source', [{'op': 'drive', 'name': 'sourceText', 'args': []},
+                         {'op': 'drive', 'name': 'emptyText', 'args': []},
+                         {'op': 'drive', 'name': 'manySpans', 'args': []},
+                         {'op': 'drive', 'name': 'stylesPreserveText', 'args': []},
+                         {'op': 'drive', 'name': 'countLabel', 'args': [-9223372036854775808]}]),
+             ('input', [{'op': 'type', 'i': 0, 'value': 'retained'},
+                        {'op': 'tap', 'id': 'button:Increment'},
+                        {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2},
+                        {'op': 'tap', 'id': 'button:Increment'}])],
+    'measured': [('labels', [{'op': 'drive', 'name': 'recordLabel', 'args': []},
+                             {'op': 'drive', 'name': 'scalarLabels', 'args': []}]),
+                 ('resize', [
+        {'op': 'type', 'i': 0, 'value': 'kept'},
+        {'op': 'resize', 'width': 300, 'height': 480, 'scale': 1},
+        {'op': 'resize', 'width': 640, 'height': 720, 'scale': 2}]),
+        ('reorder', [
+            {'op': 'type', 'i': 0, 'value': 'kept'},
+            {'op': 'tap', 'id': 'button:Reverse'},
+            {'op': 'tap', 'id': 'button:Remove first'}]),
+        ('scroll', [{'op': 'scroll', 'i': 0, 'dy': 1200},
+                    {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2}])],
+    'shaping': [('keys', [
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Home'},
+        {'op': 'key', 'key': 'ArrowLeft'}, {'op': 'type', 'value': 'X'},
+        {'op': 'key', 'key': 'End'}, {'op': 'compose', 'value': 'لا'},
+        {'op': 'key', 'key': 'Escape'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Space'}, {'op': 'text', 'i': 0, 'value': 'café'},
+        {'op': 'resize', 'width': 220, 'height': 720, 'scale': 2},
+        {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}]),
+        ('pointer', [{'op': 'tap', 'id': 'textbutton:تفاصيل'},
+                     {'op': 'text', 'i': 0, 'value': 'क्षि'},
+                     {'op': 'select', 'i': 0, 'start': 0, 'end': 12},
+                     {'op': 'compose', 'value': 'ปู่'}, {'op': 'commit'},
+                     {'op': 'text', 'i': 0, 'value': '中文漢字'},
+                     {'op': 'tap', 'id': 'button:Set Arabic'},
+                     {'op': 'select', 'i': 0, 'start': 0, 'end': 4},
+                     {'op': 'compose', 'value': 'AV'}, {'op': 'commit'},
+                     {'op': 'paste', 'value': ' fi é'},
+                     {'op': 'tap', 'id': 'button:Add'},
+                     {'op': 'scroll', 'i': 0, 'dx': 10000, 'dy': 0},
+                     {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2}])],
+    'tooltips': [('keys', [
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Escape'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Space'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'type', 'value': 'kept'}, {'op': 'key', 'key': 'Escape'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Escape'}, {'op': 'key', 'key': 'Escape'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Space'},
+        {'op': 'key', 'key': 'Space'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'resize', 'width': 220, 'height': 480, 'scale': 2},
+        {'op': 'resize', 'width': 640, 'height': 480, 'scale': 1},
+        {'op': 'key', 'key': 'Escape'}, {'op': 'key', 'key': 'Tab'}]),
+        ('pointer', [{'op': 'hover', 'x': 30, 'y': 30},
+                     {'op': 'hover', 'x': 30, 'y': 70},
+                     {'op': 'key', 'key': 'Escape'},
+                     {'op': 'hover', 'x': 30, 'y': 30},
+                     {'op': 'hover', 'x': 600, 'y': 450},
+                     {'op': 'hover', 'x': 30, 'y': 30},
+                     {'op': 'tap', 'id': 'button:Next'},
+                     {'op': 'hover', 'x': 600, 'y': 450},
+                     {'op': 'tap', 'id': 'button:Open details'},
+                     {'op': 'key', 'key': 'Escape'},
+                     {'op': 'tap', 'id': 'button:Close'},
+                     {'op': 'tap', 'id': 'button:Nested'}])],
+    'inline': [('keys', [
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Space'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Space'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'type', 'value': 'kept'}]),
+        ('pointer', [{'op': 'tap', 'id': 'textbutton:add one'},
+                     {'op': 'tap', 'id': 'textbutton:reset'},
+                     {'op': 'tap', 'id': 'textbutton:open the details dialog across wrapped lines'},
+                     {'op': 'tap', 'id': 'button:Close'},
+                     {'op': 'tap', 'id': 'textbutton:Minimum'},
+                     {'op': 'tap', 'id': 'textbutton:Maximum'},
+                     {'op': 'tap', 'id': 'textbutton:Named handler'},
+                     {'op': 'tap', 'id': 'textbutton:Value handler'}]),
+        ('resize', [{'op': 'resize', 'width': 220, 'height': 720, 'scale': 2},
+                    {'op': 'tap', 'id': 'textbutton:add one'},
+                    {'op': 'tap', 'id': 'textbutton:open the details dialog across wrapped lines'},
+                    {'op': 'tap', 'id': 'button:Close'},
+                    {'op': 'tap', 'id': 'textbutton:Maximum'}])],
+    'disclosure': [('keys', [
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'type', 'value': 'kept'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Space'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'type', 'value': 'kept note'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Space'}]),
+        ('pointer', [{'op': 'tap', 'id': 'button:Open details'},
+                     {'op': 'tap', 'id': 'button:Add'},
+                     {'op': 'tap', 'id': 'expansion:More details'},
+                     {'op': 'tap', 'id': 'button:Close details'},
+                     {'op': 'tap', 'id': 'button:Open details'},
+                     {'op': 'tap', 'id': 'checkbox:Show conditional body'},
+                     {'op': 'tap', 'id': 'expansion:Conditional'},
+                     {'op': 'tap', 'id': 'expansion:Conditional'}]),
+        ('resize', [{'op': 'resize', 'width': 300, 'height': 720, 'scale': 2},
+                    {'op': 'tap', 'id': 'expansion:Details'},
+                    {'op': 'type', 'i': 0, 'value': 'kept'},
+                    {'op': 'tap', 'id': 'button:Hide details'},
+                    {'op': 'tap', 'id': 'button:Open details'}])],
+    'choices': [('keys', [
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'ArrowRight'},
+        {'op': 'key', 'key': 'ArrowDown'}, {'op': 'key', 'key': 'End'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'End'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'ArrowRight'},
+        {'op': 'key', 'key': 'ArrowLeft'}, {'op': 'key', 'key': 'Home'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Space'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'type', 'value': 'kept'}]),
+        ('pointer', [{'op': 'tap', 'id': 'choicechip:Columns'},
+                     {'op': 'tap', 'id': 'choicechip:Roomy'},
+                     {'op': 'tap', 'id': 'choicechip:Only choice'}]),
+        ('resize', [{'op': 'resize', 'width': 300, 'height': 600, 'scale': 2},
+                    {'op': 'tap', 'id': 'choicechip:List'},
+                    {'op': 'tap', 'id': 'choicechip:Wide'},
+                    {'op': 'tap', 'id': 'button:Reset'}])],
+    'split': [('keys', [
+        {'op': 'type', 'i': 0, 'value': 'kept'},
+        {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'ArrowRight'}, {'op': 'key', 'key': 'Enter'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Home'},
+        {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'End'},
+        {'op': 'key', 'key': 'ArrowLeft'}]),
+        ('collapse', [{'op': 'type', 'i': 0, 'value': 'kept'},
+                      {'op': 'tap', 'id': 'button:Hide tools'},
+                      {'op': 'tap', 'id': 'button:Reset panes'},
+                      {'op': 'tap', 'id': 'button:Add'},
+                      {'op': 'tap', 'id': 'button:Hide preview'}]),
+        ('resize', [{'op': 'resize', 'width': 300, 'height': 480, 'scale': 2},
+                    {'op': 'tap', 'id': 'button:Reset panes'}])],
+    'themes': [('input', [
+        {'op': 'type', 'i': 0, 'value': 'Ada'},
+        {'op': 'tap', 'id': 'checkbox:Updates Light'},
+        {'op': 'tap', 'id': 'checkbox:Updates Custom'},
+        {'op': 'tap', 'id': 'button:Apply'},
+        {'op': 'resize', 'width': 320, 'height': 480, 'scale': 2}]),
+        ('compact', [{'op': 'type', 'i': 1, 'value': 'Ada'},
+                     {'op': 'tap', 'id': 'checkbox:Updates Light'},
+                     {'op': 'resize', 'width': 320, 'height': 480, 'scale': 1}]),
+        ('large', [{'op': 'type', 'i': 2, 'value': 'Ada'},
+                   {'op': 'tap', 'id': 'checkbox:Updates Custom'},
+                   {'op': 'resize', 'width': 640, 'height': 720, 'scale': 2}])],
+    'controls': [('form', [
+        {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'a', 'text': 'Ada'},
+        {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Space'},
+        {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'ArrowRight'},
+        {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'ArrowRight'},
+        {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'n', 'text': 'notes'},
+        {'op': 'key', 'key': 'Tab'},
+        {'op': 'key', 'key': 'Tab', 'mods': ['ctrl']},
+        {'op': 'key', 'key': 'Enter'}]),
+        ('modal', [
+            {'op': 'tap', 'id': 'button:Open'},
+            {'op': 'key', 'key': 'd', 'text': 'dialog'},
+            {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'Tab', 'mods': ['shift']},
+            {'op': 'tap', 'id': 'button:Review details'},
+            {'op': 'key', 'key': 'Escape'},
+            {'op': 'key', 'key': 'Escape'}]),
+        ('ranges', [{'op': 'tap', 'id': 'slider:Temperature (°C)'},
+                    {'op': 'key', 'key': 'Home'},
+                    {'op': 'key', 'key': 'ArrowUp'},
+                    {'op': 'key', 'key': 'PageUp'},
+                    {'op': 'key', 'key': 'End'},
+                    {'op': 'key', 'key': 'ArrowDown'},
+                    {'op': 'tap', 'id': 'slider:Precise count'},
+                    {'op': 'key', 'key': 'End'},
+                    {'op': 'key', 'key': 'ArrowLeft'},
+                    {'op': 'key', 'key': 'PageDown'},
+                    {'op': 'key', 'key': 'Home'},
+                    {'op': 'key', 'key': 'ArrowRight'}]),
+        ('surface', [{'op': 'tap', 'id': 'button:Open'},
+                     {'op': 'key', 'key': 'd', 'text': 'dialog'},
+                     {'op': 'xy', 'x': 280, 'y': 190},
+                     {'op': 'xy', 'x': 250, 'y': 170}]),
+        ('nested-surface', [{'op': 'tap', 'id': 'button:Open'},
+                     {'op': 'key', 'key': 'd', 'text': 'dialog'},
+                     {'op': 'tap', 'id': 'button:Review details'},
+                     {'op': 'xy', 'x': 300, 'y': 250}]),
+        ('backdrop', [{'op': 'tap', 'id': 'button:Open'},
+                     {'op': 'key', 'key': 'd', 'text': 'dialog'},
+                     {'op': 'xy', 'x': 30, 'y': 30}]),
+        ('close', [{'op': 'tap', 'id': 'button:Open'},
+                   {'op': 'key', 'key': 'd', 'text': 'dialog'},
+                   {'op': 'tap', 'id': 'button:Close'}])],
+    'list': [('edit', [{'op': 'type', 'i': 0, 'value': 'kept'}]),
+             ('reorder', [{'op': 'type', 'i': 0, 'value': 'kept'},
+                          {'op': 'tap', 'id': 'button:Reverse'},
+                          {'op': 'resize', 'width': 300, 'height': 480, 'scale': 2}])],
+    'layout': [(f'columns-{width}-{scale}', [
+        {'op': 'resize', 'width': width, 'height': 480, 'scale': scale},
+        {'op': 'tap', 'id': 'button:Third'}])
+        for width, scale in [(180, 1), (300, 1), (640, 1), (640, 2)]] + [
+        ('adaptive-resize', [
+            {'op': 'tap', 'id': 'button:First'},
+            {'op': 'resize', 'width': 180, 'height': 480, 'scale': 1},
+            {'op': 'tap', 'id': 'button:Second'},
+            {'op': 'resize', 'width': 640, 'height': 480, 'scale': 2},
+            {'op': 'tap', 'id': 'button:Third'}])],
     'tyck': [('generated', [
         {'op': 'drive', 'name': 'tyckGenerated', 'args': [7]},
         {'op': 'drive', 'name': 'prettyGenerated', 'args': [7]}])],
@@ -2320,7 +2744,7 @@ def replay(package, executable, label, events, ui=False, auto_tap=True, expected
     request = {'TESTRT': '1', 'SERVE': '1', 'KIT': 'sealed'}
     if events is not None:
         script = out / 'drive.json'
-        script.write_text(json.dumps({'v': 1, 'kind': 'inject', 'events': events}))
+        script.write_text(json.dumps(dict({'v': 1, 'kind': 'inject', 'events': events}, **({'manualPumps': True} if name == 'motion' else {}))))
         request['UI_SCRIPT' if ui else 'DRIVE_SCRIPT'] = str(script)
     if ui:
         request.update(UI_RUNTIME='headless', UI_WIDTH='960', UI_HEIGHT='560', UI_SCALE='1.0')
@@ -2335,6 +2759,7 @@ def replay(package, executable, label, events, ui=False, auto_tap=True, expected
         env = dict(base_env)
         if ui:
             req['FUZZ_DUMP'] = str(out / f'{engine}.json')
+            if name == 'controls': env['SCUZZ_UI_DEBUG_DUMP'] = req['FUZZ_DUMP']
         if engine == 'eval':
             req['PROBE_LOG'] = str(out / 'probe.log')
             path = out / 'request.txt'
@@ -2397,7 +2822,370 @@ def ui_fixture(fixture_name, source_text):
     return target
 
 for label, events in cases:
-    replay(package, name, label, events, ui)
+    output = replay(package, name, label, events, ui, auto_tap=name not in ('layout', 'list', 'controls', 'split', 'choices', 'disclosure', 'inline', 'tooltips', 'shaping', 'themes', 'text', 'measured', 'select', 'motion'))
+    if name == 'motion':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y'):
+            assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
+        transition = native['transitions'][0]
+        expected = {'pending': (75, 0, 6), 'retarget': (72, 100, 6),
+                    'input-batch': (88, 50, 6), 'reduced': (0, 0, 0),
+                    'retained': (0, 0, 0), 'hide': (100, 100, 0)}[label]
+        assert tuple(transition[key] for key in ('value', 'target', 'remaining')) == expected, transition
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        assert values['opacity'] == expected[1], values
+        assert values['count'] == (1 if label == 'retained' else 0), values
+        assert values['name'] == ('Kept' if label == 'retained' else 'Retained input'), values
+        assert native['reducedMotion'] == (label == 'reduced'), native
+        print(f'motion {label}: equal frames, targets, input, and reduced motion pass', flush=True)
+    if name == 'select':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        for field in ('selects', 'fields', 'taps', 'scrolls'):
+            assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        expected = {'cancel': (-1, 0), 'keys': (4, 119), 'timeout': (2, 0), 'dialog': (0, 0), 'pending': (-1, 0), 'options': (3, 0), 'empty': (2, 0), 'restore': (4, 0)}[label]
+        assert (values['choice'], values['item']) == expected, values
+        assert values['name'] == 'Keep this text' and values['count'] == 0, values
+        if label == 'pending':
+            opened = [item for item in native['selects'] if item['open']]
+            assert len(opened) == 1 and opened[0]['active'] == 129, opened
+            assert opened[0]['first'] >= 120 and opened[0]['popup'][3] > 0, opened
+        else:
+            assert not any(item['open'] for item in native['selects']), native['selects']
+        if label in ('options', 'empty', 'restore'):
+            counts = {'options': 4, 'empty': 0, 'restore': 5}
+            assert len(values['options']) == counts[label], values
+            assert native['selects'][0]['count'] == counts[label], native['selects']
+        print(f'select {label}: equal selection, popup, and field state pass', flush=True)
+    if name == 'shaping':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        assert native['scrolls'] == evaluated['scrolls'], (label, native, evaluated)
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        expected = 'café' if label == 'keys' else 'AV fi é'
+        assert values['count'] == 12 and values['name'] == expected, values
+        assert native['fields'][0]['value'] == expected
+        assert any(t['label'] == 'تفاصيل' for t in native['taps'])
+        timeline = (output / 'native.timeline').read_text()
+        assert 'text:اب AB 12' in timeline and 'M' * 400 in timeline
+        assert 'text:नमस्ते สวัสดี 中文漢字' in timeline and 'text:क्षि ปู่ 中文' in timeline
+        if label == 'pointer':
+            for source in ['क्षि', 'ปู่', '中文漢字']:
+                assert 'text:Value: ' + source in timeline
+        print(f'shaping {label}: equal source, fields, geometry, and scrolling pass', flush=True)
+    if name == 'tooltips':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        assert values['count'] == (111 if label == 'keys' else 110), values
+        assert values['open'] == 0 and values['shown'] == 1, values
+        assert values['name'] == ('kept' if label == 'keys' else ''), values
+        timeline = (output / 'native.timeline').read_text()
+        assert 'tooltip:Save the current document=1' in timeline
+        assert 'tooltip:Save the current document=0' in timeline
+        assert 'tooltip:Close the details dialog=1' in timeline
+        assert 'tooltip:Close the details dialog=0' in timeline
+        assert 'tooltip:Outer help=1' not in timeline
+        assert [t['label'] for t in native['taps']] == ['Save', 'Next', 'Open details', 'Nested', 'Show help', 'Long help', 'Empty help'], native['taps']
+        print(f'tooltips {label}: equal visibility, input, and retained fields pass', flush=True)
+    if name == 'inline':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        assert values['last'] == (9223372036854775807 if label == 'resize' else 6), values
+        assert values['count'] == (0 if label == 'pointer' else 1), values
+        assert values['open'] == 0 and values['name'] == ('kept' if label == 'keys' else ''), values
+        assert not any(t['label'] in ('Hidden action', '') for t in native['taps']), native['taps']
+        print(f'inline {label}: equal actions, geometry, and retained fields pass', flush=True)
+    if name == 'disclosure':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        expected = {'keys': (1, 1, 1, 0), 'pointer': (2, 1, 1, 1), 'resize': (2, 0, 0, 0)}[label]
+        assert tuple(values[k] for k in ('open', 'nested', 'count', 'show')) == expected, values
+        assert values['name'] == ('kept' if label != 'pointer' else ''), values
+        assert values['note'] == ('kept note' if label == 'keys' else ''), values
+        assert values['conditional'] == 1, values
+        print(f'disclosure {label}: equal content, geometry, and retained fields pass', flush=True)
+    if name == 'choices':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        expected = {'keys': (2, 3, 0, 0), 'pointer': (2, 2, 2, 0), 'resize': (1, 0, 2, 99)}[label]
+        assert tuple(values[k] for k in ('layout', 'density', 'repeated', 'single')) == expected, values
+        assert values['empty'] == 99 and values['name'] == ('kept' if label == 'keys' else ''), values
+        print(f'choices {label}: equal selection, geometry, and field state pass', flush=True)
+    if name == 'split':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        assert values['fraction'] == {'keys': 99, 'collapse': 100, 'resize': 40}[label], values
+        assert values['primary'] == ('kept' if label != 'resize' else ''), values
+        assert values['count'] == (1 if label == 'collapse' else 0), values
+        print(f'split {label}: equal pane geometry, state, and values pass', flush=True)
+    if name == 'measured':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        assert 0 < len(native['fields']) < 12, native
+        if label == 'resize': assert native['fields'][0]['value'] == 'kept', native
+        if label == 'reorder': assert any(f['value'] == 'kept' for f in native['fields']), native
+        print(f'measured {label}: equal row input geometry and values', flush=True)
+    if name == 'text':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        expected = 2 if label == 'input' else 0
+        assert any(s.get('name') == 'count' and s.get('value') == expected for s in native['signals']), native
+        if label == 'input': assert native['fields'][0]['value'] == 'retained', native
+        print(f'text {label}: equal source text, control geometry, and field state pass', flush=True)
+    if name == 'themes':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['fields'] == evaluated['fields'], (native, evaluated)
+        assert len(native['fields']) == 3 and all(f['value'] == 'Ada' for f in native['fields']), native
+        assert any(s.get('name') == 'checked' and s.get('value') == 1 for s in native['signals']), native
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        sizes = {tap['label']: tap['h'] for tap in native['taps'] if tap['label'].startswith('Updates ')}
+        assert sizes == {'Updates Dark': 40, 'Updates Light': 28, 'Updates Custom': 52}, sizes
+        print(f'themes {label}: equal control geometry and field state pass', flush=True)
+    if name == 'controls':
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        for field in ['fields', 'editors']:
+            assert native.get(field) == evaluated.get(field), (label, field, native, evaluated)
+        assert native['session']['focus'] == evaluated['session']['focus'], (native, evaluated)
+        values = {s.get('name'): s.get('value') for s in native['signals']}
+        def a11y_nodes(nodes):
+            for node in nodes:
+                yield node
+                yield from a11y_nodes(node.get('children', []))
+        sliders = {node['label']: node for node in a11y_nodes(native['a11y']) if node['role'] == 'slider'}
+        for label_name, signal, minimum, maximum, step in [('Volume', 'volume', 0, 100, 1),
+                ('Temperature (°C)', 'temperature', -60, 120, 3),
+                ('Precise count', 'precise', 9223372036854775797, 9223372036854775807, 1)]:
+            slider = sliders[label_name]
+            assert (slider['value'], slider['minimum'], slider['maximum'], slider['step']) == (values[signal], minimum, maximum, step), slider
+            assert 'on' not in slider, slider
+
+        if label == 'form':
+            assert all(values[k] == v for k, v in dict(name='Ada', nameText='Name: Ada', updates=1, volume=51,
+                plan=2, notes='notes  ', submitted=1).items()), values
+        elif label == 'ranges':
+            assert values['temperature'] == 117 and values['precise'] == 9223372036854775798, values
+            assert native['session']['focus'] == 'slider:Precise count', native
+        elif label in ('surface', 'nested-surface'):
+            assert values['dialog'] == 1 and values['dialogName'] == 'dialog', values
+            assert values['confirm'] == (1 if label == 'nested-surface' else 0), values
+            assert native['session']['focus'] == ('button:Back' if label == 'nested-surface' else 'field'), native
+        else:
+            assert values['dialog'] == 0 and values['confirm'] == 0 and values['dialogName'] == 'dialog', values
+            assert native['session']['focus'] == 'button:Open', native
+            assert values['name'] == '', values
+        print(f'controls {label}: equal fields, editor state, focus, and expected Signals', flush=True)
+    if name in ('layout', 'list'):
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        if name == 'list':
+            assert native['fields'] == evaluated['fields'], (label, native, evaluated)
+            assert len(native['fields']) < 10, native
+            if label == 'edit': assert native['fields'][0]['value'] == 'kept', native
+        print(f'{name} {label}: equal input geometry', flush=True)
+
+if name == 'inline':
+    proof = build / 'fuzz/inline-exit'
+    shutil.rmtree(proof, ignore_errors=True)
+    (proof / 'src').mkdir(parents=True)
+    (proof / 'scuzz.toml').write_text('[package]\nname="inline-exit"\n[ui]\ndefault_runtime="headless"\n')
+    (proof / 'src/Main.scuzz').write_text('''@main def main: IO[Unit] =
+  for {
+    _ <- Ui.run(_ => View.actionText(Text.action(1, Text.span("Wait")), _ => IO.sleep(500).flatMap(_ => IO.println("late"))))
+    _ <- IO.sleep(1000)
+    _ <- IO.println("closed")
+  } yield ()
+''')
+    script = proof / 'ops.json'
+    script.write_text(json.dumps({'v': 1, 'kind': 'inject', 'events': [
+        {'op': 'tap', 'id': 'textbutton:Wait'}, {'op': 'quit'}]}))
+    formatted = subprocess.run([str(cli), 'fmt', str(proof)], capture_output=True, text=True, timeout=20)
+    assert formatted.returncode == 0, formatted.stdout + formatted.stderr
+    result = subprocess.run([str(cli), 'run', '--target', 'headless', '--exec', str(script), str(proof)],
+                            cwd=repo, env=base_env, capture_output=True, text=True, timeout=20)
+    (proof / 'exit.log').write_text(result.stdout + result.stderr)
+    assert result.returncode == 0 and result.stdout.splitlines()[-1] == 'closed', result
+    assert 'late' not in result.stdout.splitlines(), result.stdout
+    for index, expression in enumerate([
+            'View.actionText(Text.span("Bad"), 7)',
+            'View.actionText(Text.span("Bad"), (key: String) => IO.println(key))',
+            'View.richText(Text.action("bad", Text.span("Bad")))']):
+        target = proof / f'invalid-{index}'
+        (target / 'src').mkdir(parents=True)
+        (target / 'scuzz.toml').write_text('[package]\nname="invalid"\n[ui]\ndefault_runtime="headless"\n')
+        (target / 'src/Main.scuzz').write_text('@main def main: IO[Unit] =\n  Ui.run(_ => ' + expression + ')\n')
+        formatted = subprocess.run([str(cli), 'fmt', str(target)], capture_output=True, text=True, timeout=20)
+        assert formatted.returncode == 0, formatted.stdout + formatted.stderr
+        checked = subprocess.run([str(cli), 'check', str(target)], capture_output=True, text=True, timeout=20)
+        assert checked.returncode != 0 and 'arg type mismatch' in checked.stdout + checked.stderr, checked
+    print('inline: callback types and cancellation at session exit pass', flush=True)
+
+
+if name == 'controls':
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='scuzz-slider-literals-') as directory:
+        fixture = pathlib.Path(directory)
+        (fixture / 'src').mkdir()
+        (fixture / 'scuzz.toml').write_text('[package]\nname="slider-literals"\n[ui]\ndefault_runtime="headless"\n')
+        for minimum, maximum, step, diagnostic in [
+                ('0', '100', '0', 'View.slider step must be positive'),
+                ('0', '100', '-1', 'View.slider step must be positive'),
+                ('10', '0', '1', 'View.slider minimum must not exceed maximum'),
+                ('-2', '-5', '1', 'View.slider minimum must not exceed maximum'),
+                ('5', '5', '1', ''),
+                ('-9223372036854775808', '9223372036854775807', '1', '')]:
+            (fixture / 'src/Main.scuzz').write_text(f'@main def main: IO[Unit] = Ui.run(_ => View.slider(Signal.make(0), "Range", {minimum}, {maximum}, {step}))\n')
+            subprocess.run([str(cli), 'fmt', str(fixture)], check=True, capture_output=True)
+            result = subprocess.run([str(cli), 'check', str(fixture)], capture_output=True, text=True)
+            if diagnostic:
+                assert result.returncode != 0 and diagnostic in result.stdout + result.stderr, result
+            else:
+                assert result.returncode == 0, result.stdout + result.stderr
+    print('controls: signed slider bounds and step literals are checked', flush=True)
+
+if name == 'list':
+    target = ui_fixture('record-rows', '''record Item(id: Int, title: String)
+
+def itemKey(item: Item): Int = item.id
+
+def itemRow(item: Signal[Item]): View =
+  for {
+    label = Signal.map(item, value => value.title)
+    draft = Signal.make("")
+  } yield View.column([View.bindText(label), View.textField(draft, "Draft")])
+
+@main def main: IO[Unit] =
+  for {
+    items = Signal.make([Item(1, "One"), Item(2, "Two")])
+    _ <- Ui.run(_ => View.column([View.button("Change", _ => Signal.set(items, [Item(1, "Changed"), Item(2, "Two")])), View.expanded(1, View.virtualList(120, items, itemKey, itemRow))]))
+  } yield ()
+''')
+    output = replay(target, 'record-rows', 'record-update', [
+        {'op': 'type', 'i': 0, 'value': 'kept'},
+        {'op': 'tap', 'id': 'button:Change'}], ui=True, auto_tap=False)
+    native = json.loads((output / 'native.json').read_text())
+    evaluated = json.loads((output / 'eval.json').read_text())
+    assert native['fields'] == evaluated['fields']
+    assert native['fields'][0]['value'] == 'kept', native
+    assert 'text:Changed' in native['views'] and 'text:One' not in native['views'], native
+    print('Record rows: named callbacks, item updates, and retained field state pass', flush=True)
+
+if name == 'layout':
+    target = ui_fixture('adaptive-parent', '''@main def main: IO[Unit] =
+  for {
+    selected = Signal.make(0)
+    _ <- Ui.run(_ => View.padding(20, View.adaptive(200,
+      View.button("compact", _ => Signal.set(selected, 1)),
+      View.button("wide", _ => Signal.set(selected, 2)))))
+  } yield ()
+''')
+    for width, scale in [(239, 1), (240, 1), (239, 2), (240, 2)]:
+        branch = 'compact' if width < 240 else 'wide'
+        output = replay(target, 'adaptive-parent', f'parent-{width}-{scale}', [
+            {'op': 'resize', 'width': width, 'height': 480, 'scale': scale},
+            {'op': 'tap', 'id': 'button:' + branch}], ui=True, auto_tap=False)
+        native = json.loads((output / 'native.json').read_text())
+        evaluated = json.loads((output / 'eval.json').read_text())
+        assert native['taps'] == evaluated['taps']
+        assert [tap['label'] for tap in native['taps']] == [branch], native
+        state = next(signal['value'] for signal in native['signals'] if signal['name'] == 'selected')
+        assert state == (1 if branch == 'compact' else 2), native
+    print('Adaptive parent: threshold, scale, input, and hidden branches pass', flush=True)
+    for axis in ['row', 'column']:
+        target = ui_fixture('weighted-' + axis, '''@main def main: IO[Unit] =
+  for {
+    selected = Signal.make(0)
+    _ <- Ui.run(_ => View.''' + axis + '''([View.sized(20, 20, View.text("fixed")), View.expanded(1, View.button("small", _ => Signal.set(selected, 1))), View.stretch(View.expanded(2, View.button("large", _ => Signal.set(selected, 2))))]))
+  } yield ()
+''')
+        for size, scale in [(320, 1), (640, 1), (640, 2)]:
+            out = replay(target, 'weighted-' + axis, f'size-{size}-{scale}',
+                         [{'op': 'resize', 'width': size, 'height': size, 'scale': scale},
+                          {'op': 'tap', 'id': 'button:large'}], ui=True, auto_tap=False)
+            native = json.loads((out / 'native.json').read_text())
+            evaluated = json.loads((out / 'eval.json').read_text())
+            assert native['taps'] == evaluated['taps'], (axis, native, evaluated)
+            buttons = {b['label']: b for b in native['taps']}
+            dimension = 'w' if axis == 'row' else 'h'
+            # The dump rounds each dimension to a whole pixel.
+            assert abs(buttons['large'][dimension] - 2 * buttons['small'][dimension]) <= 1.5, buttons
+            assert next(v['value'] for v in native['signals'] if v.get('name') == 'selected') == 2
+        print(f'Weighted {axis}: resize, scale, input, and geometry pass', flush=True)
+
+    target = ui_fixture('child-order', '''def next(order: Signal[Int]): Int =
+  for {
+    n = Signal.get(order) + 1
+    _ = Signal.set(order, n)
+  } yield n
+
+@main def main: IO[Unit] =
+  for {
+    order = Signal.make(0)
+    values = [next(order), next(order), next(order)]
+    text = Signal.make(["left"])
+    snapshots = [Signal.get(text), for { _ = Signal.set(text, ["right"]) } yield Signal.get(text)]
+    _ <- Ui.run(_ => View.column([View.bindText(Signal.map(Signal.make("first"), s => s)), View.bindText(Signal.map(Signal.make("second"), s => s)), View.text(Str.fromInt(List.at(values, 0))), View.text(Str.fromInt(List.at(values, 1))), View.text(Str.fromInt(List.at(values, 2))), View.text(List.at(List.at(snapshots, 0), 0)), View.text(List.at(List.at(snapshots, 1), 0))]))
+  } yield ()
+''')
+    out = replay(target, 'child-order', 'order', None, ui=True, auto_tap=False)
+    dump = json.loads((out / 'native.json').read_text())
+    assert dump['views'] == ['text:first', 'text:second', 'text:1', 'text:2', 'text:3', 'text:left', 'text:right'], dump
+    assert next(value['value'] for value in dump['signals'] if value.get('name') == 'order') == 3
+    print('List elements: left-to-right values and Signal creation order pass', flush=True)
+
+    for kind in ['column', 'row', 'stack', 'wrap', 'breadcrumb', 'grid', 'autoGrid']:
+        constructor = f'View.{kind}(' + ('3, ' if kind == 'grid' else '120, ' if kind == 'autoGrid' else '') + 'cells(chosen))'
+        source_text = '''def cells(chosen: Signal[Int]): List[View] =
+  List.map(List.range(0, 12), n => View.sized(48, 24, View.button(s"cell$n", _ => Signal.set(chosen, n))))
+
+@main def main: IO[Unit] =
+  for {
+    chosen = Signal.make(-1)
+    _ <- Ui.run(_ => ''' + constructor + ''')
+  } yield ()
+'''
+        target = ui_fixture('children-' + kind, source_text)
+        out = replay(target, 'children-' + kind, 'last-child',
+                     [{'op': 'tap', 'id': 'button:cell11'}], ui=True, auto_tap=False)
+        native = json.loads((out / 'native.json').read_text())
+        evaluated = json.loads((out / 'eval.json').read_text())
+        assert native['taps'] == evaluated['taps'], (kind, native, evaluated)
+        assert len(native['taps']) == 12, (kind, native)
+        assert next(value['value'] for value in native['signals'] if value.get('name') == 'chosen') == 11, (kind, native)
+        print(f'{kind}: twelve mapped children, flat layout, equal geometry, and last-child input pass', flush=True)
+        empty = f'View.{kind}(' + ('3, ' if kind == 'grid' else '120, ' if kind == 'autoGrid' else '') + '[])'
+        target = ui_fixture('empty-' + kind,
+                            '@main def main: IO[Unit] = Ui.run(_ => View.column([View.text("empty"), ' + empty + ']))\n')
+        out = replay(target, 'empty-' + kind, 'empty', None, ui=True, auto_tap=False)
+        dump = json.loads((out / 'native.json').read_text())
+        expected = ['text:empty'] + (['breadcrumb:Breadcrumb'] if kind == 'breadcrumb' else [])
+        assert dump['views'] == expected and not dump['taps'], (kind, dump)
+        print(f'{kind}: empty children pass', flush=True)
 
 if name == 'codegen':
     target = build / 'fuzz/parity/map-api'
@@ -2503,14 +3291,14 @@ if name == 'codegen':
   for {
     count = Signal.makeN("count", 0)
     rows = Signal.makeN("rows", ["a"])
-    _ <- Ui.run(_ => View.column(
+    _ <- Ui.run(_ => View.column([
       View.button("grow", _ => for {
         _ = Signal.set(count, Signal.get(count) + 1)
         _ = Signal.set(rows, List.append(Signal.get(rows), "b"))
       } yield ()),
       View.button("fail", _ => 1 / 0),
       View.each(rows, row => View.bindText(Signal.map(count, n => s"$row:$n")))
-    ))
+    ]))
   } yield ()
 ''')
     out = replay(target, 'mount-each', 'grow', [{'op': 'tap', 'id': 'button:grow'}],
@@ -2522,14 +3310,14 @@ if name == 'codegen':
            ui=True, auto_tap=False, expected_error="division by zero")
 
     target = ui_fixture('mount-wrappers', '''@main def main: IO[Unit] =
-  Ui.run(_ => View.column(
+  Ui.run(_ => View.column([
     View.stretch(View.clip(View.align(1, 1, View.border(2, Color.rgb(0, 0, 0),
       View.radius(4, View.opacity(80, View.gap(3, View.maxLines(2, View.ellipsis(View.text("wrapped")))))))))),
     View.ignorePointer(View.text("ignored")),
     View.absorbPointer(View.text("absorbed")),
     View.excludeSemantics(View.text("hidden")),
     View.list()
-  ))
+  ]))
 ''')
     out = replay(target, 'mount-wrappers', 'wrappers', None, ui=True, auto_tap=False)
     dump = json.loads((out / 'eval.json').read_text())
@@ -2570,6 +3358,20 @@ if name == 'tyck':
     signals = json.loads(ev.decode().split('signals:\n', 1)[1].split('\n', 1)[0])
     assert [(s['name'], s['value']) for s in signals] == [('count', 4), ('label', 'ready')], signals
     print('IO probe: user signals stay visible; internal signal storage stays hidden', flush=True)
+if name == 'text':
+
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='scuzz-heading-') as directory:
+        fixture = pathlib.Path(directory)
+        (fixture / 'src').mkdir()
+        (fixture / 'scuzz.toml').write_text('[package]\nname="heading"\n')
+        for level in [0, 7]:
+            (fixture / 'src/Main.scuzz').write_text('@main def main: IO[Unit] = Ui.run(_ => View.heading(' + str(level) + ', View.text("bad")))\n')
+            subprocess.run([str(cli), 'fmt', str(fixture)], capture_output=True, text=True, timeout=30, check=True)
+            result = subprocess.run([str(cli), 'check', str(fixture)], capture_output=True, text=True, timeout=30)
+            assert result.returncode != 0 and 'View.heading level must be 1 through 6' in result.stdout + result.stderr, result
+    print('text: invalid constant heading levels are rejected', flush=True)
+
 PY_PARITY
 }
 
@@ -2802,6 +3604,88 @@ SH
   grep -q 'web compiler failed' "$web_tmp/failure.log"
   grep -q 'web package failed with exit code 23' "$web_tmp/failure.log"
   node crates/embedder-web/test.cjs "$web_tmp/docs output/package/web"
+  "$SCUZZ" check examples/layout
+  "$SCUZZ" package --target web --out-dir "$web_tmp/layout output" examples/layout
+  node crates/embedder-web/test.cjs "$web_tmp/layout output/package/web" '' layout
+  "$SCUZZ" check examples/list
+  "$SCUZZ" package --target web --out-dir "$web_tmp/list output" examples/list
+  node crates/embedder-web/test.cjs "$web_tmp/list output/package/web" '' list
+  "$SCUZZ" check examples/controls
+  "$SCUZZ" package --target web --out-dir "$web_tmp/controls output" examples/controls
+  node crates/embedder-web/test.cjs "$web_tmp/controls output/package/web" '' controls
+
+  python3 - "$web_tmp/range-boundary" <<'PY_RANGE'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+(root / 'src').mkdir(parents=True)
+(root / 'scuzz.toml').write_text('[package]\nname="range-boundary"\n[ui]\ndefault_runtime="headless"\n')
+(root / 'src/Main.scuzz').write_text('''@main def main: IO[Unit] =
+  for {
+    negative = Signal.make(-9223372036854775807)
+    full = Signal.make(0)
+    negativeText = Signal.map(negative, n => Str.fromInt(n))
+    fullText = Signal.map(full, n => Str.fromInt(n))
+    _ <- Ui.run(_ => View.column([View.slider(negative, "Negative", -9223372036854775808, -9223372036854775798, 1), View.bindText(negativeText), View.slider(full, "Full", -9223372036854775808, 9223372036854775807, 1), View.bindText(fullText)]))
+  } yield ()
+''')
+PY_RANGE
+  "$SCUZZ" fmt "$web_tmp/range-boundary"
+  "$SCUZZ" package --target web --out-dir "$web_tmp/range-boundary output" "$web_tmp/range-boundary"
+  node crates/embedder-web/test.cjs "$web_tmp/range-boundary output/package/web" '' range-boundary
+  "$SCUZZ" check examples/shaping
+  "$SCUZZ" package --target web --out-dir "$web_tmp/shaping output" examples/shaping
+  node crates/embedder-web/test.cjs "$web_tmp/shaping output/package/web" '' shaping
+  "$SCUZZ" check examples/tooltips
+  "$SCUZZ" package --target web --out-dir "$web_tmp/tooltips output" examples/tooltips
+  node crates/embedder-web/test.cjs "$web_tmp/tooltips output/package/web" '' tooltips
+  "$SCUZZ" check examples/inline
+  "$SCUZZ" package --target web --out-dir "$web_tmp/inline output" examples/inline
+  node crates/embedder-web/test.cjs "$web_tmp/inline output/package/web" '' inline
+  "$SCUZZ" check examples/disclosure
+  "$SCUZZ" package --target web --out-dir "$web_tmp/disclosure output" examples/disclosure
+  node crates/embedder-web/test.cjs "$web_tmp/disclosure output/package/web" '' disclosure
+  "$SCUZZ" check examples/motion
+  "$SCUZZ" package --target web --out-dir "$web_tmp/motion output" examples/motion
+  node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' motion
+  python3 - "$web_tmp/motion Unicode" <<'PY_MOTION_UTF8'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+(root / 'src').mkdir(parents=True)
+(root / 'scuzz.toml').write_text('[package]\nname="motion-unicode"\n[ui]\ndefault_runtime="headless"\nheadless_size=[640,160]\n')
+label = 'a' * 62 + '中文'
+(root / 'src/Main.scuzz').write_text('@main def main: IO[Unit] =\n  for {\n    value = Signal.make(50)\n    _ <- Ui.run(_ => View.animatedOpacity(value, 8, View.text("' + label + '")))\n  } yield ()\n')
+PY_MOTION_UTF8
+  "$SCUZZ" run --target headless --exec '' --dump "$web_tmp/motion Unicode/dump.json" "$web_tmp/motion Unicode"
+  python3 - "$web_tmp/motion Unicode/dump.json" <<'PY_MOTION_UTF8'
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text())
+prefix = 'a' * 62
+assert value['views'][0] == 'opacity:' + prefix + '=50', value
+assert 'target:opacity:' + prefix + '=50' in value['views'], value
+assert 'pumps:opacity:' + prefix + '=0' in value['views'], value
+assert 'text:' + prefix + '中文' in value['views'], value
+print('Motion Unicode: native JSON preserves complete UTF-8 characters', flush=True)
+PY_MOTION_UTF8
+  "$SCUZZ" package --target web --out-dir "$web_tmp/motion Unicode output" "$web_tmp/motion Unicode"
+  node crates/embedder-web/test.cjs "$web_tmp/motion Unicode output/package/web" '' motion-unicode
+  "$SCUZZ" check examples/select
+  "$SCUZZ" package --target web --out-dir "$web_tmp/select output" examples/select
+  node crates/embedder-web/test.cjs "$web_tmp/select output/package/web" '' select
+  "$SCUZZ" check examples/choices
+  "$SCUZZ" package --target web --out-dir "$web_tmp/choices output" examples/choices
+  node crates/embedder-web/test.cjs "$web_tmp/choices output/package/web" '' choices
+  "$SCUZZ" check examples/split
+  "$SCUZZ" package --target web --out-dir "$web_tmp/split output" examples/split
+  node crates/embedder-web/test.cjs "$web_tmp/split output/package/web" '' split
+  "$SCUZZ" check examples/themes
+  "$SCUZZ" package --target web --out-dir "$web_tmp/themes output" examples/themes
+  node crates/embedder-web/test.cjs "$web_tmp/themes output/package/web" '' themes
+  "$SCUZZ" check examples/text
+  "$SCUZZ" package --target web --out-dir "$web_tmp/text output" examples/text
+  node crates/embedder-web/test.cjs "$web_tmp/text output/package/web" '' text
+  "$SCUZZ" check examples/measured
+  "$SCUZZ" package --target web --out-dir "$web_tmp/measured output" examples/measured
+  node crates/embedder-web/test.cjs "$web_tmp/measured output/package/web" '' measured
   "$SCUZZ" fuzz --iterations 0 examples/docs
   if "$SCUZZ" package --target web examples/hello; then
     echo 'web must reject a package without [ui]' >&2
