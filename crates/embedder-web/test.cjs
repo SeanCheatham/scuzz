@@ -1107,7 +1107,8 @@ async function checkShaping(browserType, url, mobile) {
         let delta = 0;
         for (let p = 0; p < width * height; p++) {
           const at = left + p % width;
-          const line = lines.find((line, i) => at >= Math.round(boxes[i].left * scale) && at < Math.round(boxes[i].right * scale)) || (at < x ? lines.at(-1) : lines[0]);
+          // Use device-pixel paint bounds. Source boxes can have fractional widths.
+          const line = lines.find(line => at >= Math.round(line.x) && at < Math.round(line.x + line.width)) || (at < x ? lines.at(-1) : lines[0]);
           const ink = [(line.ink >>> 16) & 255, (line.ink >>> 8) & 255, line.ink & 255];
           for (let channel = 0; channel < 3; channel++) {
             const expected = Math.floor((ink[channel] * mask[p * 4 + 3] + background[channel] * (255 - mask[p * 4 + 3])) / 255);
