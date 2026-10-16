@@ -12,7 +12,7 @@ from png_max_delta import read_png
 
 
 def check_metrics(reference, actual):
-    assert len(reference) == len(actual) == 48
+    assert len(reference) == len(actual) == 96
     for index, (expected, row) in enumerate(zip(reference, actual)):
         assert abs(expected["width"] - row["width"]) < .001, (index, "width")
         assert expected["breaks"] == row["breaks"], (index, "clusters")
@@ -25,9 +25,9 @@ def check_metrics(reference, actual):
 def check_pixels(reference, actual):
     width, height, expected = reference
     w, h, pixels = actual
-    assert (w, h) == (width, height) == (600, 48 * 48)
+    assert (w, h) == (width, height) == (600, 96 * 48)
     results = []
-    for row in range(48):
+    for row in range(96):
         ratios = []
         masses = []
         for source, target in [(pixels, expected), (expected, pixels)]:
@@ -81,6 +81,9 @@ def main():
         before = "return SkFont(default_typeface(), px);"
         assert outline_source.count(before) == 1
         outline_source = outline_source.replace(before, "SkFont font(default_typeface(), px); font.setHinting(SkFontHinting::kNone); font.setSubpixel(true); return font;")
+        before = "return SkFont(mono_typeface(), px);"
+        assert outline_source.count(before) == 1
+        outline_source = outline_source.replace(before, "SkFont font(mono_typeface(), px); font.setHinting(SkFontHinting::kNone); font.setSubpixel(true); return font;")
         (output / "outline.cpp").write_text(outline_source)
         run(["clang++", "-std=c++17", "-O2", "-fPIC", "-Isrc", "-Ibuild/skia-src", "-Ibuild/harfbuzz",
              "-Ibuild/sheenbidi/Headers", "-DSK_RELEASE", "-c", str(output / "outline.cpp"), "-o", str(output / "outline.o")], "outline-compile")
@@ -130,7 +133,7 @@ def main():
                 print(name + " defect rejected", flush=True)
             else:
                 raise AssertionError(name + " defect passes")
-        report.write_text(json.dumps({"rows": 48, "pixelReference": "Skia with hinting off and subpixel positions",
+        report.write_text(json.dumps({"rows": 96, "pixelReference": "Skia with hinting off and subpixel positions",
                                       "maximumUnmatchedInk": largest,
                                       "metricDefectRejected": True, "glyphDefectRejected": True,
                                       "sourceSha256": hashlib.sha256(source.encode()).hexdigest()}, indent=2) + "\n")
