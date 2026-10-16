@@ -14,8 +14,8 @@ Select work from these application needs:
 1. Screen-reader support and keyboard behavior for remaining composite controls.
    Add editable option search when an application needs it.
 2. Wider font coverage, other contextual scripts across font changes, and bidi caret affinity.
-3. Transform transitions with replay and cancellation.
-   Add native operating-system motion preference detection.
+3. Native operating-system motion preference detection.
+   Add rotation transitions with replay and cancellation.
 
 Use working applications to check each capability.
 Check native and evaluator behavior with the same inputs.
