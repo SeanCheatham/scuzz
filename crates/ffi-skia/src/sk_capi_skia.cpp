@@ -19,7 +19,6 @@
 #include <array>
 #include <algorithm>
 #include "include/encode/SkPngEncoder.h"
-#include "include/ports/SkFontMgr_data.h"
 #include "include/ports/SkFontMgr_empty.h"
 
 #include <hb.h>
@@ -30,9 +29,7 @@
 #include <climits>
 #include <cmath>
 #include <memory>
-#include <map>
 #include <vector>
-#include <string>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -52,54 +49,31 @@ struct CapSurface {
   CapCanvas canvas;
 };
 
-static sk_sp<SkTypeface> g_typeface;
-static sk_sp<SkTypeface> g_mono_typeface;
-static std::once_flag g_font_once;
-static std::once_flag g_mono_once;
+extern "C" {
+extern const unsigned char scuzz_font_latin[], scuzz_font_mono[];
+extern const unsigned int scuzz_font_latin_len, scuzz_font_mono_len;
+}
 
 static sk_sp<SkTypeface> default_typeface() {
-  std::call_once(g_font_once, [] {
-#if defined(SCUZZ_SKIA_EMBEDDED_FONT)
-    extern const unsigned char scuzz_embedded_font[];
-    extern const unsigned int scuzz_embedded_font_len;
-    sk_sp<SkData> data =
-        SkData::MakeWithoutCopy(scuzz_embedded_font, scuzz_embedded_font_len);
-    if (data) {
-      sk_sp<SkData> fonts[1] = {data};
-      sk_sp<SkFontMgr> mgr =
-          SkFontMgr_New_Custom_Data(SkSpan<sk_sp<SkData>>(fonts, 1));
-      if (mgr)
-        g_typeface = mgr->makeFromData(data);
-    }
-#endif
-    if (!g_typeface) {
-      sk_sp<SkFontMgr> mgr = SkFontMgr_New_Custom_Empty();
-      if (mgr)
-        g_typeface = mgr->legacyMakeTypeface(nullptr, SkFontStyle());
-    }
-  });
-  return g_typeface;
+  static const auto face = [] {
+    auto data = SkData::MakeWithoutCopy(scuzz_font_latin, scuzz_font_latin_len);
+    auto manager = SkFontMgr_New_Custom_Empty();
+    auto result = manager->makeFromData(data);
+    if (!result) std::abort();
+    return result;
+  }();
+  return face;
 }
 
 static sk_sp<SkTypeface> mono_typeface() {
-  std::call_once(g_mono_once, [] {
-#if defined(SCUZZ_SKIA_EMBEDDED_MONO_FONT)
-    extern const unsigned char scuzz_embedded_mono_font[];
-    extern const unsigned int scuzz_embedded_mono_font_len;
-    sk_sp<SkData> data = SkData::MakeWithoutCopy(scuzz_embedded_mono_font,
-                                                scuzz_embedded_mono_font_len);
-    if (data) {
-      sk_sp<SkData> fonts[1] = {data};
-      sk_sp<SkFontMgr> mgr =
-          SkFontMgr_New_Custom_Data(SkSpan<sk_sp<SkData>>(fonts, 1));
-      if (mgr)
-        g_mono_typeface = mgr->makeFromData(data);
-    }
-#endif
-    if (!g_mono_typeface)
-      g_mono_typeface = default_typeface();
-  });
-  return g_mono_typeface;
+  static const auto face = [] {
+    auto data = SkData::MakeWithoutCopy(scuzz_font_mono, scuzz_font_mono_len);
+    auto manager = SkFontMgr_New_Custom_Empty();
+    auto result = manager->makeFromData(data);
+    if (!result) std::abort();
+    return result;
+  }();
+  return face;
 }
 
 static SkFont make_font(float size) {

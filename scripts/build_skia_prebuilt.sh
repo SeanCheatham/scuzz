@@ -35,24 +35,6 @@ echo "==> sync deps"
 # Skip emsdk - CPU sk_capi prebuilt does not need WASM toolchains.
 GIT_SYNC_DEPS_SKIP_EMSDK=1 python3 tools/git-sync-deps
 
-FONT_DIR="${WORK}/fonts"
-mkdir -p "${FONT_DIR}"
-FONT_TTF="${FONT_DIR}/DejaVuSans.ttf"
-if [[ ! -f "${FONT_TTF}" ]]; then
-  echo "==> fetching DejaVuSans.ttf"
-  if [[ -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ]]; then
-    cp -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "${FONT_TTF}"
-  else
-    curl -fsSL -o "${FONT_TTF}" \
-      "https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf"
-  fi
-fi
-test -s "${FONT_TTF}"
-
-# Generate embedded font bytes for deterministic Headless text.
-FONT_INC="${WORK}/scuzz_embedded_font.c"
-xxd -i -n scuzz_embedded_font "${FONT_TTF}" >"${FONT_INC}"
-
 # Hermetic CPU build. Force FreeType + custom fontmgr on all hosts (including
 # Darwin, where Skia defaults to CoreText and omits the freetype2 ninja target)
 # so the SkFontMgr_New_Custom_* path in sk_capi_skia.cpp links.
@@ -68,7 +50,7 @@ GN_ARGS=(
   'skia_use_system_harfbuzz=false'
   'skia_use_freetype=true'
   'skia_use_system_freetype2=false'
-  # DejaVu TTF only. WOFF2 would need Brotli on the app link.
+  # The native fonts use TrueType data. WOFF2 needs Brotli.
   'skia_use_freetype_woff2=false'
   'skia_enable_fontmgr_custom_embedded=true'
   'skia_enable_fontmgr_custom_empty=true'
@@ -95,7 +77,6 @@ ninja -C out/Static skia freetype2 harfbuzz
 PKG="${WORK}/pkg"
 rm -rf "${PKG}"
 mkdir -p "${PKG}/fonts" "${PKG}/obj"
-cp -f "${FONT_TTF}" "${PKG}/fonts/DejaVuSans.ttf"
 cp -f "${ROOT}/third_party/skia/SheenBidi-LICENSE" "${PKG}/SheenBidi-LICENSE"
 cp -f "${ROOT}/third_party/fonts/"* "${PKG}/fonts/"
 
@@ -105,13 +86,11 @@ echo "==> compile paint interface, bridge, and embedded font"
 c++ -std=c++17 -O2 -fPIC -c "${SHIM}" -o "${PKG}/obj/sk_capi_skia.o" \
   -I"${SKIA}" -I"${SKIA}/third_party/externals/harfbuzz/src" \
   -I"${ROOT}/crates/ffi-skia/build/sheenbidi/Headers" \
-  -DSK_RELEASE \
-  -DSCUZZ_SKIA_EMBEDDED_FONT
+  -DSK_RELEASE
 
 cc -O2 -fPIC -c "${BRIDGE}" -o "${PKG}/obj/sk_capi_skia_bridge.o" \
   -I"${ROOT}/crates/ffi-skia/include"
 
-cc -O2 -fPIC -c "${FONT_INC}" -o "${PKG}/obj/scuzz_embedded_font.o"
 
 echo "==> pack libsk_capi.a"
 cp -f "${SKIA}/out/Static/libskia.a" "${PKG}/libskia.a"
@@ -128,7 +107,6 @@ SHIM_OBJS=(
   "${ROOT}/crates/ffi-skia/build/sheenbidi.o"
   "${PKG}/obj/sk_capi_skia.o"
   "${PKG}/obj/sk_capi_skia_bridge.o"
-  "${PKG}/obj/scuzz_embedded_font.o"
 )
 ARCHIVES=( "${PKG}/libskia.a" )
 for dep in "${SKIA_STATIC_LIBS[@]}"; do

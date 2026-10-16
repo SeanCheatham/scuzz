@@ -37,6 +37,8 @@ def main():
     if args.web:
         args.web.mkdir(parents=True, exist_ok=True)
     for font in fonts:
+        if args.web and font.get("native_only"):
+            continue
         target = args.destination / (font["name"] + ".ttf")
         valid = target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() == font["sha256"]
         if not valid:
@@ -48,7 +50,7 @@ def main():
                 install(target, data)
                 valid = True
         if not valid:
-            url = "https://raw.githubusercontent.com/google/fonts/" + font["revision"] + "/" + urllib.parse.quote(font["path"])
+            url = font.get("url") or ("https://raw.githubusercontent.com/google/fonts/" + font["revision"] + "/" + urllib.parse.quote(font["path"]))
             for attempt in range(4):
                 try:
                     with urllib.request.urlopen(url, timeout=90) as response:

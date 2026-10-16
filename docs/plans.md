@@ -36,7 +36,7 @@ The checkout includes pinned font data, HarfBuzz metadata, and SheenBidi source.
 The shared native shaper supplies font selection, script runs, clusters, and carets.
 The default Skia path uses this shaper.
 The pinned HarfBuzz API supplies glyph outlines. Use it for the portable raster path.
-The portable build still needs HarfBuzz source and verified Latin font data.
-The prebuilt Latin face and the CDN DejaVu face have different glyph tables.
-Use one verified Latin face for the native renderers.
+The native build verifies the Latin and monospace font files by SHA-256.
+The default Skia path uses these files. It does not select fonts from the host.
+The build supplies standalone HarfBuzz source from its pinned archive.
 The portable font provider and glyph raster paths remain open.

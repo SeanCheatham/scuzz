@@ -140,6 +140,8 @@ The paint build fetches matching HarfBuzz headers and pinned SheenBidi source.
 The build verifies each source archive before it extracts files.
 The build keeps these sources under `crates/ffi-skia/build/`.
 `scripts/fetch_fonts.py` fetches the Noto fallback fonts from Google Fonts.
+It also fetches fixed DejaVu files for native Latin and monospace text.
+It verifies these files before use. The native build does not select host fonts.
 `third_party/fonts/PIN` supplies each revision and SHA-256 value.
 Native Skia embeds these files. Web packages supply them as font assets.
 The release includes their SIL Open Font License files.

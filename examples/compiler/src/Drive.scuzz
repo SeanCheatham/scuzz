@@ -1145,7 +1145,7 @@ def pkgHostCopy(name: String, exe: String, dest: String, id: String): IO[Unit] =
   Fs.mkdirs(dest).flatMap(_ => crateHome().flatMap(h => runLine(pkgHostLicenseCmd(h, joinSlash(dest, "licenses"))).flatMap(r => linkOnlyGot(r).flatMap(_ => pkgHostCp(name, exe, dest, id)))))
 
 def pkgHostLicenseCmd(h: String, dest: String): String =
-  Str.concat("mkdir -p ", Str.concat(shQuote(dest), Str.concat(" && cp ", Str.concat(List.join(List.map(["third_party/fonts/devanagari-LICENSE", "third_party/fonts/thai-LICENSE", "third_party/fonts/sc-LICENSE", "third_party/fonts/arabic-LICENSE", "third_party/skia/SheenBidi-LICENSE"], file => shQuote(crateAt(h, file))), " "), Str.concat(" ", shQuote(dest))))))
+  Str.concat("mkdir -p ", Str.concat(shQuote(dest), Str.concat(" && cp ", Str.concat(List.join(List.map(["third_party/fonts/devanagari-LICENSE", "third_party/fonts/thai-LICENSE", "third_party/fonts/sc-LICENSE", "third_party/fonts/arabic-LICENSE", "third_party/fonts/latin-LICENSE", "third_party/fonts/mono-LICENSE", "third_party/skia/SheenBidi-LICENSE"], file => shQuote(crateAt(h, file))), " "), Str.concat(" ", shQuote(dest))))))
 
 def pkgHostCp(name: String, exe: String, dest: String, id: String): IO[Unit] =
   runLine(Str.concat("cp ", Str.concat(shQuote(exe), Str.concat(" ", shQuote(joinSlash(dest, name)))))).flatMap(r => pkgHostChmod(r, name, dest, id))

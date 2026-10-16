@@ -20,10 +20,6 @@ HB_DIR := build/harfbuzz
 SB_REV := $(shell awk -F= '/^sheenbidi_revision=/{print $$2; exit}' "$(PIN)")
 SB_SHA := $(shell awk -F= '/^sheenbidi_sha256=/{print $$2; exit}' "$(PIN)")
 SB_DIR := build/sheenbidi
-MONO_TTF := build/DejaVuSansMono.ttf
-MONO_C := build/scuzz_embedded_mono_font.c
-MONO_OBJ := build/scuzz_embedded_mono_font.o
-MONO_URL := https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSansMono.ttf
 
 .PHONY: all clean test lib lib-skia lib-sk-sw lib-gpu ensure-prebuilt ensure-fonts
 
@@ -95,6 +91,15 @@ $(HB_DIR)/.stamp: $(PIN) | build
 	@test -f $(HB_DIR)/hb-version.h
 	@echo "$(HB_REV)" > $@
 
+$(HB_DIR)/.source-stamp: $(HB_DIR)/.stamp
+	@if [ ! -f build/harfbuzz.tar.gz ]; then "$(ROOT)/scripts/fetch_skia.sh" --download "https://codeload.github.com/harfbuzz/harfbuzz/tar.gz/$(HB_REV)" build/harfbuzz.tar.gz; fi
+	@python3 -c 'import hashlib,pathlib,sys,tarfile; p=pathlib.Path(sys.argv[1]); hashlib.sha256(p.read_bytes()).hexdigest()==sys.argv[2] or sys.exit("HarfBuzz archive hash differs"); out=pathlib.Path(sys.argv[3]); t=tarfile.open(p); [(lambda p,m: (p.parent.mkdir(parents=True,exist_ok=True),p.write_bytes(t.extractfile(m).read())))(out.joinpath(*pathlib.PurePosixPath(m.name).parts[2:]),m) for m in t.getmembers() if m.isfile() and pathlib.PurePosixPath(m.name).parts[1]=="src"]' build/harfbuzz.tar.gz "$(HB_SHA)" $(HB_DIR)/Source
+	@test -f $(HB_DIR)/Source/harfbuzz.cc
+	@echo "$(HB_REV)" > $@
+
+build/harfbuzz.o: $(HB_DIR)/.source-stamp
+	$(CXX) -std=c++17 -O2 -fPIC -c $(HB_DIR)/Source/harfbuzz.cc -o $@
+
 $(HB_DIR)/arabic_joining.h: $(HB_DIR)/.stamp $(ROOT)/scripts/arabic_joining.py
 	python3 "$(ROOT)/scripts/arabic_joining.py" build/harfbuzz.tar.gz "$(HB_SHA)" $@
 
@@ -113,8 +118,7 @@ build/sheenbidi.o: $(SB_DIR)/.stamp
 
 build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h src/sk_text_shape.h include/sk_text.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
 	$(CXX) -std=c++17 -O2 -fPIC -c src/sk_capi_skia.cpp -o $@ \
-	  -Ibuild/skia-src -I$(HB_DIR) -I$(SB_DIR)/Headers -DSK_RELEASE -DSCUZZ_SKIA_EMBEDDED_FONT \
-	  -DSCUZZ_SKIA_EMBEDDED_MONO_FONT
+	  -Ibuild/skia-src -I$(HB_DIR) -I$(SB_DIR)/Headers -DSK_RELEASE
 
 build/fonts.S: $(ROOT)/scripts/fetch_fonts.py $(ROOT)/third_party/fonts/PIN | build
 	python3 "$(ROOT)/scripts/fetch_fonts.py" build/fonts --assembly $@
@@ -124,20 +128,6 @@ ensure-fonts: | build
 
 build/fonts.o: build/fonts.S | ensure-fonts
 	$(CC) -fPIC -c $< -o $@
-
-$(MONO_TTF): | build
-	@if [ -f /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf ]; then \
-	  cp -f /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf $@; \
-	else \
-	  curl -fsSL -o $@ "$(MONO_URL)"; \
-	fi
-	@test -s $@
-
-$(MONO_C): $(MONO_TTF)
-	python3 -c 'import pathlib,sys; data=pathlib.Path(sys.argv[1]).read_bytes(); n=sys.argv[2]; print("unsigned char %s[] = {" % n); print(",".join(str(b) for b in data)); print("};"); print("unsigned int %s_len = %d;" % (n, len(data)))' $< scuzz_embedded_mono_font > $@
-
-$(MONO_OBJ): $(MONO_C)
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 build/sk_capi_skia_bridge.o: src/sk_capi_skia_bridge.c include/sk_capi.h include/sk_text.h src/sk_capi_skia.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
@@ -168,7 +158,7 @@ lib-gpu: $(OBJ) build/sk_gpu.o | build
 
 # Pin supplies Skia objects + font. Replace the shim so the C ABI matches
 # sk_capi.h (save/clip/restore, RGBA peek). Fail if clip symbols are missing.
-lib-skia: build/fonts.o build/sheenbidi.o build/image.o build/image_dec.o build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o $(SHIM_OBJS) $(MONO_OBJ) | build
+lib-skia: build/fonts.o build/sheenbidi.o build/image.o build/image_dec.o build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o $(SHIM_OBJS) | build
 	@test -f "$(PREBUILT_LIB)"
 	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend \
 	    && [ ! "$(PREBUILT_LIB)" -nt build/libsk_capi.a ] \
@@ -180,8 +170,7 @@ lib-skia: build/fonts.o build/sheenbidi.o build/image.o build/image_dec.o build/
 	    && [ ! build/fonts.o -nt build/libsk_capi.a ] \
 	    && [ ! build/sheenbidi.o -nt build/libsk_capi.a ] \
 	    && [ ! build/sk_capi_skia.o -nt build/libsk_capi.a ] \
-	    && [ ! build/sk_capi_skia_bridge.o -nt build/libsk_capi.a ] \
-	    && [ ! "$(MONO_OBJ)" -nt build/libsk_capi.a ]; then \
+	    && [ ! build/sk_capi_skia_bridge.o -nt build/libsk_capi.a ]; then \
 	  if nm build/libsk_capi.a | grep -E ' T _?sk_canvas_clip_rect' >/dev/null && \
 	     nm build/libsk_capi.a | grep -E ' T _?sk_canvas_save' >/dev/null && \
 	     nm build/libsk_capi.a | grep -E ' T _?sk_canvas_restore' >/dev/null; then \
@@ -190,8 +179,8 @@ lib-skia: build/fonts.o build/sheenbidi.o build/image.o build/image_dec.o build/
 	fi; \
 	rm -f build/*.a; \
 	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a; \
-	ar d build/libsk_capi.a sk_capi_skia.o sk_capi_skia_bridge.o sheenbidi.o fonts.o; \
-	ar rcs build/libsk_capi.a build/fonts.o build/sheenbidi.o $(SHIM_OBJS) $(MONO_OBJ) build/image.o build/image_dec.o build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o; \
+	ar d build/libsk_capi.a sk_capi_skia.o sk_capi_skia_bridge.o sheenbidi.o fonts.o scuzz_embedded_font.o scuzz_embedded_mono_font.o; \
+	ar rcs build/libsk_capi.a build/fonts.o build/sheenbidi.o $(SHIM_OBJS) build/image.o build/image_dec.o build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o; \
 	if ! nm build/libsk_capi.a | grep -E ' T _?sk_canvas_clip_rect' >/dev/null; then \
 	  echo "ffi-skia: linked archive lacks sk_canvas_clip_rect" >&2; \
 	  exit 1; \
