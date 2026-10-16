@@ -36,7 +36,7 @@ Editor and monospace text keep fixed cells.
 Line separators have no glyph bounds or advance.
 The native build verifies the Latin and monospace files by SHA-256.
 The build supplies standalone HarfBuzz source from its pinned archive.
-Software runtime UI checks and all three renderer paint checks pass.
+Full runtime checks and paint checks pass for all three native renderers.
 Android arm64 and x86_64 builds pass. The APK includes font and shaper licenses.
 ASan and UBSan checks pass for the portable shaper, font provider, and raster path.
 Independent Skia checks cover 48 script, size, and style cases.

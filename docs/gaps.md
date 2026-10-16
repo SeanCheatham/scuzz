@@ -131,7 +131,7 @@ Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
 Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
 Native software and OpenGL use the shared native shaper and clipped glyph coverage rows.
 Paint checks cover proportional advances, source clusters, styles, paragraph ranges, and large zoom values.
-The software runtime UI checks pass. Android arm64 and x86_64 builds pass.
+Full runtime checks pass for all three native renderers. Android arm64 and x86_64 builds pass.
 ASan and UBSan checks pass for the portable shaper and glyph raster path.
 48 script, size, and style cases compare widths, carets, clusters, and glyph outlines with Skia.
 The glyph reference uses unhinted Skia with subpixel positions.
