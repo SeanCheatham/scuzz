@@ -19950,9 +19950,9 @@ static void test_styled_text_values(void) {
 
 static void test_font_change_joining(void) {
   if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
-  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", "\xe2\x80\xae" "Aم", "م", "م"};
+  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م"};
   const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9"};
-  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", "\xe2\x80\xae" "Aﻣ\xe2\x80\xac", "ﻡ", "ﻡ"};
+  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ"};
   const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ"};
   SzTheme theme = *sz_theme_default();
   theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;

@@ -30,6 +30,7 @@
 #include <memory>
 #include <map>
 #include <vector>
+#include <string>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -218,13 +219,38 @@ static ShapedText shape_text(SkTextRange range, float size) {
   SBScriptLocatorRelease(locator);
   hb_buffer_t *buffer = hb_buffer_create();
   SBUInteger context_start = 0, context_end = 0;
+  int64_t cluster_base = 0;
+  auto fill_buffer = [&](SBUInteger start, SBUInteger length, SBScript script, bool rtl) {
+    hb_buffer_clear_contents(buffer);
+    if (script == SBScriptARAB && !rtl) {
+      /* HarfBuzz reverses Arabic input for LTR runs. Reverse its context too. */
+      auto reverse = [&](SBUInteger a, SBUInteger b) {
+        std::string value;
+        for (SBUInteger end = b; end > a;) {
+          SBUInteger begin = end - 1;
+          while (begin > a && (static_cast<unsigned char>(text[begin]) & 0xc0) == 0x80) begin--;
+          value.append(text + begin, end - begin);
+          end = begin;
+        }
+        return value;
+      };
+      std::string value = reverse(start + length, context_end);
+      size_t item = value.size();
+      value.append(text + start, length);
+      value += reverse(context_start, start);
+      hb_buffer_add_utf8(buffer, value.data(), static_cast<int>(value.size()), static_cast<unsigned>(item), static_cast<int>(length));
+      cluster_base = static_cast<int64_t>(start) - static_cast<int64_t>(item);
+    } else {
+      hb_buffer_add_utf8(buffer, text + context_start, static_cast<int>(context_end - context_start),
+        static_cast<unsigned>(start - context_start), static_cast<int>(length));
+      cluster_base = context_start;
+    }
+  };
   auto shape = [&](SBUInteger start, SBUInteger length, SBScript script, bool rtl, unsigned index) {
     hb_font_t *font = shape_font(index);
     unsigned units = hb_face_get_upem(hb_font_get_face(font));
     float scale = (size > 0.f ? size : 8.f) / static_cast<float>(units ? units : 1);
-    hb_buffer_clear_contents(buffer);
-    hb_buffer_add_utf8(buffer, text + context_start, static_cast<int>(context_end - context_start),
-      static_cast<unsigned>(start - context_start), static_cast<int>(length));
+    fill_buffer(start, length, script, rtl);
     /* Use one language on each host. The process locale does not select glyphs. */
     hb_buffer_set_language(buffer, hb_language_from_string("und", -1));
     hb_buffer_set_direction(buffer, rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
@@ -236,7 +262,7 @@ static ShapedText shape_text(SkTextRange range, float size) {
     float x = result.width, y = 0.f;
     for (unsigned i = 0; i < count; i++) {
       result.glyphs.push_back(static_cast<SkGlyphID>(info[i].codepoint));
-      result.clusters.push_back(static_cast<unsigned>(context_start) + info[i].cluster - static_cast<unsigned>(range.start));
+      result.clusters.push_back(static_cast<unsigned>(cluster_base + info[i].cluster - range.start));
       result.fonts.push_back(index);
       result.starts.push_back(x);
       result.ends.push_back(x + position[i].x_advance * scale);
@@ -253,9 +279,7 @@ static ShapedText shape_text(SkTextRange range, float size) {
       return;
     }
     /* Keep the shaper's source clusters together when coverage is partial. */
-    hb_buffer_clear_contents(buffer);
-    hb_buffer_add_utf8(buffer, text + context_start, static_cast<int>(context_end - context_start),
-      static_cast<unsigned>(start - context_start), static_cast<int>(length));
+    fill_buffer(start, length, script, rtl);
     hb_buffer_set_direction(buffer, rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
     hb_buffer_set_script(buffer, hb_script_from_iso15924_tag(SBScriptGetUnicodeTag(script)));
     hb_buffer_set_language(buffer, hb_language_from_string("und", -1));
@@ -263,7 +287,7 @@ static ShapedText shape_text(SkTextRange range, float size) {
     unsigned count;
     const auto *info = hb_buffer_get_glyph_infos(buffer, &count);
     std::vector<unsigned> boundaries = {static_cast<unsigned>(start), static_cast<unsigned>(start + length)};
-    for (unsigned i = 0; i < count; i++) boundaries.push_back(static_cast<unsigned>(context_start) + info[i].cluster);
+    for (unsigned i = 0; i < count; i++) boundaries.push_back(static_cast<unsigned>(cluster_base + info[i].cluster));
     std::sort(boundaries.begin(), boundaries.end());
     boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
     struct Part { unsigned start, end, font; };
