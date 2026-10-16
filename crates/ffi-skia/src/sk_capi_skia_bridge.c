@@ -70,8 +70,8 @@ float sk_paint_get_text_size(const SkPaint *paint) {
   return scuzz_skia_paint_get_text_size(paint);
 }
 
-void sk_font_text_positions(const char *text, size_t bytes, float font_px, float *leading, float *trailing) {
-  scuzz_skia_font_text_positions(text, bytes, font_px, leading, trailing);
+void sk_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing) {
+  scuzz_skia_font_text_positions(text, bytes, font_px, style, leading, trailing);
 }
 
 void sk_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks) {

@@ -314,11 +314,26 @@ static bool advances_caret(SBCodepoint codepoint) {
     category != HB_UNICODE_GENERAL_CATEGORY_FORMAT;
 }
 
-void scuzz_skia_font_text_positions(const char *text, size_t bytes, float font_px,
+void scuzz_skia_font_text_positions(const char *text, size_t bytes, float font_px, int style,
                                     float *leading, float *trailing) {
   if (!leading || !trailing || bytes > INT_MAX) return;
   std::fill(leading, leading + bytes + 1, 0.f);
   std::fill(trailing, trailing + bytes + 1, 0.f);
+  if (!text) return;
+  if (style & 4) {
+    SkFont font = make_mono_font(font_px);
+    SBCodepointSequence sequence = {SBStringEncodingUTF8, const_cast<char *>(text), bytes};
+    float x = 0.f;
+    for (SBUInteger p = 0; p < bytes;) {
+      SBUInteger start = p;
+      SBCodepointSequenceGetCodepointAt(&sequence, &p);
+      float next = x + font.measureText(text + start, p - start, SkTextEncoding::kUTF8);
+      for (SBUInteger i = start; i < p; i++) { leading[i] = x; trailing[i] = next; }
+      x = next;
+    }
+    leading[bytes] = trailing[bytes] = x;
+    return;
+  }
   ShapedText shaped = shape_text(text, bytes, font_px);
   struct Cluster { float left, right; bool rtl; };
   std::map<unsigned, Cluster> clusters;

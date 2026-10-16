@@ -72,7 +72,7 @@ float sk_paint_get_text_size(const SkPaint *paint);
 
 enum { SK_TEXT_BOLD = 1, SK_TEXT_ITALIC = 2, SK_TEXT_MONO = 4, SK_TEXT_UNDERLINE = 8 };
 /* Store leading and trailing positions for each source byte. Allocate bytes + 1. */
-void sk_font_text_positions(const char *text, size_t bytes, float font_px, float *leading, float *trailing);
+void sk_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing);
 /* Mark source byte offsets at shaped cluster boundaries. Allocate bytes + 1. */
 void sk_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks);
 void sk_font_metrics(float font_px, int style, float *ascent, float *descent);

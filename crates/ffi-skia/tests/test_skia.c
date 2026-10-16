@@ -172,15 +172,18 @@ static void test_shaped_text(void) {
   sk_text_cluster_breaks("لا", 4, breaks);
   assert(breaks[0] && !breaks[1] && !breaks[2] && !breaks[3] && breaks[4]);
   float leading[32], trailing[32];
-  sk_font_text_positions("אב", 4, 28, leading, trailing);
+  sk_font_text_positions("אב", 4, 28, 0, leading, trailing);
   assert(leading[0] > leading[2] && leading[2] > leading[4]);
   assert(fabsf(leading[0] - sk_font_measure_string("אב", 28)) < .001f);
   assert(leading[4] == 0.f && trailing[3] == 0.f);
-  sk_font_text_positions("AV", 2, 28, leading, trailing);
+  sk_font_text_positions("AV", 2, 28, 0, leading, trailing);
   assert(leading[1] < sk_font_measure_string("A", 28));
-  sk_font_text_positions("fi", 2, 28, leading, trailing);
+  sk_font_text_positions("fi", 2, 28, 0, leading, trailing);
   assert(leading[0] < leading[1] && leading[1] < leading[2]);
-  sk_font_text_positions("é", 3, 28, leading, trailing);
+  sk_font_text_positions("fi", 2, 28, SK_TEXT_MONO, leading, trailing);
+  assert(fabsf(leading[2] - sk_font_measure_span("fi", 2, 28, SK_TEXT_MONO)) < .001f);
+  assert(fabsf(leading[1] - sk_font_measure_span("f", 1, 28, SK_TEXT_MONO)) < .001f);
+  sk_font_text_positions("é", 3, 28, 0, leading, trailing);
   assert(leading[1] == trailing[0] && leading[3] == trailing[0]);
   float separate = sk_font_measure_string("A", 28) + sk_font_measure_string("V", 28);
   assert(sk_font_measure_string("AV", 28) < separate - 1.f);
@@ -213,7 +216,7 @@ static void test_font_fallback(void) {
     for (int style = 0; style < 4; style++)
       assert(fabsf(sk_font_measure_span(source[i], bytes, 32, style) - widths[i]) < .002f);
     float leading[64], trailing[64];
-    sk_font_text_positions(source[i], bytes, 32, leading, trailing);
+    sk_font_text_positions(source[i], bytes, 32, 0, leading, trailing);
     assert(fabsf(leading[bytes] - widths[i]) < .002f);
     for (size_t j = 0; j <= bytes; j++) {
       assert(isfinite(leading[j]) && isfinite(trailing[j]));

@@ -44,7 +44,7 @@ void scuzz_skia_paint_set_color(void *paint, uint8_t r, uint8_t g, uint8_t b,
                                 uint8_t a);
 void scuzz_skia_paint_set_text_size(void *paint, float size);
 float scuzz_skia_paint_get_text_size(const void *paint);
-void scuzz_skia_font_text_positions(const char *text, size_t bytes, float font_px, float *leading, float *trailing);
+void scuzz_skia_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing);
 void scuzz_skia_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks);
 void scuzz_skia_font_metrics(float font_px, int style, float *ascent, float *descent);
 void scuzz_skia_font_span_metrics(const char *text, size_t bytes, float font_px, int style, float *ascent, float *descent);

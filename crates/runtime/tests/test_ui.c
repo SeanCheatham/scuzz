@@ -19201,7 +19201,9 @@ typedef struct TextProbe {
 
 static void text_probe(const char *source, int start, int end,
   float x, float baseline, float width, float font, float line_height,
-  int style, uint32_t color, int colored, int ellipsis, int action, void *env) {
+  int style, uint32_t color, int colored, int ellipsis, int action,
+  int context_start, int context_end, float context_x, void *env) {
+  (void)context_start; (void)context_end; (void)context_x;
   (void)action;
   (void)source; (void)width; (void)line_height; (void)color; (void)colored;
   TextProbe *probe = env;
@@ -19944,6 +19946,67 @@ static void test_styled_text_values(void) {
   assert(bytes == before_bytes && count == before_count);
 }
 
+static void test_styled_shaping_context(void) {
+  uint64_t before_bytes, before_count, end_bytes, end_count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  const char *left[] = {"A", "f", "ل", "e", "क्"};
+  const char *right[] = {"V", "i", "ا", "́", "षि"};
+  SzText *(*styles[])(const SzText *) = {NULL, sz_text_underline, sz_text_bold, sz_text_italic, sz_text_monospace};
+  for (int style = 0; style < 5; style++) for (int i = 0; i < 5; i++) {
+    SzText *a = test_text_span(left[i]), *b = test_text_span(right[i]);
+    SzText *colored = sz_text_color(0xff165ca0, b);
+    SzText *split = test_text_pair(a, colored);
+    SzText *plain = test_text_span(sz_text_source(split));
+    if (styles[style]) {
+      SzText *next_split = styles[style](split), *next_plain = styles[style](plain);
+      sz_release(split); sz_release(plain);
+      split = next_split; plain = next_plain;
+    }
+    SzTextMetrics whole = sz_text_layout(plain, 32, 1, 6, 0, 0, 0, NULL, NULL);
+    SzTextMetrics parts = sz_text_layout(split, 32, 1, 6, 0, 0, 0, NULL, NULL);
+    assert(fabsf(whole.width - parts.width) < .01f);
+    assert(fabsf(whole.height - parts.height) < .01f);
+    parts = sz_text_layout(split, 32, 1, 6, whole.width + .01f, 0, 0, NULL, NULL);
+    assert(parts.lines == 1);
+    SzTheme theme = *sz_theme_default();
+    theme.background = 0; theme.font_px = 32; theme.foreground = 0xff165ca0;
+    SzView *plain_view = sz_view_rich_text(plain), *split_view = sz_view_rich_text(split);
+    int gpu = sk_gpu_available();
+    SkSurface *whole_surface = gpu ? sk_surface_make_gpu_n32_premul(256, 96) : sk_surface_make_raster_n32_premul(256, 96);
+    SkSurface *split_surface = gpu ? sk_surface_make_gpu_n32_premul(256, 96) : sk_surface_make_raster_n32_premul(256, 96);
+    assert(whole_surface && split_surface);
+    assert(sz_view_paint(plain_view, sk_surface_get_canvas(whole_surface), 256, 96, &theme));
+    assert(sz_view_paint(split_view, sk_surface_get_canvas(split_surface), 256, 96, &theme));
+    const uint8_t *whole_pixels = sk_surface_peek_pixels(whole_surface, NULL);
+    const uint8_t *split_pixels = sk_surface_peek_pixels(split_surface, NULL);
+    int ink = 0;
+    for (int p = 0; p < 256 * 96; p++) {
+      if (whole_pixels[p * 4 + 3] != split_pixels[p * 4 + 3]) fprintf(stderr, "style %d case %d pixel %d,%d alpha %u != %u\n", style, i, p % 256, p / 256, whole_pixels[p * 4 + 3], split_pixels[p * 4 + 3]);
+      assert(whole_pixels[p * 4 + 3] == split_pixels[p * 4 + 3]);
+      ink += whole_pixels[p * 4 + 3] > 0;
+    }
+    assert(ink > 0);
+    assert(!memcmp(whole_pixels, split_pixels, 256 * 96 * 4));
+    if (i != 3) {
+      theme.foreground = 0xffbd3a2a;
+      assert(sz_view_paint(split_view, sk_surface_get_canvas(split_surface), 256, 96, &theme));
+      split_pixels = sk_surface_peek_pixels(split_surface, NULL);
+      int red = 0, blue = 0;
+      for (int p = 0; p < 256 * 96; p++) {
+        const uint8_t *pixel = split_pixels + p * 4;
+        red += pixel[0] > pixel[1] && pixel[0] > pixel[2];
+        blue += pixel[2] > pixel[0] && pixel[2] > pixel[1];
+      }
+      assert(red > 0 && blue > 0);
+    }
+    sk_surface_unref(whole_surface); sk_surface_unref(split_surface);
+    sz_view_free(plain_view); sz_view_free(split_view);
+    sz_release(a); sz_release(b); sz_release(colored); sz_release(split); sz_release(plain);
+  }
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(before_bytes == end_bytes && before_count == end_count);
+}
+
 static void test_styled_text_wrap(void) {
   SzText *a = test_text_span("hel");
   SzText *b = test_text_span("lo world");
@@ -20190,6 +20253,13 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && (!strcmp(argv[1], "--styled-shaping") || !strcmp(argv[1], "--styled-shaping-gpu"))) {
+    if (!strcmp(argv[1], "--styled-shaping-gpu")) assert(sk_gpu_available());
+    test_styled_shaping_context();
+    printf("styled shaping tests ok (%s)\n", sk_gpu_available() ? "OpenGL" : "raster");
+    return 0;
+  }
+
   if (argc == 2 && !strcmp(argv[1], "--opacity")) {
     test_opacity_transition_frames();
     test_opacity_session_pause_and_reduction();
@@ -20210,6 +20280,7 @@ int main(int argc, char **argv) {
     test_shaped_field_geometry();
     test_shaped_text_wrapping();
     test_fallback_text_layout();
+    test_styled_shaping_context();
     test_styled_text_wrap();
     test_styled_text_sizes();
     test_styled_text_long_paint();
@@ -20230,6 +20301,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--inline-actions")) {
     test_inline_text_actions();
     test_styled_text_values();
+    test_styled_shaping_context();
     test_styled_text_wrap();
     test_styled_text_sizes();
     puts("inline text action tests ok");
@@ -20289,6 +20361,7 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && !strcmp(argv[1], "--styled-text")) {
     test_styled_text_values();
+    test_styled_shaping_context();
     test_styled_text_wrap();
     test_styled_text_sizes();
     test_styled_text_long_paint();
@@ -21005,6 +21078,7 @@ int main(int argc, char **argv) {
   test_shaped_text_wrapping();
   test_fallback_text_layout();
   test_styled_text_values();
+  test_styled_shaping_context();
   test_styled_text_wrap();
   test_styled_text_sizes();
   test_styled_text_long_paint();

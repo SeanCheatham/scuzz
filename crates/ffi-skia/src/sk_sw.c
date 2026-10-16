@@ -635,7 +635,7 @@ EM_JS(void, web_cluster_breaks, (const char *text, int bytes, uint8_t *breaks), 
 #endif
 
 #ifdef __EMSCRIPTEN__
-EM_JS(void, web_text_positions, (const char *text, int bytes, float size, float *leading, float *trailing), {
+EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int style, float *leading, float *trailing), {
   const source = UTF8ToString(Number(text), bytes);
   let probe = Module.scuzzPositionProbe;
   if (!probe) {
@@ -644,7 +644,7 @@ EM_JS(void, web_text_positions, (const char *text, int bytes, float size, float 
     Object.assign(probe.style, {position: 'fixed', left: '0', top: '0', visibility: 'hidden', whiteSpace: 'pre', pointerEvents: 'none'});
     document.body.append(probe);
   }
-  probe.style.font = size + 'px ' + Module.scuzzFontStack; probe.textContent = source;
+  probe.style.font = ((style & 2) ? 'italic ' : '') + ((style & 1) ? 'bold ' : '') + size + 'px ' + Module.scuzzFontStack; probe.textContent = source;
   const origin = probe.getBoundingClientRect().left;
   const range = document.createRange(), node = probe.firstChild;
   let byte = 0, unit = 0, last = 0;
@@ -666,14 +666,15 @@ EM_JS(void, web_text_positions, (const char *text, int bytes, float size, float 
 });
 #endif
 
-void sk_font_text_positions(const char *text, size_t bytes, float font_px, float *leading, float *trailing) {
+void sk_font_text_positions(const char *text, size_t bytes, float font_px, int style, float *leading, float *trailing) {
   if (!leading || !trailing || bytes > INT32_MAX) return;
   memset(leading, 0, (bytes + 1) * sizeof(float));
   memset(trailing, 0, (bytes + 1) * sizeof(float));
   if (!text) return;
 #ifdef __EMSCRIPTEN__
-  web_text_positions(text, (int)bytes, font_px, leading, trailing);
+  web_text_positions(text, (int)bytes, font_px, style, leading, trailing);
 #else
+  (void)style;
   float x = 0.f, advance = (float)sw_advance(font_px);
   for (size_t i = 0; i < bytes;) {
     unsigned char c = (unsigned char)text[i];
