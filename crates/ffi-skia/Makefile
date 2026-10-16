@@ -1,6 +1,6 @@
 # Plain = so a command-line CC=gcc still wins. ?= would lose to make's built-in CC=cc default.
 CC = clang
-CXX ?= clang++
+CXX = clang++
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
 TRIPLE ?= $(shell $(ROOT)/scripts/skia_triple.sh)

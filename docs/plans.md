@@ -57,7 +57,12 @@ Package CI passes. It builds the portable renderer from bundled source.
 Android API 36 emulator checks pass on x86_64 with four cores and 4 GB of memory.
 They cover text changes, typing after a combining mark, keyboard viewport changes,
 button input, and retained state after resume.
-Final native and evaluator checks cover each renderer. Clean UI validation is in progress.
-Make still selects its built-in g++ default when CXX is absent.
-Use clang++ as the default C++ compiler. Check a build without a CXX override.
+Software replay produces exact native and evaluator timelines and claims.
+The OpenGL live graph probe times out before its campaign starts.
+Investigate this timeout. Do not count its missing claim triggers as verification.
+The final check driver stops at this failure and restores the Skia archive.
+The UI host and shaping build directories still contain OpenGL artifacts.
+Rebuild these programs for each selected renderer.
+Default-renderer replay and clean UI validation remain open.
+Make uses clang++ as its default C++ compiler.
 Apple SDK execution is unavailable on this host.
