@@ -339,8 +339,18 @@ var Module = {
           baseline = line.y;
           if (freshAction) { place(node, action); actions.add(action); }
           place(action || node, span);
-          span.removeAttribute('dir');
-          if (span.textContent !== line.text) span.textContent = line.text;
+          let display = '', sourceUnit = 0;
+          span.sourceOffsets = [0];
+          for (const point of line.text) {
+            const cp = point.codePointAt(0);
+            sourceUnit += point.length;
+            if (cp >= 0x202a && cp <= 0x202e || cp >= 0x2066 && cp <= 0x2069) continue;
+            display += point;
+            for (let i = point.length - 1; i >= 0; i--) span.sourceOffsets.push(sourceUnit - i);
+          }
+          span.dir = line.dir || 'auto';
+          span.style.unicodeBidi = line.dir && display ? 'bidi-override' : 'normal';
+          if (span.textContent !== display) span.textContent = display;
           span.block = frame.texts.indexOf(item); span.sourceStart = line.start; span.sourceEnd = line.end; span.synthetic = Boolean(line.synthetic);
           const style = line.style || 0;
           const fontStyle = ((style & 2) ? 'italic ' : '') + ((style & 1) ? 'bold ' : '') + line.font / scale + 'px ' + Module.scuzzFontStack;
@@ -593,13 +603,18 @@ document.addEventListener('copy', event => {
   const range = selection.getRangeAt(0);
   const first = range.startContainer.parentElement, last = range.endContainer.parentElement;
   if (first?.block === undefined || last?.block === undefined) return;
+  const sourceOffset = (span, offset, end) => {
+    if (!end && offset === 0) return span.sourceStart;
+    if (offset >= span.textContent.length) return span.sourceEnd;
+    return Math.min(span.sourceEnd, span.sourceStart + (span.sourceOffsets?.[offset] ?? offset));
+  };
   const pieces = [];
   for (let i = first.block; i <= last.block; i++) {
     const text = Module.textBlocks[i].text;
-    let end = i === last.block ? Math.min(last.sourceEnd, last.sourceStart + range.endOffset) : text.length;
+    let end = i === last.block ? sourceOffset(last, range.endOffset, true) : text.length;
     if (i === last.block && !last.synthetic && !last.nextElementSibling &&
         range.endOffset === last.textContent.length && !text.slice(end).trim()) end = text.length;
-    pieces.push(text.slice(i === first.block ? Math.min(first.sourceEnd, first.sourceStart + range.startOffset) : 0, end));
+    pieces.push(text.slice(i === first.block ? sourceOffset(first, range.startOffset, false) : 0, end));
   }
   event.clipboardData.setData('text/plain', pieces.join('\n')); event.preventDefault();
 });

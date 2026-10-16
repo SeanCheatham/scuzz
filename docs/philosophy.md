@@ -572,8 +572,8 @@ Synthetic ellipsis marks do not add source characters to copied text.
 
 The default native Skia renderer shapes proportional text with HarfBuzz.
 SheenBidi supplies direction and script runs within each displayed line.
-Native ranges keep direction and embedding context from the complete source paragraph.
-Plain text also keeps this context when it paints an ellipsis.
+Native proportional ranges and browser ranges keep direction and embedding context from the complete source paragraph.
+Plain and rich text keep this context when they paint an ellipsis.
 Measurement and paint use the same positioned glyphs.
 The embedded face supplies kerning, ligatures, combining marks, and Arabic forms.
 Wrapping and ellipsis keep shaped source clusters together.
@@ -586,7 +586,8 @@ Left and Right move a field caret in the visual direction.
 Composition paints the complete preview without changing the committed Signal.
 Source strings keep their original UTF-8 bytes.
 Editor cells and native monospace spans keep their cell layout.
-The browser uses its font shaper and source positions from DOM text ranges.
+The browser uses the same pinned paragraph direction algorithm.
+Its font shaper and DOM text ranges supply glyphs and source positions.
 Pinned Noto fonts supply fallback for Devanagari, Thai, and Simplified Chinese.
 Font selection keeps source clusters together. Text line boxes contain fallback marks.
 Web packages include the same fonts. Font loading updates layout and keeps input state.

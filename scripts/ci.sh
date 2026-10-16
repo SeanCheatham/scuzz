@@ -879,7 +879,12 @@ with patch.object(urllib.request, 'urlopen', side_effect=RuntimeError('font proo
         asset = name + "-" + font["sha256"][:16] + ".ttf"
         assert hashlib.sha256((destination / "web" / asset).read_bytes()).hexdigest() == font["sha256"]
     subprocess.run(['clang', '-c', str(destination / 'fonts.S'), '-o', str(destination / 'fonts.o')], check=True, timeout=30)
-print('Release fonts: pinned bytes, licenses, offline reuse, and data assembly pass', flush=True)
+    bidi = home / "crates/ffi-skia/build/sheenbidi"
+    pin = dict(line.split("=", 1) for line in (home / "third_party/skia/PIN").read_text().splitlines() if "=" in line and not line.startswith("#"))
+    assert (bidi / ".stamp").read_text().strip() == pin["sheenbidi_revision"]
+    subprocess.run(['clang', '-std=c11', '-DSB_CONFIG_UNITY', '-I' + str(bidi / 'Headers'), '-I' + str(bidi / 'Source'),
+                    '-c', str(bidi / 'Source/SheenBidi.c'), '-o', str(destination / 'bidi.o')], check=True, timeout=30)
+print('Release fonts and direction: pinned data, licenses, offline reuse, and source assembly pass', flush=True)
 root = Path("/tmp/scuzz-release-app")
 package_out = root / "build/native package"
 subprocess.run([str(prefix / "bin/scuzz"), "package", "--out-dir", str(package_out), str(root)], check=True, timeout=180)
@@ -2531,8 +2536,17 @@ cases = {
                      {'op': 'compose', 'value': 'AV'}, {'op': 'commit'},
                      {'op': 'paste', 'value': ' fi é'},
                      {'op': 'tap', 'id': 'button:Add'},
-                     {'op': 'scroll', 'i': 0, 'dx': 10000, 'dy': 0},
-                     {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2}])],
+                     {'op': 'scroll', 'i': 1, 'dx': 10000, 'dy': 0},
+                     {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2}]),
+        ('paragraphs', [{'op': 'text', 'i': 0, 'value': 'retained'},
+                        {'op': 'tap', 'id': 'expansion:Paragraphs'},
+                        {'op': 'resize', 'width': 640, 'height': 1600, 'scale': 1},
+                        {'op': 'tap', 'id': 'textbutton:שלום ABCDEF אב'},
+                        {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2},
+                        {'op': 'scroll', 'i': 0, 'dy': 600},
+                        {'op': 'resize', 'width': 640, 'height': 1600},
+                        {'op': 'tap', 'id': 'expansion:Paragraphs'},
+                        {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}])],
     'tooltips': [('keys', [
         {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Escape'},
         {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
@@ -2866,13 +2880,15 @@ for label, events in cases:
         assert native['taps'] == evaluated['taps'], (label, native, evaluated)
         assert native['scrolls'] == evaluated['scrolls'], (label, native, evaluated)
         values = {s.get('name'): s.get('value') for s in native['signals']}
-        expected = 'café' if label == 'keys' else 'AV fi é'
-        assert values['count'] == 12 and values['name'] == expected, values
+        expected = 'retained' if label == 'paragraphs' else 'café' if label == 'keys' else 'AV fi é'
+        assert values['count'] == (17 if label == 'paragraphs' else 12) and values['name'] == expected, values
         assert native['fields'][0]['value'] == expected
         assert any(t['label'] == 'تفاصيل' for t in native['taps'])
         timeline = (output / 'native.timeline').read_text()
         assert 'text:اب AB 12' in timeline and 'M' * 400 in timeline
         assert 'text:नमस्ते สวัสดี 中文漢字' in timeline and 'text:क्षि ปู่ 中文' in timeline
+        if label == 'paragraphs':
+            assert 'textbutton:שלום ABCDEF אב' in timeline and 'text:WWWWWW אבגד AB' in timeline
         if label == 'pointer':
             for source in ['क्षि', 'ปู่', '中文漢字']:
                 assert 'text:Value: ' + source in timeline

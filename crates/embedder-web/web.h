@@ -1,6 +1,7 @@
 #ifndef SCUZZ_WEB_H
 #define SCUZZ_WEB_H
 #include "scuzz_ui.h"
+#include "sk_text.h"
 void sz_web_stop(void);
 void sz_web_set_title(const char *title);
 void sz_web_start(SzUiSession *session);
@@ -18,7 +19,7 @@ void sz_web_present(int width, int height, const uint8_t *rgba);
 void sz_web_frame_begin(float scale);
 void sz_web_frame_end(void);
 void sz_web_text_begin(SzView *view, const char *text, int level, uint32_t ink, uint32_t selection);
-void sz_web_text_line(const char *source, int start, int end, const char *text,
+void sz_web_text_line(const char *source, SkTextRange context, float context_x, int start, int end, const char *text,
                       float x, float y, float width, float font, float line_h,
                       int clipped, float cx, float cy, float cw, float ch, uint32_t ink, int style, int synthetic, uintptr_t action);
 void sz_web_transition(SzView *view, int value, int target, int remaining, int suppressed);

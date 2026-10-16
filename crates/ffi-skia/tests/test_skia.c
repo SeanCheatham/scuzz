@@ -197,6 +197,32 @@ static void test_paragraph_ranges(void) {
   }
 }
 
+static void test_paragraph_brackets(void) {
+  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  const char *source = "WWWWWW אב[ אבגדה ] AB", *prefix = "WWWWWW אב[ ";
+  const char *first = "אבגדה ]", *last = " AB";
+  SkTextRange range = {source, strlen(source), strlen(prefix), strlen(source)};
+  float leading[64], trailing[64];
+  sk_font_text_positions(range, 24, 0, leading, trailing);
+  size_t bracket = strlen("אבגדה ");
+  assert(leading[bracket] > trailing[bracket]);
+  float first_width = sk_font_measure_span(sk_text_range(first, strlen(first)), 24, 0);
+  float width = first_width + sk_font_measure_span(sk_text_range(last, strlen(last)), 24, 0);
+  assert(fabsf(width - sk_font_measure_span(range, 24, 0)) < .001f);
+  SkSurface *actual = sk_surface_make_raster_n32_premul(256, 64);
+  SkSurface *expected = sk_surface_make_raster_n32_premul(256, 64);
+  assert(actual && expected);
+  SkCanvas *a = sk_surface_get_canvas(actual), *b = sk_surface_get_canvas(expected);
+  sk_canvas_clear(a, sk_color_argb(0)); sk_canvas_clear(b, sk_color_argb(0));
+  SkPaint *paint = sk_paint_new();
+  sk_paint_set_text_size(paint, 24); sk_paint_set_color(paint, sk_color_argb(0xff165ca0));
+  sk_canvas_draw_span(a, range, 4, 40, paint, 0);
+  sk_canvas_draw_span(b, sk_text_range(first, strlen(first)), 4, 40, paint, 0);
+  sk_canvas_draw_span(b, sk_text_range(last, strlen(last)), 4 + first_width, 40, paint, 0);
+  assert(!memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), 256 * 64 * 4));
+  sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+}
+
 static void test_shaped_text(void) {
   if (sk_font_measure_string("i", 28) == sk_font_measure_string("W", 28)) return;
   uint8_t breaks[16];
@@ -399,6 +425,7 @@ int main(void) {
   if (sk_gpu_available()) test_opacity_layers(1);
   test_shaped_text();
   test_paragraph_ranges();
+  test_paragraph_brackets();
   test_font_fallback();
   test_text_spans();
   test_images();

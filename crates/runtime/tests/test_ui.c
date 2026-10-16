@@ -19994,6 +19994,46 @@ static void test_wrapped_paragraph_direction(void) {
   sz_release(colored); sz_release(tail); sz_release(text);
 }
 
+static void test_rich_paragraph_ellipsis(void) {
+  if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
+  const char *sources[] = {"שלום שלום שלום שלום", "שלום ABCDEF אב עוד",
+    "WWWWWW אבגד AB tail", "مرحبا بالعالم مرحبا", "AVAVAVAVAVAVAVAVAV"};
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  for (int style = 0; style < 2; style++) for (int i = 0; i < 5; i++) {
+    const char *source = sources[i];
+    SzText *first = test_text_span(source);
+    SzText *text = style ? sz_text_underline(first) : sz_text_color(theme.foreground, first);
+    sz_release(first);
+    TextProbe probe = {0};
+    SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, 86, 1, 1, text_probe, &probe);
+    assert(metrics.truncated && probe.dots == 1 && probe.count > 1);
+    if (i < 2 || i == 3) assert(fabsf(probe.x[probe.count - 1]) < .01f);
+    int end = probe.ends[probe.count - 1];
+    char reference[256];
+    const char *mark = i < 2 || i == 3 ? "\xe2\x80\x8f" : "\xe2\x80\x8e";
+    snprintf(reference, sizeof reference, "%s%.*s...", mark, end, source);
+    int flags = style ? SK_TEXT_UNDERLINE : 0;
+    float expected_width = sk_font_measure_span(sk_text_range(reference, strlen(reference)), 24, flags);
+    assert(fabsf(metrics.width - expected_width) < .01f && metrics.width <= 86);
+    SzView *label = sz_view_rich_text(text);
+    SzView *root = sz_view_ellipsis(sz_view_max_lines(1, label));
+    SkSurface *actual = sk_surface_make_raster_n32_premul(90, 64);
+    SkSurface *expected = sk_surface_make_raster_n32_premul(90, 64);
+    assert(actual && expected);
+    assert(sz_view_paint(root, sk_surface_get_canvas(actual), 90, 64, &theme));
+    assert(!strcmp(sz_view_a11y_label(label), source));
+    SkCanvas *canvas = sk_surface_get_canvas(expected);
+    sk_canvas_clear(canvas, sk_color_argb(0));
+    SkPaint *paint = sk_paint_new();
+    sk_paint_set_text_size(paint, 24); sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+    sk_canvas_draw_span(canvas, sk_text_range(reference, strlen(reference)), 2, probe.baseline[0], paint, flags);
+    assert(!memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), 90 * 64 * 4));
+    sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+    sz_view_free(root); sz_release(text);
+  }
+}
+
 static void test_plain_paragraph_direction(void) {
   if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
   const char *prefix[] = {"אבגדהוזחטיכלמנסע ", "אבגדהוזחטיכלמנסע\n",
@@ -20338,6 +20378,7 @@ static void test_styled_text_clip_and_theme(void) {
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--paragraph-direction")) {
     test_wrapped_paragraph_direction();
+    test_rich_paragraph_ellipsis();
     test_plain_paragraph_direction();
     puts("paragraph direction tests ok");
     return 0;
@@ -21167,6 +21208,7 @@ int main(int argc, char **argv) {
   test_shaped_field_geometry();
   test_shaped_text_wrapping();
   test_wrapped_paragraph_direction();
+  test_rich_paragraph_ellipsis();
   test_plain_paragraph_direction();
   test_fallback_text_layout();
   test_styled_text_values();

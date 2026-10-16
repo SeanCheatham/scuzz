@@ -9,9 +9,10 @@ Keep font changes and full caret affinity as separate open work.
 Check RTL and LTR paragraphs whose later lines start in the other direction.
 Check numbers, punctuation, embedding controls, and explicit paragraph breaks.
 Compare plain and same-font styled text.
+Keep paragraph context for ellipsis in RTL rich text.
 Use native pixels, browser source ranges, and the shaping application.
 Resolve browser canvas runs with the same paragraph direction algorithm.
 Keep source spans in the same visual runs.
 Check native and evaluator replay, renderers, sanitizers, and integration.
 
-Status: Native plain and same-font rich text retain paragraph context. Seven range cases and eight plain-text cases match independent pixel references. Normal, ASan, and UBSan checks pass. Source labels and plain-text line heights stay correct. Complete browser context, application replay, renderer checks, and full integration checks.
+Status: Ten browser paragraph cases pass in all five browser configurations. Source selection, full and partial copying, and the wrapped action pass. Native range and bracket pixels pass. Ten native rich-text ellipsis cases pass. The resize corpus and exact native and evaluator replay pass. The shaping campaign rejects five mutations. One mutation is inert. No mutation survives. Check browser RTL ellipsis, sanitizers, renderers, and full integration.

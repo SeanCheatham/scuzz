@@ -1012,6 +1012,124 @@ async function checkSelect(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkShapingParagraphs(page, browserType, mobile) {
+  const cases = [
+    ['שלום ABCDEF אב', true, false], ['WWWWWW אבגד AB', false, false],
+    ['שלום\nABCDEF אב', false, false], ['\u202bWWWWWW ABCDEF אב\u202c', true, false],
+    ['\u2067WWWWWW ABCDEF אב\u2069', true, false], ['\u202eWWWWWW ABCDEF אב\u202c', true, true],
+    ['שלום 12: AB אב!', true, false], ['WWWWWW 12 אב AB!', false, false],
+    ['WWWWWW AB\u202aCD\u202cEF אב', false, false],
+    ['WWWWWW אב[ אבגדה ] AB', false, false, [['אבגדה ]', 'rtl'], [' AB', 'ltr']]],
+    ['שלום עולם ארוך מאוד', true, false, null, true]
+  ];
+  await page.setViewportSize({width: mobile ? 390 : 640, height: 1600});
+  await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
+  const panel = page.getByRole('button', {name: 'Paragraphs', exact: true});
+  await panel.click();
+  await page.waitForFunction(source => Module.textBlocks.some(block => block.text === source), cases.at(-1)[0]);
+  for (const [index, [source, rtl, override, pieces, ellipsis]] of cases.entries()) {
+    const result = await page.evaluate(({source, rtl, override, pieces, ellipsis}) => {
+      const block = Module.textBlocks.find(block => block.text === source && !block.lines.some(line => line.action));
+      const node = Module.nodes.get(block.id), scale = Module.webFrame.scale;
+      const rows = [...new Set(block.lines.map(line => line.y))];
+      const row = block.lines.filter(line => line.y === rows[ellipsis ? 0 : 1]);
+      const end = Math.max(...row.map(line => line.end));
+      const visible = block.text.slice(Math.min(...row.map(line => line.start)), end) + (ellipsis ? "..." : "");
+      const x = Math.min(...row.map(line => line.x)), right = Math.max(...row.map(line => line.x + line.width));
+      const line = row[0], left = Math.floor(x) - 2, top = Math.floor(line.y - line.font);
+      const width = Math.ceil(right) - left + 2, height = Math.ceil(line.font * 1.4);
+      const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
+      const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
+      const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
+      const ctx = reference.getContext('2d'); ctx.font = line.font + 'px ' + Module.scuzzFontStack;
+      ctx.textAlign = 'left'; ctx.direction = rtl ? 'rtl' : 'ltr'; ctx.fillStyle = '#ffffff';
+      const mark = override ? '\u202e' : rtl ? '\u200f' : '\u200e';
+      if (pieces) {
+        let next = x - left;
+        for (const [text, direction] of pieces) {
+          ctx.direction = direction; ctx.fillText(text, next, line.y - top); next += ctx.measureText(text).width;
+        }
+      } else ctx.fillText(mark + visible + (override ? '\u202c' : ''), x - left, line.y - top);
+      const advance = row.reduce((sum, line) => sum + line.width, 0);
+      const referenceAdvance = ctx.measureText(mark + visible + (override ? '\u202c' : '')).width;
+      const mask = ctx.getImageData(0, 0, width, height).data;
+      const ink = [(line.ink >>> 16) & 255, (line.ink >>> 8) & 255, line.ink & 255];
+      let delta = 0;
+      for (let p = 0; p < width * height; p++) for (let channel = 0; channel < 3; channel++) {
+        const expected = Math.floor((ink[channel] * mask[p * 4 + 3] + background[channel] * (255 - mask[p * 4 + 3])) / 255);
+        delta = Math.max(delta, Math.abs(actual[p * 4 + channel] - expected));
+      }
+      const geometry = node.fragments.map((span, i) => {
+        const box = span.getBoundingClientRect(), line = block.lines[i];
+        return Math.max(Math.abs(box.left * scale - line.x), Math.abs(box.width * scale - line.width));
+      });
+      let reverse = true;
+      if (override) {
+        const index = block.lines.findIndex(line => line.text.includes('ABCDEF'));
+        const span = node.fragments[index], range = document.createRange(), start = span.textContent.indexOf('ABCDEF');
+        range.setStart(span.firstChild, start + 1); range.collapse(true); const a = range.getBoundingClientRect().x;
+        range.setStart(span.firstChild, start + 2); range.collapse(true); reverse = a > range.getBoundingClientRect().x;
+      }
+      const range = document.createRange();
+      range.setStart(node.fragments[0].firstChild, 0);
+      range.setEnd(node.fragments.at(-1).firstChild, node.fragments.at(-1).textContent.length);
+      getSelection().removeAllRanges(); getSelection().addRange(range);
+      let copied;
+      const event = new Event('copy', {cancelable: true});
+      Object.defineProperty(event, 'clipboardData', {value: {setData(type, value) { if (type === 'text/plain') copied = value; }}});
+      document.dispatchEvent(event); getSelection().removeAllRanges();
+      let partial;
+      if (source.includes('AB\u202aCD\u202cEF')) {
+        const joined = node.fragments.map(span => span.textContent).join('');
+        const begin = joined.indexOf('ABCDEF');
+        const point = offset => {
+          for (const span of node.fragments) {
+            if (offset <= span.textContent.length) return [span.firstChild, offset];
+            offset -= span.textContent.length;
+          }
+          throw new Error('source offset exceeds the visible paragraph');
+        };
+        const first = point(begin + 1), last = point(begin + 5);
+        const range = document.createRange(); range.setStart(...first); range.setEnd(...last);
+        getSelection().addRange(range);
+        const event = new Event('copy', {cancelable: true});
+        Object.defineProperty(event, 'clipboardData', {value: {setData(type, value) { if (type === 'text/plain') partial = value; }}});
+        document.dispatchEvent(event); getSelection().removeAllRanges();
+      }
+      return {delta, geometry, rows: rows.length, reverse, copied, partial, visible, advance, referenceAdvance, end, dotsLeft: !ellipsis || row.find(line => line.synthetic).x < row.find(line => !line.synthetic).x};
+    }, {source, rtl, override, pieces, ellipsis});
+    assert(ellipsis ? result.rows === 1 && result.dotsLeft : result.rows > 1, `paragraph ${index}: ${JSON.stringify(result)}`);
+    assert(result.delta <= 2, `paragraph ${index}: ${JSON.stringify(result)}`);
+    assert(result.geometry.every(delta => delta < 1), `paragraph ${index}: ${JSON.stringify(result)}`);
+    assert(result.reverse, `paragraph ${index}: override keeps visual source order`);
+    assert.equal(result.copied, ellipsis ? source.slice(0, result.end) : source);
+    if (source.includes('AB\u202aCD\u202cEF')) {
+      assert.equal(result.partial, 'B\u202aCD\u202cE');
+      assert(Math.abs(result.advance - result.referenceAdvance) < .1, JSON.stringify(result));
+    }
+  }
+  const action = page.getByRole('button', {name: 'שלום ABCDEF אב', exact: true});
+  if (!mobile) {
+    const points = await action.evaluate(node => {
+      const first = node.firstChild.getBoundingClientRect(), last = node.lastChild.getBoundingClientRect();
+      return {x1: first.x + 2, y1: first.y + first.height / 2, x2: last.right - 2, y2: last.y + last.height / 2};
+    });
+    await page.mouse.move(points.x1, points.y1); await page.mouse.down();
+    await page.mouse.move(points.x2, points.y2, {steps: 8}); await page.mouse.up();
+    assert((await page.evaluate(() => getSelection().toString())).length > 0);
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Count: 12'));
+    await page.evaluate(() => getSelection().removeAllRanges());
+  }
+  await action.click();
+  await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Count: 29'));
+  await panel.click();
+  await page.waitForFunction(() => !Module.textBlocks.some(block => block.text === 'WWWWWW אבגד AB'));
+  assert.equal(await page.getByRole('textbox', {name: 'Name', exact: true}).inputValue(), 'café');
+  await page.setViewportSize({width: mobile ? 390 : 640, height: 720});
+  await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
+  console.log(`web paragraphs: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+}
+
 async function checkShaping(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -1049,7 +1167,10 @@ async function checkShaping(browserType, url, mobile) {
     const expectText = async text => page.waitForFunction(text => Module.textBlocks.some(b => b.text === text), text);
     const comparePixels = async (source, pieces) => {
       const result = await page.evaluate(({source, pieces}) => {
-        const line = Module.textBlocks.find(b => b.text === source).lines[0];
+        const block = Module.textBlocks.find(b => b.text === source);
+        const parts = block.lines.filter(line => line.y === block.lines[0].y);
+        const startX = Math.min(...parts.map(line => line.x));
+        const line = {...parts[0], x: startX, width: Math.max(...parts.map(line => line.x + line.width)) - startX};
         const left = Math.floor(line.x), top = Math.floor(line.y - line.font);
         const width = Math.ceil(line.width + 2), height = Math.ceil(line.font * 1.4);
         const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
@@ -1151,8 +1272,8 @@ async function checkShaping(browserType, url, mobile) {
     for (const source of ['AV fi é', 'اب AB 12', 'ab אב 12', 'नमस्ते สวัสดี 中文漢字', 'क्षि ปู่ 中文']) {
       const copied = await page.evaluate(source => {
         const item = Module.textBlocks.find(b => b.text === source);
-        const node = Module.nodes.get(item.id), span = node.fragments[0];
-        const range = document.createRange(); range.setStart(span.firstChild, 0); range.setEnd(span.firstChild, span.textContent.length);
+        const node = Module.nodes.get(item.id), first = node.fragments[0], last = node.fragments.at(-1);
+        const range = document.createRange(); range.setStart(first.firstChild, 0); range.setEnd(last.firstChild, last.textContent.length);
         const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
         let copied = '';
         const event = new Event('copy', {bubbles: true, cancelable: true});
@@ -1214,6 +1335,7 @@ async function checkShaping(browserType, url, mobile) {
     await page.setViewportSize({width: mobile ? 390 : 640, height: 720});
     await page.waitForFunction(() => Module.canvas.width === Math.round(innerWidth * devicePixelRatio));
     await expectText('Count: 12');
+    await checkShapingParagraphs(page, browserType, mobile);
     assert.deepEqual(errors, []);
     await context.close();
     console.log(`web shaping: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
@@ -1967,6 +2089,8 @@ async function checkControls(browserType, url, mobile) {
 async function main() {
   const directory = path.resolve(process.argv[2]);
   for (const file of ['index.html', 'app.js', 'app.wasm']) assert(fs.existsSync(path.join(directory, file)), `missing web asset: ${file}`);
+  assert.equal(fs.readFileSync(path.join(directory, 'SheenBidi-LICENSE'), 'utf8'),
+    fs.readFileSync(path.resolve(__dirname, '../../third_party/skia/SheenBidi-LICENSE'), 'utf8'), 'browser direction license');
   const html = fs.readFileSync(path.join(directory, 'index.html'), 'utf8');
   const js = fs.readFileSync(path.join(directory, 'app.js'), 'utf8');
   const version = html.match(/src="\.\/app\.js\?v=([0-9a-f]{16})"/);

@@ -10,6 +10,7 @@
 #include <math.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include <SheenBidi/SheenBidi.h>
 #include <math.h>
 #endif
 
@@ -462,17 +463,22 @@ EM_JS(int, web_text_direction, (const char *text, int bytes), {
   return rtl;
 });
 
-EM_JS(float, web_text_width, (const char *text, int bytes, float size, int style, int rtl), {
+EM_JS(float, web_text_width, (const char *text, int bytes, float size, int style, int rtl, int force), {
   const canvas = Module.scuzzTextCanvas || (Module.scuzzTextCanvas = document.createElement('canvas'));
   const context = canvas.getContext('2d', {willReadFrequently: true});
   context.direction = rtl ? 'rtl' : 'ltr'; context.textAlign = 'left';
   context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
   const source = UTF8ToString(Number(text), bytes);
   Module.loadTextFonts(source);
-  return context.measureText(source).width;
+  Module.scuzzRunSource ||= source => Array.from(source).filter(point => {
+    const cp = point.codePointAt(0);
+    return !(cp >= 0x202a && cp <= 0x202e || cp >= 0x2066 && cp <= 0x2069);
+  }).join("");
+  const shaped = force ? (rtl ? "\u202e" : "\u202d") + Module.scuzzRunSource(source) + "\u202c" : source;
+  return context.measureText(shaped).width;
 });
 
-EM_JS(void, web_text_pixels, (const char *text, float size, int style, int width, int height, float x, float y, uint8_t *pixels, int rtl), {
+EM_JS(void, web_text_pixels, (const char *text, float size, int style, int width, int height, float x, float y, uint8_t *pixels, int rtl, int force), {
   const canvas = Module.scuzzTextCanvas;
   canvas.width = width;
   canvas.height = height;
@@ -480,9 +486,72 @@ EM_JS(void, web_text_pixels, (const char *text, float size, int style, int width
   context.direction = rtl ? 'rtl' : 'ltr'; context.textAlign = 'left';
   context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
   context.fillStyle = '#ffffff';
-  context.fillText(UTF8ToString(Number(text)), x, y);
+  const source = UTF8ToString(Number(text));
+  const shaped = force ? (rtl ? "\u202e" : "\u202d") + Module.scuzzRunSource(source) + "\u202c" : source;
+  context.fillText(shaped, x, y);
   HEAPU8.set(context.getImageData(0, 0, width, height).data, Number(pixels));
 });
+#endif
+
+#ifdef __EMSCRIPTEN__
+EM_JS(void, web_span_metrics, (const char *text, int bytes, float size, int style, int rtl, int force, float *out), {
+  const canvas = Module.scuzzTextCanvas || (Module.scuzzTextCanvas = document.createElement('canvas'));
+  const context = canvas.getContext('2d');
+  context.direction = rtl ? 'rtl' : 'ltr'; context.textAlign = 'left';
+  context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
+  const source = UTF8ToString(Number(text), bytes);
+  const shaped = force ? (rtl ? "\u202e" : "\u202d") + Module.scuzzRunSource(source) + "\u202c" : source;
+  const metrics = context.measureText(shaped);
+  HEAPF32[Number(out) / 4] = Math.max(0, metrics.actualBoundingBoxAscent);
+  HEAPF32[Number(out) / 4 + 1] = Math.max(0, metrics.actualBoundingBoxDescent);
+});
+#endif
+
+#ifdef __EMSCRIPTEN__
+typedef struct WebTextRun { size_t start, end; int rtl; float x, width; } WebTextRun;
+typedef struct WebTextLayout { WebTextRun *runs; size_t count; float width; } WebTextLayout;
+
+static WebTextLayout web_text_layout(SkTextRange range, float size, int style) {
+  WebTextLayout layout = {0};
+  if (!range.source || range.start >= range.end || range.end > range.bytes || range.bytes > INT_MAX) return layout;
+  SBCodepointSequence sequence = {SBStringEncodingUTF8, (void *)range.source, range.bytes};
+  SBAlgorithmRef algorithm = SBAlgorithmCreate(&sequence);
+  if (!algorithm) return layout;
+  int failed = 0;
+  for (SBUInteger offset = 0; offset < range.end;) {
+    SBParagraphRef paragraph = SBAlgorithmCreateParagraph(algorithm, offset, range.bytes - offset, SBLevelDefaultLTR);
+    if (!paragraph) { failed = 1; break; }
+    SBUInteger length = SBParagraphGetLength(paragraph);
+    SBUInteger start = offset > range.start ? offset : range.start;
+    SBUInteger end = offset + length < range.end ? offset + length : range.end;
+    SBLineRef line = end > start ? SBParagraphCreateLine(paragraph, start, end - start) : NULL;
+    if (line) {
+      size_t count = SBLineGetRunCount(line);
+      WebTextRun *grown = layout.runs;
+      if (count) grown = count <= SIZE_MAX / sizeof(WebTextRun) - layout.count ?
+        realloc(layout.runs, (layout.count + count) * sizeof(WebTextRun)) : NULL;
+      if (!grown && count) failed = 1;
+      else {
+        layout.runs = grown;
+        const SBRun *runs = SBLineGetRunsPtr(line);
+        for (size_t i = 0; i < count; i++) {
+          WebTextRun *run = &layout.runs[layout.count++];
+          *run = (WebTextRun){runs[i].offset, runs[i].offset + runs[i].length,
+            runs[i].level & 1, layout.width, 0.f};
+          run->width = web_text_width(range.source + run->start, (int)(run->end - run->start), size, style, run->rtl, 1);
+          layout.width += run->width;
+        }
+      }
+      SBLineRelease(line);
+    }
+    SBParagraphRelease(paragraph);
+    if (!length || failed) break;
+    offset += length;
+  }
+  SBAlgorithmRelease(algorithm);
+  if (failed) { free(layout.runs); return (WebTextLayout){0}; }
+  return layout;
+}
 #endif
 
 /* Cell advance. Draw and measure use the same advance so caret columns
@@ -494,7 +563,7 @@ static int sw_advance(float font_px) {
 
 float sk_font_measure_string(const char *text, float font_px) {
 #ifdef __EMSCRIPTEN__
-  return text ? web_text_width(text, (int)strlen(text), font_px > 0.f ? font_px : 8.f, 0, web_text_direction(text, (int)strlen(text))) : 0.f;
+  return text ? web_text_width(text, (int)strlen(text), font_px > 0.f ? font_px : 8.f, 0, web_text_direction(text, (int)strlen(text)), 0) : 0.f;
 #else
   const char *p;
   int n = 0;
@@ -513,7 +582,10 @@ float sk_font_measure_string(const char *text, float font_px) {
 }
 
 static void draw_styled_string(SkCanvas *canvas, const char *text, float x, float y,
-                                const SkPaint *paint, int style) {
+                                const SkPaint *paint, int style, int direction) {
+#ifndef __EMSCRIPTEN__
+  (void)direction;
+#endif
   float size, scale;
   int advance, baseline, cx, row, col, sr, sc;
   const char *p;
@@ -530,9 +602,12 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
   size = paint->text_size > 0.f ? paint->text_size : 8.f;
 #ifdef __EMSCRIPTEN__
   {
-    float ascent, descent;
-    sk_font_span_metrics(sk_text_range(text, strlen(text)), size, style, &ascent, &descent);
-    float advance_width = web_text_width(text, (int)strlen(text), size, style, web_text_direction(text, (int)strlen(text)));
+    int rtl = direction < 0 ? web_text_direction(text, (int)strlen(text)) : direction;
+    int force = direction >= 0;
+    float advance_width = web_text_width(text, (int)strlen(text), size, style, rtl, force);
+    float metrics[2];
+    web_span_metrics(text, (int)strlen(text), size, style, rtl, force, metrics);
+    float ascent = metrics[0], descent = metrics[1];
     int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - size)));
     int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + size)));
     int top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(y - ascent)));
@@ -541,7 +616,7 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
     if (width < 1 || height < 1) return;
     uint8_t *pixels = malloc((size_t)width * height * 4);
     if (!pixels) return;
-    web_text_pixels(text, size, style, width, height, x - left, y - top, pixels, web_text_direction(text, (int)strlen(text)));
+    web_text_pixels(text, size, style, width, height, x - left, y - top, pixels, rtl, force);
     for (int row = 0; row < height; row++) {
       for (int col = 0; col < width; col++) {
         SkColor color = paint->color;
@@ -605,7 +680,7 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
 
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
                            const SkPaint *paint) {
-  draw_styled_string(canvas, text, x, y, paint, 0);
+  draw_styled_string(canvas, text, x, y, paint, 0, -1);
 }
 
 #ifdef __EMSCRIPTEN__
@@ -635,25 +710,38 @@ EM_JS(void, web_cluster_breaks, (const char *text, int bytes, uint8_t *breaks), 
 #endif
 
 #ifdef __EMSCRIPTEN__
-EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int style, float *leading, float *trailing), {
+EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int style, int rtl, float *leading, float *trailing), {
   const source = UTF8ToString(Number(text), bytes);
   let probe = Module.scuzzPositionProbe;
   if (!probe) {
     probe = Module.scuzzPositionProbe = document.createElement('span');
-    probe.dir = 'auto'; probe.setAttribute('aria-hidden', 'true');
-    Object.assign(probe.style, {position: 'fixed', left: '0', top: '0', visibility: 'hidden', whiteSpace: 'pre', pointerEvents: 'none'});
+    probe.setAttribute('aria-hidden', 'true');
+    Object.assign(probe.style, {position: 'fixed', left: '0', top: '0', visibility: 'hidden', whiteSpace: 'pre', pointerEvents: 'none', unicodeBidi: 'bidi-override'});
     document.body.append(probe);
   }
-  probe.style.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack; probe.textContent = source;
-  const origin = probe.getBoundingClientRect().left;
+  probe.style.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack; probe.dir = rtl ? "rtl" : "ltr"; probe.textContent = Module.scuzzRunSource(source);
+  const bounds = probe.getBoundingClientRect(), origin = bounds.left;
   const range = document.createRange(), node = probe.firstChild;
+  const caret = unit => {
+    if (unit === 0) return rtl ? bounds.width : 0;
+    if (unit === node.length) return rtl ? 0 : bounds.width;
+    range.setStart(node, unit); range.collapse(true);
+    return range.getBoundingClientRect().left - origin;
+  };
   let byte = 0, unit = 0, last = 0;
   for (const point of source) {
-    range.setStart(node, unit); range.collapse(true);
-    const a = range.getBoundingClientRect().left - origin;
-    unit += point.length;
-    range.setStart(node, unit); range.collapse(true);
-    last = range.getBoundingClientRect().left - origin;
+    const cp = point.codePointAt(0), hidden = cp >= 0x202a && cp <= 0x202e || cp >= 0x2066 && cp <= 0x2069;
+    if (!node) {
+      const length = new TextEncoder().encode(point).length;
+      for (let i = 0; i < length; i++) {
+        HEAPF32[Number(leading) / 4 + byte + i] = 0;
+        HEAPF32[Number(trailing) / 4 + byte + i] = 0;
+      }
+      byte += length; continue;
+    }
+    const a = caret(unit);
+    if (!hidden) unit += point.length;
+    last = caret(unit);
     const length = new TextEncoder().encode(point).length;
     for (let i = 0; i < length; i++) {
       HEAPF32[Number(leading) / 4 + byte + i] = a;
@@ -661,8 +749,6 @@ EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int st
     }
     byte += length;
   }
-  HEAPF32[Number(leading) / 4 + bytes] = last;
-  HEAPF32[Number(trailing) / 4 + bytes] = last;
 });
 #endif
 
@@ -675,7 +761,16 @@ void sk_font_text_positions(SkTextRange range, float font_px, int style, float *
   memset(trailing, 0, (bytes + 1) * sizeof(float));
   if (!text) return;
 #ifdef __EMSCRIPTEN__
-  web_text_positions(text, (int)bytes, font_px, style, leading, trailing);
+  WebTextLayout layout = web_text_layout(range, font_px, style);
+  for (size_t i = 0; i < layout.count; i++) {
+    const WebTextRun *run = &layout.runs[i];
+    size_t start = run->start - range.start, end = run->end - range.start;
+    web_text_positions(range.source + run->start, (int)(run->end - run->start), font_px, style, run->rtl,
+      leading + start, trailing + start);
+    for (size_t byte = start; byte < end; byte++) { leading[byte] += run->x; trailing[byte] += run->x; }
+  }
+  if (bytes) leading[bytes] = trailing[bytes] = trailing[bytes - 1];
+  free(layout.runs);
 #else
   (void)style;
   float x = 0.f, advance = (float)sw_advance(font_px);
@@ -722,15 +817,7 @@ void sk_font_metrics(float font_px, int style, float *ascent, float *descent) {
 #endif
 }
 
-#ifdef __EMSCRIPTEN__
-EM_JS(void, web_span_metrics, (const char *text, int bytes, float size, int style, float *out), {
-  const context = Module.scuzzTextCanvas.getContext('2d');
-  context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack;
-  const metrics = context.measureText(UTF8ToString(Number(text), bytes));
-  HEAPF32[Number(out) / 4] = Math.max(0, metrics.actualBoundingBoxAscent);
-  HEAPF32[Number(out) / 4 + 1] = Math.max(0, metrics.actualBoundingBoxDescent);
-});
-#endif
+
 
 void sk_font_span_metrics(SkTextRange range, float font_px, int style, float *ascent, float *descent) {
   if (range.start > range.end || range.end > range.bytes) return;
@@ -739,7 +826,17 @@ void sk_font_span_metrics(SkTextRange range, float font_px, int style, float *as
   float metrics[2];
   sk_font_metrics(font_px, style, &metrics[0], &metrics[1]);
 #ifdef __EMSCRIPTEN__
-  if (text && bytes <= INT_MAX) web_span_metrics(text, (int)bytes, font_px > 0.f ? font_px : 8.f, style, metrics);
+  (void)text; (void)bytes;
+  WebTextLayout layout = web_text_layout(range, font_px, style);
+  metrics[0] = metrics[1] = 0.f;
+  for (size_t i = 0; i < layout.count; i++) {
+    const WebTextRun *run = &layout.runs[i];
+    float bounds[2];
+    web_span_metrics(range.source + run->start, (int)(run->end - run->start), font_px > 0.f ? font_px : 8.f,
+      style, run->rtl, 1, bounds);
+    metrics[0] = fmaxf(metrics[0], bounds[0]); metrics[1] = fmaxf(metrics[1], bounds[1]);
+  }
+  free(layout.runs);
 #else
   (void)text; (void)bytes;
 #endif
@@ -754,7 +851,11 @@ float sk_font_measure_span(SkTextRange range, float font_px, int style) {
   if (!text) return 0.f;
   if (font_px <= 0.f) font_px = 8.f;
 #ifdef __EMSCRIPTEN__
-  return web_text_width(text, (int)bytes, font_px, style, web_text_direction(text, (int)bytes));
+  (void)bytes;
+  WebTextLayout layout = web_text_layout(range, font_px, style);
+  float width = layout.width;
+  free(layout.runs);
+  return width;
 #else
   (void)style;
   size_t i = 0, count = 0;
@@ -774,12 +875,25 @@ void sk_canvas_draw_span(SkCanvas *canvas, SkTextRange range,
   const char *text = range.source ? range.source + range.start : NULL;
   size_t bytes = range.end - range.start;
   if (!text || bytes == SIZE_MAX || !paint) return;
+#ifdef __EMSCRIPTEN__
+  WebTextLayout layout = web_text_layout(range, paint->text_size, style);
+  for (size_t i = 0; i < layout.count; i++) {
+    const WebTextRun *run = &layout.runs[i];
+    size_t length = run->end - run->start;
+    char *copy = malloc(length + 1);
+    if (!copy) continue;
+    memcpy(copy, range.source + run->start, length); copy[length] = 0;
+    draw_styled_string(canvas, copy, x + run->x, y, paint, style, run->rtl);
+    free(copy);
+  }
+  free(layout.runs);
+#else
   char *copy = malloc(bytes + 1);
   if (!copy) return;
-  memcpy(copy, text, bytes);
-  copy[bytes] = 0;
-  draw_styled_string(canvas, copy, x, y, paint, style);
+  memcpy(copy, text, bytes); copy[bytes] = 0;
+  draw_styled_string(canvas, copy, x, y, paint, style, -1);
   free(copy);
+#endif
   if (style & SK_TEXT_UNDERLINE) {
     float width = sk_font_measure_span(range, paint->text_size, style);
     sk_canvas_draw_rect(canvas, x, y + paint->text_size * 0.1f, width,

@@ -1,4 +1,6 @@
 #include "web.h"
+#include "sk_capi.h"
+#include <stdlib.h>
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <string.h>
@@ -152,18 +154,55 @@ void sz_web_inline_action(SzView *text, const SzRect *boxes, int count) {
   web_inline_action(sz_view_id(text), boxes, count);
 }
 
-EM_JS(void, sz_web_text_line, (const char *source, int start, int end,
+EM_JS(void, web_text_fragments, (const char *source, int context_start, float context_x,
+    const float *leading, const float *trailing, int start, int end,
     const char *text, float x, float y, float width, float font, float line_h,
     int clipped, float cx, float cy, float cw, float ch, uint32_t ink, int style, int synthetic, uintptr_t action), {
-  const f = Module.webFrame;
-  const base = Number(source);
-  f.texts[f.texts.length - 1].lines.push({
-    start: start ? UTF8ToString(base, start).length : 0,
-    end: end ? UTF8ToString(base, end).length : 0,
-    text: UTF8ToString(Number(text)), x, y, width, font, line_h, ink, style, synthetic: Boolean(synthetic), action: Number(action),
+  const lines = Module.webFrame.texts.at(-1).lines;
+  const base = Number(source), display = UTF8ToString(Number(text));
+  const offset = byte => byte ? UTF8ToString(base, byte).length : 0;
+  const add = (text, first, last, left, width, rtl) => lines.push({
+    start: offset(first), end: offset(last), text, x: left, y, width, font, line_h, ink, style,
+    synthetic: Boolean(synthetic), action: Number(action), dir: rtl ? 'rtl' : 'ltr',
     clip: clipped ? [cx, cy, cw, ch] : null
   });
+  if (synthetic || !Number(leading) || !display.length) { add(display, start, end, x, width, false); return; }
+  const encoder = new TextEncoder();
+  const total = encoder.encode(display).length;
+  let byte = 0, unit = 0, firstByte = 0, firstUnit = 0, left = 0, right = 0, rtl, ready = false;
+  const flush = () => {
+    const last = byte === total ? end : Math.min(end, start + byte);
+    add(display.slice(firstUnit, unit), Math.min(end, start + firstByte), last,
+      context_x + left, right - left, Boolean(rtl));
+  };
+  for (const point of display) {
+    const at = start - context_start + byte;
+    const a = HEAPF32[Number(leading) / 4 + at], b = HEAPF32[Number(trailing) / 4 + at];
+    const nextLeft = Math.min(a, b), nextRight = Math.max(a, b);
+    const direction = Math.abs(a - b) > .001 ? b < a : rtl;
+    if (ready && (rtl !== undefined && direction !== undefined && direction !== rtl ||
+        nextLeft > right + .01 || nextRight < left - .01)) {
+      flush(); firstByte = byte; firstUnit = unit; ready = false; rtl = undefined;
+    }
+    left = ready ? Math.min(left, nextLeft) : nextLeft;
+    right = ready ? Math.max(right, nextRight) : nextRight;
+    if (direction !== undefined) rtl = direction;
+    ready = true;
+    byte += encoder.encode(point).length; unit += point.length;
+  }
+  if (ready) flush();
 });
+
+void sz_web_text_line(const char *source, SkTextRange context, float context_x, int start, int end,
+    const char *text, float x, float y, float width, float font, float line_h,
+    int clipped, float cx, float cy, float cw, float ch, uint32_t ink, int style, int synthetic, uintptr_t action) {
+  size_t count = context.end - context.start + 1;
+  float *positions = !synthetic && count < SIZE_MAX / (2 * sizeof(float)) ? malloc(count * 2 * sizeof(float)) : NULL;
+  if (positions) sk_font_text_positions(context, font, style, positions, positions + count);
+  web_text_fragments(source, (int)context.start, context_x, positions, positions ? positions + count : NULL,
+    start, end, text, x, y, width, font, line_h, clipped, cx, cy, cw, ch, ink, style, synthetic, action);
+  free(positions);
+}
 EM_JS(int, sz_web_book_begin, (), {
   if (Module.webFrame.bookSeen) return 0;
   Module.webFrame.bookSeen = true;

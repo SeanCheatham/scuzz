@@ -1,2 +1,2 @@
 [fuzz]
-events = ["tap textbutton:تفاصيل", "tap button:Set Arabic", "tap button:Set Latin", "tap button:Add", "scroll 0 1800"]
+events = ["tap textbutton:تفاصيل", "tap button:Set Arabic", "tap button:Set Latin", "tap button:Add", "scroll 1 1800"]

@@ -72,6 +72,12 @@ cp -f "$ROOT/crates/ffi-skia/build/fonts/"*.ttf "$OUT/third_party/fonts/"
 mkdir -p "$OUT/third_party/skia"
 cp -f "$ROOT/third_party/skia/PIN" "$OUT/third_party/skia/PIN"
 cp -f "$ROOT/third_party/skia/SheenBidi-LICENSE" "$OUT/third_party/skia/SheenBidi-LICENSE"
+make -C "$ROOT/crates/ffi-skia" build/sheenbidi/.stamp
+mkdir -p "$OUT/crates/ffi-skia/build/sheenbidi"
+cp -a "$ROOT/crates/ffi-skia/build/sheenbidi/Headers" "$ROOT/crates/ffi-skia/build/sheenbidi/Source" \
+  "$OUT/crates/ffi-skia/build/sheenbidi/"
+cp -f "$ROOT/crates/ffi-skia/build/sheenbidi/.stamp" "$OUT/crates/ffi-skia/build/sheenbidi/.stamp"
+touch "$OUT/crates/ffi-skia/build/sheenbidi/.stamp"
 if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
   echo "==> SCUZZ_SKIA=sk_sw - release keeps in-tree sk_sw only"
 else

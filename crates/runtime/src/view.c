@@ -6405,11 +6405,6 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
   int shortened = wp->ellipsis && wp->cap > 0 && wp->drawn == wp->cap - 1;
   if (shortened)
     ellipsize_to_width(tmp, (size_t)n + 4, wp->inner, wp->font_px);
-#ifdef __EMSCRIPTEN__
-  if (wp->selectable)
-    sz_web_text_line(s, start, end, tmp, wp->x, wp->y, width, wp->font_px,
-                     wp->line_h, g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h, wp->argb, 0, 0, 0);
-#endif
   SkTextRange context = {s, strlen(s), (size_t)start, (size_t)end};
   char *source = NULL;
   if (shortened && tmp[0]) {
@@ -6421,6 +6416,11 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
     memcpy(source + insert + 3, s + insert, context.bytes - insert + 1);
     context = (SkTextRange){source, context.bytes + 3, (size_t)start, insert + 3};
   } else if (shortened) context.end = context.start;
+#ifdef __EMSCRIPTEN__
+  if (wp->selectable)
+    sz_web_text_line(s, context, wp->x, start, end, tmp, wp->x, wp->y, width, wp->font_px,
+                     wp->line_h, g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h, wp->argb, 0, 0, 0);
+#endif
   SkPaint *paint = sk_paint_new();
   if (paint) {
     sk_paint_set_color(paint, sk_color_argb(apply_paint_alpha(wp->argb)));
@@ -6456,8 +6456,8 @@ static void paint_rich_fragment(SkTextRange context, int start, int end,
   SkPaint *p = sk_paint_new();
   sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(ink)));
   sk_paint_set_text_size(p, font);
-  if (ellipsis || ((size_t)start == context.start && (size_t)end == context.end)) {
-    sk_canvas_draw_span(paint->canvas, ellipsis ? sk_text_range("...", 3) : context, paint->x + context_x, paint->y + baseline, p, style);
+  if ((size_t)start == context.start && (size_t)end == context.end) {
+    sk_canvas_draw_span(paint->canvas, context, paint->x + context_x, paint->y + baseline, p, style);
   } else if (width > 0.f) {
     SzView *root = paint->view;
     while (root->parent) root = root->parent;
@@ -6476,7 +6476,7 @@ static void paint_rich_fragment(SkTextRange context, int start, int end,
   if (paint->selectable) {
     SzString *display = ellipsis ? sz_string_from_cstr("...") :
       sz_string_from_bytes(source + start, (size_t)(end - start));
-    sz_web_text_line(source, start, end, sz_string_cstr(display), paint->x + x,
+    sz_web_text_line(source, context, paint->x + context_x, start, end, sz_string_cstr(display), paint->x + x,
       paint->y + baseline, width, font, line_height, g_clip_on,
       g_clip.x, g_clip.y, g_clip.w, g_clip.h, ink, style, ellipsis,
       action > 0 && action <= paint->view->child_count ? sz_view_id(paint->view->children[action - 1]) : 0);
@@ -6484,6 +6484,7 @@ static void paint_rich_fragment(SkTextRange context, int start, int end,
   }
 #else
   (void)source;
+  (void)ellipsis;
   (void)width;
   (void)line_height;
 #endif
