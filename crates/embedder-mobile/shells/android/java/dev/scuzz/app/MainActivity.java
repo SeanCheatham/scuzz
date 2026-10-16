@@ -5,8 +5,10 @@ import android.content.Context;
 import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Insets;
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
@@ -18,6 +20,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -98,6 +101,22 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     FrameLayout root = new FrameLayout(this);
+    root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+      @Override
+      @SuppressWarnings("deprecation")
+      public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
+        if (Build.VERSION.SDK_INT >= 30) {
+          Insets safe = insets.getInsets(WindowInsets.Type.systemBars()
+              | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+          view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+        } else {
+          view.setPadding(insets.getSystemWindowInsetLeft(),
+              insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetRight(),
+              insets.getSystemWindowInsetBottom());
+        }
+        return insets;
+      }
+    });
     surface = new SurfaceView(this);
     holder = surface.getHolder();
     holder.addCallback(this);
@@ -130,6 +149,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
     root.addView(hidden, new FrameLayout.LayoutParams(1, 1));
     setContentView(root);
+    root.requestApplyInsets();
     DisplayMetrics dm = getResources().getDisplayMetrics();
     density = dm.density > 0f ? dm.density : 1f;
     pointW = Math.max(1, (int) (dm.widthPixels / density));

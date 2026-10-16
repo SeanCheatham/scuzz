@@ -18,6 +18,10 @@ Use the macOS workspace preference and its display-options notification.
 Use the iOS accessibility preference and its motion-status notification.
 Use the Android animator setting with change and resume handling.
 Release observers when the native session ends.
+Keep Android system controls outside the Scuzz viewport.
+The emulator shows that the native action bar covers the first application controls.
+Remove this bar. Apply system, display cutout, and keyboard insets to the host container.
+Check input against the visible controls.
 Keep unavailable platform execution checks explicit.
 
 Use the motion application to check cancellation and retained input.
@@ -57,7 +61,10 @@ The private Linux Settings portal check also passes under both sanitizers.
 Android reads the animation setting before the application worker starts.
 It observes changes and reads the setting again on resume.
 The Java source compiles. Android packages compile for both native ABIs.
-A finite emulator check remains open.
+The finite Android emulator check passes with a temporary app and restored settings.
+It checks initial reduction, live changes, visible input, resume, and a new process.
+The host container excludes the system bars and display cutout.
+Keyboard-inset execution checks remain open.
 Apple native preference sources remain open.
 The Linux host has D-Bus development files and tools for a finite private session bus.
 Apple SDK tools are unavailable on this host. Apple execution checks remain open.

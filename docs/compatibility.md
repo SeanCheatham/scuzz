@@ -63,7 +63,7 @@ Run `scuzz docs packages`, `scuzz docs android`, or `scuzz docs ios` for app pac
 | Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCUZZ_MOBILE_SHELL=1` |
 | macOS desktop | Yes | Cocoa blit | UI host packages are signed `.app` bundles. Non-system libraries are included. Finder launch uses Desktop. AppKit handles window borders before it sends content input to the shared UI. Content input uses top-left coordinates. |
 | Windows desktop | Later | Later | Shared session design. No supported host build |
-| iOS / Android | Shared app code | Packaging shells | iOS simulator run needs Xcode on Apple Silicon. Android needs the NDK. iOS HTTP clients use platform trust. Physical device proof stays open |
+| iOS / Android | Shared app code | Packaging shells | iOS simulator run needs Xcode on Apple Silicon. Android needs the NDK. Its viewport excludes the system bars and display cutout. iOS HTTP clients use platform trust. Physical device proof stays open |
 | Web / browser | WebAssembly GUI | Canvas presentation | `scuzz package --target web`; cached Emscripten 4.0.23; Python 3 on the build host |
 
 ## Toolchain

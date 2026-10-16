@@ -160,7 +160,10 @@ They check retained input, field selection, and the forced native setting.
 The shared runtime checks and private portal check pass under ASan and UBSan.
 Full native and evaluator preference replay checks remain open.
 Android reads the animation setting before application startup and observes live changes.
-Android emulator checks, Apple preference detection, and real-device motion checks remain open.
+Android emulator checks cover initial preferences, live changes, visible input, resume, and restart.
+The Android viewport excludes the system bars and display cutout.
+Android keyboard-inset execution checks remain open.
+Apple preference detection and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 
 Use the UI work order in `vision.md`.

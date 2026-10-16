@@ -163,6 +163,15 @@ It has no input queue and exits after one frame. Pixels remain offscreen.
 Link the Mobile archive with `--whole-archive` on Linux or `-force_load` on macOS.
 These options select its implementation instead of the runtime's weak symbols.
 Android and iOS shells live in `crates/embedder-mobile/shells/`.
+Use a test emulator for the Android motion check:
+
+```bash
+python3 crates/embedder-mobile/shells/android/test_motion.py emulator-5554
+```
+
+The check builds a temporary app from `examples/motion`.
+It checks the initial motion preference, live changes, visible input, resume, and restart.
+It restores the animation setting and removes the temporary app.
 App instructions: run `scuzz docs gui`, `scuzz docs android`, or `scuzz docs ios`.
 
 ## Web build tools
