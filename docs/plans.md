@@ -44,4 +44,8 @@ The rebuilt CLI manual includes both scale APIs. Full Web integration checks pas
 Package and clean UI integration checks pass.
 The isolated paragraph check preserves wrapping and following layout in three scripts.
 The permanent paragraph check passes in normal, ASan, and UBSan builds.
-A direct browser glyph comparison remains open.
+A direct browser glyph comparison passes at six scales in all five browser configurations.
+It rejects a font size change that removes glyphs at large scales.
+Browser text uses the original font size and a Canvas transform.
+Full Web and package checks remain open for this browser text change.
+Native software paint has identical preprocessed code.

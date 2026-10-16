@@ -4117,7 +4117,7 @@ PY_POSITION_LIMIT
   "$SCUZZ" fmt "$web_tmp/position limit"
   "$SCUZZ" package --target web --out-dir "$web_tmp/position limit output" "$web_tmp/position limit"
   node crates/embedder-web/test.cjs "$web_tmp/position limit output/package/web" '' position-limit
-  python3 - "$web_tmp/scale limit" "$web_tmp/scale input" <<'PY_SCALE_FIXTURES'
+  python3 - "$web_tmp/scale limit" "$web_tmp/scale input" "$web_tmp/scale glyph" <<'PY_SCALE_FIXTURES'
 import pathlib, sys
 fixtures = [
     (sys.argv[1], 'scale-limit', '''def scene(label: String, child: View): View =
@@ -4150,6 +4150,12 @@ def scene(value: Signal[Int], child: View): View =
     _ <- Ui.run(_ => View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.button("Large scale", _ => Signal.set(value, 400)), View.button("Double scale", _ => Signal.set(value, 200)), View.bindText(countText), View.padding(20, scene(value, panel(name, selected, options, count)))])))
   } yield ()
 '''),
+    (sys.argv[3], 'scale-glyph', '''@main def main: IO[Unit] =
+  for {
+    value = Signal.make(100)
+    _ <- Ui.run(_ => View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.wrap([View.button("Normal", _ => Signal.set(value, 100)), View.button("Fraction", _ => Signal.set(value, 113)), View.button("Double", _ => Signal.set(value, 200)), View.button("Quad", _ => Signal.set(value, 400)), View.button("Huge", _ => Signal.set(value, 100000)), View.button("Maximum", _ => Signal.set(value, 9223372036854775807))]), View.semantics("Glyph scene", View.sized(300, 160, View.clip(View.stack([View.sized(300, 160, View.background(Color.rgb(255, 255, 255), View.text(""))), View.positioned(130, 70, View.animatedScale(value, 8, View.sized(40, 20, View.textColor(Color.rgb(0, 0, 0), View.text("HHHH")))))]))))])))
+  } yield ()
+'''),
  ]
 for destination, name, source in fixtures:
     root = pathlib.Path(destination)
@@ -4157,7 +4163,7 @@ for destination, name, source in fixtures:
     (root / 'scuzz.toml').write_text(f'[package]\nname="{name}"\n[ui]\ndefault_runtime="headless"\n')
     (root / 'src/Main.scuzz').write_text(source)
 PY_SCALE_FIXTURES
-  for mode in limit input; do
+  for mode in limit input glyph; do
     "$SCUZZ" fmt "$web_tmp/scale $mode"
     "$SCUZZ" package --target web --out-dir "$web_tmp/scale $mode output" "$web_tmp/scale $mode"
     node crates/embedder-web/test.cjs "$web_tmp/scale $mode output/package/web" '' "scale-$mode"

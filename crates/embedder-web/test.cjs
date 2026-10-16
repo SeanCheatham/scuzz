@@ -1230,6 +1230,54 @@ async function checkScaleInput(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkScaleGlyph(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 720}, deviceScaleFactor: mobile ? 2 : 1,
+      hasTouch: mobile, isMobile: mobile, reducedMotion: 'reduce'});
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => Module.ready && Module.webFrame?.transitions.length === 1);
+    await page.evaluate(() => document.fonts.ready);
+    for (const [label, percent] of [['Normal', 100], ['Fraction', 113], ['Double', 200], ['Quad', 400], ['Huge', 100000], ['Maximum', 2147483647]]) {
+      await page.getByRole('button', {name: label, exact: true}).click();
+      await page.waitForFunction(percent => Module.webFrame.transitions.some(item => item.kind === 'scale' && item.value === percent && item.remaining === 0), percent);
+      const result = await page.evaluate(percent => {
+        const frame = Module.webFrame, dpr = frame.scale;
+        const block = frame.texts.find(item => item.text === 'HHHH');
+        const scene = frame.items.find(item => item.group && item.label === 'Glyph scene');
+        const factor = Math.fround(percent / 100);
+        const tx = (scene.x + 150 * dpr) * (1 - factor);
+        const ty = (scene.y + 80 * dpr) * (1 - factor);
+        if (block.lines.length !== 1 || block.lines[0].text !== 'HHHH' || block.lines[0].font !== 14 * dpr)
+          throw new Error('scale preserves the original text layout and font size');
+        const reference = document.createElement('canvas'); reference.width = Module.canvas.width; reference.height = Module.canvas.height;
+        const ctx = reference.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.rect(scene.x, scene.y, scene.w, scene.h); ctx.clip();
+        ctx.setTransform(factor * dpr, 0, 0, factor * dpr, tx, ty);
+        ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left';
+        for (const line of block.lines) {
+          ctx.font = '14px ' + Module.scuzzFontStack;
+          ctx.direction = line.dir;
+          ctx.fillText(line.text, line.x / dpr, line.y / dpr);
+        }
+        const expected = ctx.getImageData(scene.x, scene.y, scene.w, scene.h).data;
+        const actual = Module.canvas.getContext('2d').getImageData(scene.x, scene.y, scene.w, scene.h).data;
+        let max = 0, bad = 0, ink = 0;
+        for (let i = 0; i < actual.length; i += 4) {
+          const delta = Math.abs(actual[i] - (255 - expected[i + 3])); max = Math.max(max, delta); if (delta > 2) bad++;
+          if (expected[i + 3] > 0) ink++;
+        }
+        return {max, bad, ink, factor};
+      }, percent);
+      assert(result.ink > 0, 'the reference contains visible glyph coverage');
+      assert.equal(result.bad, 0, `${percent}% preserves glyph coverage and spacing: ${JSON.stringify(result)}`);
+    }
+    console.log(`web scale glyphs: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkScaleMotion(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2935,7 +2983,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'scale-glyph' ? checkScaleGlyph : process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

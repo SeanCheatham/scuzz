@@ -535,7 +535,7 @@ EM_JS(float, web_text_width, (const char *text, int bytes, float size, int style
   return context.measureText(shaped).width * scale;
 });
 
-EM_JS(void, web_text_pixels, (const char *text, float size, int style, int width, int height, float x, float y, uint8_t *pixels, int rtl, int force, int joins, int arabic), {
+EM_JS(void, web_text_pixels, (const char *text, float size, float factor, int style, int width, int height, float x, float y, uint8_t *pixels, int rtl, int force, int joins, int arabic), {
   const scale = Module.scuzzTextScale || 1;
   const canvas = Module.scuzzTextCanvas;
   canvas.width = width;
@@ -543,11 +543,12 @@ EM_JS(void, web_text_pixels, (const char *text, float size, int style, int width
   const context = canvas.getContext('2d', {willReadFrequently: true});
   context.direction = rtl ? 'rtl' : 'ltr'; context.textAlign = 'left';
   context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size / scale + 'px ' + (arabic ? '"Arabic context"' : Module.scuzzFontStack);
-  context.setTransform(scale, 0, 0, scale, 0, 0);
+  const matrix = scale * factor;
+  context.setTransform(matrix, 0, 0, matrix, 0, 0);
   context.fillStyle = '#ffffff';
   const source = UTF8ToString(Number(text));
   const shaped = force ? Module.scuzzShapingSource(source, rtl, joins) : source;
-  context.fillText(shaped, x / scale, y / scale);
+  context.fillText(shaped, x / matrix, y / matrix);
   HEAPU8.set(context.getImageData(0, 0, width, height).data, Number(pixels));
 });
 #endif
@@ -754,18 +755,19 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
     advance_width *= canvas->scale;
     x = (float)((double)x * canvas->scale + canvas->tx);
     y = (float)((double)y * canvas->scale + canvas->ty);
-    size *= canvas->scale;
-    if (!isfinite(size) || !isfinite(x) || !isfinite(y)) return;
-    int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - size)));
-    int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + size)));
-    /* Keep antialias coverage outside the geometric glyph bounds. */
-    int top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(y - ascent) - 1.f));
-    int bottom = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, ceilf(y + descent) + 1.f));
+    float render_size = size * canvas->scale;
+    if (!isfinite(render_size) || !isfinite(x) || !isfinite(y)) return;
+    int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - render_size)));
+    int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + render_size)));
+    /* Scale the coverage margin with the glyphs. */
+    float margin = fmaxf(1.f, canvas->scale);
+    int top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(y - ascent) - margin));
+    int bottom = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, ceilf(y + descent) + margin));
     int width = right - left, height = bottom - top;
     if (width < 1 || height < 1) return;
     uint8_t *pixels = malloc((size_t)width * height * 4);
     if (!pixels) return;
-    web_text_pixels(text, size, style, width, height, x - left, y - top, pixels, rtl, force, joins, arabic);
+    web_text_pixels(text, size, canvas->scale, style, width, height, x - left, y - top, pixels, rtl, force, joins, arabic);
     for (int row = 0; row < height; row++) {
       for (int col = 0; col < width; col++) {
         SkColor color = paint->color;
