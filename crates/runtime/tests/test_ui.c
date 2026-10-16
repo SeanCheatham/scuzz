@@ -19744,7 +19744,7 @@ static void test_modal_keyboard_sync(void) {
 }
 
 static void test_modal_lifecycle(void) {
-  uint64_t before_bytes, before_count, bytes, count;
+  size_t before_bytes, before_count, bytes, count;
   sz_alloc_stats(&before_bytes, &before_count);
   SzSignalInt *open = sz_signal_int(0), *nested = sz_signal_int(0);
   SzView *root = sz_view_stack();
@@ -19816,7 +19816,7 @@ static void test_modal_lifecycle(void) {
 }
 
 static void test_color_theme_scope(void) {
-  uint64_t before_bytes, before_count, bytes, count;
+  size_t before_bytes, before_count, bytes, count;
   sz_alloc_stats(&before_bytes, &before_count);
   for (int i = 0; i < 100; i++) {
     SzTheme *palette = sz_theme_dark();
@@ -20344,7 +20344,7 @@ static void test_shaped_text_wrapping(void) {
 }
 
 static void test_opacity_transition_frames(void) {
-  uint64_t before_bytes, before_count, end_bytes, end_count;
+  size_t before_bytes, before_count, end_bytes, end_count;
   sz_alloc_stats(&before_bytes, &before_count);
   SzSignalInt *value = sz_signal_int(100), *reduced = sz_signal_int(0), *visible = sz_signal_int(1);
   SzView *content = sz_view_stack();
@@ -20605,7 +20605,7 @@ static SzSignalList *select_test_options(const char *const *labels, int count) {
 }
 
 static void test_select_keyboard_window(void) {
-  uint64_t before_bytes, before_count, end_bytes, end_count;
+  size_t before_bytes, before_count, end_bytes, end_count;
   sz_alloc_stats(&before_bytes, &before_count);
   SzSignalInt *selected = sz_signal_int(0);
   SzSignalList *options = sz_signal_list(NULL);
@@ -20725,7 +20725,7 @@ static void select_test_replace(SzSignalList *options, const char *const *labels
 }
 
 static void test_select_reactive_options(void) {
-  uint64_t bytes, count, end_bytes, end_count;
+  size_t bytes, count, end_bytes, end_count;
   sz_alloc_stats(&bytes, &count);
   const char *initial[] = {"Alpha", "Beta", "中文"};
   const char *replacement[] = {"New", "Same", "Same", "Last"};
@@ -20964,7 +20964,7 @@ static void test_fallback_text_layout(void) {
 }
 
 static void test_styled_text_values(void) {
-  uint64_t before_bytes, before_count, bytes, count;
+  size_t before_bytes, before_count, bytes, count;
   sz_alloc_stats(&before_bytes, &before_count);
   SzText *a = test_text_span("Scu");
   SzText *b = test_text_span("zz λ🙂");
@@ -21296,7 +21296,7 @@ static void test_plain_paragraph_direction(void) {
 }
 
 static void test_styled_shaping_context(void) {
-  uint64_t before_bytes, before_count, end_bytes, end_count;
+  size_t before_bytes, before_count, end_bytes, end_count;
   sz_alloc_stats(&before_bytes, &before_count);
   const char *left[] = {"A", "f", "ل", "e", "क्"};
   const char *right[] = {"V", "i", "ا", "́", "षि"};
