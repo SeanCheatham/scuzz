@@ -41,4 +41,15 @@ Android arm64 and x86_64 builds pass. The APK includes font and shaper licenses.
 ASan and UBSan checks pass for the portable shaper, font provider, and raster path.
 Independent Skia checks cover 48 script, size, and style cases.
 They reject deliberate text advance and glyph placement defects.
-Wider runtime parity, browser checks, package checks, and Android execution remain open. Apple SDK execution is unavailable on this host.
+Full native ASan and UBSan runtime checks pass.
+Text and measured-list checks produce exact native and evaluator timelines and claims.
+The browser checks pass before the caret boundary change. Repeat them for the current runtime.
+Pointer and arrow input select the boundary after characters with no advance.
+Mark checks cover Latin, Arabic, Hebrew, Thai, and Devanagari text at two sizes.
+They also check that a Latin ligature retains its internal caret position.
+The font fetcher supports assembly and web output in the same call.
+Native-only fonts stay in the assembly. They do not enter web assets.
+Offline checks cover all three output combinations.
+Package checks also build the portable renderer from bundled HarfBuzz source.
+Package validation and Android input checks remain open.
+Apple SDK execution is unavailable on this host.

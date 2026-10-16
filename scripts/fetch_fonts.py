@@ -37,7 +37,7 @@ def main():
     if args.web:
         args.web.mkdir(parents=True, exist_ok=True)
     for font in fonts:
-        if args.web and font.get("native_only"):
+        if args.web and not args.assembly and font.get("native_only"):
             continue
         target = args.destination / (font["name"] + ".ttf")
         valid = target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() == font["sha256"]
@@ -68,7 +68,7 @@ def main():
         assembly.extend([".balign 16", ".globl SYM(" + symbol + ")", "SYM(" + symbol + "):",
                          '.incbin "' + path + '"', ".balign 4", ".globl SYM(" + symbol + "_len)",
                          "SYM(" + symbol + "_len):", ".long " + str(target.stat().st_size)])
-        if args.web:
+        if args.web and not font.get("native_only"):
             filename = font["name"] + "-" + font["sha256"][:16] + ".ttf"
             (args.web / filename).write_bytes(target.read_bytes())
             css.append('@font-face { font-family: "Scuzz ' + font["name"] + '"; src: url("./' + filename + '") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; unicode-range: ' + font["unicode_range"] + '; }')

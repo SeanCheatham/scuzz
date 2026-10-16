@@ -877,7 +877,11 @@ with patch.object(urllib.request, 'urlopen', side_effect=RuntimeError('font proo
     for font in fonts:
         name = font["name"]
         asset = name + "-" + font["sha256"][:16] + ".ttf"
-        assert hashlib.sha256((destination / "web" / asset).read_bytes()).hexdigest() == font["sha256"]
+        if font.get("native_only"):
+            assert not (destination / "web" / asset).exists()
+        else:
+            assert hashlib.sha256((destination / "web" / asset).read_bytes()).hexdigest() == font["sha256"]
+        assert "SYM(scuzz_font_" + name + "):" in (destination / "fonts.S").read_text()
     subprocess.run(['clang', '-c', str(destination / 'fonts.S'), '-o', str(destination / 'fonts.o')], check=True, timeout=30)
     bidi = home / "crates/ffi-skia/build/sheenbidi"
     pin = dict(line.split("=", 1) for line in (home / "third_party/skia/PIN").read_text().splitlines() if "=" in line and not line.startswith("#"))
@@ -892,7 +896,9 @@ with patch.object(urllib.request, 'urlopen', side_effect=RuntimeError('font proo
     proof.write_text('#include "arabic_joining.h"\nint main(void) { return sk_joining_type(0x645) != JOINING_TYPE_D || sk_joining_type(0x627) != JOINING_TYPE_R || sk_joining_type(0x200c) != JOINING_TYPE_U || sk_joining_type(0x200d) != JOINING_TYPE_D; }\n')
     subprocess.run(['clang', '-std=c11', '-I' + str(joining), str(proof), '-o', str(destination / 'joining')], check=True, timeout=30)
     subprocess.run([str(destination / 'joining')], check=True, timeout=30)
-    snapshots = []
+    assert (joining / ".source-stamp").read_text().strip() == pin["harfbuzz_revision"]
+    assert (joining / "Source/harfbuzz.cc").is_file()
+    snapshots = {"skia": [], "sk_sw": []}
     for name, letters in [("joining-source", ["م", "ر"]), ("joining-forms", ["ﻣ", "ﺮ"])]:
         package = destination / name
         (package / "src").mkdir(parents=True)
@@ -900,9 +906,13 @@ with patch.object(urllib.request, 'urlopen', side_effect=RuntimeError('font proo
         words = [json.dumps(letter, ensure_ascii=False) for letter in letters]
         (package / "src/Main.scuzz").write_text('@main def main: IO[Unit] = Ui.run(_ => View.fontSize(24, View.richText(Text.concat([Text.bold(Text.span(' + words[0] + ')), Text.span(' + words[1] + ')]))))\n')
         subprocess.run([str(prefix / "bin/scuzz"), "fmt", str(package)], check=True, timeout=60)
-        subprocess.run([str(prefix / "bin/scuzz"), "run", "--target", "headless", "--exec", "", str(package)], check=True, timeout=60)
-        snapshots.append(str(package / "build/snapshot.png"))
-    subprocess.run([sys.executable, str(home / "scripts/png_max_delta.py"), "0", *snapshots], check=True, timeout=30)
+        for backend, images in snapshots.items():
+            target = package / "build" / backend
+            subprocess.run([str(prefix / "bin/scuzz"), "run", "--target", "headless", "--out-dir", str(target), "--exec", "", str(package)],
+                           env=dict(os.environ, SCUZZ_SKIA=backend), check=True, timeout=180)
+            images.append(str(target / "snapshot.png"))
+    for images in snapshots.values():
+        subprocess.run([sys.executable, str(home / "scripts/png_max_delta.py"), "0", *images], check=True, timeout=30)
 
 print('Release fonts and direction: pinned data, licenses, offline reuse, and source assembly pass', flush=True)
 root = Path("/tmp/scuzz-release-app")
@@ -912,7 +922,7 @@ licenses = package_out / "package/host"
 if sys.platform == "darwin":
     licenses = licenses / "scuzz-release-app.app/Contents/Resources"
 licenses = licenses / "licenses"
-for source in [*(home / "third_party/fonts" / (font["name"] + "-LICENSE") for font in fonts), home / "third_party/skia/SheenBidi-LICENSE"]:
+for source in [*(home / "third_party/fonts" / (font["name"] + "-LICENSE") for font in fonts), home / "third_party/skia/SheenBidi-LICENSE", joining / "HarfBuzz-LICENSE"]:
     assert (licenses / source.name).read_bytes() == source.read_bytes()
 print('Native package: font and text shaper licenses pass', flush=True)
 out = root / "build/ide-host"
