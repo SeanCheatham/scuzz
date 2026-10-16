@@ -2878,7 +2878,7 @@ static void ellipsize_to_width(char *line, size_t cap, float max_w, float font_p
 }
 
 static float span_width(const char *s, int start, int end, float font_px) {
-  return s && end > start ? sk_font_measure_span(sk_text_range(s + start, (size_t)(end - start)), font_px, 0) : 0.f;
+  return s && end > start ? sk_font_measure_span((SkTextRange){s, strlen(s), (size_t)start, (size_t)end}, font_px, 0) : 0.f;
 }
 
 static float *text_positions(const char *text, int length, float font) {
@@ -6402,14 +6402,33 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
   if (n > 0)
     memcpy(tmp, s + start, (size_t)n);
   tmp[n] = '\0';
-  if (wp->ellipsis && wp->cap > 0 && wp->drawn == wp->cap - 1)
+  int shortened = wp->ellipsis && wp->cap > 0 && wp->drawn == wp->cap - 1;
+  if (shortened)
     ellipsize_to_width(tmp, (size_t)n + 4, wp->inner, wp->font_px);
 #ifdef __EMSCRIPTEN__
   if (wp->selectable)
     sz_web_text_line(s, start, end, tmp, wp->x, wp->y, width, wp->font_px,
                      wp->line_h, g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h, wp->argb, 0, 0, 0);
 #endif
-  paint_string(wp->c, tmp, wp->x, wp->y, wp->argb, wp->font_px);
+  SkTextRange context = {s, strlen(s), (size_t)start, (size_t)end};
+  char *source = NULL;
+  if (shortened && tmp[0]) {
+    /* Keep hidden source characters in the paragraph context. */
+    size_t insert = (size_t)start + strlen(tmp) - 3;
+    source = sz_alloc(context.bytes + 4);
+    memcpy(source, s, insert);
+    memcpy(source + insert, "...", 3);
+    memcpy(source + insert + 3, s + insert, context.bytes - insert + 1);
+    context = (SkTextRange){source, context.bytes + 3, (size_t)start, insert + 3};
+  } else if (shortened) context.end = context.start;
+  SkPaint *paint = sk_paint_new();
+  if (paint) {
+    sk_paint_set_color(paint, sk_color_argb(apply_paint_alpha(wp->argb)));
+    sk_paint_set_text_size(paint, wp->font_px);
+    sk_canvas_draw_span(wp->c, context, wp->x, wp->y, paint, 0);
+    sk_paint_delete(paint);
+  }
+  sz_free(source);
   wp->y += wp->line_h;
   wp->drawn++;
   sz_free(tmp);

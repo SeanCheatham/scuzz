@@ -572,6 +572,8 @@ Synthetic ellipsis marks do not add source characters to copied text.
 
 The default native Skia renderer shapes proportional text with HarfBuzz.
 SheenBidi supplies direction and script runs within each displayed line.
+Native ranges keep direction and embedding context from the complete source paragraph.
+Plain text also keeps this context when it paints an ellipsis.
 Measurement and paint use the same positioned glyphs.
 The embedded face supplies kerning, ligatures, combining marks, and Arabic forms.
 Wrapping and ellipsis keep shaped source clusters together.

@@ -10,6 +10,8 @@ Check RTL and LTR paragraphs whose later lines start in the other direction.
 Check numbers, punctuation, embedding controls, and explicit paragraph breaks.
 Compare plain and same-font styled text.
 Use native pixels, browser source ranges, and the shaping application.
+Resolve browser canvas runs with the same paragraph direction algorithm.
+Keep source spans in the same visual runs.
 Check native and evaluator replay, renderers, sanitizers, and integration.
 
-Status: Native same-font rich text retains paragraph context. Seven range cases match independent position and pixel references. Normal, ASan, UBSan, Skia, and software checks pass. Browser C compilation passes. Complete plain text, browser context, application replay, and full integration checks.
+Status: Native plain and same-font rich text retain paragraph context. Seven range cases and eight plain-text cases match independent pixel references. Normal, ASan, and UBSan checks pass. Source labels and plain-text line heights stay correct. Complete browser context, application replay, renderer checks, and full integration checks.
