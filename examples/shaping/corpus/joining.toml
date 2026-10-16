@@ -1,0 +1,2 @@
+[fuzz]
+events = ["text 0 retained", "tap expansion:Joining", "resize 640 1600 1", "tap textbutton:محمد", "resize 300 720 2", "scroll 0 500", "resize 640 1600", "tap expansion:Joining", "resize 640 720 1"]
