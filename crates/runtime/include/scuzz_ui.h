@@ -285,7 +285,9 @@ typedef enum SzViewKind {
   SZ_VIEW_SELECT_OPTION,
   SZ_VIEW_ANIMATED_SIZE,
   SZ_VIEW_ANIMATED_CONTENT_SIZE,
-  SZ_VIEW_ANIMATED_POSITION
+  SZ_VIEW_ANIMATED_POSITION,
+  SZ_VIEW_SCALE,
+  SZ_VIEW_ANIMATED_SCALE
 } SzViewKind;
 
 typedef struct SzRect {
@@ -488,6 +490,11 @@ SzView *sz_view_max_size(int w, int h, SzView *child);
 SzView *sz_view_clip(SzView *child);
 /* Pass constraints through; size to child; scale paint alpha (`pct` 0-100). */
 SzView *sz_view_opacity(int pct, SzView *child);
+/* Scale paint and input about the child center. Keep layout unchanged. */
+SzView *sz_view_scale(int64_t percent, SzView *child);
+SzView *sz_view_animated_scale(SzSignalInt *value, int64_t pumps, SzView *child);
+/* Return the composed scale from layout coordinates to displayed coordinates. */
+float sz_view_paint_scale(const SzView *view);
 SzView *sz_view_animated_opacity(SzSignalInt *value, int64_t pumps, SzView *child);
 /* Animate a clipped size in logical pixels. Both axes use one pump count. */
 SzView *sz_view_animated_size(SzSignalInt *width, SzSignalInt *height, int64_t pumps, SzView *child);
@@ -555,6 +562,7 @@ void sz_view_free(SzView *view);
 SzString *sz_view_show(const SzView *view);
 
 SzViewKind sz_view_kind(const SzView *view);
+/* Return displayed bounds. */
 SzRect sz_view_frame(const SzView *view);
 uintptr_t sz_view_id(const SzView *view);
 SzView *sz_view_find(SzView *root, uintptr_t id);

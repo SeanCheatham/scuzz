@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include <math.h>
 #include <limits.h>
+#include <float.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -15463,6 +15464,302 @@ static void test_animated_content_size_constraints(void) {
   sk_surface_unref(surface); sz_view_free(root); sz_signal_str_free(text);
 }
 
+static SzView *scale_scene(SzView *content) {
+  SzView *stack = sz_view_stack();
+  sz_view_add_child(stack, sz_view_sized(320, 240, sz_view_text("")));
+  sz_view_add_child(stack, sz_view_positioned(100, 80, content));
+  return sz_view_sized(320, 240, sz_view_clip(stack));
+}
+
+static void assert_scale_frame(SzView *view, float x, float y, float w, float h) {
+  SzRect frame = sz_view_frame(view);
+  assert(frame.x == x && frame.y == y && frame.w == w && frame.h == h);
+}
+
+static void test_scale_geometry(void) {
+  for (int device = 1; device <= 2; device++) for (int clipped = 0; clipped <= 1; clipped++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = device; theme.background = 0xffffffff;
+    SzSignalInt *taps = sz_signal_int(0);
+    SzView *button = sz_view_ink_well("Scaled card", counter_tap, taps,
+      sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+    SzView *scaled = sz_view_scale(200, button);
+    SzView *root = scale_scene(clipped ? sz_view_clip(scaled) : scaled);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(320 * device, 240 * device);
+    assert(surface);
+    assert(sz_view_paint(root, sk_surface_get_canvas(surface), 320 * device, 240 * device, &theme));
+    assert_scale_frame(button, 60 * device, 60 * device, 160 * device, 80 * device);
+    assert_scale_frame(root, 0, 0, 320 * device, 240 * device);
+    assert(sz_view_paint_scale(button) == 2);
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, 320 * device, 140 * device, 100 * device, 255, 0, 0));
+    assert(px_rgb(pixels, 320 * device, 210 * device, 100 * device,
+      255, clipped ? 255 : 0, clipped ? 255 : 0));
+    assert(sz_view_hit_test(root, 210.f * device, 100.f * device) == (clipped ? NULL : button));
+    assert(sz_view_hit_test(root, 59.f * device, 100.f * device) == NULL);
+    assert(sz_view_handle_tap(root, 140.f * device, 100.f * device));
+    assert(sz_signal_int_get(taps) == 1);
+    sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(taps);
+  }
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzView *child = sz_view_sized(80, 40, sz_view_text("nested"));
+  SzView *root = scale_scene(sz_view_scale(200, sz_view_scale(50, child)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert_scale_frame(child, 100, 80, 80, 40);
+  assert(sz_view_paint_scale(child) == 1);
+  sz_view_free(root);
+}
+
+static void test_animated_scale_steps(void) {
+  SzTheme theme = *sz_theme_default();
+  theme.pad = theme.gap = 0; theme.px_scale = 1; theme.background = 0xffffffff;
+  SzSignalInt *value = sz_signal_int(100), *taps = sz_signal_int(0);
+  SzView *child = sz_view_ink_well("Scale card", counter_tap, taps,
+    sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+  SzView *scale = sz_view_animated_scale(value, 8, child);
+  SzView *root = scale_scene(scale);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 100, 80, 80, 40);
+  assert(!sz_view_transition_pending(root));
+  sz_signal_int_set(value, 200);
+  for (int repeat = 0; repeat < 3; repeat++) {
+    sz_view_layout(root, 320, 240, &theme);
+    assert_scale_frame(child, 100, 80, 80, 40);
+    assert(sz_view_hit_test(root, 95, 100) == NULL);
+  }
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 94.8f, 77.4f, 90.4f, 45.2f);
+  assert(sz_view_hit_test(root, 96, 100) == child);
+  FILE *file = tmpfile(); assert(file);
+  sz_view_transitions_dump_json(root, file); rewind(file);
+  char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file);
+  json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"scale\",\"value\":113,\"target\":200,\"remaining\":7"));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, 96, 100, 255, 0, 0));
+  assert(px_rgb(pixels, 320, 92, 100, 255, 255, 255));
+  sz_signal_int_set(value, 50);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == 1.05f);
+  sz_view_pause_motion(root, 1);
+  sz_signal_int_set(value, 150);
+  for (int repeat = 0; repeat < 3; repeat++) {
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_scale(child) == 1.05f);
+  }
+  assert(!sz_view_transition_pending(root));
+  sz_view_pause_motion(root, 0);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == 1.11f);
+  const int remaining[] = {116, 122, 128, 133, 139, 144, 150};
+  for (int i = 0; i < 7; i++) {
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_scale(child) == remaining[i] / 100.f);
+  }
+  assert(!sz_view_transition_pending(root));
+  sz_view_reduce_motion(root, 1);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 80, 70, 120, 60);
+  assert(!sz_view_transition_pending(root));
+  sz_signal_int_set(value, -1);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_hit_test(root, 140, 100) == NULL);
+  assert(sz_view_paint_scale(child) == 0);
+  assert(sz_signal_int_get(value) == -1);
+  sz_view_reduce_motion(root, 0);
+  sz_signal_int_set(value, 100);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == .13f);
+  assert(sz_view_hit_test(root, 140, 100) == child);
+  sk_surface_unref(surface); sz_view_free(root);
+  sz_signal_int_free(value); sz_signal_int_free(taps);
+}
+
+static void test_scale_field_input(void) {
+  for (int hidden = 0; hidden < 3; hidden++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalInt *value = sz_signal_int(100), *shown = sz_signal_int(1);
+    SzSignalStr *text = sz_signal_str("Retained scale input");
+    SzView *field = sz_view_text_field(text, "Scale name");
+    SzView *scale = sz_view_animated_scale(value, 8, sz_view_sized(120, 40, field));
+    SzView *visible = hidden == 0 ? sz_view_visibility(shown, scale) :
+      hidden == 1 ? sz_view_show_when(shown, 1, scale) : sz_view_offstage(shown, scale);
+    SzView *root = scale_scene(visible);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    sz_view_focus(root, field); sz_view_set_text_field_sel(field, 2, 5);
+    sz_signal_int_set(value, 200);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_focused(root) == field);
+    assert(sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 5);
+    sz_view_reduce_motion(root, 1);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert_scale_frame(field, 40, 60, 240, 80);
+    float positions[21], trailing[21];
+    const char *source = sz_signal_str_get(text);
+    sk_font_text_positions(sk_text_range(source, strlen(source)), theme.font_px, 0, positions, trailing);
+    float x = 40 + (6 + positions[4]) * 2;
+    assert(sz_view_handle_tap(root, x, 100));
+    assert(sz_view_text_field_caret(field) == 4);
+    assert(sz_view_edit_extend_to_xy(field, 40 + (6 + positions[8]) * 2, 100));
+    assert(sz_view_text_field_sel_start(field) == 4 && sz_view_text_field_sel_end(field) == 8);
+    SzRect caret = sz_view_caret_rect(root, &theme);
+    assert(fabsf(caret.x - (40 + (6 + positions[8]) * 2)) < .01f && caret.w == 2);
+    sz_signal_int_set(shown, 0); sz_signal_int_set(value, 50);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_focused(root) == NULL);
+    sz_signal_int_set(shown, 1);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_scale(field) == .5f);
+    assert(!strcmp(sz_signal_str_get(text), "Retained scale input"));
+    sz_view_focus(root, field); sz_signal_int_set(value, 0);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    SzView *fields[2];
+    assert(sz_view_collect_text_fields(root, fields, 2) == 0 && sz_view_focused(root) == NULL);
+    assert(!sz_view_handle_text_edit(root, "hidden", 0));
+    SzString *dump = sz_view_a11y_dump(root);
+    assert(!strstr(sz_string_cstr(dump), "textfield:Scale name")); sz_string_free(dump);
+    assert(!strcmp(sz_signal_str_get(text), "Retained scale input"));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(value); sz_signal_int_free(shown); sz_signal_str_free(text);
+  }
+}
+
+static void test_scale_range_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *value = sz_signal_int(0);
+  SzView *slider = sz_view_slider(value, "Scale range", 0, 100, 1);
+  SzView *root = scale_scene(sz_view_scale(200, sz_view_sized(80, 40, slider)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert_scale_frame(slider, 60, 60, 160, 80);
+  assert(sz_view_slider_set_at(slider, 180));
+  assert(sz_signal_int_get(value) == 75);
+  assert(sz_view_handle_tap(root, 100, 100));
+  assert(sz_signal_int_get(value) == 25);
+  sz_view_free(root); sz_signal_int_free(value);
+}
+
+static SzSignalList *select_test_options(const char *const *labels, int count);
+
+static void test_scale_popup_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *count = sz_signal_int(0);
+  SzView *button = sz_view_ink_well("Scale tip trigger", counter_tap, count,
+    sz_view_sized(80, 40, sz_view_text("")));
+  SzView *tip = sz_view_tooltip("Scaled trigger", button);
+  SzView *root = scale_scene(sz_view_scale(200, tip));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_tooltip_at(root, 210, 100) == tip);
+  assert(sz_view_set_hover_at(root, 210, 100));
+  assert(sz_view_tooltip_visible(tip));
+  SzRect popup = sz_view_tooltip_frame(tip);
+  assert(popup.x == 60 && popup.y == 140);
+  assert(sz_view_hit_test(root, popup.x + 2, popup.y + 2) == tip);
+  sz_view_free(root); sz_signal_int_free(count);
+
+  const char *labels[] = {"First", "Second", "Third"};
+  SzSignalList *options = select_test_options(labels, 3);
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *select = sz_view_select(selected, "Scaled select", options);
+  root = scale_scene(sz_view_scale(200, sz_view_sized(80, 40, select)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_handle_tap(root, 210, 100));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_select_open(select));
+  popup = sz_view_frame(sz_view_select_popup(select));
+  assert(popup.x == 60 && popup.y == 140 && popup.w == 160);
+  SzView *option = sz_view_select_active_option(select);
+  SzRect row = sz_view_control_frame(option);
+  assert(row.x == popup.x && row.y == popup.y && row.w == 160 && row.h == theme.control_h);
+  assert(sz_view_paint_scale(option) == 1);
+  assert(sz_view_hit_test(root, row.x + 2, row.y + row.h / 2) == option);
+  assert(sz_view_handle_key(root, "ArrowDown", "", 0));
+  assert(sz_view_handle_key(root, "Enter", "", 0));
+  assert(sz_signal_int_get(selected) == 1 && !sz_view_select_open(select));
+  sz_view_free(root); sz_signal_int_free(selected); sz_signal_list_free(options);
+}
+
+static void test_scale_drag_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *fraction = sz_signal_int(50);
+  SzView *split = sz_view_split(fraction, "Scale split", sz_view_text("A"), sz_view_text("B"));
+  SzView *root = scale_scene(sz_view_scale(200, sz_view_sized(80, 40, split)));
+  sz_view_layout(root, 320, 240, &theme);
+  SzRect handle = sz_view_control_frame(split);
+  assert(handle.x == 134 && handle.y == 60 && handle.w == 12 && handle.h == 80);
+  assert(sz_view_hit_test(root, 140, 100) == split);
+  assert(sz_view_split_set_at(split, 177));
+  assert(sz_signal_int_get(fraction) == 75);
+  sz_view_free(root); sz_signal_int_free(fraction);
+
+  SzView *scroll = sz_view_scroll(sz_view_sized(80, 400, sz_view_text("")));
+  root = sz_view_theme(&theme, scale_scene(sz_view_scale(200, sz_view_sized(80, 40, scroll))));
+  SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 320, .height = 240, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&config, root);
+  assert(session && sz_ui_pump_sync(session));
+  assert(sz_view_scroll_at(root, 210, 100) == scroll);
+  SzInputEvent event = {.kind = SZ_INPUT_SCROLL, .x = 140, .y = 100, .dy = 20};
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_view_scroll_y(scroll) == 10);
+  event = (SzInputEvent){.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN, .x = 140, .y = 100};
+  assert(sz_ui_inject_sync(session, &event));
+  event.pointer_phase = SZ_POINTER_MOVE; event.y = 80;
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_view_scroll_y(scroll) == 20);
+  event.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &event));
+  sz_ui_unmount(session); sz_view_free(root);
+}
+
+static void test_scale_limits(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1; theme.background = 0xffffffff;
+  SzSignalInt *value = sz_signal_int(INT64_MAX), *count = sz_signal_int(0);
+  SzView *child = sz_view_ink_well("Scale limits", counter_tap, count,
+    sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+  SzView *root = scale_scene(sz_view_animated_scale(value, INT_MAX, child));
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == (float)INT_MAX / 100.f);
+  assert(sz_signal_int_get(value) == INT64_MAX);
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, 2, 2, 255, 0, 0));
+  assert(sz_view_hit_test(root, 2, 2) == child);
+  assert(sz_view_hit_test(root, 321, 2) == NULL);
+  sz_signal_int_set(value, 0);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  FILE *file = tmpfile(); assert(file);
+  sz_view_transitions_dump_json(root, file); rewind(file);
+  char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file); json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"scale\",\"value\":2147483646,\"target\":0,\"remaining\":2147483646"));
+  sz_view_reduce_motion(root, 1); sz_signal_int_set(value, INT64_MIN);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == 0 && sz_signal_int_get(value) == INT64_MIN);
+  assert(sz_view_hit_test(root, 140, 100) == NULL);
+  pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, 140, 100, 255, 255, 255));
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(value); sz_signal_int_free(count);
+}
+
+static void test_scale_small_input(void) {
+  for (int editor = 0; editor <= 1; editor++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalStr *text = sz_signal_str(editor ? "first\nlast" : "abcdef");
+    SzView *field = editor ? sz_view_editor(text) : sz_view_text_field(text, "Small field");
+    SzView *root = scale_scene(sz_view_scale(1, sz_view_sized(120, 40, field)));
+    sz_view_layout(root, 320, 240, &theme);
+    assert(sz_view_edit_extend_to_xy(field, FLT_MAX, FLT_MAX));
+    assert((editor ? sz_view_editor_caret(field) : sz_view_text_field_caret(field)) == (editor ? 10 : 6));
+    assert(sz_view_edit_extend_to_xy(field, -FLT_MAX, -FLT_MAX));
+    assert((editor ? sz_view_editor_caret(field) : sz_view_text_field_caret(field)) == 0);
+    assert(!sz_view_edit_extend_to_xy(field, NAN, 100));
+    sz_view_free(root); sz_signal_str_free(text);
+  }
+}
+
 static void position_step(SzView *root, SzView *child, SkCanvas *canvas,
                           int x, int y, const SzTheme *theme) {
   int scale = (int)theme->px_scale;
@@ -21116,6 +21413,11 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--scale")) {
+    test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
+    test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input();
+    puts("scale tests ok"); return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "--animated-position")) {
     test_animated_position_steps();
     test_animated_position_retains_input();
@@ -21896,6 +22198,8 @@ int main(int argc, char **argv) {
   test_slider_pointer_drag();
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
+  test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
+  test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input();
   test_animated_position_steps();
   test_animated_position_retains_input();
   test_animated_position_limits();

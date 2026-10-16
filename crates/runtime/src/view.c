@@ -12,6 +12,7 @@ static SzView *web_modal_scope;
 #endif
 
 #include <limits.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -418,7 +419,7 @@ static int transition_has_axes(const SzView *view) {
 
 static int view_has_transition(const SzView *view) {
   return transition_has_axes(view) || view->kind == SZ_VIEW_ANIMATED_OPACITY ||
-    view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE;
+    view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE || view->kind == SZ_VIEW_ANIMATED_SCALE;
 }
 
 static int motion_pending_node(const SzView *v) {
@@ -494,7 +495,7 @@ static int view_accepts_children(const SzView *view) {
          kind == SZ_VIEW_SELECT || kind == SZ_VIEW_THEME || kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
-         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY || kind == SZ_VIEW_ANIMATED_SIZE || kind == SZ_VIEW_ANIMATED_CONTENT_SIZE ||
+         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY || kind == SZ_VIEW_SCALE || kind == SZ_VIEW_ANIMATED_SCALE || kind == SZ_VIEW_ANIMATED_SIZE || kind == SZ_VIEW_ANIMATED_CONTENT_SIZE ||
          kind == SZ_VIEW_REDUCED_MOTION || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
@@ -573,9 +574,70 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_NAV_TILE);
 }
 
+static float view_scale(const SzView *view) {
+  if (view->kind == SZ_VIEW_SCALE) return view->img_w / 100.f;
+  if (view->kind == SZ_VIEW_ANIMATED_SCALE) return view->animation_value / 100.f;
+  return 1.f;
+}
+
+static SzRect scale_pivot_frame(const SzView *view) {
+  return view->child_count ? view->children[0]->frame : view->frame;
+}
+
+typedef struct { double scale, x, y; } ViewTransform;
+
+static ViewTransform display_transform(const SzView *view) {
+  ViewTransform matrix = {1, 0, 0};
+  for (const SzView *p = view; p; p = p->parent) {
+    double scale = view_scale(p);
+    if (scale != 1) {
+      SzRect frame = scale_pivot_frame(p);
+      double x = frame.x + frame.w * .5f;
+      double y = frame.y + frame.h * .5f;
+      matrix.x = scale * matrix.x + x * (1 - scale);
+      matrix.y = scale * matrix.y + y * (1 - scale);
+      matrix.scale *= scale;
+    }
+    /* Select popups use viewport coordinates. */
+    if (p->parent && p->parent->kind == SZ_VIEW_SELECT) break;
+  }
+  return matrix;
+}
+
+float sz_view_paint_scale(const SzView *view) {
+  ViewTransform matrix = display_transform(view);
+  return isfinite(matrix.scale) && matrix.scale <= FLT_MAX &&
+    isfinite(matrix.x) && isfinite(matrix.y) && fabs(matrix.x) <= FLT_MAX && fabs(matrix.y) <= FLT_MAX
+      ? (float)matrix.scale : 0;
+}
+
+static float display_float(double value) {
+  return (float)fmax(-FLT_MAX, fmin(FLT_MAX, value));
+}
+
+static SzRect display_rect(const SzView *view, SzRect frame) {
+  ViewTransform matrix = display_transform(view);
+  if (!(matrix.scale > 0) || matrix.scale > FLT_MAX ||
+      !isfinite(matrix.x) || !isfinite(matrix.y) ||
+      fabs(matrix.x) > FLT_MAX || fabs(matrix.y) > FLT_MAX) return (SzRect){0};
+  return (SzRect){display_float(matrix.scale * frame.x + matrix.x),
+    display_float(matrix.scale * frame.y + matrix.y),
+    display_float(matrix.scale * frame.w), display_float(matrix.scale * frame.h)};
+}
+
+static int layout_point(const SzView *view, float *x, float *y) {
+  if (!isfinite(*x) || !isfinite(*y)) return 0;
+  ViewTransform matrix = display_transform(view);
+  if (!(matrix.scale > 0) || matrix.scale > FLT_MAX ||
+      !isfinite(matrix.x) || !isfinite(matrix.y) ||
+      fabs(matrix.x) > FLT_MAX || fabs(matrix.y) > FLT_MAX) return 0;
+  *x = display_float(((double)*x - matrix.x) / matrix.scale);
+  *y = display_float(((double)*y - matrix.y) / matrix.scale);
+  return isfinite(*x) && isfinite(*y);
+}
+
 SzRect sz_view_frame(const SzView *view) {
-  SzRect z = {0, 0, 0, 0};
-  return view ? view->frame : z;
+  return view ? display_rect(view, view->frame) : (SzRect){0};
 }
 
 void sz_view_add_child(SzView *parent, SzView *child) {
@@ -1311,12 +1373,12 @@ int sz_view_progress_value(const SzView *view) {
   return (int)percent_clamp(view->sig_int ? sz_signal_int_get(view->sig_int) : 0);
 }
 
-SzRect sz_view_control_frame(const SzView *view) {
+static SzRect control_layout_frame(const SzView *view) {
   if (view && view->kind == SZ_VIEW_SELECT_OPTION && view->parent && view->parent->parent) {
     SzRect visible;
     return rects_intersect(view->frame, view->parent->parent->frame, &visible) ? visible : (SzRect){0};
   }
-  SzRect frame = sz_view_frame(view);
+  SzRect frame = view ? view->frame : (SzRect){0};
   if (!view) return frame;
   if (view->inline_action && view->action_count) return view->action_boxes[0];
   if (view->kind == SZ_VIEW_EXPANSION_TILE) {
@@ -1330,6 +1392,10 @@ SzRect sz_view_control_frame(const SzView *view) {
   return frame;
 }
 
+SzRect sz_view_control_frame(const SzView *view) {
+  return display_rect(view, control_layout_frame(view));
+}
+
 static int split_set_fraction(SzView *view, int64_t value) {
   if (!view->sig_int) return 0;
   int previous = sz_view_split_frac(view);
@@ -1341,7 +1407,9 @@ static int split_set_fraction(SzView *view, int64_t value) {
 
 int sz_view_split_set_at(SzView *view, float x) {
   if (!view || view->kind != SZ_VIEW_SPLIT || !view->sig_int || !isfinite(x)) return 0;
-  SzRect handle = sz_view_control_frame(view);
+  float y = 0;
+  if (!layout_point(view, &x, &y)) return 0;
+  SzRect handle = control_layout_frame(view);
   double width = (double)view->frame.w - handle.w;
   double distance = (double)x - view->frame.x - handle.w / 2;
   int64_t value = 0;
@@ -1355,6 +1423,8 @@ int sz_view_split_set_at(SzView *view, float x) {
 int sz_view_slider_set_at(SzView *view, float x) {
   if (!view || view->kind != SZ_VIEW_SLIDER || !view->sig_int || !isfinite(x) ||
       !isfinite(view->frame.x) || !isfinite(view->frame.w)) return 0;
+  float y = 0;
+  if (!layout_point(view, &x, &y)) return 0;
   int64_t value = view->range_minimum;
   double distance = (double)x - view->frame.x;
   double width = view->frame.w;
@@ -2090,6 +2160,13 @@ static void a11y_dump_motion(SzView *v, char **buf, size_t *len, size_t *cap) {
       label, v->animation_duration - v->animation_step);
     sz_dump_append(buf, len, cap, line);
   }
+  if (v->kind == SZ_VIEW_ANIMATED_SCALE && v->animation_ready) {
+    motion_label_copy(v, label, sizeof label);
+    snprintf(line, sizeof line, "scale:%s=%d\ntarget:scale:%s=%d\npumps:scale:%s=%d\n",
+      label, v->animation_value, label, v->animation_target,
+      label, v->animation_duration - v->animation_step);
+    sz_dump_append(buf, len, cap, line);
+  }
   if (v->motion_left <= 0) return;
   motion_label_copy(v, label, sizeof label);
   snprintf(line, sizeof line, "motion:%s:%s=%d\n", motion_name(v->motion),
@@ -2512,6 +2589,23 @@ SzView *sz_view_opacity(int pct, SzView *child) {
   return v;
 }
 
+SzView *sz_view_scale(int64_t percent, SzView *child) {
+  SzView *view = view_new(SZ_VIEW_SCALE);
+  view->img_w = percent < 0 ? 0 : percent > INT_MAX ? INT_MAX : (int)percent;
+  if (child) sz_view_add_child(view, child);
+  return view;
+}
+
+SzView *sz_view_animated_scale(SzSignalInt *value, int64_t pumps, SzView *child) {
+  if (!value || !child || pumps < 1 || pumps > INT_MAX)
+    sz_panic("Animated scale needs a Signal, a child, and positive pump count within Int32");
+  SzView *view = view_new(SZ_VIEW_ANIMATED_SCALE);
+  view->sig_int = value;
+  view->animation_duration = (int)pumps;
+  sz_view_add_child(view, child);
+  return view;
+}
+
 SzView *sz_view_animated_opacity(SzSignalInt *value, int64_t pumps, SzView *child) {
   if (!value || !child || pumps < 1 || pumps > INT_MAX)
     sz_panic("Animated opacity needs a Signal, a child, and positive pump count within Int32");
@@ -2558,8 +2652,26 @@ static int transition_axis(int64_t value) {
 }
 
 static int size_collapsed(const SzView *view) {
-  return view && (view->kind == SZ_VIEW_ANIMATED_SIZE || view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) && view->animation_ready &&
+  if (!view) return 0;
+  if (view->kind == SZ_VIEW_SCALE) return sz_view_paint_scale(view) == 0;
+  if (view->kind == SZ_VIEW_ANIMATED_SCALE) return view->animation_ready && sz_view_paint_scale(view) == 0;
+  return (view->kind == SZ_VIEW_ANIMATED_SIZE || view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) && view->animation_ready &&
     (view->frame.w <= 0 || view->frame.h <= 0);
+}
+
+static void sync_scalar(SzView *view, int suppressed) {
+  int64_t source = sz_signal_int_get(view->sig_int);
+  int maximum = view->kind == SZ_VIEW_ANIMATED_OPACITY ? 100 : INT_MAX;
+  int target = source < 0 ? 0 : source > maximum ? maximum : (int)source;
+  if (!view->animation_ready || suppressed) {
+    view->animation_ready = 1;
+    view->animation_value = view->animation_from = view->animation_target = target;
+    view->animation_step = view->animation_duration;
+  } else if (target != view->animation_target) {
+    view->animation_from = view->animation_value;
+    view->animation_target = target;
+    view->animation_step = view->animation_value == target ? view->animation_duration : 0;
+  }
 }
 
 static void sync_axes(SzView *view, int suppressed) {
@@ -2637,19 +2749,8 @@ static void sync_transitions(SzView *view, int shown, int reduced) {
   if (view->motion_suppressed) {
     view->motion = SZ_MOTION_NONE; view->motion_left = 0; view->motion_painted = 0;
   }
-  if (view->kind == SZ_VIEW_ANIMATED_OPACITY) {
-    int64_t source = sz_signal_int_get(view->sig_int);
-    int target = source < 0 ? 0 : source > 100 ? 100 : (int)source;
-    if (!view->animation_ready || view->motion_suppressed) {
-      view->animation_ready = 1;
-      view->animation_value = view->animation_from = view->animation_target = target;
-      view->animation_step = view->animation_duration;
-    } else if (target != view->animation_target) {
-      view->animation_from = view->animation_value;
-      view->animation_target = target;
-      view->animation_step = view->animation_value == target ? view->animation_duration : 0;
-    }
-  }
+  if (view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SCALE)
+    sync_scalar(view, view->motion_suppressed);
   if (transition_has_axes(view)) sync_axes(view, view->motion_suppressed);
   if (view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE && view->motion_suppressed) {
     view->content_w = view->content_target_w;
@@ -2676,6 +2777,7 @@ static int step_transitions(SzView *view) {
       view->content_h = (float)(((double)(duration - step) * view->content_from_h + (double)step * view->content_target_h) / duration);
       resized = 1;
     } else view->animation_value = animation_lerp(view->animation_from, view->animation_target, step, duration);
+    if (view->kind == SZ_VIEW_ANIMATED_SCALE) resized = 1;
     if (transition_has_axes(view)) {
       view->animation_axis2 = animation_lerp(view->animation_from_axis2, view->animation_target_axis2, step, duration);
       resized = 1;
@@ -3551,7 +3653,9 @@ static int caret_on_line_at_width(const char *s, int start, int end, float want,
     return start;
   if (cell < 1.f)
     cell = 1.f;
-  col = (int)((want / cell) + 0.5f);
+  double column = (double)want / cell + .5;
+  if (column >= end - start) return end;
+  col = (int)column;
   i = start;
   n = 0;
   while (i < end && n < col) {
@@ -5156,6 +5260,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = fmaxf(child ? child->frame.h : 0.f, scale_px(theme, 24.f));
     break;
   }
+  case SZ_VIEW_SCALE:
+  case SZ_VIEW_ANIMATED_SCALE:
   case SZ_VIEW_THEME:
   case SZ_VIEW_BACKGROUND:
   case SZ_VIEW_CLIP:
@@ -5177,6 +5283,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
   case SZ_VIEW_VISIBILITY:
+    if (v->kind == SZ_VIEW_ANIMATED_SCALE) sync_scalar(v, transition_suppressed(v));
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     if (v->kind == SZ_VIEW_FOCUS_GROUP)
       restore_group_focus(v);
@@ -5627,20 +5734,21 @@ static int select_key(SzView *root, SzView *v, const char *key, const char *text
 }
 
 static void layout_select_popup(SzView *root, SzView *v) {
+  SzRect anchor = sz_view_frame(v);
   const SzTheme *theme = &v->layout_theme;
   float scale = theme_px_scale(theme), row = theme->control_h;
   float edge = scale_px(theme, 4.f);
-  float w = fminf(v->frame.w, fmaxf(0.f, root->viewport_w - edge * 2.f));
-  float below = fmaxf(0.f, root->viewport_h - edge - v->frame.y - v->frame.h);
-  float above = fmaxf(0.f, v->frame.y - edge);
+  float w = fminf(anchor.w, fmaxf(0.f, root->viewport_w - edge * 2.f));
+  float below = fmaxf(0.f, root->viewport_h - edge - anchor.y - anchor.h);
+  float above = fmaxf(0.f, anchor.y - edge);
   float wanted = fminf((float)v->select_count, 8.f) * row;
   int up = below < wanted && above > below;
   float h = fminf(wanted, up ? above : below);
   if (w <= 0.f || h <= 0.f || row <= 0.f) { v->select_open = 0; return; }
-  float x = fminf(fmaxf(v->frame.x, edge), root->viewport_w - edge - w);
+  float x = fminf(fmaxf(anchor.x, edge), root->viewport_w - edge - w);
   SzView *popup = sz_view_select_popup(v), *rows = popup->scroll_child;
   if (popup->frame.h != h || popup->layout_theme.control_h != row) v->select_reveal_pending = 1;
-  popup->frame = (SzRect){x, up ? v->frame.y - h : v->frame.y + v->frame.h, w, h};
+  popup->frame = (SzRect){x, up ? anchor.y - h : anchor.y + anchor.h, w, h};
   popup->layout_theme = *theme;
   popup->layout_theme.pad = 0.f;
   if (v->select_reveal_pending) { select_reveal(v); v->select_reveal_pending = 0; }
@@ -5721,6 +5829,25 @@ static int point_in(const SzRect *r, float x, float y) {
   return x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
 }
 
+static int view_clips_children(const SzView *view) {
+  return view->kind == SZ_VIEW_CLIP || view->kind == SZ_VIEW_RADIUS ||
+    view->kind == SZ_VIEW_SCROLL || view->kind == SZ_VIEW_APP_SHELL ||
+    view->kind == SZ_VIEW_EXPANSION_TILE || view->kind == SZ_VIEW_ANIMATED_SIZE ||
+    view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE;
+}
+
+static int point_in_view(const SzView *view, float x, float y) {
+  SzRect frame = sz_view_frame(view);
+  return point_in(&frame, x, y);
+}
+
+static int input_node_allows(const SzView *view, float x, float y) {
+  if (!view || !view_is_shown(view) || size_collapsed(view)) return 0;
+  if (!view->parent && view->viewport_w > 0 && view->viewport_h > 0 &&
+      (x < 0 || y < 0 || x >= view->viewport_w || y >= view->viewport_h)) return 0;
+  return !view_clips_children(view) || point_in_view(view, x, y);
+}
+
 static SzView *tooltip_for_focus(SzView *root) {
   for (SzView *p = sz_view_focused(root); p; p = p->parent)
     if (p->kind == SZ_VIEW_TOOLTIP && p->text && p->text[0]) return p;
@@ -5730,7 +5857,7 @@ static SzView *tooltip_for_focus(SzView *root) {
 static int popup_owner_in_scope(SzView *v, SzView *scope) {
   if (!view_is_path_shown(v) || v->frame.w <= 0.f || v->frame.h <= 0.f) return 0;
   int inside = 0;
-  SzRect visible = v->frame;
+  SzRect visible = sz_view_frame(v);
   for (SzView *p = v; p; p = p->parent) {
     if (p == scope) inside = 1;
     if (!view_is_shown(p) ||
@@ -5738,9 +5865,9 @@ static int popup_owner_in_scope(SzView *v, SzView *scope) {
         (p->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(p)) ||
         (p->kind == SZ_VIEW_OVERLAY && !view_overlay_open(p))) return 0;
     if (p->kind == SZ_VIEW_IGNORE_POINTER || p->kind == SZ_VIEW_ABSORB_POINTER) return 0;
-    if (p->kind == SZ_VIEW_SCROLL || p->kind == SZ_VIEW_CLIP || p->kind == SZ_VIEW_ANIMATED_SIZE || p->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE || p->kind == SZ_VIEW_APP_SHELL) {
+    if (view_clips_children(p)) {
       SzRect clipped;
-      if (!rects_intersect(visible, p->frame, &clipped)) return 0;
+      if (!rects_intersect(visible, sz_view_frame(p), &clipped)) return 0;
       visible = clipped;
     }
   }
@@ -5749,9 +5876,10 @@ static int popup_owner_in_scope(SzView *v, SzView *scope) {
 
 static void sync_tooltip_node(SzView *v, SzView *root, SzView *scope, SzView *focus) {
   if (v->kind == SZ_VIEW_TOOLTIP) {
+    SzRect anchor = sz_view_frame(v);
     SzRect viewport = {0, 0, root->viewport_w, root->viewport_h}, visible;
     int eligible = popup_owner_in_scope(v, scope) && v->text && v->text[0] &&
-      rects_intersect(v->frame, viewport, &visible);
+      rects_intersect(anchor, viewport, &visible);
     if (!eligible) v->hover = 0;
     if ((!v->hover && focus != v) || !eligible) v->tooltip_dismissed = 0;
     v->tooltip_open = eligible && (v->hover || focus == v) && !v->tooltip_dismissed;
@@ -5771,9 +5899,9 @@ static void sync_tooltip_node(SzView *v, SzView *root, SzView *scope, SzView *fo
         theme_px_scale(theme), scale_px(theme, theme->line_gap), inner, cap, 1, NULL, NULL);
       float w = fminf(width, metrics.width + 2.f * pad);
       float h = fminf(root->viewport_h, metrics.height + 2.f * pad);
-      float x = fmaxf(0.f, fminf(v->frame.x, root->viewport_w - w));
-      float y = v->frame.y + v->frame.h;
-      if (y + h > root->viewport_h) y = v->frame.y - h;
+      float x = fmaxf(0.f, fminf(anchor.x, root->viewport_w - w));
+      float y = anchor.y + anchor.h;
+      if (y + h > root->viewport_h) y = anchor.y - h;
       y = fmaxf(0.f, fminf(y, root->viewport_h - h));
       v->tooltip_frame = (SzRect){x, y, w, h};
     }
@@ -5824,7 +5952,7 @@ static SzView *input_scope_at(SzView *root, float x, float y) {
   SzView *scope = sz_view_input_scope(root);
   if (scope == root || (scope && scope->kind == SZ_VIEW_SELECT)) return scope;
   for (SzView *p = scope ? scope->parent : NULL; p; p = p->parent) {
-    if (!point_in(&p->frame, x, y) || p->kind == SZ_VIEW_IGNORE_POINTER ||
+    if (!input_node_allows(p, x, y) || p->kind == SZ_VIEW_IGNORE_POINTER ||
         p->kind == SZ_VIEW_ABSORB_POINTER) return NULL;
     if (p == root) break;
   }
@@ -5834,11 +5962,12 @@ static SzView *input_scope_at(SzView *root, float x, float y) {
 static SzView *hit_node(SzView *v, float x, float y) {
   int i;
   SzView *hit;
-  if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
+  if (!input_node_allows(v, x, y))
     return NULL;
   if (v->inline_action) {
     for (int i = 0; i < v->action_count; i++)
-      if (point_in(&v->action_boxes[i], x, y)) return v;
+      { SzRect box = display_rect(v, v->action_boxes[i]);
+        if (point_in(&box, x, y)) return v; }
     return NULL;
   }
   if (v->kind == SZ_VIEW_IGNORE_POINTER)
@@ -5850,14 +5979,14 @@ static SzView *hit_node(SzView *v, float x, float y) {
   if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return NULL;
   if (v->kind == SZ_VIEW_ABSORB_POINTER)
-    return v;
+    return point_in_view(v, x, y) ? v : NULL;
   /* Front-to-back: last child wins. */
   for (i = v->child_count - 1; i >= 0; i--) {
     hit = hit_node(v->children[i], x, y);
     if (hit)
       return hit;
   }
-  if (v->kind == SZ_VIEW_CARD) {
+  if (v->kind == SZ_VIEW_CARD && point_in_view(v, x, y)) {
     for (SzView *p = v->parent; p; p = p->parent) {
       if (p->kind == SZ_VIEW_OVERLAY) return v;
       if (p->interactive) break;
@@ -5867,13 +5996,13 @@ static SzView *hit_node(SzView *v, float x, float y) {
     SzRect handle = sz_view_control_frame(v);
     return point_in(&handle, x, y) ? v : NULL;
   }
-  return v->interactive ? v : NULL;
+  return v->interactive && point_in_view(v, x, y) ? v : NULL;
 }
 
 SzView *sz_view_hit_test(SzView *root, float x, float y) {
   SzView *select = open_select_node(sz_view_input_scope(root));
   if (select) {
-    if (point_in(&select->frame, x, y)) return select;
+    if (point_in_view(select, x, y)) return select;
     SzView *hit = hit_node(sz_view_select_popup(select), x, y);
     return hit ? hit : select;
   }
@@ -5884,7 +6013,7 @@ SzView *sz_view_hit_test(SzView *root, float x, float y) {
 static SzView *tooltip_at_node(SzView *v, float x, float y) {
   int i;
   SzView *found;
-  if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
+  if (!input_node_allows(v, x, y))
     return NULL;
   if (v->kind == SZ_VIEW_IGNORE_POINTER || v->kind == SZ_VIEW_ABSORB_POINTER)
     return NULL;
@@ -5899,7 +6028,7 @@ static SzView *tooltip_at_node(SzView *v, float x, float y) {
     if (found)
       return found;
   }
-  return v->kind == SZ_VIEW_TOOLTIP && v->text && v->text[0] ? v : NULL;
+  return v->kind == SZ_VIEW_TOOLTIP && v->text && v->text[0] && point_in_view(v, x, y) ? v : NULL;
 }
 
 SzView *sz_view_tooltip_at(SzView *root, float x, float y) {
@@ -5910,7 +6039,7 @@ SzView *sz_view_tooltip_at(SzView *root, float x, float y) {
 static SzView *on_secondary_at_node(SzView *v, float x, float y) {
   int i;
   SzView *found;
-  if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
+  if (!input_node_allows(v, x, y))
     return NULL;
   if (v->kind == SZ_VIEW_IGNORE_POINTER)
     return NULL;
@@ -5925,7 +6054,7 @@ static SzView *on_secondary_at_node(SzView *v, float x, float y) {
     if (found)
       return found;
   }
-  return v->kind == SZ_VIEW_ON_SECONDARY ? v : NULL;
+  return v->kind == SZ_VIEW_ON_SECONDARY && point_in_view(v, x, y) ? v : NULL;
 }
 
 int sz_view_handle_secondary(SzView *root, float x, float y) {
@@ -6714,6 +6843,20 @@ static void paint_children_clipped(SzView *v, SkCanvas *c, const SzTheme *theme)
   g_clip_on = prev_on;
 }
 
+/* Round the inverse bounds outward. The device clip stays exact. */
+static SzRect inverse_scale_clip(SzRect rect, float scale, float x, float y) {
+  if (scale == 1) return rect;
+  double left = x + ((double)rect.x - x) / scale;
+  double top = y + ((double)rect.y - y) / scale;
+  double right = x + ((double)rect.x + rect.w - x) / scale;
+  double bottom = y + ((double)rect.y + rect.h - y) / scale;
+  float x0 = nextafterf((float)left, -INFINITY);
+  float y0 = nextafterf((float)top, -INFINITY);
+  float x1 = nextafterf((float)right, INFINITY);
+  float y1 = nextafterf((float)bottom, INFINITY);
+  return (SzRect){x0, y0, x1 - x0, y1 - y0};
+}
+
 static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   char buf[256];
   int i;
@@ -6773,7 +6916,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       related = tabs->children[v->radio_value + 1]->children[0];
     }
     if (v->kind == SZ_VIEW_EXPANSION_TILE && v->child_count > 0) related = v->children[0];
-    SzRect control = sz_view_control_frame(v);
+    SzRect control = control_layout_frame(v);
     sz_web_control(v, v->a11y_role, sz_view_a11y_label(v),
       v->route_id && v->route_id[0] ? v->route_id : NULL,
       v->copy_text, v->sig_str ? sz_signal_str_get(v->sig_str) : "", related, checked,
@@ -7704,6 +7847,27 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     sk_canvas_restore(c);
     break;
   }
+  case SZ_VIEW_SCALE:
+  case SZ_VIEW_ANIMATED_SCALE: {
+    float scale = view_scale(v);
+    if (!(scale > 0)) break;
+    SzRect frame = scale_pivot_frame(v), previous_clip = g_clip, previous_radius = g_radius_rect;
+    float x = frame.x + frame.w * .5f, y = frame.y + frame.h * .5f;
+    float radius = g_radius;
+    sk_canvas_save(c);
+    if (sk_canvas_scale(c, scale, x, y)) {
+      if (g_clip_on) g_clip = inverse_scale_clip(g_clip, scale, x, y);
+      if (g_radius_on) {
+        g_radius_rect = (SzRect){x + (g_radius_rect.x - x) / scale,
+          y + (g_radius_rect.y - y) / scale, g_radius_rect.w / scale, g_radius_rect.h / scale};
+        g_radius /= scale;
+      }
+      for (i = 0; i < v->child_count; i++) paint_node(v->children[i], c, theme);
+    }
+    sk_canvas_restore(c);
+    g_clip = previous_clip; g_radius_rect = previous_radius; g_radius = radius;
+    break;
+  }
   case SZ_VIEW_ANIMATED_POSITION:
 #ifdef __EMSCRIPTEN__
     sz_web_position_transition(v, v->animation_value, v->animation_axis2,
@@ -7925,7 +8089,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     }
 #endif
     if (v->child_count > 0) paint_node(v->children[0], c, theme);
-    SzRect handle = sz_view_control_frame(v);
+    SzRect handle = control_layout_frame(v);
     paint_rect(c, handle.x, handle.y, handle.w, handle.h, theme->muted);
 #ifdef __EMSCRIPTEN__
     if (!excluded) sz_web_control(v, SZ_A11Y_SPLIT, sz_view_a11y_label(v), NULL,
@@ -7947,7 +8111,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   if (v->focused && (v->interactive || v->a11y_role == SZ_A11Y_TAB_PANEL) && !view_is_edit(v)) {
-    SzRect focus = sz_view_control_frame(v);
+    SzRect focus = control_layout_frame(v);
     float inset = v->kind == SZ_VIEW_SPLIT ? 0.f : scale_px(theme, 4.f);
     focus.x += inset;
     focus.y += inset;
@@ -8214,8 +8378,8 @@ static int activate_group_focus(SzView *root, SzView *group) {
   hit = group_focused_target(group);
   if (!hit)
     return 0;
-  fr = hit->frame;
-  return sz_view_activate(root, hit, fr.x + 4.f, fr.y + 4.f);
+  fr = sz_view_control_frame(hit);
+  return sz_view_activate(root, hit, fr.x + fr.w / 2.f, fr.y + fr.h / 2.f);
 }
 
 float sz_view_scroll_x(const SzView *scroll) {
@@ -8361,7 +8525,8 @@ SzView *sz_view_scroll_wheel_target(SzView *root, float x, float y, float dx,
   while (v) {
     double ox = v->scroll_x;
     double oy = v->scroll_y;
-    if (sz_view_scroll_pan(v, dx, dy)) {
+    float scale = sz_view_paint_scale(v);
+    if (scale > 0 && sz_view_scroll_pan(v, dx / scale, dy / scale)) {
       v->scroll_x = ox;
       v->scroll_y = oy;
       return v;
@@ -8374,7 +8539,7 @@ SzView *sz_view_scroll_wheel_target(SzView *root, float x, float y, float dx,
 static SzView *scroll_at_node(SzView *v, float x, float y) {
   int i;
   SzView *found;
-  if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
+  if (!input_node_allows(v, x, y))
     return NULL;
   if (v->kind == SZ_VIEW_IGNORE_POINTER || v->kind == SZ_VIEW_ABSORB_POINTER ||
       (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v)) ||
@@ -8386,7 +8551,7 @@ static SzView *scroll_at_node(SzView *v, float x, float y) {
     if (found)
       return found;
   }
-  return (v->kind == SZ_VIEW_SCROLL || v->kind == SZ_VIEW_EDITOR) ? v : NULL;
+  return (v->kind == SZ_VIEW_SCROLL || v->kind == SZ_VIEW_EDITOR) && point_in_view(v, x, y) ? v : NULL;
 }
 
 SzView *sz_view_scroll_at(SzView *root, float x, float y) {
@@ -8570,7 +8735,7 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
     return z;
   theme = &f->layout_theme;
   if (f->kind == SZ_VIEW_EDITOR)
-    return editor_caret_rect(f, theme);
+    return display_rect(f, editor_caret_rect(f, theme));
   char *display = field_display(f, &c, &pre_start, &pre_end);
   n = (int)strlen(display);
   float *positions = text_positions(display, n, theme->font_px);
@@ -8591,7 +8756,7 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   z.y = y;
   z.w = scale_px(theme, 1.f);
   z.h = h;
-  return z;
+  return display_rect(f, z);
 }
 
 static int caret_offset_at_x(SzView *f, float x) {
@@ -8599,16 +8764,28 @@ static int caret_offset_at_x(SzView *f, float x) {
   const char *source = field_cstr(f);
   int length = (int)strlen(source), best = 0;
   float *positions = text_positions(source, length, f->layout_theme.font_px);
-  float local = x - f->frame.x - scale_px(&f->layout_theme, k_text_field_inset);
-  float distance = fabsf(positions[0] - local);
+  double local = (double)x - f->frame.x - scale_px(&f->layout_theme, k_text_field_inset);
+  float minimum = positions[0], maximum = positions[0];
   for (int byte = 0; byte <= length;) {
-    float next = fabsf(positions[byte] - local);
+    minimum = fminf(minimum, positions[byte]); maximum = fmaxf(maximum, positions[byte]);
+    if (byte == length) break;
+    byte += utf8_clen(source, byte);
+  }
+  local = fmax(minimum - 1., fmin(maximum + 1., local));
+  double distance = fabs(positions[0] - local);
+  for (int byte = 0; byte <= length;) {
+    double next = fabs(positions[byte] - local);
     if (next < distance) { distance = next; best = byte; }
     if (byte == length) break;
     byte += utf8_clen(source, byte);
   }
   sz_free(positions);
   return best;
+}
+
+static int text_row_at_y(double local_y, double line_h) {
+  double row = local_y / line_h;
+  return !(row > 0) ? 0 : row >= INT_MAX ? INT_MAX : (int)row;
 }
 
 static int caret_offset_at_xy(SzView *f, float x, float y) {
@@ -8630,9 +8807,7 @@ static int caret_offset_at_xy(SzView *f, float x, float y) {
   }
   if (line_h < 1.f)
     line_h = 1.f;
-  line = (int)(local_y / line_h);
-  if (line < 0)
-    line = 0;
+  line = text_row_at_y(local_y, line_h);
   line = editor_line_at_vis(f, line);
   if (!line_span(s, n, line, &start, &end))
     return n;
@@ -8656,9 +8831,7 @@ static int editor_toggle_fold_at(SzView *v, float x, float y) {
   if (line_h < 1.f)
     line_h = 1.f;
   local_y = y - v->frame.y - inset + scale_px(theme, v->scroll_y);
-  vis = (int)(local_y / line_h);
-  if (vis < 0)
-    vis = 0;
+  vis = text_row_at_y(local_y, line_h);
   line = editor_line_at_vis(v, vis);
   idx = editor_fold_at(v, line);
   if (idx < 0)
@@ -8791,12 +8964,14 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
     return 1;
   }
   if (hit->kind == SZ_VIEW_TEXT_FIELD) {
+    if (!layout_point(hit, &x, &y)) return 0;
     clear_focus(root);
     hit->focused = 1;
     sz_view_set_text_field_caret(hit, caret_offset_at_x(hit, x));
     return 1;
   }
   if (hit->kind == SZ_VIEW_EDITOR) {
+    if (!layout_point(hit, &x, &y)) return 0;
     clear_focus(root);
     hit->focused = 1;
     if (!editor_toggle_fold_at(hit, x, y))
@@ -8988,6 +9163,12 @@ static void dump_transition_nodes(SzView *view, FILE *file, int *index) {
     fprintf(file, "%s{\"i\":%d,\"kind\":\"position\",\"x\":%d,\"y\":%d,\"targetX\":%d,\"targetY\":%d,\"remaining\":%d,\"suppressed\":%s}",
       *index ? "," : "", *index, view->animation_value, view->animation_axis2,
       view->animation_target, view->animation_target_axis2,
+      view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
+    (*index)++;
+  }
+  if (view->kind == SZ_VIEW_ANIMATED_SCALE) {
+    fprintf(file, "%s{\"i\":%d,\"kind\":\"scale\",\"value\":%d,\"target\":%d,\"remaining\":%d,\"suppressed\":%s}",
+      *index ? "," : "", *index, view->animation_value, view->animation_target,
       view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
     (*index)++;
   }
@@ -9275,8 +9456,8 @@ int sz_view_tap_label(SzView *root, const char *label) {
     SzRect fr;
     if (!lab || strcmp(lab, label) != 0)
       continue;
-    fr = taps[i]->frame;
-    return sz_view_activate(root, taps[i], fr.x + 4.f, fr.y + 4.f);
+    fr = sz_view_control_frame(taps[i]);
+    return sz_view_activate(root, taps[i], fr.x + fr.w / 2.f, fr.y + fr.h / 2.f);
   }
   return 0;
 }
@@ -9734,7 +9915,7 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
   if (focused && !view_is_edit(focused) && focused->kind != SZ_VIEW_SLIDER &&
       !(mods & (SZ_KEY_CTRL | SZ_KEY_CMD | SZ_KEY_ALT)) &&
       (!strcmp(key, "Enter") || !strcmp(key, "Space"))) {
-    SzRect frame = focused->frame;
+    SzRect frame = sz_view_control_frame(focused);
     int handled = sz_view_activate(root, focused, frame.x + frame.w / 2.f, frame.y + frame.h / 2.f);
     if (!sz_view_focused(root)) sz_view_focus(root, focused);
     return handled;
@@ -9950,7 +10131,7 @@ int sz_view_handle_compose(SzView *root, const char *text) {
 }
 
 int sz_view_edit_extend_to_xy(SzView *view, float x, float y) {
-  if (!view_is_edit(view))
+  if (!view_is_edit(view) || !view_is_path_shown(view) || !layout_point(view, &x, &y))
     return 0;
   if (view->kind == SZ_VIEW_EDITOR)
     view->caret = caret_offset_at_xy(view, x, y);
@@ -10021,17 +10202,19 @@ SzView *sz_view_web_find(SzView *v, uintptr_t id) {
 #endif
 
 static void reveal_view(SzView *view) {
-  SzRect frame = view->frame;
+  SzRect frame = sz_view_frame(view);
   for (SzView *p = view->parent; p; p = p->parent) {
     if (p->kind != SZ_VIEW_SCROLL) continue;
     float start = p->scroll_h ? frame.x : frame.y;
     float extent = p->scroll_h ? frame.w : frame.h;
-    float origin = p->scroll_h ? p->frame.x : p->frame.y;
-    float available = p->scroll_h ? p->frame.w : p->frame.h;
+    SzRect viewport = sz_view_frame(p);
+    float origin = p->scroll_h ? viewport.x : viewport.y;
+    float available = p->scroll_h ? viewport.w : viewport.h;
     float delta = start < origin || extent > available ? start - origin :
       start + extent > origin + available ? start + extent - origin - available : 0;
-    if (delta) {
-      sz_view_scroll_by(p, delta / theme_px_scale(&p->layout_theme));
+    float scale = sz_view_paint_scale(p);
+    if (delta && scale > 0) {
+      sz_view_scroll_by(p, delta / (theme_px_scale(&p->layout_theme) * scale));
       if (p->scroll_h) frame.x -= delta; else frame.y -= delta;
     }
   }

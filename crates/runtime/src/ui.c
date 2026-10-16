@@ -1901,14 +1901,16 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
                                       event->y);
       session_mark_dirty(session);
     } else if (session->pointer_scroll) {
-      /* Finger down -> content follows (positive finger pans content up or left). */
+      float scale = sz_view_paint_scale(session->pointer_scroll);
+      if (!(scale > 0)) return 1;
+      /* Finger movement changes the scroll offset in layout coordinates. */
       if (sz_view_scroll_is_h(session->pointer_scroll)) {
         if (dx > 0.5f || dx < -0.5f) {
-          sz_view_scroll_by(session->pointer_scroll, -dx);
+          sz_view_scroll_by(session->pointer_scroll, -dx / scale);
           session_mark_dirty(session);
         }
       } else if (dy > 0.5f || dy < -0.5f) {
-        sz_view_scroll_by(session->pointer_scroll, -dy);
+        sz_view_scroll_by(session->pointer_scroll, -dy / scale);
         session_mark_dirty(session);
       }
     }
@@ -2112,7 +2114,8 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
                                          event->dx, event->dy);
     if (!scroll)
       return 0;
-    (void)sz_view_scroll_pan(scroll, event->dx, event->dy);
+    float scale = sz_view_paint_scale(scroll);
+    if (scale > 0) (void)sz_view_scroll_pan(scroll, event->dx / scale, event->dy / scale);
     session_mark_dirty(session);
     return 1;
   case SZ_INPUT_LIFECYCLE:
