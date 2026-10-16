@@ -89,6 +89,7 @@ jobs:
           CI_SLICES: ${{ matrix.slices }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LIBGL_ALWAYS_SOFTWARE: "1"
+          LP_NUM_THREADS: "2"
         run: |
           read -ra slices <<< "$CI_SLICES"
           for slice in "${slices[@]}"; do

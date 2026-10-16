@@ -44,6 +44,9 @@ It preserves the normal build and the `lib-asan` archive.
 C tests disable leak detection. They still check invalid memory access.
 Compiled corpus replay uses `lib-asan` and `scuzz fuzz --asan` with leak detection.
 GPU needs `LIBGL_ALWAYS_SOFTWARE=1` when the host has no GPU.
+Set `LP_NUM_THREADS=2` for software OpenGL checks.
+This bounds Mesa thread stack reservations within the Linux probe limit.
+See [Mesa LLVMpipe variables](https://docs.mesa3d.org/envvars.html#llvmpipe-driver-environment-variables).
 
 UBSan fails when compile or link support is unavailable.
 The target rejects a known signed overflow before the runtime checks.
