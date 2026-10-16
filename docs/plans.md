@@ -31,7 +31,9 @@ Rebuild the product CLI and check its GUI manual.
 Status: Shared canvas and native View APIs support nested uniform scales.
 Native paint and input use the child center. Layout and text wrapping stay unchanged.
 Field selection, range controls, scroll input, popups, source limits, and motion controls have focused native checks.
-Normal native runtime checks pass. An independent input check rejects a missing inverse transform.
+Normal, ASan, and UBSan native runtime checks pass.
+An independent input check rejects a missing inverse transform.
 Canvas pixel checks pass in Skia, software, and GPU rendering.
-Software paint ASan and UBSan checks pass. Native scale sanitizer and renderer checks remain open.
+Software paint ASan and UBSan checks pass.
+Native scale, position, size, and content-size checks pass with software and GPU rendering.
 The Scuzz API, browser overlays, motion application, replay, and integration checks remain open.
