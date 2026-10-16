@@ -217,13 +217,14 @@ static ShapedText shape_text(SkTextRange range, float size) {
   while (SBScriptLocatorMoveNext(locator)) scripts.push_back(*SBScriptLocatorGetAgent(locator));
   SBScriptLocatorRelease(locator);
   hb_buffer_t *buffer = hb_buffer_create();
+  SBUInteger context_start = 0, context_end = 0;
   auto shape = [&](SBUInteger start, SBUInteger length, SBScript script, bool rtl, unsigned index) {
     hb_font_t *font = shape_font(index);
     unsigned units = hb_face_get_upem(hb_font_get_face(font));
     float scale = (size > 0.f ? size : 8.f) / static_cast<float>(units ? units : 1);
     hb_buffer_clear_contents(buffer);
-    hb_buffer_add_utf8(buffer, text + range.line_start, static_cast<int>(range.line_end - range.line_start),
-      static_cast<unsigned>(start - range.line_start), static_cast<int>(length));
+    hb_buffer_add_utf8(buffer, text + context_start, static_cast<int>(context_end - context_start),
+      static_cast<unsigned>(start - context_start), static_cast<int>(length));
     /* Use one language on each host. The process locale does not select glyphs. */
     hb_buffer_set_language(buffer, hb_language_from_string("und", -1));
     hb_buffer_set_direction(buffer, rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
@@ -235,7 +236,7 @@ static ShapedText shape_text(SkTextRange range, float size) {
     float x = result.width, y = 0.f;
     for (unsigned i = 0; i < count; i++) {
       result.glyphs.push_back(static_cast<SkGlyphID>(info[i].codepoint));
-      result.clusters.push_back(info[i].cluster - static_cast<unsigned>(range.start - range.line_start));
+      result.clusters.push_back(static_cast<unsigned>(context_start) + info[i].cluster - static_cast<unsigned>(range.start));
       result.fonts.push_back(index);
       result.starts.push_back(x);
       result.ends.push_back(x + position[i].x_advance * scale);
@@ -253,8 +254,8 @@ static ShapedText shape_text(SkTextRange range, float size) {
     }
     /* Keep the shaper's source clusters together when coverage is partial. */
     hb_buffer_clear_contents(buffer);
-    hb_buffer_add_utf8(buffer, text + range.line_start, static_cast<int>(range.line_end - range.line_start),
-      static_cast<unsigned>(start - range.line_start), static_cast<int>(length));
+    hb_buffer_add_utf8(buffer, text + context_start, static_cast<int>(context_end - context_start),
+      static_cast<unsigned>(start - context_start), static_cast<int>(length));
     hb_buffer_set_direction(buffer, rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
     hb_buffer_set_script(buffer, hb_script_from_iso15924_tag(SBScriptGetUnicodeTag(script)));
     hb_buffer_set_language(buffer, hb_language_from_string("und", -1));
@@ -262,7 +263,7 @@ static ShapedText shape_text(SkTextRange range, float size) {
     unsigned count;
     const auto *info = hb_buffer_get_glyph_infos(buffer, &count);
     std::vector<unsigned> boundaries = {static_cast<unsigned>(start), static_cast<unsigned>(start + length)};
-    for (unsigned i = 0; i < count; i++) boundaries.push_back(static_cast<unsigned>(range.line_start) + info[i].cluster);
+    for (unsigned i = 0; i < count; i++) boundaries.push_back(static_cast<unsigned>(context_start) + info[i].cluster);
     std::sort(boundaries.begin(), boundaries.end());
     boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
     struct Part { unsigned start, end, font; };
@@ -288,6 +289,8 @@ static ShapedText shape_text(SkTextRange range, float size) {
       SBUInteger count = SBLineGetRunCount(line);
       for (SBUInteger i = 0; i < count; i++) {
         const SBRun &run = runs[i];
+        context_start = run.offset;
+        context_end = run.offset + run.length;
         std::vector<SBScriptAgent> parts;
         for (const auto &script : scripts) {
           SBUInteger start = std::max({run.offset, script.offset, static_cast<SBUInteger>(range.start)});
