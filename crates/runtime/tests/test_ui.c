@@ -165,8 +165,9 @@ static void test_code_block_wheel_pans_x(void) {
   fr = sz_view_frame(scrolls[0]);
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_SCROLL;
-  ev.x = fr.x + 8.f;
-  ev.y = fr.y + 8.f;
+  assert(fr.w > 0.f && fr.h > 0.f);
+  ev.x = fr.x + fr.w * .5f;
+  ev.y = fr.y + fr.h * .5f;
   ev.dy = 24.f;
   assert(sz_ui_inject_sync(session, &ev));
   assert(sz_view_scroll_x(scrolls[0]) == 24.f);
@@ -20244,7 +20245,8 @@ static void test_inline_text_actions(void) {
   assert(text->runs[1].action == 1 && text->runs[4].action == 2);
   SzSignalInt *picked = sz_signal_int(0);
   SzView *root = sz_view_action_text(text, record_text_action, picked);
-  sz_view_layout(root, 160, 800, sz_theme_default());
+  float wrap_width = sk_font_measure_span(sk_text_range("Before wrapped ", 15), sz_theme_default()->font_px, 0) + 4.f;
+  sz_view_layout(root, wrap_width, 800, sz_theme_default());
   SzView *targets[4];
   assert(sz_view_collect_tap_targets(root, targets, 4) == 3);
   assert(targets[0] != targets[1] && sz_view_text_action_id(targets[2]) == INT64_MAX);
