@@ -25,7 +25,7 @@ static int g_motion_value, g_motion_reported;
 static int g_frames;
 static int g_w;
 static int g_h;
-static _Atomic int g_keyboard;
+static _Atomic uint32_t g_keyboard_request;
 static uint8_t *g_rgba;
 static size_t g_rgba_cap;
 static char *g_text_bufs[TEXT_RING];
@@ -270,10 +270,14 @@ int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
 }
 
 void sz_mobile_set_keyboard(int visible) {
-  atomic_store(&g_keyboard, visible ? 1 : 0);
+  uint32_t previous = atomic_load(&g_keyboard_request), next;
+  /* Bit zero gives visibility. Other bits identify each request. */
+  do {
+    next = ((previous + 2u) & ~UINT32_C(1)) | (visible != 0);
+  } while (!atomic_compare_exchange_weak(&g_keyboard_request, &previous, next));
 }
 
-int scuzz_android_keyboard_visible(void) { return atomic_load(&g_keyboard); }
+int scuzz_android_keyboard_request(void) { return (int)atomic_load(&g_keyboard_request); }
 
 static int frame_int(const int *p) {
   int v;

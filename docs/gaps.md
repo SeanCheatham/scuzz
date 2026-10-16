@@ -162,7 +162,7 @@ Full native and evaluator preference replay checks remain open.
 Android reads the animation setting before application startup and observes live changes.
 Android emulator checks cover initial preferences, live changes, visible input, resume, and restart.
 The Android viewport excludes the system bars and display cutout.
-Android keyboard-inset execution checks remain open.
+Android emulator checks cover keyboard insets, typing, dismissal, reopening, and retained text.
 Apple preference sources read the initial setting and observe native notifications.
 Their SDK compilation and execution remain unverified.
 Real-device motion checks remain open.

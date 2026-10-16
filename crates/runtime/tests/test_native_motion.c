@@ -12,6 +12,7 @@ const int32_t sz_eval_value_tag_base = 42;
 int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event);
 
 static int preference, queued, queries, presents, shutdowns;
+static int keyboard_requests, keyboard_wanted;
 int sz_embedder_available(void) { return 1; }
 double sz_embedder_display_scale(void) { return 1; }
 int sz_embedder_reduced_motion(void) { queries++; return preference; }
@@ -37,6 +38,10 @@ int sz_mobile_present(const char *title, int w, int h, int pw, int ph,
   return sz_embedder_present(title, w, h, pw, ph, rgba, bytes);
 }
 void sz_mobile_shutdown(void) { sz_embedder_shutdown(); }
+void sz_mobile_set_keyboard(int visible) {
+  keyboard_requests++;
+  keyboard_wanted = visible != 0;
+}
 
 typedef struct Fixture {
   SzSignalInt *value;
@@ -89,6 +94,35 @@ static void fixture_free(Fixture *f) {
 static void prepare(Fixture *f) {
   sz_view_focus(f->root, f->action);
   sz_view_set_text_field_sel(f->field, 1, 4);
+}
+
+static void test_keyboard_requests(void) {
+  preference = queued = 0;
+  for (int kind = SZ_UI_RUNTIME_HEADLESS; kind <= SZ_UI_RUNTIME_MOBILE; kind++) {
+    SzUiConfig cfg = {.kind = (SzUiRuntimeKind)kind, .width = 320, .height = 120, .scale = 1};
+    SzSignalStr *text = sz_signal_str("Retained input");
+    SzView *field = sz_view_text_field(text, "Name");
+    SzUiSession *session = sz_ui_mount(&cfg, field);
+    assert(session && sz_ui_pump_sync(session));
+    SzRect bounds = sz_view_frame(field);
+    int before = keyboard_requests;
+    for (int tap = 0; tap < 4; tap++) {
+      SzInputEvent event = {.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN,
+                           .x = bounds.x + bounds.w / 2, .y = bounds.y + bounds.h / 2};
+      assert(sz_ui_inject_sync(session, &event));
+      event.pointer_phase = SZ_POINTER_UP;
+      assert(sz_ui_inject_sync(session, &event));
+      assert(sz_ui_pump_sync(session));
+      assert(keyboard_requests == before + (kind == SZ_UI_RUNTIME_MOBILE ? tap + 1 : 0));
+      if (kind == SZ_UI_RUNTIME_MOBILE) assert(keyboard_wanted);
+      assert(!strcmp(sz_signal_str_get(text), "Retained input"));
+      assert(sz_view_focused(field) == field);
+    }
+    sz_ui_unmount(session);
+    if (kind == SZ_UI_RUNTIME_MOBILE) assert(!keyboard_wanted);
+    sz_view_free(field); sz_signal_str_free(text);
+  }
+  puts("Native keyboard: repeated field input requests pass.");
 }
 
 int main(void) {
@@ -156,6 +190,7 @@ int main(void) {
     fixture_free(&live); fixture_free(&replay);
   }
   remove(path);
+  test_keyboard_requests();
   puts("Native motion: 400 recordings replay with equal transitions and retained input.");
   return 0;
 }

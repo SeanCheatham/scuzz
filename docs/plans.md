@@ -44,9 +44,9 @@ Status: Native sessions support an explicit reduction setting and recorded prefe
 Linux has initial detection and live Settings portal input.
 A private bus check covers repeated changes, invalid signals, foreign senders, stale replies, service restart, and shutdown.
 It rejects a deliberate inversion of the preference.
-The rebuilt product CLI includes the current runtime and GUI manual.
+Rebuild the product CLI after the keyboard request change.
 The motion campaign reaches all 29 triggers. It rejects four mutants and reports no survivors.
-All 44 selected motion replays have equal native and evaluator timelines and claims.
+Repeat the 44 selected motion comparisons with the rebuilt CLI.
 Desktop input and resize checks pass.
 Full UI, browser, and package integration checks remain open.
 Recordings include the initial preference before live input.
@@ -55,8 +55,7 @@ A native event fixture compares 400 Desktop and Mobile recordings across all fiv
 It checks retained input, field selection, and the forced native setting.
 The native replay check rejects a missing initial preference, stale suppression, and an ignored forced setting.
 Preference updates clear inherited suppression before later input.
-Normal runtime IO and UI checks pass.
-Full ASan and UBSan runtime checks pass.
+Repeat full runtime IO, UI, ASan, and UBSan checks after the keyboard request change.
 All 400 native replay cases pass in normal, ASan, and UBSan builds.
 The private Linux Settings portal check also passes under both sanitizers.
 Android reads the animation setting before the application worker starts.
@@ -65,7 +64,11 @@ The Java source compiles. Android packages compile for both native ABIs.
 The finite Android emulator check passes with a temporary app and restored settings.
 It checks initial reduction, live changes, visible input, resume, and a new process.
 The host container excludes the system bars and display cutout.
-Keyboard-inset execution checks remain open.
+The Android emulator check covers keyboard insets, typing, dismissal, reopening, and retained text.
+A repeated field tap requests the keyboard even when focus does not change.
+The native check verifies this request for Mobile and excludes it for Headless and Desktop.
+Focused normal, ASan, and UBSan checks pass.
+The native check rejects a runtime that omits the repeated request.
 macOS reads the workspace preference and observes its notification center.
 iOS reads the accessibility preference and observes its status notification.
 Both sources release their observers at shutdown. iOS also reads the setting on resume.

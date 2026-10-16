@@ -39,7 +39,7 @@ def stop():
     run(["shell", "am", "force-stop", bundle])
 
 
-def wait_dump(reduced, target):
+def wait_dump(reduced, target, contains=None):
     end = time.monotonic() + 30
     while time.monotonic() < end:
         try:
@@ -49,15 +49,15 @@ def wait_dump(reduced, target):
             if (data["reducedMotion"] is reduced and motion["target"] == target
                     and motion["value"] == target and motion["remaining"] == 0):
                 assert motion["suppressed"] is reduced
-                return data
+                if contains is None or any(contains in field["value"] for field in data["fields"]):
+                    return data
         except (subprocess.CalledProcessError, json.JSONDecodeError):
             pass
         time.sleep(.2)
     raise AssertionError("The Android motion dump does not reach its expected state.")
 
 
-def click(data, label):
-    button = next(row for row in data["taps"] if row["label"] == label)
+def geometry():
     density = int(run(["shell", "wm", "density"]).stdout.strip().split()[-1]) / 160
     run(["shell", "uiautomator", "dump", "/sdcard/scuzz-motion.xml"])
     tree = ET.fromstring(run(["shell", "cat", "/sdcard/scuzz-motion.xml"]).stdout)
@@ -68,10 +68,31 @@ def click(data, label):
                    and node.get("package") == bundle)
     left, top, right, bottom = map(int, re.findall(r"\d+", surface.get("bounds")))
     assert top > 0 and right > left and bottom > top
-    x = left + round((button["x"] + button["w"] / 2) * density)
-    y = top + round((button["y"] + button["h"] / 2) * density)
+    return (left, top, right, bottom), density
+
+
+def tap(x, y):
+    (left, top, right, bottom), density = geometry()
+    x = left + round(x * density)
+    y = top + round(y * density)
     assert left < x < right and top < y < bottom
     run(["shell", "input", "tap", str(x), str(y)])
+
+
+def click(data, label):
+    button = next(row for row in data["taps"] if row["label"] == label)
+    tap(button["x"] + button["w"] / 2, button["y"] + button["h"] / 2)
+
+
+def wait_viewport(height, smaller):
+    end = time.monotonic() + 30
+    while time.monotonic() < end:
+        (left, top, right, bottom), _ = geometry()
+        current = bottom - top
+        if (current < height if smaller else current == height):
+            return current
+        time.sleep(.2)
+    raise AssertionError("The Android keyboard does not update the viewport.")
 
 
 previous = run(["shell", "settings", "get", "global", "animator_duration_scale"]).stdout.strip()
@@ -101,12 +122,31 @@ try:
         launch()
         resumed = wait_dump(False, 0)
         click(resumed, "Fade in")
-        wait_dump(False, 100)
+        visible = wait_dump(False, 100)
+        (left, top, right, bottom), _ = geometry()
+        full_height = bottom - top
+        add = next(row for row in visible["taps"] if row["label"] == "Add")
+        # The field is above Add. The sample has a gap of eight pixels.
+        tap(add["x"] + add["w"] / 2, add["y"] - 8 - add["h"] / 2)
+        wait_viewport(full_height, True)
+        run(["shell", "input", "text", "Kept"])
+        wait_dump(False, 100, "Kept")
+        setting("0")
+        wait_dump(True, 100, "Kept")
+        run(["shell", "input", "keyevent", "KEYCODE_BACK"])
+        wait_viewport(full_height, False)
+        tap(add["x"] + add["w"] / 2, add["y"] - 8 - add["h"] / 2)
+        wait_viewport(full_height, True)
+        wait_dump(True, 100, "Kept")
+        run(["shell", "input", "keyevent", "KEYCODE_BACK"])
+        wait_viewport(full_height, False)
+        setting("1")
+        wait_dump(False, 100, "Kept")
         stop()
         run(["shell", "run-as", bundle, "rm", "-f", "files/scuzz_android.debug.dump"])
         launch()
         wait_dump(False, 100)
-        print("Android motion: initial preference, live changes, input, resume, and restart pass.")
+        print("Android motion: initial preference, live changes, input, keyboard insets, resume, and restart pass.")
 finally:
     if installed:
         stop()

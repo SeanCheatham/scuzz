@@ -171,6 +171,7 @@ python3 crates/embedder-mobile/shells/android/test_motion.py emulator-5554
 
 The check builds a temporary app from `examples/motion`.
 It checks the initial motion preference, live changes, visible input, resume, and restart.
+It also checks keyboard insets, typing, dismissal, reopening, and retained text.
 It restores the animation setting and removes the temporary app.
 App instructions: run `scuzz docs gui`, `scuzz docs android`, or `scuzz docs ios`.
 

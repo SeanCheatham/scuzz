@@ -1869,8 +1869,12 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->pointer_slider = NULL;
       session->pointer_scroll = NULL;
       session->pointer_field = hit;
+      int keyboard_was_requested = session->keyboard_visible;
       (void)sz_view_handle_tap(session->root, event->x, event->y);
       sync_keyboard(session);
+      if (keyboard_was_requested && session->keyboard_visible &&
+          session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
+        sz_mobile_set_keyboard(1);
     } else {
       session->pointer_slider = NULL;
       session->pointer_scroll =

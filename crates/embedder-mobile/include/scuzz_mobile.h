@@ -24,7 +24,7 @@ int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
 /* Destroy shell resources. */
 void sz_mobile_shutdown(void);
 
-/* Soft keyboard show/hide request from the session (TextField focus). */
+/* Request keyboard display or dismissal. A field tap can repeat a display request. */
 void sz_mobile_set_keyboard(int visible);
 
 /* Pop one queued OS event into out. Returns 1 if an event was written. */

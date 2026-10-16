@@ -46,7 +46,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   private Bitmap bitmap;
   private int[] pixels;
   private int dumped;
-  private int keyboard;
+  private int keyboardRequest;
   private int watchLock;
   private float density = 1f;
   private int pointW;
@@ -89,7 +89,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
   public native void nativeSetAlive(int alive);
 
-  public native int nativeKeyboardVisible();
+  public native int nativeKeyboardRequest();
 
   private void syncMotionPreference() {
     float scale = Settings.Global.getFloat(
@@ -305,12 +305,13 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   }
 
   private void syncKeyboard() {
-    int want = nativeKeyboardVisible();
+    int request = nativeKeyboardRequest();
     InputMethodManager imm;
-    if (want == keyboard) {
+    if (request == keyboardRequest) {
       return;
     }
-    keyboard = want;
+    keyboardRequest = request;
+    int want = request & 1;
     imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
     if (imm == null) {
       return;
