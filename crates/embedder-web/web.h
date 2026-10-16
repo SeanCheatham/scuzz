@@ -26,6 +26,7 @@ void sz_web_text_line(const char *source, SkTextRange context, float context_x, 
 void sz_web_transition(SzView *view, int value, int target, int remaining, int suppressed);
 void sz_web_size_transition(SzView *view, int width, int height, int target_width, int target_height, int remaining, int suppressed);
 void sz_web_content_size_transition(SzView *view, float width, float height, float target_width, float target_height, int remaining, int suppressed);
+void sz_web_position_transition(SzView *view, int x, int y, int target_x, int target_y, int remaining, int suppressed);
 void sz_web_select_state(SzView *view, SzView *popup, SzView *active, int count);
 void sz_web_select_list(SzView *view, SzView *popup, SzRect frame);
 void sz_web_select_option(SzView *option, SzView *view, int index, int count);

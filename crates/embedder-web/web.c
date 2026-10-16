@@ -80,6 +80,14 @@ void sz_web_content_size_transition(SzView *view, float width, float height, flo
   web_content_size_transition(sz_view_id(view), width, height, target_width, target_height, remaining, suppressed);
 }
 
+EM_JS(void, web_position_transition, (uintptr_t view, int x, int y, int target_x, int target_y, int remaining, int suppressed), {
+  Module.webFrame.transitions.push({id: Number(view), kind: 'position', x, y,
+    targetX: target_x, targetY: target_y, remaining, suppressed: Boolean(suppressed)});
+});
+void sz_web_position_transition(SzView *view, int x, int y, int target_x, int target_y, int remaining, int suppressed) {
+  web_position_transition(sz_view_id(view), x, y, target_x, target_y, remaining, suppressed);
+}
+
 EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t active, int count), {
   const item = Module.webFrame.items.at(-1);
   item.active = Number(active); item.optionCount = count;

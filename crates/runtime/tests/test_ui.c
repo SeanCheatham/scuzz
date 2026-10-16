@@ -15463,6 +15463,173 @@ static void test_animated_content_size_constraints(void) {
   sk_surface_unref(surface); sz_view_free(root); sz_signal_str_free(text);
 }
 
+static void position_step(SzView *root, SzView *child, SkCanvas *canvas,
+                          int x, int y, const SzTheme *theme) {
+  int scale = (int)theme->px_scale;
+  assert(sz_view_paint(root, canvas, 400 * scale, 400 * scale, theme));
+  SzRect frame = sz_view_frame(child);
+  assert(frame.x == x * scale && frame.y == y * scale);
+}
+
+static void test_animated_position_steps(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale; theme.background = 0xffffffff;
+    SzSignalInt *x = sz_signal_int(16), *y = sz_signal_int(16), *taps = sz_signal_int(0);
+    SzView *child = sz_view_ink_well("Moving card", counter_tap, taps,
+      sz_view_sized(40, 30, sz_view_background(0xffff0000, sz_view_text(""))));
+    SzView *position = sz_view_animated_position(x, y, 8, child), *stack = sz_view_stack();
+    sz_view_add_child(stack, sz_view_sized(320, 240, sz_view_text("")));
+    sz_view_add_child(stack, position);
+    SzView *root = sz_view_sized(320, 240, sz_view_clip(stack));
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400 * scale, 400 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    position_step(root, child, canvas, 16, 16, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(x, 176); sz_signal_int_set(y, 136);
+    for (int repeat = 0; repeat < 3; repeat++) {
+      sz_view_layout(root, 400 * scale, 400 * scale, &theme);
+      assert(sz_view_frame(child).x == 16 * scale && sz_view_frame(child).y == 16 * scale);
+    }
+    for (int step = 1; step <= 8; step++) {
+      int px = 16 + 20 * step, py = 16 + 15 * step;
+      position_step(root, child, canvas, px, py, &theme);
+      assert(sz_view_frame(child).w == 40 * scale && sz_view_frame(child).h == 30 * scale);
+      assert(sz_view_frame(position).w == (px + 40) * scale && sz_view_frame(position).h == (py + 30) * scale);
+      const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+      assert(px_rgb(pixels, 400 * scale, (px + 1) * scale, (py + 1) * scale, 255, 0, 0));
+      assert(px_rgb(pixels, 400 * scale, 17 * scale, 17 * scale, 255, 255, 255));
+      assert(sz_view_hit_test(root, (px + 1.f) * scale, (py + 1.f) * scale) == child);
+      assert(sz_view_hit_test(root, 17.f * scale, 17.f * scale) == NULL);
+      assert(sz_view_transition_pending(root) == (step < 8));
+    }
+    assert(!sz_view_handle_tap(root, 17.f * scale, 17.f * scale));
+    assert(sz_signal_int_get(taps) == 0);
+    assert(sz_view_handle_tap(root, 177.f * scale, 137.f * scale));
+    assert(sz_signal_int_get(taps) == 1);
+    sz_signal_int_set(x, 16); sz_signal_int_set(y, 16);
+    position_step(root, child, canvas, 156, 121, &theme);
+    position_step(root, child, canvas, 136, 106, &theme);
+    sz_signal_int_set(x, 56); sz_signal_int_set(y, 26);
+    for (int step = 1; step <= 8; step++)
+      position_step(root, child, canvas, 136 - 10 * step, 106 - 10 * step, &theme);
+    sz_signal_int_set(x, 136);
+    position_step(root, child, canvas, 66, 26, &theme);
+    sz_signal_int_set(y, 106);
+    position_step(root, child, canvas, 75, 36, &theme);
+    sz_view_pause_motion(root, 1);
+    sz_signal_int_set(x, 155); sz_signal_int_set(y, 116);
+    for (int repeat = 0; repeat < 3; repeat++) position_step(root, child, canvas, 75, 36, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_view_pause_motion(root, 0);
+    position_step(root, child, canvas, 85, 46, &theme);
+    sz_view_reduce_motion(root, 1);
+    position_step(root, child, canvas, 155, 116, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(x, 300); sz_signal_int_set(y, 220);
+    position_step(root, child, canvas, 300, 220, &theme);
+    assert(sz_view_frame(child).w == 20 * scale && sz_view_frame(child).h == 20 * scale);
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, 400 * scale, 319 * scale, 239 * scale, 255, 0, 0));
+    assert(px_rgb(pixels, 400 * scale, 321 * scale, 239 * scale, 255, 255, 255));
+    assert(px_rgb(pixels, 400 * scale, 319 * scale, 241 * scale, 255, 255, 255));
+    assert(sz_view_hit_test(root, 319.f * scale, 239.f * scale) == child);
+    assert(sz_view_hit_test(root, 321.f * scale, 239.f * scale) == NULL);
+    sz_signal_int_set(x, 330); sz_signal_int_set(y, 250);
+    position_step(root, child, canvas, 330, 250, &theme);
+    assert(sz_view_hit_test(root, 331.f * scale, 251.f * scale) == NULL);
+    pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, 400 * scale, 331 * scale, 251 * scale, 255, 255, 255));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(x); sz_signal_int_free(y); sz_signal_int_free(taps);
+  }
+}
+
+static void test_animated_position_retains_input(void) {
+  for (int hidden = 0; hidden < 3; hidden++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalInt *x = sz_signal_int(16), *y = sz_signal_int(16);
+    SzSignalInt *shown = sz_signal_int(1), *reduced = sz_signal_int(0);
+    SzSignalStr *text = sz_signal_str("Retained position input");
+    SzView *field = sz_view_text_field(text, "Moving name");
+    SzView *position = sz_view_animated_position(x, y, 8, sz_view_sized(120, 40, field));
+    SzView *motion = sz_view_reduced_motion(reduced, position);
+    SzView *root = hidden == 0 ? sz_view_visibility(shown, motion) :
+      hidden == 1 ? sz_view_show_when(shown, 1, motion) : sz_view_offstage(shown, motion);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    position_step(root, field, canvas, 16, 16, &theme);
+    sz_view_focus(root, field); sz_view_set_text_field_sel(field, 2, 5);
+    sz_signal_int_set(x, 176); sz_signal_int_set(y, 136);
+    position_step(root, field, canvas, 36, 31, &theme);
+    assert(sz_view_focused(root) == field && sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 5);
+    SzView *fields[2]; assert(sz_view_collect_text_fields(root, fields, 2) == 1 && fields[0] == field);
+    FILE *file = tmpfile(); assert(file);
+    sz_view_transitions_dump_json(root, file); rewind(file);
+    char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file);
+    json[bytes] = 0; fclose(file);
+    assert(strstr(json, "\"kind\":\"position\",\"x\":36,\"y\":31,\"targetX\":176,\"targetY\":136,\"remaining\":7"));
+    SzString *dump = sz_view_a11y_dump(root);
+    assert(strstr(sz_string_cstr(dump), "position:Moving name=36,31\n")); sz_string_free(dump);
+    sz_signal_int_set(shown, 0);
+    assert(sz_view_paint(root, canvas, 400, 400, &theme));
+    assert(!sz_view_transition_pending(root) && sz_view_focused(root) == NULL);
+    assert(sz_view_collect_text_fields(root, fields, 2) == 0);
+    sz_signal_int_set(x, 80); sz_signal_int_set(y, 64);
+    assert(sz_view_paint(root, canvas, 400, 400, &theme));
+    sz_signal_int_set(shown, 1);
+    position_step(root, field, canvas, 80, 64, &theme);
+    assert(!sz_view_transition_pending(root));
+    assert(!strcmp(sz_signal_str_get(text), "Retained position input"));
+    assert(sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 5);
+    sz_signal_int_set(reduced, 1); sz_signal_int_set(x, 0); sz_signal_int_set(y, 16);
+    position_step(root, field, canvas, 0, 16, &theme);
+    assert(!sz_view_transition_pending(root));
+    assert(sz_view_collect_text_fields(root, fields, 2) == 1);
+    assert(sz_view_hit_test(root, 1, 17) == field);
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(x); sz_signal_int_free(y); sz_signal_int_free(shown); sz_signal_int_free(reduced); sz_signal_str_free(text);
+  }
+}
+
+static void test_animated_position_limits(void) {
+  const int64_t source[][2] = {{INT64_MAX, INT64_MAX}, {INT64_MIN, INT64_MAX}, {INT64_MAX, INT64_MIN}, {INT64_MIN, INT64_MIN}};
+  const int expected[][2] = {{INT_MAX, INT_MAX}, {0, INT_MAX}, {INT_MAX, 0}, {0, 0}};
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale; theme.background = 0xffffffff;
+    SzSignalInt *x = sz_signal_int(0), *y = sz_signal_int(0);
+    SzView *child = sz_view_sized(40, 30, sz_view_background(0xffff0000, sz_view_text("")));
+    SzView *position = sz_view_animated_position(x, y, 8, child);
+    SzView *root = sz_view_unconstrained_box(position);
+    sz_view_reduce_motion(root, 1);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(64 * scale, 64 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    for (size_t i = 0; i < sizeof source / sizeof source[0]; i++) {
+      sz_signal_int_set(x, source[i][0]); sz_signal_int_set(y, source[i][1]);
+      assert(sz_view_paint(root, canvas, 64 * scale, 64 * scale, &theme));
+      assert(sz_view_frame(child).x == (float)expected[i][0] * scale);
+      assert(sz_view_frame(child).y == (float)expected[i][1] * scale);
+      assert(sz_signal_int_get(x) == source[i][0] && sz_signal_int_get(y) == source[i][1]);
+      const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+      assert(px_rgb(pixels, 64 * scale, 1, 1, 255, i == 3 ? 0 : 255, i == 3 ? 0 : 255));
+      assert(!sz_view_transition_pending(root));
+    }
+    sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(x); sz_signal_int_free(y);
+  }
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *x = sz_signal_int(0), *y = sz_signal_int(0);
+  SzView *child = sz_view_sized(40, 30, sz_view_text(""));
+  SzView *root = sz_view_animated_position(x, y, INT_MAX, child);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  position_step(root, child, canvas, 0, 0, &theme);
+  sz_signal_int_set(x, INT64_MAX); sz_signal_int_set(y, INT64_MAX);
+  position_step(root, child, canvas, 1, 1, &theme);
+  assert(sz_view_transition_pending(root));
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(x); sz_signal_int_free(y);
+}
+
 static void test_progress_named_range(void) {
   const int64_t values[] = {INT64_MIN, -1, 0, 17, 100, INT64_MAX};
   const int expected[] = {0, 0, 0, 17, 100, 100};
@@ -20949,6 +21116,13 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--animated-position")) {
+    test_animated_position_steps();
+    test_animated_position_retains_input();
+    test_animated_position_limits();
+    puts("animated position tests ok");
+    return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "--animated-content-size")) {
     test_animated_content_size_steps();
     test_animated_content_size_fractional();
@@ -21722,6 +21896,9 @@ int main(int argc, char **argv) {
   test_slider_pointer_drag();
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
+  test_animated_position_steps();
+  test_animated_position_retains_input();
+  test_animated_position_limits();
   test_animated_content_size_steps();
   test_animated_content_size_fractional();
   test_animated_content_size_retains_input();

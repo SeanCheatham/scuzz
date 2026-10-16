@@ -353,6 +353,19 @@ Pause preserves the current size. Reduced motion uses the measured target immedi
 Hidden content cancels pending motion. Its next visible layout uses the current measurement.
 Recorded output includes fractional current size, target size, and remaining pumps.
 
+Use `View.animatedPosition(x, y, pumps, child)` for a position transition.
+Both coordinates use `Signal[Int]` values in logical pixels.
+Display clamps each coordinate to 0 through the signed 32-bit maximum.
+The constructor does not write either Signal.
+Initial display uses their current values. Both coordinates use one positive pump count.
+The count fits a signed 32-bit integer. A target change starts from the current position.
+Use the layout rules of `View.positioned` for the child and incoming constraints.
+Paint, pointer input, and control bounds use the current child layout.
+Keep child state, focus, and field selection during motion.
+Hidden or reduced content snaps to its target. Pause preserves the current position.
+Layout and input do not advance the shared clock.
+Recorded output includes current coordinates, target coordinates, and remaining pumps.
+
 Use `View.reducedMotion(reduced, child)` to reduce motion in a subtree.
 A nonzero Signal snaps explicit transitions and removes built-in motion steps.
 An ancestor or session preference stays effective inside nested wrappers.

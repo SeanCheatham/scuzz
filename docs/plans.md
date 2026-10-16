@@ -24,4 +24,4 @@ Reject a deliberate position or input defect with an independent check.
 Run runtime, sanitizer, renderer, browser, and integration checks.
 Rebuild the product CLI and check its GUI manual.
 
-Status: `View.positioned` uses fixed coordinates. Its runtime check covers one static offset. Shared position transitions remain to implement.
+Status: The shared native constructor and recorded position data are implemented. Focused native checks pass for exact steps, both axes, retargeting, pixels, pointer input, retained selection, scale, clipping, source limits, hidden cancellation, pause, and reduced motion. Full runtime, sanitizer, and deliberate input-defect checks are active. Compiler exposure, application, browser proof, replay, manual, renderer checks, and integration remain.
