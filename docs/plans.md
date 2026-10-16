@@ -27,4 +27,13 @@ Portable font, shaper, and raster checks pass under ASan and UBSan with leak det
 Unicode editor checks cover pointer positions, arrow movement, insertion, and UTF-8 byte offsets.
 They pass for software, OpenGL, Skia, ASan, and UBSan at two display scales.
 The CLI rebuild passes.
-Application replay, package, browser, Android, and clean UI checks remain open.
+Text application replay passes for software, OpenGL, and Skia.
+Native and evaluator timelines, claims, source text, control geometry, and field state match exactly.
+Package CI passes. Browser text and control checks pass in all five configurations.
+Android arm64 and x86_64 packages pass.
+A finite Android API 36 emulator check covers monospace spans, counter input, typing,
+keyboard viewport changes, and retained state after resume.
+The temporary app, emulator, and private ADB server are removed or stopped.
+Software and OpenGL application snapshots have a maximum channel delta of 1.
+Clean UI validation is in progress.
+Apple SDK execution and physical-device checks remain unverified.
