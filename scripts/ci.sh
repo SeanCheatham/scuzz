@@ -2578,11 +2578,11 @@ cases = {
                    {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}]),
         ('joining', [{'op': 'text', 'i': 0, 'value': 'retained'},
                      {'op': 'tap', 'id': 'expansion:Joining'},
-                     {'op': 'resize', 'width': 640, 'height': 1600, 'scale': 1},
+                     {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
                      {'op': 'tap', 'id': 'textbutton:محمد'},
                      {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2},
                      {'op': 'scroll', 'i': 0, 'dy': 500},
-                     {'op': 'resize', 'width': 640, 'height': 1600},
+                     {'op': 'resize', 'width': 640, 'height': 2000},
                      {'op': 'tap', 'id': 'expansion:Joining'},
                      {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}])],
     'tooltips': [('keys', [

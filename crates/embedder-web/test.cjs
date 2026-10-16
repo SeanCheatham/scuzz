@@ -1023,7 +1023,7 @@ async function activateInline(page, node, mobile) {
 }
 
 async function checkShapingFontChanges(page, browserType, mobile, joining = false) {
-  await page.setViewportSize({width: mobile ? 390 : 640, height: 1600});
+  await page.setViewportSize({width: mobile ? 390 : 640, height: joining ? 2000 : 1600});
   await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
   const panel = page.getByRole('button', {name: joining ? 'Joining' : 'Font changes', exact: true});
   await panel.click();
@@ -1049,7 +1049,9 @@ async function checkShapingFontChanges(page, browserType, mobile, joining = fals
     ['م\u202eر\u202c', [['ﺭ', 18, 0, true], ['ﻡ', 18, 1, true]]],
     ['م\u2067ر\u2069', [['ﺭ', 18, 0, true], ['ﻡ', 18, 1, true]]],
     ['\u202dمعم\u202c', [['\u202dﻢﻌ\u202c', 18, 1, false], ['ﻣ', 18, 0, false]]],
-    ['\u202dfiمم\u202c', [['fiﻢ', 18, 1, false], ['ﻣ', 18, 0, false]]]
+    ['\u202dfiمم\u202c', [['fiﻢ', 18, 1, false], ['ﻣ', 18, 0, false]]],
+    ['م'.repeat(10) + 'ر', null, false, true],
+    ['م'.repeat(10) + 'د', null, false, true]
   ] : [
     ['אבגדהו', [['דהו', 18, 0, true], ['אבג', 24, 0, true]]],
     ['זחטיכל', [['יכל', 18, 0, true], ['זחט', 18, 1, true]]],
@@ -1061,7 +1063,7 @@ async function checkShapingFontChanges(page, browserType, mobile, joining = fals
     ['אבגדהוזחטיכלמנסע', null, false, true]
   ];
   for (const [source, pieces, wrapped, ellipsis, first] of cases) {
-    const result = await page.evaluate(({source, pieces, wrapped, ellipsis, first}) => {
+    const result = await page.evaluate(({source, pieces, wrapped, ellipsis, first, joining}) => {
       const scale = Module.webFrame.scale;
       const block = Module.textBlocks.find(block => block.text === source && !block.lines.some(line => line.action) &&
         (!first || block.lines[0].font === first[0] * scale && (block.lines[0].style & 3) === first[1] &&
@@ -1071,11 +1073,15 @@ async function checkShapingFontChanges(page, browserType, mobile, joining = fals
       const rows = [...new Set(block.lines.map(line => line.y))];
       const row = block.lines.filter(line => line.y === rows.at(-1));
       const end = Math.max(...row.map(line => line.end));
-      const referencePieces = pieces || [[source.slice(2, end) + '...', 18, 0, true], ['אב', 24, 0, true]];
+      const referencePieces = pieces || (joining ? (end === 1 ? [['ﻡ...', 18, 1, true]] :
+        [['ﻤ'.repeat(end - 2) + 'ﻢ...', 18, 0, true], ['ﻣ', 18, 1, true]]) :
+        [[source.slice(2, end) + '...', 18, 0, true], ['אב', 24, 0, true]]);
       const x = Math.min(...row.map(line => line.x)), right = Math.max(...row.map(line => line.x + line.width));
       const font = Math.max(...row.map(line => line.font)), baseline = row[0].y;
       const left = Math.floor(x) - 2, top = Math.floor(baseline - font);
       const width = Math.ceil(right) - left + 2, height = Math.ceil(font * 1.4);
+      if (top < 0 || top + height > Module.canvas.height)
+        throw new Error('The text row is outside the pixel check viewport: ' + source + ' at ' + top);
       const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
       const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
       const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
@@ -1107,9 +1113,13 @@ async function checkShapingFontChanges(page, browserType, mobile, joining = fals
       document.dispatchEvent(event); getSelection().removeAllRanges();
       return {delta, geometry, rows: rows.length, copied, end, advance: row.reduce((sum, line) => sum + line.width, 0), expectedAdvance: next - (x - left),
         dotsLeft: !ellipsis || row.find(line => line.synthetic).x === x};
-    }, {source, pieces, wrapped, ellipsis, first: first || (joining ? [18, 1] : undefined)});
+    }, {source, pieces, wrapped, ellipsis, joining, first: first || (joining ? [18, 1] : undefined)});
     assert(result.delta <= 2, source + ': ' + JSON.stringify(result));
     assert(result.geometry.every(delta => delta < 1), source + ': ' + JSON.stringify(result));
+    if (joining && ellipsis) {
+      assert(source.endsWith('ر') ? result.end === 1 : result.end >= 2, JSON.stringify(result));
+      assert(result.end < source.length, source);
+    }
     assert.equal(result.rows, wrapped ? 2 : 1, source);
     assert(result.dotsLeft && Math.abs(result.advance - result.expectedAdvance) < .1, source + ': ' + JSON.stringify(result));
     assert.equal(result.copied, ellipsis ? source.slice(0, result.end) : source);

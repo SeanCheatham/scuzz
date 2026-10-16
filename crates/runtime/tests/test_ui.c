@@ -19950,13 +19950,13 @@ static void test_styled_text_values(void) {
 
 static void test_font_change_joining(void) {
   if (sk_font_measure_string("i", 24) == sk_font_measure_string("W", 24)) return;
-  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م", "\xe2\x80\xadمع", ("\xe2\x80\xad" "fiم")};
-  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9", "م\xe2\x80\xac", "م\xe2\x80\xac"};
-  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ", "\xe2\x80\xadﻢﻌ\xe2\x80\xac", "fiﻢ"};
-  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ", "ﻣ", "ﻣ"};
+  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م", "\xe2\x80\xadمع", ("\xe2\x80\xad" "fiم"), "م", "م"};
+  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9", "م\xe2\x80\xac", "م\xe2\x80\xac", "مممممممممر", "مممممممممد"};
+  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ", "\xe2\x80\xadﻢﻌ\xe2\x80\xac", "fiﻢ", "ﻡ...", "ﻣ"};
+  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ", "ﻣ", "ﻣ", NULL, "ﻢ..."};
   SzTheme theme = *sz_theme_default();
   theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
-  for (int i = 0; i < 20; i++) {
+  for (int i = 0; i < 22; i++) {
     SzText *a = test_text_span(first[i]), *b = test_text_span(last[i]);
     int style = i == 1 ? SK_TEXT_ITALIC : i == 2 ? 0 : SK_TEXT_BOLD;
     float size = i == 2 || i == 11 ? 32 : 24;
@@ -19971,8 +19971,14 @@ static void test_font_change_joining(void) {
       sz_release(third); sz_release(small);
     }
     int width = i == 10 ? (int)ceilf(sk_font_measure_span(sk_text_range("ﻡ", strlen("ﻡ")), 24, style)) + 5 : 400;
+    int ellipsis = i >= 20;
+    if (ellipsis) {
+      float reference = sk_font_measure_span(sk_text_range(first_form[i], strlen(first_form[i])), size, style);
+      if (last_form[i]) reference += sk_font_measure_span(sk_text_range(last_form[i], strlen(last_form[i])), 24, 0);
+      width = (int)ceilf(reference) + 4;
+    }
     TextProbe probe = {0};
-    SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width - 4, 0, 0, text_probe, &probe);
+    SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width - 4, ellipsis, ellipsis, text_probe, &probe);
     if (i == 15) {
       SzTextMetrics fit = sz_text_layout(text, 24, 1, 6, nextafterf(metrics.width, 0.f), 0, 0, NULL, NULL);
       SzTextMetrics narrow = sz_text_layout(text, 24, 1, 6, metrics.width - 1.f, 0, 0, NULL, NULL);
@@ -19980,12 +19986,17 @@ static void test_font_change_joining(void) {
     }
     int two_lines = i == 9 || i == 10 || i == 12;
     assert(metrics.lines == (two_lines ? 2 : 1));
-    SzView *root = sz_view_rich_text(text);
+    if (ellipsis) {
+      assert(metrics.truncated && probe.dots == 1);
+      assert(probe.ends[probe.count - 1] == (i == 20 ? 2 : 4));
+    }
+    SzView *label = sz_view_rich_text(text);
+    SzView *root = ellipsis ? sz_view_ellipsis(sz_view_max_lines(1, label)) : label;
     SkSurface *actual = sk_surface_make_raster_n32_premul(width, 128);
     SkSurface *expected = sk_surface_make_raster_n32_premul(width, 128);
     assert(actual && expected);
     assert(sz_view_paint(root, sk_surface_get_canvas(actual), width, 128, &theme));
-    assert(!strcmp(sz_view_a11y_label(root), sz_text_source(text)));
+    assert(!strcmp(sz_view_a11y_label(label), sz_text_source(text)));
     SkCanvas *canvas = sk_surface_get_canvas(expected);
     sk_canvas_clear(canvas, sk_color_argb(0));
     SkPaint *paint = sk_paint_new();
@@ -20006,7 +20017,7 @@ static void test_font_change_joining(void) {
     int parts = i == 11 ? 3 : 2;
     for (int j = parts - 1; j >= 0; j--) {
       if (!pieces[j]) continue;
-      int part = i == 13 || i == 14 || i >= 18 ? parts - 1 - j : j;
+      int part = i == 13 || i == 14 || i == 18 || i == 19 ? parts - 1 - j : j;
       positions[part] = x;
       x += sk_font_measure_span(sk_text_range(pieces[part], strlen(pieces[part])), sizes[part], flags[part]);
     }

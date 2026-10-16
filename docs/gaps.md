@@ -115,8 +115,8 @@ Default native Skia checks cover kerning, ligatures, combining accents, Arabic j
 Source cluster checks cover wrapping and ellipsis. Field checks cover shaped carets and pointer positions.
 Same-font span checks cover kerning, ligatures, Arabic joining, combining marks, and fallback clusters.
 Native paint checks compare 25 style and source-cluster cases with unsplit text.
-Twenty native and browser cases check Arabic joining across font and size changes.
-They include direction controls, isolates, transparent marks, and hard and soft line breaks.
+22 native and browser cases check Arabic joining across font and size changes.
+They include direction controls, isolates, transparent marks, line breaks, and ellipsis.
 Browser checks cover joined source ranges, colored glyphs, copying, wrapped-action selection, and retained focus.
 Pinned Noto fonts supply native and browser fallback for Arabic, Devanagari, Thai, and Simplified Chinese.
 Finite checks cover source clusters, mark bounds, CJK field positions, and composition.
