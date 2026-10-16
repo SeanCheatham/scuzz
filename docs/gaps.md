@@ -144,6 +144,7 @@ Native and evaluator replays compare exact content-size timelines and claims.
 Position transitions use the shared pump clock and current child layout.
 Native checks cover exact steps, both axes, clipped parents, source limits, and retained selection.
 Browser checks cover moving control bounds, old and current pointer locations, hidden cancellation, and reduction.
+Browser range checks keep signed 64-bit source values while display clamps the coordinates.
 Native and evaluator replays compare exact position timelines, claims, and control bounds.
 Transform transitions remain open.
 Native operating-system motion preference detection and real-device motion checks remain open.

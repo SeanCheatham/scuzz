@@ -3980,6 +3980,29 @@ PY_SIZE_LIMIT
   "$SCUZZ" fmt "$web_tmp/size limit"
   "$SCUZZ" package --target web --out-dir "$web_tmp/size limit output" "$web_tmp/size limit"
   node crates/embedder-web/test.cjs "$web_tmp/size limit output/package/web" '' size-limit
+  python3 - "$web_tmp/position limit" <<'PY_POSITION_LIMIT'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+(root / 'src').mkdir(parents=True)
+(root / 'scuzz.toml').write_text('[package]\nname="position-limit"\n[ui]\ndefault_runtime="headless"\n')
+(root / 'src/Main.scuzz').write_text('''def minimum(x: Signal[Int], y: Signal[Int]): Unit =
+  for {
+    _ = Signal.set(x, -9223372036854775808)
+  } yield Signal.set(y, -9223372036854775808)
+
+@main def main: IO[Unit] =
+  for {
+    rangeX = Signal.makeN("rangeX", 9223372036854775807)
+    rangeY = Signal.makeN("rangeY", 9223372036854775807)
+    sourceX = Signal.map(rangeX, n => s"X: $n")
+    sourceY = Signal.map(rangeY, n => s"Y: $n")
+    _ <- Ui.run(_ => View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.sized(64, 32, View.clip(View.stack([View.sized(64, 32, View.background(Color.rgb(255, 255, 255), View.text(""))), View.animatedPosition(rangeX, rangeY, 4, View.sized(40, 30, View.background(Color.rgb(255, 0, 0), View.text(""))))]))), View.button("Minimum", _ => minimum(rangeX, rangeY)), View.bindText(sourceX), View.bindText(sourceY)])))
+  } yield ()
+''')
+PY_POSITION_LIMIT
+  "$SCUZZ" fmt "$web_tmp/position limit"
+  "$SCUZZ" package --target web --out-dir "$web_tmp/position limit output" "$web_tmp/position limit"
+  node crates/embedder-web/test.cjs "$web_tmp/position limit output/package/web" '' position-limit
   python3 - "$web_tmp/motion Unicode" <<'PY_MOTION_UTF8'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])

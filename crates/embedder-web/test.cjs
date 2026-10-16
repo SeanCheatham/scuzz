@@ -862,6 +862,43 @@ async function checkSizeLimit(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkPositionLimit(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: 64, height: 96},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile, reducedMotion: 'reduce'});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await page.goto(url);
+    await page.waitForFunction(() => Module.ready && Module.webFrame?.transitions.some(item => item.kind === 'position'));
+    const state = () => page.evaluate(() => {
+      const frame = Module.webFrame.transitions.find(item => item.kind === 'position');
+      const scale = Module.webFrame.scale, ctx = Module.canvas.getContext('2d');
+      const pixel = (x, y) => Array.from(ctx.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data);
+      return {position: [frame.x, frame.y, frame.targetX, frame.targetY, frame.remaining],
+        first: pixel(0, 0), inner: pixel(39, 29), outside: pixel(40, 30),
+        source: Module.ccall('sz_web_snapshot', 'string', [], [])};
+    });
+    const high = await state();
+    assert.deepEqual(high.position, [2147483647, 2147483647, 2147483647, 2147483647, 0]);
+    assert.deepEqual(high.first, [255, 255, 255, 255]);
+    assert.deepEqual(high.inner, [255, 255, 255, 255]);
+    assert.equal((high.source.match(/9223372036854775807/g) || []).length, 2, 'display keeps both source values');
+    assert(high.source.includes('text:X: 9223372036854775807') && high.source.includes('text:Y: 9223372036854775807'));
+    await page.getByRole('button', {name: 'Minimum', exact: true}).click();
+    await page.waitForFunction(() => Module.webFrame.transitions.some(item => item.kind === 'position' && item.x === 0 && item.y === 0 && item.remaining === 0));
+    const low = await state();
+    assert.deepEqual(low.position, [0, 0, 0, 0, 0]);
+    assert.deepEqual(low.first, [255, 0, 0, 255]);
+    assert.deepEqual(low.inner, [255, 0, 0, 255]);
+    assert.deepEqual(low.outside, [255, 255, 255, 255]);
+    assert.equal((low.source.match(/-9223372036854775808/g) || []).length, 2, 'zero coordinates keep both negative source values');
+    assert(low.source.includes('text:X: -9223372036854775808') && low.source.includes('text:Y: -9223372036854775808'));
+    assert.deepEqual(errors, []);
+    console.log(`web position limit: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkSizeMotion(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2691,7 +2728,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }
