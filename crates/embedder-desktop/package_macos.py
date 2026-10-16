@@ -37,7 +37,7 @@ def bundle(exe, dest, name, version, identifier, width, height, scale):
         root = Path(__file__).resolve().parents[2]
         licenses = contents / "Resources" / "licenses"
         licenses.mkdir()
-        for font_name in ("devanagari", "thai", "sc"):
+        for font_name in ("devanagari", "thai", "sc", "arabic"):
             shutil.copy2(root / "third_party/fonts" / (font_name + "-LICENSE"), licenses)
         shutil.copy2(root / "third_party/skia/SheenBidi-LICENSE", licenses)
         copied = {}
