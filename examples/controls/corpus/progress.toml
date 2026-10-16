@@ -1,2 +1,2 @@
 [fuzz]
-events = ["tap slider:Volume", "key Home", "key PageUp", "key End", "key PageDown", "key Home", "tap checkbox:Updates", "tap button:Open", "key Escape"]
+events = ["tap slider:Volume", "key Home", "key PageUp", "key End", "key PageDown", "key Home", "tap button:Mute", "tap checkbox:Updates", "tap button:Open", "key Escape"]

@@ -2053,6 +2053,9 @@ async function checkProgress(browserType, url, mobile) {
       await page.keyboard.press(key);
       await expectValue(value);
     }
+    await page.getByRole('button', {name: 'Mute', exact: true}).click();
+    await page.waitForFunction(() => Module.ccall('sz_web_snapshot', 'string', [], []).includes('slider:Volume=0'));
+    await expectValue('0');
     assert(await original.evaluate(node => node === document.querySelector('[role="progressbar"][aria-label="Linear completion"]')));
     const box = await linear.boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -2074,6 +2077,8 @@ async function checkProgress(browserType, url, mobile) {
       document.body.append(outside);
     });
     await page.getByRole('slider', {name: 'Precise count', exact: true}).focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Mute');
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Outside');
     assert.deepEqual(errors, []);
@@ -2202,7 +2207,11 @@ async function checkControls(browserType, url, mobile) {
       await page.waitForFunction(node => node.getAttribute('aria-valuenow') === '9223372036854775807', await precise.elementHandle());
     }
     await page.keyboard.press('Tab');
+    assert.equal(await activeLabel(), 'Mute');
+    await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.getElementById('app').contains(document.activeElement)), false);
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await activeLabel(), 'Mute');
     await page.keyboard.press('Shift+Tab');
     assert.equal(await activeLabel(), 'Precise count');
     await page.keyboard.press('Shift+Tab');

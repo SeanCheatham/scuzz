@@ -2704,6 +2704,7 @@ cases = {
         {'op': 'key', 'key': 'End'},
         {'op': 'key', 'key': 'PageDown'},
         {'op': 'key', 'key': 'Home'},
+        {'op': 'tap', 'id': 'button:Mute'},
         {'op': 'tap', 'id': 'checkbox:Updates'},
         {'op': 'tap', 'id': 'button:Open'},
         {'op': 'key', 'key': 'Escape'}]),
