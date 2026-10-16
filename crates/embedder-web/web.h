@@ -16,6 +16,7 @@ void sz_web_loop_pause(void);
  * session dirty. */
 void sz_web_idle_wake(void);
 void sz_web_present(int width, int height, const uint8_t *rgba);
+void sz_web_text_scale(float scale);
 void sz_web_frame_begin(float scale);
 void sz_web_frame_end(void);
 void sz_web_text_begin(SzView *view, const char *text, int level, uint32_t ink, uint32_t selection);

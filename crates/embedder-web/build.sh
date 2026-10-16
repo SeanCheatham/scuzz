@@ -18,7 +18,7 @@ INCLUDES=(-I"$ROOT/crates/embedder-web" -I"$ROOT/crates/runtime/include" -I"$ROO
   -I"$ROOT/crates/embedder-desktop/include" -I"$ROOT/crates/embedder-mobile/include")
 FLAGS=(-O2 -sMEMORY64=2)
 BIDI="$ROOT/crates/ffi-skia/build/sheenbidi"
-make -C "$ROOT/crates/ffi-skia" build/sheenbidi/.stamp
+make -C "$ROOT/crates/ffi-skia" build/sheenbidi/.stamp build/harfbuzz/arabic_joining.h build/harfbuzz/HarfBuzz-LICENSE
 "${EMCC[@]}" "${FLAGS[@]}" -std=c11 -DSB_CONFIG_UNITY -I"$BIDI/Headers" -I"$BIDI/Source" \
   -c "$BIDI/Source/SheenBidi.c" -o "$OBJ/sheenbidi.o"
 "${EMCC[@]}" "${FLAGS[@]}" -Wno-override-module -c "$IR" -o "$OBJ/app.o"
@@ -29,7 +29,7 @@ for src in "$ROOT"/crates/runtime/src/*.c; do
 done
 for name in image image_dec sk_sw png_enc sk_gpu_none sk_mono sk_color; do
   "${EMCC[@]}" "${FLAGS[@]}" -std=c11 -I"$ROOT/crates/ffi-skia/include" \
-    -I"$ROOT/crates/ffi-skia/src" -I"$BIDI/Headers" -c "$ROOT/crates/ffi-skia/src/$name.c" -o "$OBJ/$name.o"
+    -I"$ROOT/crates/ffi-skia/src" -I"$ROOT/crates/ffi-skia/build/harfbuzz" -I"$BIDI/Headers" -c "$ROOT/crates/ffi-skia/src/$name.c" -o "$OBJ/$name.o"
 done
 for name in web net_stub; do
   "${EMCC[@]}" "${FLAGS[@]}" "${INCLUDES[@]}" -c "$ROOT/crates/embedder-web/$name.c" -o "$OBJ/$name.o"
@@ -37,6 +37,7 @@ done
 python3 "$ROOT/scripts/fetch_fonts.py" "$ROOT/crates/ffi-skia/build/fonts" --web "$OUT/fonts"
 cp "$ROOT/crates/embedder-web/index.html" "$OUT/index.html"
 cp "$ROOT/third_party/skia/SheenBidi-LICENSE" "$OUT/SheenBidi-LICENSE"
+cp "$ROOT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE" "$OUT/HarfBuzz-LICENSE"
 "${EMCC[@]}" "${FLAGS[@]}" "$OBJ"/*.o -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=8388608 \
   -sEXPORTED_RUNTIME_METHODS=ccall -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576 -sENVIRONMENT=web \
   -o "$OUT/app.js"

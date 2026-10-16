@@ -70,6 +70,8 @@ def main():
             filename = font["name"] + "-" + font["sha256"][:16] + ".ttf"
             (args.web / filename).write_bytes(target.read_bytes())
             css.append('@font-face { font-family: "Scuzz ' + font["name"] + '"; src: url("./' + filename + '") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; unicode-range: ' + font["unicode_range"] + '; }')
+            if font["name"] == "arabic":
+                css.append('@font-face { font-family: "Arabic context"; src: url("./' + filename + '") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; }')
             (args.web / (font["name"] + "-LICENSE")).write_bytes((root / "third_party/fonts" / (font["name"] + "-LICENSE")).read_bytes())
     assembly.extend(["#ifndef __APPLE__", '.section .note.GNU-stack,"",@progbits', "#endif", ""])
     if args.assembly:

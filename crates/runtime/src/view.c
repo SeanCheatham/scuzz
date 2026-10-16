@@ -5529,6 +5529,9 @@ void sz_view_prepare_input(SzView *root) {
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme) {
   if (!root || !theme)
     return;
+#ifdef __EMSCRIPTEN__
+  sz_web_text_scale(theme->px_scale);
+#endif
   g_max_lines = 0;
   g_ellipsis = 0;
   g_gap_on = 0;

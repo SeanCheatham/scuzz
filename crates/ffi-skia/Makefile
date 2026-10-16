@@ -95,6 +95,12 @@ $(HB_DIR)/.stamp: $(PIN) | build
 	@test -f $(HB_DIR)/hb-version.h
 	@echo "$(HB_REV)" > $@
 
+$(HB_DIR)/arabic_joining.h: $(HB_DIR)/.stamp $(ROOT)/scripts/arabic_joining.py
+	python3 "$(ROOT)/scripts/arabic_joining.py" build/harfbuzz.tar.gz "$(HB_SHA)" $@
+
+$(HB_DIR)/HarfBuzz-LICENSE: $(HB_DIR)/arabic_joining.h
+	@test -f $@ || python3 "$(ROOT)/scripts/arabic_joining.py" build/harfbuzz.tar.gz "$(HB_SHA)" $(HB_DIR)/arabic_joining.h
+
 $(SB_DIR)/.stamp: $(PIN) | build
 	@mkdir -p $(SB_DIR)
 	@"$(ROOT)/scripts/fetch_skia.sh" --download "https://codeload.github.com/Tehreer/SheenBidi/tar.gz/$(SB_REV)" build/sheenbidi.tar.gz

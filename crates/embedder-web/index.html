@@ -10,13 +10,13 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: pinch-zoom; }
 #text-layer { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
 #text-layer .text { position: absolute; white-space: pre; text-align: left; pointer-events: auto; }
-#text-layer .text span { position: relative; white-space: pre; color: transparent;
+#text-layer .text span { position: relative; display: inline-block; transform-origin: left top; white-space: pre; color: transparent;
   pointer-events: auto; user-select: text; -webkit-user-select: text; cursor: text; }
 #text-layer .text span::selection { background: var(--selection, #f4d35e); color: var(--ink, #24211c); }
 #app { position: relative; width: 100%; height: 100%; }
 .control { position: absolute; display: block; box-sizing: border-box; margin: 0; padding: 0;
   border: 0; background: transparent; color: transparent; cursor: pointer; pointer-events: auto; }
-#text-layer .text .inline-action { position: static; display: inline; pointer-events: auto; user-select: text; }
+#text-layer .text .inline-action { position: absolute; display: inline-block; pointer-events: auto; user-select: text; }
 #text-layer .text .inline-action, #text-layer .text .inline-action span { cursor: pointer; }
 .inline-action:focus-visible { outline: none !important; }
 .control:focus-visible { outline: 2px solid var(--ink, #24211c); outline-offset: -4px; }
@@ -46,7 +46,7 @@ const encoder = new TextEncoder();
 var Module = {
   canvas: document.getElementById('canvas'),
   nodes: new Map(),
-  scuzzFontStack: '"Scuzz devanagari", "Scuzz thai", "Scuzz sc", monospace',
+  scuzzFontStack: '"Scuzz arabic", "Scuzz devanagari", "Scuzz thai", "Scuzz sc", monospace',
   loadTextFonts(source) {
     this.fontLoads ||= new Map();
     this.fontRanges ||= [...document.fonts].filter(face => face.family.includes('Scuzz ')).map(face => ({
@@ -63,7 +63,8 @@ var Module = {
         return font.ranges.some(([start, end]) => cp >= start && cp <= end);
       });
       if (character === undefined) continue;
-      const promise = document.fonts.load('400 16px ' + font.family, character);
+      const promise = Promise.all([document.fonts.load('400 16px ' + font.family, character),
+        ...(font.family.includes('Scuzz arabic') ? [document.fonts.load('400 16px "Arabic context"', character)] : [])]);
       this.fontLoads.set(font.family, promise);
       promise.then(() => {
         if (Module.ready) Module.ccall('sz_web_fonts_changed', null, [], []);
@@ -360,7 +361,7 @@ var Module = {
             baselines.set(fontStyle, metrics.fontBoundingBoxAscent ?? line.font * 0.8 / scale);
           }
           if (lineIndex === 0) node.style.font = fontStyle;
-          span.style.left = '0px'; span.style.top = '0px';
+          span.style.left = '0px'; span.style.top = '0px'; span.style.transform = 'none';
           span.style.font = fontStyle; span.style.lineHeight = line.line_h / scale + 'px';
           span.style.textDecorationLine = (style & 8) ? 'underline' : 'none';
           span.style.textDecorationColor = 'transparent';
@@ -374,20 +375,25 @@ var Module = {
           while (parent.children.length > (positions.get(parent) || 0)) parent.lastChild.remove();
         let dx = 0, dy = 0;
         if (fragments.length) {
-          const first = fragments[0], rect = first.span.getBoundingClientRect();
-          dx = first.line.x / scale - rect.left;
-          dy = first.line.y / scale - first.ascent - rect.top;
+          dx = Math.min(...fragments.map(({line}) => line.x)) / scale - ox / scale;
+          dy = Math.min(...fragments.map(({line, ascent}) => line.y / scale - ascent)) - oy / scale;
           node.style.left = dx + 'px'; node.style.top = dy + 'px';
+        }
+        for (const action of actions) {
+          action.style.left = (action.item.x - ox) / scale - dx + 'px';
+          action.style.top = (action.item.y - oy) / scale - dy + 'px';
         }
         const boxes = fragments.map(fragment => fragment.span.getBoundingClientRect());
         fragments.forEach(({span, line, ascent}, i) => {
+          if (boxes[i].width > 0) span.style.transform = 'scaleX(' + line.width / scale / boxes[i].width + ')';
           span.style.left = line.x / scale - boxes[i].left + 'px';
           span.style.top = line.y / scale - ascent - boxes[i].top + 'px';
         });
         const width = Math.max(0, ...fragments.map(({line}) => line.x + line.width - ox - dx * scale));
         const height = Math.max(0, ...fragments.map(({line, ascent}, i) => line.y - ascent * scale + boxes[i].height * scale - oy - dy * scale));
         node.style.width = width / scale + 'px'; node.style.height = height / scale + 'px';
-        clip(node, ox + dx * scale, oy + dy * scale, width, height, item.lines[0]?.clip, scale);
+        item.x = ox + dx * scale; item.y = oy + dy * scale;
+        clip(node, item.x, item.y, width, height, item.lines[0]?.clip, scale);
       } else {
         node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
         node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';

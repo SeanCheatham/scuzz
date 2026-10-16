@@ -581,6 +581,8 @@ Plain text measurement and paint use complete lines.
 Adjacent spans with the same font and size use one shaping run.
 Color, underline, and inline actions keep this shaping context.
 Proportional font and size changes keep the visual order of each line.
+Native and browser Arabic text keeps joining forms across font and size changes.
+Joining stays within one direction run of the visible line.
 Native font groups keep glyph context from the same direction run in the visible line.
 Each paint span uses its source range within the complete run.
 Field carets, pointer input, and selection use shaped source positions.
@@ -589,11 +591,12 @@ Composition paints the complete preview without changing the committed Signal.
 Source strings keep their original UTF-8 bytes.
 Editor cells and native monospace spans keep their cell layout.
 The browser uses the same pinned paragraph direction algorithm.
+Pinned HarfBuzz data supplies Arabic joining at font boundaries.
 Its font shaper and DOM text ranges supply glyphs and source positions.
 Pinned Noto fonts supply fallback for Arabic, Devanagari, Thai, and Simplified Chinese.
 Font selection keeps source clusters together. Text line boxes contain fallback marks.
 Web packages include the same fonts. Font loading updates layout and keeps input state.
-Other script coverage, contextual glyph forms across font changes and full bidi caret affinity remain open.
+Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
 The software and OpenGL native renderers retain their code-point cells.
 They do not supply these proportional shaping guarantees.
 See the [HarfBuzz shaping model](https://harfbuzz.github.io/getting-started.html).

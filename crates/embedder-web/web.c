@@ -31,6 +31,8 @@ void sz_web_live_loop(void (*frame)(void)) {
   emscripten_set_main_loop(frame, 0, 0);
 }
 
+EM_JS(void, sz_web_text_scale, (float scale), { Module.scuzzTextScale = scale > 0 ? scale : 1; });
+
 EM_JS(void, sz_web_frame_begin, (float scale), {
   Module.webFrame = {scale, texts: [], sections: [], items: [], groups: [], transitions: []};
 });

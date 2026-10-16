@@ -1012,13 +1012,35 @@ async function checkSelect(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
-async function checkShapingFontChanges(page, browserType, mobile) {
+async function checkShapingFontChanges(page, browserType, mobile, joining = false) {
   await page.setViewportSize({width: mobile ? 390 : 640, height: 1600});
   await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
-  const panel = page.getByRole('button', {name: 'Font changes', exact: true});
+  const panel = page.getByRole('button', {name: joining ? 'Joining' : 'Font changes', exact: true});
   await panel.click();
-  await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'אבגדהו'));
-  const cases = [
+  await page.waitForFunction(source => Module.textBlocks.some(block => block.text === source), joining ? 'مر' : 'אבגדהו');
+  const cases = joining ? [
+    ['مر', [['ﺮ', 18, 0, true], ['ﻣ', 18, 1, true]], false, false, [18, 1]],
+    ['مر', [['ﺮ', 18, 0, true], ['ﻣ', 18, 2, true]], false, false, [18, 2]],
+    ['مر', [['ﺮ', 18, 0, true], ['ﻣ', 24, 0, true]], false, false, [24, 0]],
+    ['لا', [['ﺎ', 18, 0, true], ['ﻟ', 18, 1, true]]],
+    ['در', [['ﺭ', 18, 0, true], ['ﺩ', 18, 1, true]]],
+    ['م ر', [['ﺭ', 18, 0, true], ['ﻡ ', 18, 1, true]]],
+    // Keep the reference mark visible after a presentation form in WebKit.
+    ['مَر', [['ﺮ', 18, 0, true], ['ﻣَ\u034f', 18, 1, true]]],
+    ['م\u200cر', [['ﺭ', 18, 0, true], ['ﻡ', 18, 1, true]]],
+    ['د\u200dر', [['ﺮ', 18, 0, true], ['ﺩ', 18, 1, true]]],
+    ['م\nر', [['ﺭ', 18, 0, true]], true],
+    ['مر', [['ﺭ', 18, 0, true]], true, false, [18, 1]],
+    ['ممر', [['ﺮ', 14, 0, true], ['ﻤ', 18, 2, true], ['ﻣ', 24, 1, true]], false, false, [24, 1]],
+    ['Latin\nمر', [['ﺮ', 18, 0, true], ['ﻣ', 18, 1, true]], true],
+    ['\u202dمر\u202c', [['ﻡ', 18, 1, false], ['ﺭ', 18, 0, false]]],
+    ['\u202dمم\u202c', [['ﻢ', 18, 1, false], ['ﻣ', 18, 0, false]]],
+    ['\u202eAمر\u202c', [['ﺮ', 18, 0, true], ['\u202eAﻣ\u202c', 18, 1, true]]],
+    ['م\u202eر\u202c', [['ﺭ', 18, 0, true], ['ﻡ', 18, 1, true]]],
+    ['م\u2067ر\u2069', [['ﺭ', 18, 0, true], ['ﻡ', 18, 1, true]]],
+    ['\u202dمعم\u202c', [['\u202dﻢﻌ\u202c', 18, 1, false], ['ﻣ', 18, 0, false]]],
+    ['\u202dfiمم\u202c', [['fiﻢ', 18, 1, false], ['ﻣ', 18, 0, false]]]
+  ] : [
     ['אבגדהו', [['דהו', 18, 0, true], ['אבג', 24, 0, true]]],
     ['זחטיכל', [['יכל', 18, 0, true], ['זחט', 18, 1, true]]],
     ['מנסעפצ', [['עפצ', 18, 0, true], ['מנס', 18, 2, true]]],
@@ -1028,10 +1050,14 @@ async function checkShapingFontChanges(page, browserType, mobile) {
     ['אבגדהוז אבגדהו', [['גדהו', 18, 0, true], ['אב', 24, 0, true]], true],
     ['אבגדהוזחטיכלמנסע', null, false, true]
   ];
-  for (const [source, pieces, wrapped, ellipsis] of cases) {
-    const result = await page.evaluate(({source, pieces, wrapped, ellipsis}) => {
-      const block = Module.textBlocks.find(block => block.text === source);
-      const node = Module.nodes.get(block.id), scale = Module.webFrame.scale;
+  for (const [source, pieces, wrapped, ellipsis, first] of cases) {
+    const result = await page.evaluate(({source, pieces, wrapped, ellipsis, first}) => {
+      const scale = Module.webFrame.scale;
+      const block = Module.textBlocks.find(block => block.text === source && !block.lines.some(line => line.action) &&
+        (!first || block.lines[0].font === first[0] * scale && (block.lines[0].style & 3) === first[1] &&
+          new Set(block.lines.map(line => line.y)).size === (wrapped ? 2 : 1)));
+      if (!block) throw new Error('font case is absent: ' + source);
+      const node = Module.nodes.get(block.id);
       const rows = [...new Set(block.lines.map(line => line.y))];
       const row = block.lines.filter(line => line.y === rows.at(-1));
       const end = Math.max(...row.map(line => line.end));
@@ -1043,13 +1069,13 @@ async function checkShapingFontChanges(page, browserType, mobile) {
       const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
       const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
       const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
-      const ctx = reference.getContext('2d'); ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff';
+      const ctx = reference.getContext('2d'); ctx.setTransform(scale, 0, 0, scale, 0, 0); ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff';
       let next = x - left;
       for (const [text, size, style, rtl] of referencePieces) {
-        ctx.font = ((style & 2) ? 'italic ' : '') + ((style & 1) ? 'bold ' : '') + size * scale + 'px ' + Module.scuzzFontStack;
+        ctx.font = ((style & 2) ? 'italic ' : '') + ((style & 1) ? 'bold ' : '') + size + 'px ' + Module.scuzzFontStack;
         ctx.direction = rtl ? 'rtl' : 'ltr';
         const marked = (rtl ? '\u200f' : '\u200e') + text;
-        ctx.fillText(marked, Math.fround(next + left) - left, baseline - top); next += ctx.measureText(marked).width;
+        ctx.fillText(marked, (Math.fround(next + left) - left) / scale, (baseline - top) / scale); next += ctx.measureText(marked).width * scale;
       }
       const mask = ctx.getImageData(0, 0, width, height).data, ink = row[0].ink;
       const rgb = [(ink >>> 16) & 255, (ink >>> 8) & 255, ink & 255];
@@ -1071,20 +1097,20 @@ async function checkShapingFontChanges(page, browserType, mobile) {
       document.dispatchEvent(event); getSelection().removeAllRanges();
       return {delta, geometry, rows: rows.length, copied, end, advance: row.reduce((sum, line) => sum + line.width, 0), expectedAdvance: next - (x - left),
         dotsLeft: !ellipsis || row.find(line => line.synthetic).x === x};
-    }, {source, pieces, wrapped, ellipsis});
+    }, {source, pieces, wrapped, ellipsis, first: first || (joining ? [18, 1] : undefined)});
     assert(result.delta <= 2, source + ': ' + JSON.stringify(result));
     assert(result.geometry.every(delta => delta < 1), source + ': ' + JSON.stringify(result));
     assert.equal(result.rows, wrapped ? 2 : 1, source);
     assert(result.dotsLeft && Math.abs(result.advance - result.expectedAdvance) < .1, source + ': ' + JSON.stringify(result));
     assert.equal(result.copied, ellipsis ? source.slice(0, result.end) : source);
   }
-  await page.getByRole('button', {name: 'קר AB CD', exact: true}).click();
-  await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Count: 52'));
+  await page.getByRole('button', {name: joining ? 'محمد' : 'קר AB CD', exact: true}).click();
+  await page.waitForFunction(value => Module.textBlocks.some(block => block.text === value), joining ? 'Count: 83' : 'Count: 52');
   await panel.click();
   assert.equal(await page.getByRole('textbox', {name: 'Name', exact: true}).inputValue(), 'café');
   await page.setViewportSize({width: mobile ? 390 : 640, height: 720});
   await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
-  console.log(`web font changes: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  console.log(`web ${joining ? "joining" : "font changes"}: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
 }
 
 async function checkShapingParagraphs(page, browserType, mobile) {
@@ -1117,17 +1143,17 @@ async function checkShapingParagraphs(page, browserType, mobile) {
       const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
       const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
       const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
-      const ctx = reference.getContext('2d'); ctx.font = line.font + 'px ' + Module.scuzzFontStack;
+      const ctx = reference.getContext('2d'); ctx.setTransform(scale, 0, 0, scale, 0, 0); ctx.font = line.font / scale + 'px ' + Module.scuzzFontStack;
       ctx.textAlign = 'left'; ctx.direction = rtl ? 'rtl' : 'ltr'; ctx.fillStyle = '#ffffff';
       const mark = override ? '\u202e' : rtl ? '\u200f' : '\u200e';
       if (pieces) {
         let next = x - left;
         for (const [text, direction] of pieces) {
-          ctx.direction = direction; ctx.fillText(text, next, line.y - top); next += ctx.measureText(text).width;
+          ctx.direction = direction; ctx.fillText(text, next / scale, (line.y - top) / scale); next += ctx.measureText(text).width * scale;
         }
-      } else ctx.fillText(mark + visible + (override ? '\u202c' : ''), x - left, line.y - top);
+      } else ctx.fillText(mark + visible + (override ? '\u202c' : ''), (x - left) / scale, (line.y - top) / scale);
       const advance = row.reduce((sum, line) => sum + line.width, 0);
-      const referenceAdvance = ctx.measureText(mark + visible + (override ? '\u202c' : '')).width;
+      const referenceAdvance = ctx.measureText(mark + visible + (override ? '\u202c' : '')).width * scale;
       const mask = ctx.getImageData(0, 0, width, height).data;
       const ink = [(line.ink >>> 16) & 255, (line.ink >>> 8) & 255, line.ink & 255];
       let delta = 0;
@@ -1232,11 +1258,11 @@ async function checkShaping(browserType, url, mobile) {
     releaseFonts();
     await page.evaluate(async () => {
       await Promise.all([document.fonts.load('24px "Scuzz devanagari"', 'नमस्ते'),
-        document.fonts.load('24px "Scuzz thai"', 'สวัสดี'), document.fonts.load('24px "Scuzz sc"', '中文')]);
+        document.fonts.load('24px "Scuzz arabic"', 'مر'), document.fonts.load('24px "Scuzz thai"', 'สวัสดี'), document.fonts.load('24px "Scuzz sc"', '中文')]);
       await document.fonts.ready;
     });
     await page.waitForFunction(paints => [...document.fonts].filter(face => face.family.includes('Scuzz ')).every(face => face.status === 'loaded') && Module.ccall('sz_web_paints', 'number', [], []) > paints, paintsBeforeFonts);
-    assert.equal(fontRequests.size, 3, 'load the three pinned fonts');
+    assert.equal(fontRequests.size, 4, 'load the four pinned fonts');
     assert.equal(await initialField.getAttribute('id'), identity, 'font loading keeps field identity');
     assert(await initialField.evaluate(node => node === document.activeElement && node.selectionStart === 1 && node.selectionEnd === 1), 'font loading keeps focus and selection');
     assert.equal(await initialField.inputValue(), 'אב', 'font loading keeps source state');
@@ -1253,10 +1279,11 @@ async function checkShaping(browserType, url, mobile) {
         const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
         const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
         const ctx = reference.getContext('2d', {willReadFrequently: true});
-        ctx.fillStyle = '#ffffff'; ctx.font = line.font + 'px ' + Module.scuzzFontStack; ctx.textAlign = 'left';
+        const scale = Module.webFrame.scale; ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        ctx.fillStyle = '#ffffff'; ctx.font = line.font / scale + 'px ' + Module.scuzzFontStack; ctx.textAlign = 'left';
         let x = line.x - left;
         for (const [text, direction] of pieces) {
-          ctx.direction = direction; ctx.fillText(text, x, line.y - top); x += ctx.measureText(text).width;
+          ctx.direction = direction; ctx.fillText(text, x / scale, (line.y - top) / scale); x += ctx.measureText(text).width * scale;
         }
         const expected = ctx.getImageData(0, 0, width, height).data;
         const ink = [(line.ink >>> 16) & 255, (line.ink >>> 8) & 255, line.ink & 255];
@@ -1292,9 +1319,10 @@ async function checkShaping(browserType, url, mobile) {
         const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
         const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
         const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
-        const ctx = reference.getContext('2d'); ctx.font = lines[0].font + 'px ' + Module.scuzzFontStack;
+        const ctx = reference.getContext('2d'); ctx.setTransform(scale, 0, 0, scale, 0, 0); ctx.font = lines[0].font / scale + 'px ' + Module.scuzzFontStack;
         ctx.textAlign = 'left'; ctx.direction = 'rtl'; ctx.fillStyle = '#ffffff';
-        ctx.fillText(source, x - left, lines[0].y - top);
+        ctx.fillText(source, (x - left) / scale, (lines[0].y - top) / scale);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         if (lines[0].style & 8) {
           const underline = lines[0].y + lines[0].font * .1;
           ctx.fillRect(Math.floor(x) - left, Math.floor(underline) - top, Math.floor(end) - Math.floor(x),
@@ -1320,7 +1348,7 @@ async function checkShaping(browserType, url, mobile) {
         const event = new Event('copy', {cancelable: true});
         Object.defineProperty(event, 'clipboardData', {value: {setData(type, value) { if (type === 'text/plain') copied = value; }}});
         document.dispatchEvent(event); getSelection().removeAllRanges();
-        return {delta, geometry, copied, pieces: lines.map(line => line.text), inks: lines.map(line => line.ink), width: end - x, reference: ctx.measureText(source).width};
+        return {delta, geometry, copied, pieces: lines.map(line => line.text), inks: lines.map(line => line.ink), width: end - x, reference: ctx.measureText(source).width * scale};
       }, source);
       assert(result.geometry.every(delta => delta < 1), JSON.stringify(result));
       assert(Math.abs(result.width - result.reference) < 1, JSON.stringify(result));
@@ -1413,6 +1441,7 @@ async function checkShaping(browserType, url, mobile) {
     await expectText('Count: 12');
     await checkShapingParagraphs(page, browserType, mobile);
     await checkShapingFontChanges(page, browserType, mobile);
+    await checkShapingFontChanges(page, browserType, mobile, true);
     assert.deepEqual(errors, []);
     await context.close();
     console.log(`web shaping: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
@@ -2168,6 +2197,8 @@ async function main() {
   for (const file of ['index.html', 'app.js', 'app.wasm']) assert(fs.existsSync(path.join(directory, file)), `missing web asset: ${file}`);
   assert.equal(fs.readFileSync(path.join(directory, 'SheenBidi-LICENSE'), 'utf8'),
     fs.readFileSync(path.resolve(__dirname, '../../third_party/skia/SheenBidi-LICENSE'), 'utf8'), 'browser direction license');
+  assert.equal(fs.readFileSync(path.join(directory, 'HarfBuzz-LICENSE'), 'utf8'),
+    fs.readFileSync(path.resolve(__dirname, '../ffi-skia/build/harfbuzz/HarfBuzz-LICENSE'), 'utf8'), 'browser joining license');
   const html = fs.readFileSync(path.join(directory, 'index.html'), 'utf8');
   const js = fs.readFileSync(path.join(directory, 'app.js'), 'utf8');
   const version = html.match(/src="\.\/app\.js\?v=([0-9a-f]{16})"/);
@@ -2176,7 +2207,7 @@ async function main() {
   const server = http.createServer((request, response) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
     const relative = pathname === '/scuzz/' ? 'index.html' : pathname.replace(/^\/scuzz\//, '');
-    if (!['index.html', 'app.js', 'app.wasm', 'fonts/fonts.css'].includes(relative) && !/^fonts\/(devanagari|thai|sc)-[0-9a-f]{16}\.ttf$/.test(relative)) { response.writeHead(404).end(); return; }
+    if (!['index.html', 'app.js', 'app.wasm', 'fonts/fonts.css'].includes(relative) && !/^fonts\/(arabic|devanagari|thai|sc)-[0-9a-f]{16}\.ttf$/.test(relative)) { response.writeHead(404).end(); return; }
     if (!fs.existsSync(path.join(directory, relative))) { response.writeHead(404).end(); return; }
     response.setHeader('Content-Type', relative.endsWith('.wasm') ? 'application/wasm' : relative.endsWith('.js') ? 'text/javascript' : relative.endsWith('.css') ? 'text/css' : relative.endsWith('.ttf') ? 'font/ttf' : 'text/html');
     response.end(fs.readFileSync(path.join(directory, relative)));

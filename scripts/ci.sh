@@ -884,6 +884,26 @@ with patch.object(urllib.request, 'urlopen', side_effect=RuntimeError('font proo
     assert (bidi / ".stamp").read_text().strip() == pin["sheenbidi_revision"]
     subprocess.run(['clang', '-std=c11', '-DSB_CONFIG_UNITY', '-I' + str(bidi / 'Headers'), '-I' + str(bidi / 'Source'),
                     '-c', str(bidi / 'Source/SheenBidi.c'), '-o', str(destination / 'bidi.o')], check=True, timeout=30)
+    joining = home / "crates/ffi-skia/build/harfbuzz"
+    assert (joining / ".stamp").read_text().strip() == pin["harfbuzz_revision"]
+    subprocess.run(['make', '-q', '-C', str(home / 'crates/ffi-skia'), 'build/harfbuzz/arabic_joining.h', 'build/harfbuzz/HarfBuzz-LICENSE'], check=True, timeout=30)
+    assert (joining / "HarfBuzz-LICENSE").read_bytes() == Path("crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE").read_bytes()
+    proof = destination / "joining.c"
+    proof.write_text('#include "arabic_joining.h"\nint main(void) { return sk_joining_type(0x645) != JOINING_TYPE_D || sk_joining_type(0x627) != JOINING_TYPE_R || sk_joining_type(0x200c) != JOINING_TYPE_U || sk_joining_type(0x200d) != JOINING_TYPE_D; }\n')
+    subprocess.run(['clang', '-std=c11', '-I' + str(joining), str(proof), '-o', str(destination / 'joining')], check=True, timeout=30)
+    subprocess.run([str(destination / 'joining')], check=True, timeout=30)
+    snapshots = []
+    for name, letters in [("joining-source", ["م", "ر"]), ("joining-forms", ["ﻣ", "ﺮ"])]:
+        package = destination / name
+        (package / "src").mkdir(parents=True)
+        (package / "scuzz.toml").write_text('[package]\nname = "' + name + '"\n\n[ui]\ndefault_runtime = "headless"\nheadless_size = [160, 96]\n')
+        words = [json.dumps(letter, ensure_ascii=False) for letter in letters]
+        (package / "src/Main.scuzz").write_text('@main def main: IO[Unit] = Ui.run(_ => View.fontSize(24, View.richText(Text.concat([Text.bold(Text.span(' + words[0] + ')), Text.span(' + words[1] + ')]))))\n')
+        subprocess.run([str(prefix / "bin/scuzz"), "fmt", str(package)], check=True, timeout=60)
+        subprocess.run([str(prefix / "bin/scuzz"), "run", "--target", "headless", "--exec", "", str(package)], check=True, timeout=60)
+        snapshots.append(str(package / "build/snapshot.png"))
+    subprocess.run([sys.executable, str(home / "scripts/png_max_delta.py"), "0", *snapshots], check=True, timeout=30)
+
 print('Release fonts and direction: pinned data, licenses, offline reuse, and source assembly pass', flush=True)
 root = Path("/tmp/scuzz-release-app")
 package_out = root / "build/native package"
@@ -2555,7 +2575,16 @@ cases = {
                    {'op': 'scroll', 'i': 0, 'dy': 400},
                    {'op': 'resize', 'width': 640, 'height': 1600},
                    {'op': 'tap', 'id': 'expansion:Font changes'},
-                   {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}])],
+                   {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}]),
+        ('joining', [{'op': 'text', 'i': 0, 'value': 'retained'},
+                     {'op': 'tap', 'id': 'expansion:Joining'},
+                     {'op': 'resize', 'width': 640, 'height': 1600, 'scale': 1},
+                     {'op': 'tap', 'id': 'textbutton:محمد'},
+                     {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2},
+                     {'op': 'scroll', 'i': 0, 'dy': 500},
+                     {'op': 'resize', 'width': 640, 'height': 1600},
+                     {'op': 'tap', 'id': 'expansion:Joining'},
+                     {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}])],
     'tooltips': [('keys', [
         {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Escape'},
         {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
@@ -2889,8 +2918,8 @@ for label, events in cases:
         assert native['taps'] == evaluated['taps'], (label, native, evaluated)
         assert native['scrolls'] == evaluated['scrolls'], (label, native, evaluated)
         values = {s.get('name'): s.get('value') for s in native['signals']}
-        expected = 'retained' if label in ('paragraphs', 'fonts') else 'café' if label == 'keys' else 'AV fi é'
-        assert values['count'] == (23 if label == 'fonts' else 17 if label == 'paragraphs' else 12) and values['name'] == expected, values
+        expected = 'retained' if label in ('paragraphs', 'fonts', 'joining') else 'café' if label == 'keys' else 'AV fi é'
+        assert values['count'] == (31 if label == 'joining' else 23 if label == 'fonts' else 17 if label == 'paragraphs' else 12) and values['name'] == expected, values
         assert native['fields'][0]['value'] == expected
         assert any(t['label'] == 'تفاصيل' for t in native['taps'])
         timeline = (output / 'native.timeline').read_text()
@@ -2900,6 +2929,8 @@ for label, events in cases:
             assert 'textbutton:שלום ABCDEF אב' in timeline and 'text:WWWWWW אבגד AB' in timeline
         if label == 'fonts':
             assert 'textbutton:קר AB CD' in timeline and 'text:אבגדהו' in timeline
+        if label == 'joining':
+            assert 'textbutton:محمد' in timeline and 'text:مر' in timeline
         if label == 'pointer':
             for source in ['क्षि', 'ปู่', '中文漢字']:
                 assert 'text:Value: ' + source in timeline
