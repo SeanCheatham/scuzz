@@ -22,5 +22,9 @@ It includes fractional sizes, Greek, and Cyrillic text.
 Renderer and UI runtime checks pass for software, OpenGL, and Skia.
 Scale checks compare monospace spans and editor cells with larger glyphs.
 Caret paint uses a device pixel column. Reported caret geometry keeps fractional values.
-Runtime sanitizer checks are in progress.
-Portable C++ sanitizer and application checks remain open.
+Runtime ASan and UBSan checks pass.
+Portable font, shaper, and raster checks pass under ASan and UBSan with leak detection.
+Unicode editor checks cover pointer positions, arrow movement, insertion, and UTF-8 byte offsets.
+They pass for software, OpenGL, Skia, ASan, and UBSan at two display scales.
+The CLI rebuild passes.
+Application replay, package, browser, Android, and clean UI checks remain open.

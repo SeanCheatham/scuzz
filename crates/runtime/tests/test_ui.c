@@ -20126,6 +20126,7 @@ static void test_theme_metrics_editor(void) {
     theme.gap *= scale;
     theme.control_h *= scale;
     theme.px_scale = scale;
+    sz_signal_str_set(value, "abcd\nabcd\nabcd\nabcd\nabcd\nabcd");
     sz_view_layout(root, 640 * scale, 480 * scale, &theme);
     sz_view_set_editor_caret(editor, 0);
     sz_view_focus(root, editor);
@@ -20140,6 +20141,26 @@ static void test_theme_metrics_editor(void) {
     sz_view_scroll_pan(editor, 0.f, 10000.f);
     assert(fabsf(sz_view_editor_scroll_y(editor) - 130.f) < .01f);
     sz_view_scroll_pan(editor, 0.f, -10000.f);
+    sz_signal_str_set(value, "IéЖΩx");
+    sz_view_layout(root, 640 * scale, 480 * scale, &theme);
+    frame = sz_view_frame(editor);
+    gutter = sz_view_editor_gutter_w(editor);
+    float cell = sk_font_mono_cell(22.f * scale);
+    const int offsets[] = {0, 1, 3, 5, 7, 8};
+    for (int column = 0; column <= 5; column++) {
+      float x = frame.x + gutter + 6.f * scale + column * cell;
+      sz_view_activate(root, editor, x + .1f * cell, frame.y + 8.f * scale);
+      assert(sz_view_editor_caret(editor) == offsets[column]);
+      SzRect caret = sz_view_caret_rect(root, &theme);
+      assert(fabsf(caret.x - x) < .01f);
+      if (column < 5) {
+        sz_view_handle_key(root, "ArrowRight", "", 0);
+        assert(sz_view_editor_caret(editor) == offsets[column + 1]);
+      }
+    }
+    assert(sz_view_set_editor_caret(editor, 5));
+    sz_view_handle_key(root, "X", "X", 0);
+    assert(strcmp(sz_signal_str_get(value), "IéЖXΩx") == 0);
   }
   sz_view_free(root);
   sz_signal_str_free(value);
