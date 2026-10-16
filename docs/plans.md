@@ -38,6 +38,13 @@ Sources:
 - [Android animator preference](https://developer.android.com/reference/android/animation/ValueAnimator#areAnimatorsEnabled())
 
 Status: Native sessions support an explicit reduction setting and recorded preference events.
-Automatic native preference detection remains open.
+Linux has initial detection and live Settings portal input.
+A private bus check covers repeated changes, invalid signals, foreign senders, stale replies, service restart, and shutdown.
+It rejects a deliberate inversion of the preference.
+The product CLI rebuild passes.
+Desktop input and resize checks pass.
+Runtime, replay, sanitizer, and package checks remain open for this change.
+Initial preference recording needs a shared runtime check.
+Other native preference sources remain open.
 The Linux host has D-Bus development files and tools for a finite private session bus.
 Apple SDK tools are unavailable on this host. Apple execution checks remain open.

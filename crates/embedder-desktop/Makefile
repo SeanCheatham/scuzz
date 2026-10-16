@@ -17,6 +17,14 @@ build:
 
 ifeq ($(UNAME_S),Linux)
 
+INCLUDES += $(shell pkg-config --cflags dbus-1 2>/dev/null)
+
+.PHONY: dbus-check
+dbus-check:
+	@command -v pkg-config >/dev/null 2>&1 && pkg-config --exists dbus-1 || { echo "Install: sudo apt-get install pkg-config libdbus-1-dev" >&2; exit 1; }
+
+build/x11_present.o build/test_motion: | dbus-check
+
 SRC := src/x11_present.c
 OBJ := build/x11_present.o
 
@@ -32,9 +40,10 @@ build/libscuzz_embedder.a: $(OBJ)
 build/test_idle_events build/test_resize: tests/x11_test.h
 
 build/test_%: tests/test_%.c build/libscuzz_embedder.a | build
-	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $< -Lbuild -lscuzz_embedder -lX11 -o $@
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $< -Lbuild -lscuzz_embedder -lX11 $(shell pkg-config --libs dbus-1) -o $@
 
-test: lib build/test_headless build/test_idle_events build/test_resize
+test: lib build/test_headless build/test_idle_events build/test_resize build/test_motion
+	dbus-run-session -- ./build/test_motion
 	env -u DISPLAY ./build/test_headless
 	@if [ -n "$$DISPLAY" ]; then ./build/test_idle_events && ./build/test_resize; else echo "embedder-desktop: skip idle/resize events (no DISPLAY)"; fi
 

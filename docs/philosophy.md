@@ -385,7 +385,10 @@ A nonzero Signal snaps explicit transitions and removes built-in motion steps.
 An ancestor or session preference stays effective inside nested wrappers.
 Headless and native sessions accept `SCUZZ_UI_REDUCED_MOTION=1`.
 The browser follows `prefers-reduced-motion` and listens for changes.
-Native operating-system preference detection remains open.
+Linux Desktop reads the Settings portal motion preference before motion starts.
+It sends live changes through the shared input path.
+An absent portal does not prevent application use.
+Other native operating-system preference detection remains open.
 The shared `reduceMotion` input records preference changes.
 
 Script input paints one pump while an explicit transition has pending steps.

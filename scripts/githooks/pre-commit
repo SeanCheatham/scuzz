@@ -27,6 +27,11 @@ if [[ "$platform" == Darwin ]] && command -v brew >/dev/null 2>&1; then
   if [[ -n "$ssl_prefix" ]]; then INCLUDES+=("-I$ssl_prefix/include"); fi
 fi
 
+if [[ "$platform" == Linux ]] && command -v pkg-config >/dev/null 2>&1; then
+  read -r -a DBUS_INCLUDES <<<"$(pkg-config --cflags dbus-1 2>/dev/null || true)"
+  INCLUDES+=("${DBUS_INCLUDES[@]}")
+fi
+
 fail=0
 for path in "${STAGED[@]}"; do
   [[ -f "$CHECKOUT/$path" ]] || continue
@@ -46,7 +51,8 @@ for path in "${STAGED[@]}"; do
     crates/embedder-desktop/src/x11_present.c | \
     crates/embedder-desktop/tests/test_headless.c | \
     crates/embedder-desktop/tests/test_idle_events.c | \
-    crates/embedder-desktop/tests/test_resize.c)
+    crates/embedder-desktop/tests/test_resize.c | \
+    crates/embedder-desktop/tests/test_motion.c)
       [[ "$platform" == Linux ]] || continue ;;
     crates/runtime/tests/test_net_apple.c)
       [[ "$platform" == Darwin ]] || continue ;;

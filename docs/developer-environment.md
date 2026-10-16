@@ -35,7 +35,7 @@ export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13${LIBRARY_PATH:+:$LIBRARY_PA
 | ASan (`make -C crates/runtime test-asan`) | `libclang-rt-18-dev` (match host clang) |
 | UBSan (`make -C crates/runtime test-ubsan`) | `libclang-rt-18-dev` (match host clang) |
 | GPU (`SCUZZ_SKIA=gpu`) | `libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri xvfb` |
-| Desktop X11 | `libx11-dev xvfb` |
+| Desktop X11 | `libx11-dev libdbus-1-dev pkg-config dbus-daemon xvfb` |
 
 ASan skips when the ASan runtime cannot link.
 The target first checks that ASan rejects a known heap buffer overflow.
@@ -151,6 +151,12 @@ The archive build disables WOFF2 and rejects undefined Brotli symbols.
 `scripts/package_release.sh` includes the pinned host archive unless `SCUZZ_SKIA=sk_sw`.
 
 Desktop uses X11 on Linux and Cocoa on macOS.
+Linux desktop motion preferences use the Settings portal through D-Bus.
+Install its development files before a native UI build:
+
+```bash
+sudo apt-get install -y pkg-config libdbus-1-dev
+```
 AppKit runs on the process main thread. The IO worker sends work to that thread.
 The Mobile host shell writes frame and keyboard records to stderr when `SCUZZ_MOBILE_SHELL=1`.
 It has no input queue and exits after one frame. Pixels remain offscreen.

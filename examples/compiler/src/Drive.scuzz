@@ -94,7 +94,7 @@ def uiFlags1(mac: Bool): String =
   if (mac) " -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon " else " -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive "
 
 def uiFlags2(mac: Bool): String =
-  if (mac) " -framework Cocoa -lobjc " else " -Wl,--no-whole-archive -lX11 -Wl,--whole-archive "
+  if (mac) " -framework Cocoa -lobjc " else " -Wl,--no-whole-archive -lX11 -ldbus-1 -Wl,--whole-archive "
 
 def uiFlags3(gpu: Bool, mac: Bool): String =
   if (mac) Str.concat(if (gpu) gpuLibs(mac) else "", " -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o ") else Str.concat(" -Wl,--no-whole-archive", Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -lssl -lcrypto -rdynamic -o "))

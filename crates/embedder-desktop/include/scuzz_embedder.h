@@ -25,6 +25,9 @@ double sz_embedder_display_scale(void);
  * Weak stub returns 0 (one-shot demos). */
 int sz_embedder_alive(void);
 
+/* Read the initial system motion preference. Start change delivery. */
+int sz_embedder_reduced_motion(void);
+
 /* Present an RGBA8888 frame in a window. Blocks briefly to process events.
  * point_w/point_h are the window size in points; pixel_w/pixel_h are the
  * rgba dimensions (point * backing scale). Returns 1 on success. */

@@ -152,7 +152,10 @@ Zero scale excludes paint, input, focus, and accessibility. Child state remains 
 Browser checks compare glyph coverage with a separate Canvas reference at six scales.
 Native and evaluator replays compare exact scale timelines, claims, and control bounds.
 Rotation transitions remain open.
-Native operating-system motion preference detection and real-device motion checks remain open.
+Linux Desktop reads the Settings portal motion preference and receives live changes.
+A private bus check covers initial values, invalid signals, foreign senders, stale replies, and service restart.
+Initial preference recording and full native preference replay checks remain open.
+Other native operating-system motion preference detection and real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 
 Use the UI work order in `vision.md`.

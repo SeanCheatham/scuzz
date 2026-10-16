@@ -49,6 +49,7 @@ static SkSurface *make_session_surface(int pw, int ph) {
 __attribute__((weak)) int sz_embedder_available(void) { return 0; }
 __attribute__((weak)) double sz_embedder_display_scale(void) { return 1.0; }
 __attribute__((weak)) int sz_embedder_alive(void) { return 0; }
+__attribute__((weak)) int sz_embedder_reduced_motion(void) { return 0; }
 __attribute__((weak)) int sz_embedder_present(const char *title, int point_w,
                                               int point_h, int pixel_w,
                                               int pixel_h, const uint8_t *rgba,
@@ -253,6 +254,7 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
     s->cfg.scale = 1.0;
   /* Desktop: prefer OS backing scale so Retina text stays sharp. */
   if (s->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
+    s->cfg.reduced_motion |= sz_embedder_reduced_motion();
     double ds = sz_embedder_display_scale();
     if (ds > s->cfg.scale)
       s->cfg.scale = ds;
@@ -1526,6 +1528,15 @@ int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event) {
   return sz_ui_inject_sync(session, event);
 }
 
+static void inject_native_event(SzUiSession *session, SzInputEvent *event) {
+  if (event->kind == SZ_INPUT_REDUCED_MOTION) {
+    const char *forced = getenv("SCUZZ_UI_REDUCED_MOTION");
+    if (forced && !strcmp(forced, "1"))
+      event->reduced_motion = 1;
+  }
+  (void)sz_ui_session_live_inject(session, event);
+}
+
 static void drain_mobile_events(SzUiSession *session) {
   SzInputEvent ev;
   if (!session || session->cfg.kind != SZ_UI_RUNTIME_MOBILE)
@@ -1533,7 +1544,7 @@ static void drain_mobile_events(SzUiSession *session) {
   if (!sz_mobile_available())
     return;
   while (sz_mobile_poll_event(&ev))
-    (void)sz_ui_session_live_inject(session, &ev);
+    inject_native_event(session, &ev);
 }
 
 static void drain_desktop_events(SzUiSession *session) {
@@ -1543,7 +1554,7 @@ static void drain_desktop_events(SzUiSession *session) {
   if (!sz_embedder_available())
     return;
   while (sz_embedder_poll_event(&ev))
-    (void)sz_ui_session_live_inject(session, &ev);
+    inject_native_event(session, &ev);
 }
 
 /* The inject document plays whole on change. It is not appended. */
