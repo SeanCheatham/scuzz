@@ -1012,6 +1012,81 @@ async function checkSelect(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkShapingFontChanges(page, browserType, mobile) {
+  await page.setViewportSize({width: mobile ? 390 : 640, height: 1600});
+  await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
+  const panel = page.getByRole('button', {name: 'Font changes', exact: true});
+  await panel.click();
+  await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'אבגדהו'));
+  const cases = [
+    ['אבגדהו', [['דהו', 18, 0, true], ['אבג', 24, 0, true]]],
+    ['זחטיכל', [['יכל', 18, 0, true], ['זחט', 18, 1, true]]],
+    ['מנסעפצ', [['עפצ', 18, 0, true], ['מנס', 18, 2, true]]],
+    ['אב AB CD', [['AB', 24, 0, false], [' CD', 18, 0, false], ['אב ', 24, 0, true]]],
+    ['ab אב גד', [['ab ', 24, 0, false], [' גד', 18, 0, true], ['אב', 24, 0, true]]],
+    ['A\nאבגדהו', [['גדהו', 18, 0, true], ['אב', 24, 0, true]], true],
+    ['אבגדהוז אבגדהו', [['גדהו', 18, 0, true], ['אב', 24, 0, true]], true],
+    ['אבגדהוזחטיכלמנסע', null, false, true]
+  ];
+  for (const [source, pieces, wrapped, ellipsis] of cases) {
+    const result = await page.evaluate(({source, pieces, wrapped, ellipsis}) => {
+      const block = Module.textBlocks.find(block => block.text === source);
+      const node = Module.nodes.get(block.id), scale = Module.webFrame.scale;
+      const rows = [...new Set(block.lines.map(line => line.y))];
+      const row = block.lines.filter(line => line.y === rows.at(-1));
+      const end = Math.max(...row.map(line => line.end));
+      const referencePieces = pieces || [[source.slice(2, end) + '...', 18, 0, true], ['אב', 24, 0, true]];
+      const x = Math.min(...row.map(line => line.x)), right = Math.max(...row.map(line => line.x + line.width));
+      const font = Math.max(...row.map(line => line.font)), baseline = row[0].y;
+      const left = Math.floor(x) - 2, top = Math.floor(baseline - font);
+      const width = Math.ceil(right) - left + 2, height = Math.ceil(font * 1.4);
+      const actual = Module.canvas.getContext('2d').getImageData(left, top, width, height).data;
+      const background = Module.canvas.getContext('2d').getImageData(Module.canvas.width - 2, 2, 1, 1).data;
+      const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
+      const ctx = reference.getContext('2d'); ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff';
+      let next = x - left;
+      for (const [text, size, style, rtl] of referencePieces) {
+        ctx.font = ((style & 2) ? 'italic ' : '') + ((style & 1) ? 'bold ' : '') + size * scale + 'px ' + Module.scuzzFontStack;
+        ctx.direction = rtl ? 'rtl' : 'ltr';
+        const marked = (rtl ? '\u200f' : '\u200e') + text;
+        ctx.fillText(marked, Math.fround(next + left) - left, baseline - top); next += ctx.measureText(marked).width;
+      }
+      const mask = ctx.getImageData(0, 0, width, height).data, ink = row[0].ink;
+      const rgb = [(ink >>> 16) & 255, (ink >>> 8) & 255, ink & 255];
+      let delta = 0;
+      for (let p = 0; p < width * height; p++) for (let channel = 0; channel < 3; channel++) {
+        const expected = Math.floor((rgb[channel] * mask[p * 4 + 3] + background[channel] * (255 - mask[p * 4 + 3])) / 255);
+        delta = Math.max(delta, Math.abs(actual[p * 4 + channel] - expected));
+      }
+      const geometry = node.fragments.map((span, i) => {
+        const box = span.getBoundingClientRect(), line = block.lines[i];
+        return Math.max(Math.abs(box.left * scale - line.x), Math.abs(box.width * scale - line.width));
+      });
+      const range = document.createRange(); range.setStart(node.fragments[0].firstChild, 0);
+      range.setEnd(node.fragments.at(-1).firstChild, node.fragments.at(-1).textContent.length);
+      getSelection().removeAllRanges(); getSelection().addRange(range);
+      let copied;
+      const event = new Event('copy', {cancelable: true});
+      Object.defineProperty(event, 'clipboardData', {value: {setData(type, value) { if (type === 'text/plain') copied = value; }}});
+      document.dispatchEvent(event); getSelection().removeAllRanges();
+      return {delta, geometry, rows: rows.length, copied, end, advance: row.reduce((sum, line) => sum + line.width, 0), expectedAdvance: next - (x - left),
+        dotsLeft: !ellipsis || row.find(line => line.synthetic).x === x};
+    }, {source, pieces, wrapped, ellipsis});
+    assert(result.delta <= 2, source + ': ' + JSON.stringify(result));
+    assert(result.geometry.every(delta => delta < 1), source + ': ' + JSON.stringify(result));
+    assert.equal(result.rows, wrapped ? 2 : 1, source);
+    assert(result.dotsLeft && Math.abs(result.advance - result.expectedAdvance) < .1, source + ': ' + JSON.stringify(result));
+    assert.equal(result.copied, ellipsis ? source.slice(0, result.end) : source);
+  }
+  await page.getByRole('button', {name: 'קר AB CD', exact: true}).click();
+  await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Count: 52'));
+  await panel.click();
+  assert.equal(await page.getByRole('textbox', {name: 'Name', exact: true}).inputValue(), 'café');
+  await page.setViewportSize({width: mobile ? 390 : 640, height: 720});
+  await page.waitForFunction(() => Module.canvas.height === Math.round(innerHeight * devicePixelRatio));
+  console.log(`web font changes: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+}
+
 async function checkShapingParagraphs(page, browserType, mobile) {
   const cases = [
     ['שלום ABCDEF אב', true, false], ['WWWWWW אבגד AB', false, false],
@@ -1337,6 +1412,7 @@ async function checkShaping(browserType, url, mobile) {
     await page.waitForFunction(() => Module.canvas.width === Math.round(innerWidth * devicePixelRatio));
     await expectText('Count: 12');
     await checkShapingParagraphs(page, browserType, mobile);
+    await checkShapingFontChanges(page, browserType, mobile);
     assert.deepEqual(errors, []);
     await context.close();
     console.log(`web shaping: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);

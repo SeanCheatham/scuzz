@@ -2546,7 +2546,16 @@ cases = {
                         {'op': 'scroll', 'i': 0, 'dy': 600},
                         {'op': 'resize', 'width': 640, 'height': 1600},
                         {'op': 'tap', 'id': 'expansion:Paragraphs'},
-                        {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}])],
+                        {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}]),
+        ('fonts', [{'op': 'text', 'i': 0, 'value': 'retained'},
+                   {'op': 'tap', 'id': 'expansion:Font changes'},
+                   {'op': 'resize', 'width': 640, 'height': 1600, 'scale': 1},
+                   {'op': 'tap', 'id': 'textbutton:קר AB CD'},
+                   {'op': 'resize', 'width': 300, 'height': 720, 'scale': 2},
+                   {'op': 'scroll', 'i': 0, 'dy': 400},
+                   {'op': 'resize', 'width': 640, 'height': 1600},
+                   {'op': 'tap', 'id': 'expansion:Font changes'},
+                   {'op': 'resize', 'width': 640, 'height': 720, 'scale': 1}])],
     'tooltips': [('keys', [
         {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Escape'},
         {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Tab'},
@@ -2880,8 +2889,8 @@ for label, events in cases:
         assert native['taps'] == evaluated['taps'], (label, native, evaluated)
         assert native['scrolls'] == evaluated['scrolls'], (label, native, evaluated)
         values = {s.get('name'): s.get('value') for s in native['signals']}
-        expected = 'retained' if label == 'paragraphs' else 'café' if label == 'keys' else 'AV fi é'
-        assert values['count'] == (17 if label == 'paragraphs' else 12) and values['name'] == expected, values
+        expected = 'retained' if label in ('paragraphs', 'fonts') else 'café' if label == 'keys' else 'AV fi é'
+        assert values['count'] == (23 if label == 'fonts' else 17 if label == 'paragraphs' else 12) and values['name'] == expected, values
         assert native['fields'][0]['value'] == expected
         assert any(t['label'] == 'تفاصيل' for t in native['taps'])
         timeline = (output / 'native.timeline').read_text()
@@ -2889,6 +2898,8 @@ for label, events in cases:
         assert 'text:नमस्ते สวัสดี 中文漢字' in timeline and 'text:क्षि ปู่ 中文' in timeline
         if label == 'paragraphs':
             assert 'textbutton:שלום ABCDEF אב' in timeline and 'text:WWWWWW אבגד AB' in timeline
+        if label == 'fonts':
+            assert 'textbutton:קר AB CD' in timeline and 'text:אבגדהו' in timeline
         if label == 'pointer':
             for source in ['क्षि', 'ปู่', '中文漢字']:
                 assert 'text:Value: ' + source in timeline

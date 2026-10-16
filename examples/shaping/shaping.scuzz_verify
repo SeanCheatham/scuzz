@@ -22,7 +22,7 @@ def latinKeepsSource(t: Timeline): Verdict =
 })
 
 def startsWithHebrew(t: Timeline): Verdict =
-  Verdict.every(t, i => i != 0 || Timeline.signalStrHas(t, i, "name", "אב") && Timeline.a11yHas(t, i, "text:Value: אב") && Timeline.signalInt(t, i, "count") == 0 && Timeline.signalInt(t, i, "showParagraphs") == 0)
+  Verdict.every(t, i => i != 0 || Timeline.signalStrHas(t, i, "name", "אב") && Timeline.a11yHas(t, i, "text:Value: אב") && Timeline.signalInt(t, i, "count") == 0 && Timeline.signalInt(t, i, "showParagraphs") == 0 && Timeline.signalInt(t, i, "showFonts") == 0)
 
 def fallbackKeepsSource(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.a11yHas(t, i, "text:नमस्ते สวัสดี 中文漢字") && Timeline.a11yHas(t, i, "text:क्षि ปู่ 中文"))
@@ -30,5 +30,10 @@ def fallbackKeepsSource(t: Timeline): Verdict =
 def paragraphActionKeepsKey(t: Timeline): Verdict =
   Verdict.onHit(t, "textbutton:שלום ABCDEF אב", pair => pair match {
   case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 17
+})
+
+def fontActionKeepsKey(t: Timeline): Verdict =
+  Verdict.onHit(t, "textbutton:קר AB CD", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 23
 })
 

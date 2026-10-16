@@ -2,6 +2,7 @@
 #include "sk_capi.h"
 #include <limits.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int next_cluster(const uint8_t *breaks, int byte, int end) {
@@ -76,6 +77,73 @@ static float range_width(const SzText *text, int start, int end, float font, flo
   return width;
 }
 
+typedef struct TextFragment {
+  SkTextRange context;
+  int start, end, style, colored, dots, action, order;
+  uint32_t color;
+  float x, baseline, width, font, height, context_x, key;
+} TextFragment;
+
+typedef struct TextFragments {
+  TextFragment *values;
+  int count, capacity, start;
+  const float *leading, *trailing;
+} TextFragments;
+
+static void collect_fragment(SkTextRange context, int start, int end,
+  float x, float baseline, float width, float font, float height,
+  int style, uint32_t color, int colored, int dots, int action,
+  float context_x, void *env) {
+  TextFragments *fragments = env;
+  if (fragments->count == fragments->capacity) {
+    if (fragments->capacity > INT_MAX / 2) sz_panic("Text has too many fragments");
+    int capacity = fragments->capacity ? fragments->capacity * 2 : 8;
+    TextFragment *values = sz_alloc((size_t)capacity * sizeof(*values));
+    if (fragments->count) memcpy(values, fragments->values, (size_t)fragments->count * sizeof(*values));
+    sz_free(fragments->values); fragments->values = values; fragments->capacity = capacity;
+  }
+  float key = INFINITY;
+  for (int byte = start; byte < end + (dots ? 3 : 0); byte++) {
+    int at = byte - fragments->start;
+    key = fminf(key, fminf(fragments->leading[at], fragments->trailing[at]));
+  }
+  int order = fragments->count++;
+  fragments->values[order] = (TextFragment){context, start, end, style, colored, dots, action,
+    order, color, x, baseline, width, font, height, context_x, key};
+}
+
+static int fragment_visual_order(const void *a, const void *b) {
+  const TextFragment *first = a, *second = b;
+  if (first->key < second->key) return -1;
+  if (first->key > second->key) return 1;
+  return (first->order > second->order) - (first->order < second->order);
+}
+
+static int fragment_source_order(const void *a, const void *b) {
+  const TextFragment *first = a, *second = b;
+  return (first->order > second->order) - (first->order < second->order);
+}
+
+static void emit_fragments(TextFragments *fragments, SzTextFragmentFn emit, void *env) {
+  qsort(fragments->values, (size_t)fragments->count, sizeof(TextFragment), fragment_visual_order);
+  float x = 0.f;
+  for (int i = 0; i < fragments->count; i++) {
+    TextFragment *part = &fragments->values[i];
+    part->context_x += x - part->x;
+    part->x = x;
+    x += part->width;
+  }
+  /* Source order keeps browser selection and copying in the original text. */
+  qsort(fragments->values, (size_t)fragments->count, sizeof(TextFragment), fragment_source_order);
+  for (int i = 0; i < fragments->count; i++) {
+    const TextFragment *part = &fragments->values[i];
+    emit(part->context, part->start, part->end, part->x, part->baseline, part->width,
+      part->font, part->height, part->style, part->color, part->colored, part->dots,
+      part->action, part->context_x, env);
+  }
+  sz_free(fragments->values);
+}
+
 static void emit_part(SkTextRange context, int start, int end, float left, float right,
   float x, float baseline, float font, float height, const SzTextRun *run,
   SzTextFragmentFn emit, void *env) {
@@ -85,17 +153,26 @@ static void emit_part(SkTextRange context, int start, int end, float left, float
 
 static void emit_run(SkTextRange context, int start, int end, const float *leading,
   const float *trailing, float x, float baseline, float font, float height,
-  const SzTextRun *run, SzTextFragmentFn emit, void *env) {
+  const SzTextRun *run, const TextFragments *visual, SzTextFragmentFn emit, void *env) {
   const char *source = context.source;
   int first = start, ready = 0;
-  float left = 0.f, right = 0.f;
+  float left = 0.f, right = 0.f, visual_left = 0.f, visual_right = 0.f;
+  int direction = 0;
   for (int byte = start; byte < end;) {
     float a = fminf(leading[byte - context.start], trailing[byte - context.start]);
     float b = fmaxf(leading[byte - context.start], trailing[byte - context.start]);
-    if (ready && (a > right + .01f || b < left - .01f)) {
+    float va = visual ? visual->leading[byte - visual->start] : 0.f;
+    float vb = visual ? visual->trailing[byte - visual->start] : 0.f;
+    float vl = fminf(va, vb), vr = fmaxf(va, vb);
+    int next_direction = vb < va ? -1 : vb > va ? 1 : direction;
+    if (ready && (a > right + .01f || b < left - .01f ||
+        (visual && (vl > visual_right + .01f || vr < visual_left - .01f || next_direction != direction)))) {
       emit_part(context, first, byte, left, right, x, baseline, font, height, run, emit, env);
       first = byte; ready = 0;
     }
+    visual_left = ready ? fminf(visual_left, vl) : vl;
+    visual_right = ready ? fmaxf(visual_right, vr) : vr;
+    direction = next_direction;
     left = ready ? fminf(left, a) : a;
     right = ready ? fmaxf(right, b) : b;
     ready = 1;
@@ -218,6 +295,24 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
     float base = fmaxf(line->font, ascent) + 2.f * scale;
     float line_height = fmaxf(line->font + gap, base + descent);
     float baseline = result.height + base;
+    int first_group = run_at(text, line->start);
+    int next_group = text && first_group < text->count ?
+      group_after(text, first_group, line->end, font, scale) : first_group;
+    int mixed = text && line->end > line->start && next_group < text->count &&
+      text->runs[next_group].start < line->end;
+    TextFragments fragments = {.start = line->start};
+    float *visual_positions = NULL;
+    SzTextFragmentFn output = emit;
+    void *output_env = env;
+    if (mixed && emit) {
+      SkTextRange context = {line_source, line_bytes, (size_t)line->start,
+        (size_t)line->end + (line->dots ? 3 : 0)};
+      size_t count = context.end - context.start + 1;
+      visual_positions = sz_alloc(count * 2 * sizeof(float));
+      sk_font_text_positions(context, font, 0, visual_positions, visual_positions + count);
+      fragments.leading = visual_positions; fragments.trailing = visual_positions + count;
+      output = collect_fragment; output_env = &fragments;
+    }
     float x = 0.f;
     for (int i = run_at(text, line->start); text && line->end > line->start && i < text->count && text->runs[i].start < line->end;) {
       int next = group_after(text, i, line->end, font, scale);
@@ -236,7 +331,7 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
           int start = a > run->start ? a : run->start;
           int end = b < run->end ? b : run->end;
           emit_run(context, start, end, leading, trailing, x, baseline, size, line_height,
-            run, emit, env);
+            run, visual_positions ? &fragments : NULL, output, output_env);
         }
         if (line->dots && b == line->end) {
           float left = INFINITY, right = -INFINITY;
@@ -244,8 +339,8 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
             left = fminf(left, fminf(leading[byte - a], trailing[byte - a]));
             right = fmaxf(right, fmaxf(leading[byte - a], trailing[byte - a]));
           }
-          emit(context, b, b, x + left, baseline, right - left, dots_font, line_height,
-            last->style, last->color, last->colored, 1, 0, x, env);
+          output(context, b, b, x + left, baseline, right - left, dots_font, line_height,
+            last->style, last->color, last->colored, 1, 0, x, output_env);
         }
         sz_free(leading);
       }
@@ -262,6 +357,8 @@ SzTextMetrics sz_text_layout(const SzText *text, float font, float scale, float 
       emit((SkTextRange){line_source, line_bytes, (size_t)line->end, (size_t)line->end + 3},
         line->end, line->end, 0.f, baseline, dots_width, dots_font, line_height,
         last->style, last->color, last->colored, 1, 0, 0.f, env);
+    if (visual_positions) emit_fragments(&fragments, emit, env);
+    sz_free(visual_positions);
     sz_free(joined);
     if (line->width > result.width) result.width = line->width;
     result.height += line_height;

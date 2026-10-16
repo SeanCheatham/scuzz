@@ -610,8 +610,9 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
     float ascent = metrics[0], descent = metrics[1];
     int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - size)));
     int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + size)));
-    int top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(y - ascent)));
-    int bottom = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, ceilf(y + descent)));
+    /* Keep antialias coverage outside the geometric glyph bounds. */
+    int top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(y - ascent) - 1.f));
+    int bottom = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, ceilf(y + descent) + 1.f));
     int width = right - left, height = bottom - top;
     if (width < 1 || height < 1) return;
     uint8_t *pixels = malloc((size_t)width * height * 4);
@@ -710,7 +711,7 @@ EM_JS(void, web_cluster_breaks, (const char *text, int bytes, uint8_t *breaks), 
 #endif
 
 #ifdef __EMSCRIPTEN__
-EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int style, int rtl, float *leading, float *trailing), {
+EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int style, int rtl, float advance, float *leading, float *trailing), {
   const source = UTF8ToString(Number(text), bytes);
   let probe = Module.scuzzPositionProbe;
   if (!probe) {
@@ -721,12 +722,13 @@ EM_JS(void, web_text_positions, (const char *text, int bytes, float size, int st
   }
   probe.style.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size + 'px ' + Module.scuzzFontStack; probe.dir = rtl ? "rtl" : "ltr"; probe.textContent = Module.scuzzRunSource(source);
   const bounds = probe.getBoundingClientRect(), origin = bounds.left;
+  const factor = bounds.width > 0 ? advance / bounds.width : 1;
   const range = document.createRange(), node = probe.firstChild;
   const caret = unit => {
-    if (unit === 0) return rtl ? bounds.width : 0;
-    if (unit === node.length) return rtl ? 0 : bounds.width;
+    if (unit === 0) return rtl ? advance : 0;
+    if (unit === node.length) return rtl ? 0 : advance;
     range.setStart(node, unit); range.collapse(true);
-    return range.getBoundingClientRect().left - origin;
+    return (range.getBoundingClientRect().left - origin) * factor;
   };
   let byte = 0, unit = 0, last = 0;
   for (const point of source) {
@@ -765,7 +767,7 @@ void sk_font_text_positions(SkTextRange range, float font_px, int style, float *
   for (size_t i = 0; i < layout.count; i++) {
     const WebTextRun *run = &layout.runs[i];
     size_t start = run->start - range.start, end = run->end - range.start;
-    web_text_positions(range.source + run->start, (int)(run->end - run->start), font_px, style, run->rtl,
+    web_text_positions(range.source + run->start, (int)(run->end - run->start), font_px, style, run->rtl, run->width,
       leading + start, trailing + start);
     for (size_t byte = start; byte < end; byte++) { leading[byte] += run->x; trailing[byte] += run->x; }
   }
