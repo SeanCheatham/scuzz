@@ -33,4 +33,6 @@ The software span measure counts UTF-8 code points and ignores proportional font
 The default Skia path and browser Canvas path support proportional shaping.
 The shared text API carries source ranges and visible line context.
 The checkout includes pinned font data, HarfBuzz metadata, and SheenBidi source.
-The portable native shaping and glyph raster paths remain open.
+The shared native shaper supplies font selection, script runs, clusters, and carets.
+The default Skia path uses this shaper.
+The portable font provider and glyph raster paths remain open.

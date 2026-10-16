@@ -111,7 +111,7 @@ $(SB_DIR)/.stamp: $(PIN) | build
 build/sheenbidi.o: $(SB_DIR)/.stamp
 	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o $@
 
-build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h include/sk_text.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
+build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h src/sk_text_shape.h include/sk_text.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
 	$(CXX) -std=c++17 -O2 -fPIC -c src/sk_capi_skia.cpp -o $@ \
 	  -Ibuild/skia-src -I$(HB_DIR) -I$(SB_DIR)/Headers -DSK_RELEASE -DSCUZZ_SKIA_EMBEDDED_FONT \
 	  -DSCUZZ_SKIA_EMBEDDED_MONO_FONT
