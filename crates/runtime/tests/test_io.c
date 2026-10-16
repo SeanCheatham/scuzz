@@ -3574,6 +3574,15 @@ static void test_float_box_equality(void) {
   neg_box = sz_box_float_bits(neg_bits);
   int_box = sz_box_i64(pos_bits);
   assert(!sz_ptr_eq(nan_box, nan_box));
+  void *containers[] = {
+    sz_adt_new(7, nan_box), sz_pair_new(nan_box, nan_box),
+    sz_list_cons(nan_box, NULL), sz_either_right(nan_box), sz_error_value(nan_box),
+    sz_map_set(sz_map_empty(), int_box, nan_box, 0)
+  };
+  for (size_t i = 0; i < sizeof containers / sizeof containers[0]; i++) {
+    assert(!sz_ptr_eq(containers[i], containers[i]));
+    sz_release(containers[i]);
+  }
   assert(sz_ptr_eq(pos_box, neg_box));
   assert(!sz_ptr_eq(pos_box, int_box));
   xs = sz_list_cons(neg_box, sz_list_nil());

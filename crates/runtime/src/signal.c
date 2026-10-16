@@ -637,7 +637,7 @@ void *sz_signal_read(SzSignal *s) {
 
 void *sz_signal_write(SzSignal *s, void *value) {
   if (!s || s->map_fn) return NULL;
-  if (s->value == value || sz_ptr_eq(s->value, value)) return NULL;
+  if (sz_ptr_eq(s->value, value)) return NULL;
   sz_retain(value);
   drop_value(s, s->value);
   s->value = value;

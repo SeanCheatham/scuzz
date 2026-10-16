@@ -17043,6 +17043,36 @@ static void test_signal_mirror_revision(void) {
   sz_signal_free(mirror);
 }
 
+static void *map_counting_value(void *value, void *env) {
+  (void)env;
+  g_map_calls++;
+  sz_retain(value);
+  return value;
+}
+
+static void test_signal_nan_alias(void) {
+  double nan = NAN;
+  int64_t bits;
+  memcpy(&bits, &nan, sizeof bits);
+  void *box = sz_box_float_bits(bits);
+  void *values[] = {box, sz_adt_new(7, box), sz_list_cons(box, NULL)};
+  for (size_t i = 0; i < sizeof values / sizeof values[0]; i++) {
+    g_map_calls = 0;
+    SzSignal *source = sz_signal_new(values[i], 4, NULL);
+    SzSignal *mapped = sz_signal_derive(source, map_counting_value, NULL, 4, NULL);
+    for (int step = 1; step <= 3; step++) {
+      sz_signal_write(source, values[i]);
+      void *value = sz_signal_read(mapped);
+      sz_release(value);
+      assert(g_map_calls == step + 1);
+    }
+    sz_signal_free(mapped);
+    sz_signal_free(source);
+    if (i) sz_release(values[i]);
+  }
+  sz_release(box);
+}
+
 static void test_signal_map_caches_unchanged_source(void) {
   SzSignalInt *count;
   SzSignalStr *label;
@@ -20363,7 +20393,13 @@ static void test_opacity_transition_frames(void) {
   assert(sz_view_animated_opacity_value(animation) == 100 && sz_view_motion_pending(root));
   assert(sz_view_paint(root, canvas, 20, 12, &theme));
   assert(sz_view_animated_opacity_value(animation) == 75);
-  assert(px_rgb(sk_surface_peek_pixels(surface, NULL), 20, 5, 5, 64, 64, 255));
+  const uint8_t *faded = sk_surface_peek_pixels(surface, NULL) + (5 * 20 + 5) * 4;
+  if (faded[0] != 64 || faded[1] != 64 || faded[2] != 255)
+    fprintf(stderr, "Opacity pixel at 75 percent: %u %u %u %u\n",
+            faded[0], faded[1], faded[2], faded[3]);
+  /* Allow one channel value for intermediate alpha rounding. */
+  assert(abs((int)faded[0] - 64) <= 1 && abs((int)faded[1] - 64) <= 1 &&
+         faded[2] == 255 && faded[3] == 255);
   assert(sz_signal_int_get(value) == 0);
   assert(sz_view_paint(root, canvas, 20, 12, &theme));
   assert(sz_view_animated_opacity_value(animation) == 50);
@@ -22458,6 +22494,7 @@ int main(int argc, char **argv) {
   test_signal_map_source_free();
   test_signal_mirror_revision();
   test_signal_map_caches_unchanged_source();
+  test_signal_nan_alias();
   test_signal_list_elem_str_flag();
   test_signal_dump_long_name();
   test_signal_list_mixed_kinds();

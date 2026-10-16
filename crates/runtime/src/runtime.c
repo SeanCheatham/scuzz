@@ -2423,8 +2423,6 @@ static int map_subset_eq(const SzMap *a, SzMap *b) {
 }
 
 static int map_eq(const SzMap *a, const SzMap *b) {
-  if (a == b)
-    return 1;
   if (!a || !b)
     return 0;
   if (a->key_kind != b->key_kind)
@@ -2469,8 +2467,6 @@ int sz_ptr_eq(const void *a, const void *b) {
   ka = sz_rc_hdr(a)->kind;
   if (ka != sz_rc_hdr(b)->kind)
     return 0;
-  if (ka != SZ_RC_FLOAT_BOX && a == b)
-    return 1;
   switch (ka) {
   case SZ_RC_STRING:
     return sz_string_eq((const SzString *)a, (const SzString *)b);
@@ -2495,7 +2491,7 @@ int sz_ptr_eq(const void *a, const void *b) {
   case SZ_RC_ERROR:
     return error_eq((const SzError *)a, (const SzError *)b);
   default:
-    return 0;
+    return a == b;
   }
 }
 
