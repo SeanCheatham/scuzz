@@ -283,7 +283,8 @@ typedef enum SzViewKind {
   SZ_VIEW_ANIMATED_OPACITY,
   SZ_VIEW_REDUCED_MOTION,
   SZ_VIEW_SELECT_OPTION,
-  SZ_VIEW_ANIMATED_SIZE
+  SZ_VIEW_ANIMATED_SIZE,
+  SZ_VIEW_ANIMATED_CONTENT_SIZE
 } SzViewKind;
 
 typedef struct SzRect {
@@ -489,6 +490,8 @@ SzView *sz_view_opacity(int pct, SzView *child);
 SzView *sz_view_animated_opacity(SzSignalInt *value, int64_t pumps, SzView *child);
 /* Animate a clipped size in logical pixels. Both axes use one pump count. */
 SzView *sz_view_animated_size(SzSignalInt *width, SzSignalInt *height, int64_t pumps, SzView *child);
+/* Measure the child. Animate the clipped box with the shared pump clock. */
+SzView *sz_view_animated_content_size(int64_t pumps, SzView *child);
 SzView *sz_view_reduced_motion(SzSignalInt *reduced, SzView *child);
 int sz_view_animated_opacity_value(const SzView *view);
 int sz_view_motion_pending(const SzView *root);

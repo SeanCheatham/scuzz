@@ -340,6 +340,19 @@ Zero size excludes child focus and accessibility. Child state stays available.
 Hidden or reduced content snaps to its target. Pause preserves the current size.
 Recorded output includes current size, target size, and remaining pumps.
 
+Use `View.animatedContentSize(pumps, child)` for a measured size transition.
+Measure the child with the incoming constraints on each layout.
+Keep fractional logical dimensions. Initial display uses the measured size.
+Use that measurement as the target for both dimensions.
+A target change starts from the current transition size.
+The child keeps its measured layout. The displayed box clips paint and pointer input.
+Following content uses the displayed box boundary.
+Incoming constraints limit that box. Zero size excludes child focus and accessibility.
+Keep child state. Layout and input do not advance the shared pump clock.
+Pause preserves the current size. Reduced motion uses the measured target immediately.
+Hidden content cancels pending motion. Its next visible layout uses the current measurement.
+Recorded output includes fractional current size, target size, and remaining pumps.
+
 Use `View.reducedMotion(reduced, child)` to reduce motion in a subtree.
 A nonzero Signal snaps explicit transitions and removes built-in motion steps.
 An ancestor or session preference stays effective inside nested wrappers.

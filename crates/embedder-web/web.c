@@ -72,6 +72,14 @@ void sz_web_size_transition(SzView *view, int width, int height, int target_widt
   web_size_transition(sz_view_id(view), width, height, target_width, target_height, remaining, suppressed);
 }
 
+EM_JS(void, web_content_size_transition, (uintptr_t view, float width, float height, float target_width, float target_height, int remaining, int suppressed), {
+  Module.webFrame.transitions.push({id: Number(view), kind: 'contentSize', width, height,
+    targetWidth: target_width, targetHeight: target_height, remaining, suppressed: Boolean(suppressed)});
+});
+void sz_web_content_size_transition(SzView *view, float width, float height, float target_width, float target_height, int remaining, int suppressed) {
+  web_content_size_transition(sz_view_id(view), width, height, target_width, target_height, remaining, suppressed);
+}
+
 EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t active, int count), {
   const item = Module.webFrame.items.at(-1);
   item.active = Number(active); item.optionCount = count;

@@ -25,4 +25,4 @@ Reject a deliberate clipping or measurement defect with an independent check.
 Run runtime, sanitizer, renderer, browser, and integration checks.
 Rebuild the product CLI and check its GUI manual.
 
-Status: The current size API requires explicit width and height Signals. The disclosure application changes its body size directly. Implementation remains.
+Status: The shared native constructor and recorded transition data are implemented. Focused native checks pass for geometry, pixels, pointer bounds, retargeting, fractional dimensions, wrapped text, constraints, retained input, hidden cancellation, pause, and reduced motion. The full normal runtime suite passes. Sanitizer and deliberate-defect checks are active. Compiler exposure, application, browser proof, replay, manual, and integration remain.

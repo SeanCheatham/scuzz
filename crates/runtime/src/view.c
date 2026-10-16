@@ -188,6 +188,8 @@ struct SzView {
   int animation_value, animation_from, animation_target;
   SzSignalInt *size_height;
   int animation_height, animation_from_height, animation_target_height;
+  float content_w, content_h, content_from_w, content_from_h;
+  float content_target_w, content_target_h;
   int animation_step, animation_duration, animation_ready;
   int motion_reduced, motion_paused, motion_suppressed;
   int motion;
@@ -414,7 +416,7 @@ static int motion_pending_node(const SzView *v) {
   int i;
   if (!v)
     return 0;
-  if (v->motion_left > 0 || ((v->kind == SZ_VIEW_ANIMATED_OPACITY || v->kind == SZ_VIEW_ANIMATED_SIZE) &&
+  if (v->motion_left > 0 || ((v->kind == SZ_VIEW_ANIMATED_OPACITY || v->kind == SZ_VIEW_ANIMATED_SIZE || v->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) &&
       v->animation_ready && v->animation_step < v->animation_duration))
     return 1;
   for (i = 0; i < v->child_count; i++)
@@ -425,7 +427,7 @@ static int motion_pending_node(const SzView *v) {
 
 static int transition_pending_node(const SzView *view) {
   if (!view) return 0;
-  if ((view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SIZE) && view->animation_ready &&
+  if ((view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SIZE || view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) && view->animation_ready &&
       view->animation_step < view->animation_duration) return 1;
   for (int i = 0; i < view->child_count; i++)
     if (transition_pending_node(view->children[i])) return 1;
@@ -483,7 +485,7 @@ static int view_accepts_children(const SzView *view) {
          kind == SZ_VIEW_SELECT || kind == SZ_VIEW_THEME || kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
-         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY || kind == SZ_VIEW_ANIMATED_SIZE ||
+         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY || kind == SZ_VIEW_ANIMATED_SIZE || kind == SZ_VIEW_ANIMATED_CONTENT_SIZE ||
          kind == SZ_VIEW_REDUCED_MOTION || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
@@ -2061,6 +2063,15 @@ static void a11y_dump_motion(SzView *v, char **buf, size_t *len, size_t *cap) {
       label, v->animation_duration - v->animation_step);
     sz_dump_append(buf, len, cap, line);
   }
+  if (v->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE && v->animation_ready) {
+    motion_label_copy(v, label, sizeof label);
+    snprintf(line, sizeof line,
+      "contentSize:%s=%.3f,%.3f\ntarget:contentSize:%s=%.3f,%.3f\npumps:contentSize:%s=%d\n",
+      label, (double)v->content_w, (double)v->content_h,
+      label, (double)v->content_target_w, (double)v->content_target_h,
+      label, v->animation_duration - v->animation_step);
+    sz_dump_append(buf, len, cap, line);
+  }
   if (v->motion_left <= 0) return;
   motion_label_copy(v, label, sizeof label);
   snprintf(line, sizeof line, "motion:%s:%s=%d\n", motion_name(v->motion),
@@ -2504,12 +2515,21 @@ SzView *sz_view_animated_size(SzSignalInt *width, SzSignalInt *height, int64_t p
   return view;
 }
 
+SzView *sz_view_animated_content_size(int64_t pumps, SzView *child) {
+  if (!child || pumps < 1 || pumps > INT_MAX)
+    sz_panic("Animated content size needs a child and positive pump count within Int32");
+  SzView *view = view_new(SZ_VIEW_ANIMATED_CONTENT_SIZE);
+  view->animation_duration = (int)pumps;
+  sz_view_add_child(view, child);
+  return view;
+}
+
 static int size_axis(int64_t value) {
   return value < 0 ? 0 : value > INT_MAX ? INT_MAX : (int)value;
 }
 
 static int size_collapsed(const SzView *view) {
-  return view && view->kind == SZ_VIEW_ANIMATED_SIZE && view->animation_ready &&
+  return view && (view->kind == SZ_VIEW_ANIMATED_SIZE || view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) && view->animation_ready &&
     (view->frame.w <= 0 || view->frame.h <= 0);
 }
 
@@ -2540,6 +2560,21 @@ static int size_suppressed(const SzView *view) {
         (p->kind == SZ_VIEW_OVERLAY && !view_overlay_open(p))) return 1;
   }
   return 0;
+}
+
+static void sync_content_size(SzView *view, float width, float height) {
+  if (!view->animation_ready || size_suppressed(view)) {
+    view->animation_ready = 1;
+    view->content_w = view->content_from_w = view->content_target_w = width;
+    view->content_h = view->content_from_h = view->content_target_h = height;
+    view->animation_step = view->animation_duration;
+  } else if (width != view->content_target_w || height != view->content_target_h) {
+    view->content_from_w = view->content_w;
+    view->content_from_h = view->content_h;
+    view->content_target_w = width;
+    view->content_target_h = height;
+    view->animation_step = view->content_w == width && view->content_h == height ? view->animation_duration : 0;
+  }
 }
 
 SzView *sz_view_reduced_motion(SzSignalInt *reduced, SzView *child) {
@@ -2587,6 +2622,12 @@ static void sync_transitions(SzView *view, int shown, int reduced) {
     }
   }
   if (view->kind == SZ_VIEW_ANIMATED_SIZE) sync_size(view, view->motion_suppressed);
+  if (view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE && view->motion_suppressed) {
+    view->content_w = view->content_target_w;
+    view->content_h = view->content_target_h;
+    view->animation_step = view->animation_duration;
+    if (!shown) view->animation_ready = 0;
+  }
   for (int i = 0; i < view->child_count; i++)
     sync_transitions(view->children[i], shown && !size_collapsed(view), reduced);
 }
@@ -2598,10 +2639,14 @@ static int animation_lerp(int from, int target, int64_t step, int64_t duration) 
 static int step_transitions(SzView *view) {
   if (!view) return 0;
   int resized = 0;
-  if ((view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SIZE) &&
-      view->animation_step < view->animation_duration) {
+  if ((view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SIZE || view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) &&
+      view->animation_ready && view->animation_step < view->animation_duration) {
     int64_t step = ++view->animation_step, duration = view->animation_duration;
-    view->animation_value = animation_lerp(view->animation_from, view->animation_target, step, duration);
+    if (view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) {
+      view->content_w = (float)(((double)(duration - step) * view->content_from_w + (double)step * view->content_target_w) / duration);
+      view->content_h = (float)(((double)(duration - step) * view->content_from_h + (double)step * view->content_target_h) / duration);
+      resized = 1;
+    } else view->animation_value = animation_lerp(view->animation_from, view->animation_target, step, duration);
     if (view->kind == SZ_VIEW_ANIMATED_SIZE) {
       view->animation_height = animation_lerp(view->animation_from_height, view->animation_target_height, step, duration);
       resized = 1;
@@ -4991,6 +5036,16 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.h = max_h;
     break;
   }
+  case SZ_VIEW_ANIMATED_CONTENT_SIZE: {
+    layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
+    float scale = theme_px_scale(theme);
+    sync_content_size(v, v->frame.w / scale, v->frame.h / scale);
+    v->frame.w = fmaxf(min_w, v->content_w * scale);
+    v->frame.h = fmaxf(min_h, v->content_h * scale);
+    if (max_w > 0.f && v->frame.w > max_w) v->frame.w = max_w;
+    if (max_h > 0.f && v->frame.h > max_h) v->frame.h = max_h;
+    break;
+  }
   case SZ_VIEW_ANIMATED_SIZE:
   case SZ_VIEW_SIZED: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
@@ -5652,7 +5707,7 @@ static int popup_owner_in_scope(SzView *v, SzView *scope) {
         (p->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(p)) ||
         (p->kind == SZ_VIEW_OVERLAY && !view_overlay_open(p))) return 0;
     if (p->kind == SZ_VIEW_IGNORE_POINTER || p->kind == SZ_VIEW_ABSORB_POINTER) return 0;
-    if (p->kind == SZ_VIEW_SCROLL || p->kind == SZ_VIEW_CLIP || p->kind == SZ_VIEW_ANIMATED_SIZE || p->kind == SZ_VIEW_APP_SHELL) {
+    if (p->kind == SZ_VIEW_SCROLL || p->kind == SZ_VIEW_CLIP || p->kind == SZ_VIEW_ANIMATED_SIZE || p->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE || p->kind == SZ_VIEW_APP_SHELL) {
       SzRect clipped;
       if (!rects_intersect(visible, p->frame, &clipped)) return 0;
       visible = clipped;
@@ -7618,6 +7673,14 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     sk_canvas_restore(c);
     break;
   }
+  case SZ_VIEW_ANIMATED_CONTENT_SIZE:
+#ifdef __EMSCRIPTEN__
+    sz_web_content_size_transition(v, v->content_w, v->content_h,
+      v->content_target_w, v->content_target_h,
+      v->animation_duration - v->animation_step, v->motion_suppressed);
+#endif
+    if (!size_collapsed(v)) paint_children_clipped(v, c, theme);
+    break;
   case SZ_VIEW_ANIMATED_SIZE:
 #ifdef __EMSCRIPTEN__
     sz_web_size_transition(v, v->animation_value, v->animation_height,
@@ -8872,6 +8935,13 @@ static void dump_transition_nodes(SzView *view, FILE *file, int *index) {
     fprintf(file, "%s{\"i\":%d,\"kind\":\"size\",\"width\":%d,\"height\":%d,\"targetWidth\":%d,\"targetHeight\":%d,\"remaining\":%d,\"suppressed\":%s}",
       *index ? "," : "", *index, view->animation_value, view->animation_height,
       view->animation_target, view->animation_target_height,
+      view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
+    (*index)++;
+  }
+  if (view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE) {
+    fprintf(file, "%s{\"i\":%d,\"kind\":\"contentSize\",\"width\":%.9g,\"height\":%.9g,\"targetWidth\":%.9g,\"targetHeight\":%.9g,\"remaining\":%d,\"suppressed\":%s}",
+      *index ? "," : "", *index, (double)view->content_w, (double)view->content_h,
+      (double)view->content_target_w, (double)view->content_target_h,
       view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
     (*index)++;
   }
