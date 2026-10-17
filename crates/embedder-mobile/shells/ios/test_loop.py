@@ -94,7 +94,7 @@ try:
         device = next(re.search(r"\(([0-9A-F-]{36})\)", line)[1]
                       for line in lines if line.startswith("iOS simulator:"))
         objects = app / "output path" / "ios-sim" / "obj"
-        native = {p.name: p.stat().st_mtime_ns for p in objects.glob("*.o") if p.name != "app.o"}
+        native = {p.relative_to(objects): p.stat().st_mtime_ns for p in objects.rglob("*.o") if p.name != "app.o"}
         assert native, "native cache is empty"
         debug = app / "output path" / "debug.json"
         def shows(text):
