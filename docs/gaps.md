@@ -84,6 +84,9 @@ Real mobile device bitmap checks remain open.
 Image color profiles, orientation metadata, and animated formats remain open.
 Browser accessibility and real screen-reader checks remain incomplete.
 Android exposes its drawing surface without child controls to platform accessibility tools.
+The shared runtime supplies owned semantic snapshots and validates actions against current visible controls.
+Headless records and replays accessibility actions by semantic position.
+Android publication, virtual nodes, and platform action input remain open.
 Keyboard checks cover a form, named radio groups, manual tabs, nested dialogs, named range sliders, and editors.
 Range checks cover signed 64-bit bounds, stepped values, pointer input, and browser accessibility data.
 Physical-device and real screen-reader checks for sliders remain open.

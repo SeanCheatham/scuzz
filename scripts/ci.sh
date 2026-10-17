@@ -3724,6 +3724,39 @@ if name == 'codegen':
         ('nested', ['<handle>', ['<handle>']])], signals
     print('View signals: direct, list, and nested tuple values match native handles', flush=True)
 
+    target = ui_fixture('accessibility-input', '''@main def main: IO[Unit] =
+  for {
+    first = Signal.makeN("first", 0)
+    second = Signal.makeN("second", 0)
+    draft = Signal.makeN("draft", "")
+    checked = Signal.makeN("checked", 0)
+    amount = Signal.makeN("amount", 0)
+    _ <- Ui.run(_ => View.column([
+      View.button("Same", _ => Signal.set(first, Signal.get(first) + 1)),
+      View.button("Same", _ => Signal.set(second, Signal.get(second) + 1)),
+      View.textField(draft, "Draft"),
+      View.checkbox(checked, "Checked"),
+      View.slider(amount, "Amount", -9223372036854775808, 9223372036854775807, 1)
+    ]))
+  } yield ()
+''')
+    out = replay(target, 'accessibility-input', 'actions', [
+        {'op': 'accessibility', 'i': 1, 'action': 'activate'},
+        {'op': 'accessibility', 'i': 2, 'action': 'focus'},
+        {'op': 'accessibility', 'i': 2, 'action': 'setText', 'text': 'é😀"z'},
+        {'op': 'accessibility', 'i': 2, 'action': 'setSelection', 'start': 2, 'end': 6},
+        {'op': 'accessibility', 'i': 2, 'action': 'clearFocus'},
+        {'op': 'accessibility', 'i': 3, 'action': 'activate'},
+        {'op': 'accessibility', 'i': 4, 'action': 'setValue', 'value': 9223372036854775807},
+        {'op': 'accessibility', 'i': 4, 'action': 'decrement'},
+        {'op': 'accessibility', 'i': -1, 'action': 'activate'}], ui=True, auto_tap=False)
+    for engine in ('eval', 'native'):
+        dump = json.loads((out / f'{engine}.json').read_text())
+        values = {item['name']: item['value'] for item in dump['signals']}
+        assert values == {'first': 0, 'second': 1, 'draft': 'é😀"z',
+                          'checked': 1, 'amount': 9223372036854775806}, values
+    print('Accessibility input: repeated labels, Unicode editing, selection, and Int64 ranges match', flush=True)
+
     target = ui_fixture('mount-each', '''@main def main: IO[Unit] =
   for {
     count = Signal.makeN("count", 0)

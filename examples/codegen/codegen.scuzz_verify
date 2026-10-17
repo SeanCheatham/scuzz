@@ -138,3 +138,13 @@ inputTime invalid
 inputTime -1
 """
 
+oracle accessibilityScript(): Bool =
+  Verify.scriptJson("""accessibility 99 activate
+accessibility   100  setText é😀  z
+accessibility 100 setSelection 2 6
+accessibility 102 setValue -9223372036854775808
+""") == "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"accessibility\",\"i\":99,\"action\":\"activate\"},{\"op\":\"accessibility\",\"i\":100,\"action\":\"setText\",\"text\":\"é😀  z\"},{\"op\":\"accessibility\",\"i\":100,\"action\":\"setSelection\",\"start\":2,\"end\":6},{\"op\":\"accessibility\",\"i\":102,\"action\":\"setValue\",\"value\":-9223372036854775808}]}"
+
+oracle accessibilityTrailingSpace(): Bool =
+  Verify.scriptJson(Str.concat("accessibility 0 setText x", " ")) == "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"accessibility\",\"i\":0,\"action\":\"setText\",\"text\":\"x \"}]}"
+

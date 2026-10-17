@@ -339,6 +339,51 @@ static int jev_mods(SzAdt *ev) {
   return mods;
 }
 
+const char *sz_ui_a11y_action_name(int action) {
+  switch (action) {
+  case SZ_A11Y_FOCUS: return "focus";
+  case SZ_A11Y_CLEAR_FOCUS: return "clearFocus";
+  case SZ_A11Y_ACTIVATE: return "activate";
+  case SZ_A11Y_SET_TEXT: return "setText";
+  case SZ_A11Y_SET_SELECTION: return "setSelection";
+  case SZ_A11Y_INCREMENT: return "increment";
+  case SZ_A11Y_DECREMENT: return "decrement";
+  case SZ_A11Y_SET_VALUE: return "setValue";
+  default: return "";
+  }
+}
+
+static void script_accessibility(SzUiSession *session, SzAdt *event) {
+  if (!sz_jev_has(event, "i") || !sz_jev_has(event, "action"))
+    sz_panic("Ui.run: accessibility needs i and action");
+  const char *name = sz_jev_str(event, "action");
+  int action;
+  for (action = 1; action <= SZ_A11Y_CLEAR_FOCUS; action *= 2)
+    if (!strcmp(name, sz_ui_a11y_action_name(action))) break;
+  if (action > SZ_A11Y_CLEAR_FOCUS) sz_panic("Ui.run: unknown accessibility action");
+  if (action == SZ_A11Y_SET_TEXT && !sz_jev_has(event, "text"))
+    sz_panic("Ui.run: setText needs text");
+  if (action == SZ_A11Y_SET_SELECTION &&
+      (!sz_jev_has(event, "start") || !sz_jev_has(event, "end")))
+    sz_panic("Ui.run: setSelection needs start and end");
+  if (action == SZ_A11Y_SET_VALUE && !sz_jev_has(event, "value"))
+    sz_panic("Ui.run: setValue needs value");
+  SzA11ySnapshot *snapshot = sz_ui_session_a11y_snapshot(session);
+  int64_t index = sz_jev_int(event, "i", -1);
+  const SzA11yNode *node = index >= 0 && (uint64_t)index < sz_a11y_snapshot_count(snapshot)
+    ? sz_a11y_snapshot_node(snapshot, (size_t)index) : NULL;
+  uintptr_t id = node ? node->id : 0;
+  sz_a11y_snapshot_free(snapshot);
+  SzInputEvent input = {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = id,
+    .a11y_action = action, .text = sz_jev_str(event, "text"),
+    .a11y_value = sz_jev_int(event, "value", 0)};
+  int64_t start = sz_jev_int(event, "start", 0), end = sz_jev_int(event, "end", 0);
+  input.a11y_start = start < 0 ? 0 : start > INT_MAX ? INT_MAX : (int)start;
+  input.a11y_end = end < 0 ? 0 : end > INT_MAX ? INT_MAX : (int)end;
+  /* A removed live target records index -1. It remains a no-op in replay. */
+  (void)sz_ui_inject_sync(session, &input);
+}
+
 static void play_script_event_json(SzUiSession *session, SzAdt *ev, int manual) {
   const char *op;
   if (!ev || !sz_json_is_obj(ev))
@@ -349,7 +394,9 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev, int manual) 
   if (strcmp(op, "inputTime") == 0) {
     if (!sz_jev_has(ev, "ms")) sz_panic("Ui.run: inputTime needs ms");
     sz_ui_session_input_time(session, sz_jev_int(ev, "ms", -1));
-  } else if (strcmp(op, "tap") == 0)
+  } else if (strcmp(op, "accessibility") == 0)
+    script_accessibility(session, ev);
+  else if (strcmp(op, "tap") == 0)
     script_tap(session, ev);
   else if (strcmp(op, "xy") == 0) {
     if (!sz_jev_has(ev, "x") || !sz_jev_has(ev, "y"))

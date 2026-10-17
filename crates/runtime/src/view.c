@@ -10289,6 +10289,7 @@ static unsigned a11y_actions(const SzView *view) {
   unsigned actions = 0;
   if (edit || (sz_view_is_tap_target(view) && view->kind != SZ_VIEW_SELECT_OPTION))
     actions |= SZ_A11Y_FOCUS;
+  if (view->focused && (actions & SZ_A11Y_FOCUS)) actions |= SZ_A11Y_CLEAR_FOCUS;
   if (edit) actions |= SZ_A11Y_ACTIVATE | SZ_A11Y_SET_TEXT | SZ_A11Y_SET_SELECTION;
   if ((view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_SPLIT) && view->sig_int)
     return actions | SZ_A11Y_INCREMENT | SZ_A11Y_DECREMENT | SZ_A11Y_SET_VALUE;
@@ -10449,6 +10450,10 @@ int sz_view_a11y_action(SzView *root, const SzA11yRequest *request) {
     switch (request->action) {
     case SZ_A11Y_FOCUS:
       sz_view_focus(root, view);
+      result = 1;
+      break;
+    case SZ_A11Y_CLEAR_FOCUS:
+      sz_view_focus(root, NULL);
       result = 1;
       break;
     case SZ_A11Y_ACTIVATE: {

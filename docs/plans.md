@@ -5,7 +5,8 @@ Keep Headless and native input on the same action path.
 
 The shared snapshot and action layer passes the runtime, ASan, and UBSan checks.
 The focused ASan check also passes with leak detection enabled.
-Android publication and recorded accessibility input remain open.
+Shared session input records semantic positions and replays control actions.
+Android publication and platform input remain open.
 
 - Add owned semantic snapshots with View identities, parent links, clipped bounds, live values, state, and available actions.
 - Validate actions against the current visible semantic tree. Reject removed, hidden, excluded, and background dialog targets.

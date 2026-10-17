@@ -16709,6 +16709,103 @@ static void test_native_a11y_clip_and_modal(void) {
   sz_signal_int_free(count);
 }
 
+static void remove_own_control(SzView *view, void *environment) {
+  (void)view;
+  sz_view_clear_children(environment);
+}
+
+static void test_native_a11y_record_replay(void) {
+  const char *record = "/tmp/scuzz-a11y-record.json";
+  char *expected = NULL;
+  uintptr_t previous = 0;
+  for (int replay = 0; replay < 2; replay++) {
+    SzSignalInt *counts[100];
+    SzView *buttons[100], *root = sz_view_column();
+    for (int i = 0; i < 100; i++) {
+      counts[i] = sz_signal_int(0);
+      buttons[i] = sz_view_button("Same", counter_tap, counts[i]);
+      sz_view_add_child(root, buttons[i]);
+    }
+    assert(sz_view_id(buttons[99]) != previous);
+    previous = sz_view_id(buttons[99]);
+    SzSignalStr *text = sz_signal_str("");
+    SzSignalInt *checked = sz_signal_int(1), *range = sz_signal_int(INT64_MAX);
+    SzView *field = sz_view_text_field(text, "Name");
+    SzView *toggle = sz_view_checkbox(checked, "Enabled");
+    SzView *slider = sz_view_slider(range, "Range", INT64_MIN, INT64_MAX, 1);
+    sz_view_add_child(root, field);
+    sz_view_add_child(root, toggle);
+    sz_view_add_child(root, slider);
+    SzView *holder = sz_view_column();
+    SzView *remove = sz_view_button("Remove", remove_own_control, holder);
+    uintptr_t removed = sz_view_id(remove);
+    sz_view_add_child(holder, remove);
+    sz_view_add_child(root, holder);
+    SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 240, .height = 6000, .scale = 1};
+    SzUiSession *session = sz_ui_mount(&config, root);
+    assert(session);
+    sz_ui_session_take_root(session);
+    if (replay) {
+      sz_ui_script_run_file(session, record);
+    } else {
+      assert(sz_ui_session_set_record(session, record));
+      SzInputEvent events[] = {
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = previous, .a11y_action = SZ_A11Y_ACTIVATE},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = previous, .a11y_action = SZ_A11Y_ACTIVATE},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(field), .a11y_action = SZ_A11Y_FOCUS},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(field), .a11y_action = SZ_A11Y_SET_TEXT, .text = "é😀\"z"},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(field), .a11y_action = SZ_A11Y_SET_SELECTION, .a11y_start = 2, .a11y_end = 6},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(field), .a11y_action = SZ_A11Y_CLEAR_FOCUS},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(toggle), .a11y_action = SZ_A11Y_ACTIVATE},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(slider), .a11y_action = SZ_A11Y_DECREMENT},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(slider), .a11y_action = SZ_A11Y_SET_VALUE, .a11y_value = INT64_MIN},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(slider), .a11y_action = SZ_A11Y_INCREMENT},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = removed, .a11y_action = SZ_A11Y_ACTIVATE},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = removed, .a11y_action = SZ_A11Y_ACTIVATE},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = previous, .a11y_action = SZ_A11Y_SET_TEXT, .text = "Ignore"},
+        {.kind = SZ_INPUT_LIFECYCLE, .lifecycle = SZ_LIFECYCLE_PAUSE},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_id = sz_view_id(field), .a11y_action = SZ_A11Y_FOCUS},
+        {.kind = SZ_INPUT_LIFECYCLE, .lifecycle = SZ_LIFECYCLE_RESUME},
+        {.kind = SZ_INPUT_ACCESSIBILITY, .a11y_action = SZ_A11Y_ACTIVATE}
+      };
+      for (size_t i = 0; i < sizeof events / sizeof events[0]; i++) {
+        int rejected = i == 11 || i == 12 || i == 14 || i == 16;
+        assert(sz_ui_session_live_inject(session, &events[i]) == !rejected);
+        if (i >= 2 && i <= 4) assert(sz_ui_session_keyboard_visible(session));
+        if (i == 5) assert(!sz_ui_session_keyboard_visible(session) && !sz_view_focused(root));
+        assert(sz_ui_pump_sync(session));
+      }
+      char *body = slurp_cstr(record);
+      assert(strstr(body, "\"op\":\"accessibility\",\"i\":99,\"action\":\"activate\""));
+      assert(strstr(body, "\"i\":-1,\"action\":\"activate\""));
+      assert(!strstr(body, "\"id\":"));
+      free(body);
+    }
+    for (int i = 0; i < 100; i++) assert(sz_signal_int_get(counts[i]) == (i == 99 ? 2 : 0));
+    assert(!strcmp(sz_signal_str_get(text), "é😀\"z"));
+    assert(sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 6);
+    assert(sz_signal_int_get(checked) == 0 && sz_signal_int_get(range) == INT64_MIN + 1);
+    assert(!sz_ui_session_keyboard_visible(session));
+    assert(sz_ui_session_lifecycle(session) == SZ_LIFECYCLE_RESUME);
+    assert(!sz_view_find(root, removed));
+    char *dump = NULL;
+    size_t length = 0;
+    FILE *stream = open_memstream(&dump, &length);
+    assert(stream);
+    sz_view_a11y_dump_json(root, stream);
+    fclose(stream);
+    if (replay) { assert(!strcmp(dump, expected)); free(dump); }
+    else expected = dump;
+    sz_ui_unmount(session);
+    for (int i = 0; i < 100; i++) sz_signal_int_free(counts[i]);
+    sz_signal_str_free(text);
+    sz_signal_int_free(checked);
+    sz_signal_int_free(range);
+  }
+  free(expected);
+  remove(record);
+}
+
 static void test_a11y(void) {
   SzView *btn;
   SzView *col;
@@ -21826,6 +21923,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--native-a11y")) {
     test_native_a11y_snapshot();
     test_native_a11y_clip_and_modal();
+    test_native_a11y_record_replay();
     puts("native accessibility tests ok");
     return 0;
   }
@@ -22661,6 +22759,7 @@ int main(int argc, char **argv) {
   test_text_blank_line_from_newline();
   test_native_a11y_snapshot();
   test_native_a11y_clip_and_modal();
+  test_native_a11y_record_replay();
   test_a11y();
   test_a11y_dump_grows_past_4k();
   test_clear_children();

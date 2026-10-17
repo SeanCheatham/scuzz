@@ -999,20 +999,26 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   sz_view_format_hit_id(hit, buf, cap);
 }
 
-static void session_set_last_hit(SzUiSession *session, float x, float y,
-                                 SzView *hit_if_fired) {
-  char desc[256];
+static void session_note_hit(SzUiSession *session, float x, float y,
+                              const char *desc, int fired) {
   if (!session)
     return;
-  format_last_hit_desc(hit_if_fired, desc, sizeof desc);
   session->last_hit_seen = 1;
   session->last_hit_fresh = 1;
   session->last_hit_x = x;
   session->last_hit_y = y;
   host_free(&session->last_hit_desc);
   session->last_hit_desc = host_dup(desc);
-  if (hit_if_fired)
+  if (fired)
     sz_property_note_hit(desc);
+}
+
+static void session_set_last_hit(SzUiSession *session, float x, float y,
+                                 SzView *hit_if_fired) {
+  if (!session) return;
+  char desc[256];
+  format_last_hit_desc(hit_if_fired, desc, sizeof desc);
+  session_note_hit(session, x, y, desc, hit_if_fired != NULL);
 }
 
 static void session_set_hover(SzUiSession *session, float x, float y,
@@ -1235,10 +1241,44 @@ static char *jrec_str_event(const char *op, const char *key,
   return buf;
 }
 
+static char *jrec_accessibility(SzUiSession *session, const SzInputEvent *event) {
+  const char *action = sz_ui_a11y_action_name(event->a11y_action);
+  if (!action[0]) return NULL;
+  SzA11ySnapshot *snapshot = sz_ui_session_a11y_snapshot(session);
+  int64_t index = -1;
+  for (size_t i = 0; i < sz_a11y_snapshot_count(snapshot); i++) {
+    if (sz_a11y_snapshot_node(snapshot, i)->id == event->a11y_id) {
+      index = (int64_t)i;
+      break;
+    }
+  }
+  sz_a11y_snapshot_free(snapshot);
+  char *buffer = NULL, number[160];
+  size_t length = 0, capacity = 0;
+  snprintf(number, sizeof number, "{\"op\":\"accessibility\",\"i\":%lld,\"action\":\"%s\"",
+    (long long)index, action);
+  sz_dump_append(&buffer, &length, &capacity, number);
+  if (event->a11y_action == SZ_A11Y_SET_TEXT) {
+    sz_dump_append(&buffer, &length, &capacity, ",\"text\":\"");
+    json_append_escaped(&buffer, &length, &capacity, event->text);
+    sz_dump_append(&buffer, &length, &capacity, "\"");
+  } else if (event->a11y_action == SZ_A11Y_SET_SELECTION) {
+    snprintf(number, sizeof number, ",\"start\":%d,\"end\":%d", event->a11y_start, event->a11y_end);
+    sz_dump_append(&buffer, &length, &capacity, number);
+  } else if (event->a11y_action == SZ_A11Y_SET_VALUE) {
+    snprintf(number, sizeof number, ",\"value\":%lld", (long long)event->a11y_value);
+    sz_dump_append(&buffer, &length, &capacity, number);
+  }
+  sz_dump_append(&buffer, &length, &capacity, "}");
+  return buffer;
+}
+
 /* JSON sibling of record_live_event. Same branch conditions, object out. */
 static void record_live_event_json(SzUiSession *session,
                                    const SzInputEvent *ev) {
-  if (ev->kind == SZ_INPUT_TAP) {
+  if (ev->kind == SZ_INPUT_ACCESSIBILITY) {
+    record_json_event(session, jrec_accessibility(session, ev));
+  } else if (ev->kind == SZ_INPUT_TAP) {
     record_json_event(session, jrec_tap_or_xy(session, "tap", ev->x, ev->y));
   } else if (ev->kind == SZ_INPUT_RESIZE) {
     char *buf = NULL;
@@ -2026,6 +2066,26 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
     return 0;
 
   switch (event->kind) {
+  case SZ_INPUT_ACCESSIBILITY: {
+    if (session->lifecycle != SZ_LIFECYCLE_RESUME) return 0;
+    sz_view_layout(session->root, (float)session->cfg.width,
+                    (float)session->cfg.height, session->theme);
+    SzView *target = sz_view_find(session->root, event->a11y_id);
+    SzRect bounds = sz_view_control_frame(target);
+    char description[256];
+    format_last_hit_desc(target, description, sizeof description);
+    SzA11yRequest request = {.id = event->a11y_id,
+      .action = (SzA11yAction)event->a11y_action, .text = event->text,
+      .selection_start = event->a11y_start, .selection_end = event->a11y_end,
+      .value = event->a11y_value};
+    if (!sz_view_a11y_action(session->root, &request)) return 0;
+    if (event->a11y_action == SZ_A11Y_ACTIVATE)
+      session_note_hit(session, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2,
+                         description, 1);
+    sync_keyboard(session);
+    session_mark_dirty(session);
+    return 1;
+  }
   case SZ_INPUT_TAP: {
     SzView *hit;
     int fired;
@@ -2347,6 +2407,14 @@ SzUiRuntimeKind sz_ui_session_kind(const SzUiSession *session) {
 
 SzView *sz_ui_session_root(SzUiSession *session) {
   return session ? session->root : NULL;
+}
+
+SzA11ySnapshot *sz_ui_session_a11y_snapshot(SzUiSession *session) {
+  if (!session || !session->root) return NULL;
+  sz_view_layout(session->root, (float)session->cfg.width,
+                  (float)session->cfg.height, session->theme);
+  return sz_view_a11y_snapshot(session->root,
+    (SzRect){0, 0, session->cfg.width, session->cfg.height});
 }
 
 int sz_ui_session_set_title(SzUiSession *session, const char *title) {
