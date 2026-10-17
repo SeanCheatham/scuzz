@@ -16526,6 +16526,189 @@ static void test_text_blank_line_from_newline(void) {
   sz_view_free(t);
 }
 
+static const SzA11yNode *snapshot_id(const SzA11ySnapshot *snapshot, uintptr_t id) {
+  for (size_t i = 0; i < sz_a11y_snapshot_count(snapshot); i++) {
+    const SzA11yNode *node = sz_a11y_snapshot_node(snapshot, i);
+    if (node->id == id) return node;
+  }
+  return NULL;
+}
+
+typedef struct SnapshotReader {
+  const SzA11ySnapshot *snapshot;
+  uintptr_t field;
+  atomic_int ready, stop;
+} SnapshotReader;
+
+static void *snapshot_reader(void *argument) {
+  SnapshotReader *reader = argument;
+  atomic_store(&reader->ready, 1);
+  do {
+    const SzA11yNode *field = snapshot_id(reader->snapshot, reader->field);
+    assert(field && !strcmp(field->value, "a😀é"));
+    assert(!strcmp(field->description, "Help"));
+  } while (!atomic_load(&reader->stop));
+  return NULL;
+}
+
+static void test_native_a11y_snapshot(void) {
+  SzSignalInt *count = sz_signal_int(0), *checked = sz_signal_int(1);
+  SzSignalInt *range = sz_signal_int(INT64_MAX), *shown = sz_signal_int(0);
+  SzSignalStr *text = sz_signal_str("a😀é");
+  SzView *column = sz_view_column(), *buttons[120];
+  SzView *root = sz_view_semantics("Form", column);
+  for (int i = 0; i < 120; i++) {
+    buttons[i] = sz_view_button("Same", counter_tap, count);
+    sz_view_add_child(column, buttons[i]);
+  }
+  SzView *field = sz_view_text_field(text, "Name");
+  sz_view_add_child(column, sz_view_tooltip("Help", field));
+  SzView *toggle = sz_view_checkbox(checked, "Enabled");
+  SzView *slider = sz_view_slider(range, "Range", INT64_MIN, INT64_MAX, 1);
+  sz_view_add_child(column, toggle);
+  sz_view_add_child(column, slider);
+  SzView *excluded = sz_view_button("Excluded", counter_tap, count);
+  sz_view_add_child(column, sz_view_exclude_semantics(excluded));
+  SzView *hidden = sz_view_button("Hidden", counter_tap, count);
+  sz_view_add_child(column, sz_view_show_when(shown, 1, hidden));
+  SzView *merged = sz_view_button("Child", counter_tap, count);
+  sz_view_add_child(column, sz_view_merge_semantics("Combined", merged));
+  SzView *holder = sz_view_column();
+  SzView *removed = sz_view_button("Same", counter_tap, count);
+  uintptr_t removed_id = sz_view_id(removed);
+  sz_view_add_child(holder, removed);
+  sz_view_add_child(column, holder);
+  sz_view_layout(root, 300, 20000, sz_theme_default());
+  sz_view_set_text_field_sel(field, 1, 5);
+  SzA11ySnapshot *before = sz_view_a11y_snapshot(root, (SzRect){0, 0, 300, 20000});
+  assert(sz_a11y_snapshot_count(before) > 120);
+  const SzA11yNode *entry = snapshot_id(before, sz_view_id(field));
+  assert(entry && entry->editable && !strcmp(entry->label, "Name"));
+  assert(!strcmp(entry->value, "a😀é") && !strcmp(entry->description, "Help"));
+  assert(entry->selection_start == 1 && entry->selection_end == 5);
+  assert(snapshot_id(before, sz_view_id(toggle))->checked == 1);
+  const SzA11yNode *r = snapshot_id(before, sz_view_id(slider));
+  assert(r && r->minimum == INT64_MIN && r->maximum == INT64_MAX && r->step == 1);
+  assert(!strcmp(r->value, "9223372036854775807"));
+  assert(!snapshot_id(before, sz_view_id(hidden)));
+  assert(!snapshot_id(before, sz_view_id(excluded)));
+  assert(!snapshot_id(before, sz_view_id(merged)));
+  SnapshotReader reader = {.snapshot = before, .field = sz_view_id(field)};
+  pthread_t thread;
+  assert(pthread_create(&thread, NULL, snapshot_reader, &reader) == 0);
+  while (!atomic_load(&reader.ready)) sched_yield();
+  for (int i = 0; i < 120; i++) {
+    const SzA11yNode *button = snapshot_id(before, sz_view_id(buttons[i]));
+    assert(button && !strcmp(button->label, "Same"));
+    assert(button->parent_id == sz_view_id(root));
+    for (int j = 0; j < i; j++) assert(button->id != sz_view_id(buttons[j]));
+    SzA11yRequest request = {.id = button->id, .action = SZ_A11Y_ACTIVATE};
+    assert(sz_view_a11y_action(root, &request));
+    assert(sz_signal_int_get(count) == i + 1);
+  }
+  SzA11yRequest toggle_request = {.id = sz_view_id(toggle), .action = SZ_A11Y_ACTIVATE};
+  assert(sz_view_a11y_action(root, &toggle_request) && sz_signal_int_get(checked) == 0);
+  SzA11ySnapshot *after = sz_view_a11y_snapshot(root, (SzRect){0, 0, 300, 20000});
+  assert(snapshot_id(after, sz_view_id(toggle))->checked == 0);
+  assert(snapshot_id(before, sz_view_id(toggle))->checked == 1);
+  sz_a11y_snapshot_free(after);
+  SzA11yRequest request = {.id = sz_view_id(hidden), .action = SZ_A11Y_ACTIVATE};
+  assert(!sz_view_a11y_action(root, &request));
+  request.id = sz_view_id(excluded);
+  assert(!sz_view_a11y_action(root, &request));
+  request.id = sz_view_id(merged);
+  assert(!sz_view_a11y_action(root, &request));
+  request = (SzA11yRequest){.id = sz_view_id(field), .action = SZ_A11Y_SET_TEXT, .text = "é😀z"};
+  assert(sz_view_a11y_action(root, &request));
+  assert(!strcmp(sz_signal_str_get(text), "é😀z"));
+  request.action = SZ_A11Y_SET_SELECTION;
+  request.selection_start = 2;
+  request.selection_end = 6;
+  assert(sz_view_a11y_action(root, &request));
+  assert(sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 6);
+  request = (SzA11yRequest){.id = sz_view_id(slider), .action = SZ_A11Y_INCREMENT};
+  assert(sz_view_a11y_action(root, &request) && sz_signal_int_get(range) == INT64_MAX);
+  request.action = SZ_A11Y_DECREMENT;
+  assert(sz_view_a11y_action(root, &request) && sz_signal_int_get(range) == INT64_MAX - 1);
+  request.action = SZ_A11Y_SET_VALUE;
+  request.value = INT64_MIN;
+  assert(sz_view_a11y_action(root, &request) && sz_signal_int_get(range) == INT64_MIN);
+  request.action = SZ_A11Y_DECREMENT;
+  assert(sz_view_a11y_action(root, &request) && sz_signal_int_get(range) == INT64_MIN);
+  sz_view_clear_children(holder);
+  sz_view_add_child(holder, sz_view_button("Same", counter_tap, count));
+  sz_view_layout(root, 300, 20000, sz_theme_default());
+  request = (SzA11yRequest){.id = removed_id, .action = SZ_A11Y_ACTIVATE};
+  assert(!sz_view_a11y_action(root, &request) && sz_signal_int_get(count) == 120);
+  sz_view_free(root);
+  atomic_store(&reader.stop, 1);
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!strcmp(entry->value, "a😀é") && !strcmp(entry->description, "Help"));
+  assert(snapshot_id(before, removed_id));
+  sz_a11y_snapshot_free(before);
+  sz_signal_int_free(count);
+  sz_signal_int_free(checked);
+  sz_signal_int_free(range);
+  sz_signal_int_free(shown);
+  sz_signal_str_free(text);
+}
+
+static void test_native_a11y_clip_and_modal(void) {
+  SzTheme theme = *sz_theme_default();
+  theme.pad = theme.gap = 0;
+  theme.control_h = 20;
+  SzView *column = sz_view_column(), *buttons[4];
+  for (int i = 0; i < 4; i++) {
+    buttons[i] = sz_view_button("Wide row with text", NULL, NULL);
+    sz_view_add_child(column, buttons[i]);
+  }
+  SzView *root = sz_view_clip(sz_view_sized(100, 40, column));
+  sz_view_layout(root, 60, 30, &theme);
+  SzA11ySnapshot *snapshot = sz_view_a11y_snapshot(root, (SzRect){0, 0, 60, 30});
+  assert(sz_a11y_snapshot_count(snapshot) == 2);
+  const SzA11yNode *first = snapshot_id(snapshot, sz_view_id(buttons[0]));
+  const SzA11yNode *second = snapshot_id(snapshot, sz_view_id(buttons[1]));
+  assert(first && first->bounds.x == 0 && first->bounds.y == 0 && first->bounds.w == 60 && first->bounds.h == 20);
+  assert(second && second->bounds.y == 20 && second->bounds.h == 10);
+  assert(!snapshot_id(snapshot, sz_view_id(buttons[2])));
+  sz_a11y_snapshot_free(snapshot);
+  sz_view_free(root);
+
+  SzView *scaled = sz_view_button("Scale", NULL, NULL);
+  root = sz_view_scale(50, sz_view_sized(100, 40, scaled));
+  sz_view_layout(root, 300, 100, &theme);
+  snapshot = sz_view_a11y_snapshot(root, (SzRect){0, 0, 300, 100});
+  const SzA11yNode *node = snapshot_id(snapshot, sz_view_id(scaled));
+  assert(node && node->bounds.x == 25 && node->bounds.y == 10 &&
+         node->bounds.w == 50 && node->bounds.h == 20);
+  assert(sz_view_hit_test(root, 73, 28) == scaled);
+  assert(sz_view_hit_test(root, 1, 1) != scaled);
+  sz_a11y_snapshot_free(snapshot);
+  sz_view_free(root);
+
+  SzSignalInt *count = sz_signal_int(0), *open = sz_signal_int(1);
+  root = sz_view_stack();
+  SzView *background = sz_view_button("Same", counter_tap, count);
+  SzView *foreground = sz_view_button("Same", counter_tap, count);
+  sz_view_add_child(root, background);
+  sz_view_add_child(root, sz_view_overlay(open, "Dialog", foreground));
+  sz_view_layout(root, 300, 200, sz_theme_default());
+  snapshot = sz_view_a11y_snapshot(root, (SzRect){0, 0, 300, 200});
+  assert(!snapshot_id(snapshot, sz_view_id(background)));
+  assert(snapshot_id(snapshot, sz_view_id(foreground)));
+  SzA11yRequest request = {.id = sz_view_id(background), .action = SZ_A11Y_ACTIVATE};
+  assert(!sz_view_a11y_action(root, &request));
+  request.id = sz_view_id(foreground);
+  assert(sz_view_a11y_action(root, &request) && sz_signal_int_get(count) == 1);
+  sz_signal_int_set(open, 0);
+  sz_view_layout(root, 300, 200, sz_theme_default());
+  assert(!sz_view_a11y_action(root, &request));
+  sz_a11y_snapshot_free(snapshot);
+  sz_view_free(root);
+  sz_signal_int_free(open);
+  sz_signal_int_free(count);
+}
+
 static void test_a11y(void) {
   SzView *btn;
   SzView *col;
@@ -21640,6 +21823,12 @@ static void test_styled_text_clip_and_theme(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--native-a11y")) {
+    test_native_a11y_snapshot();
+    test_native_a11y_clip_and_modal();
+    puts("native accessibility tests ok");
+    return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "--motion-preference-record")) {
     test_record_json();
     test_initial_motion_recording();
@@ -22470,6 +22659,8 @@ int main(int argc, char **argv) {
   test_exclude_semantics_sibling_button_stays();
   test_button_does_not_wrap();
   test_text_blank_line_from_newline();
+  test_native_a11y_snapshot();
+  test_native_a11y_clip_and_modal();
   test_a11y();
   test_a11y_dump_grows_past_4k();
   test_clear_children();

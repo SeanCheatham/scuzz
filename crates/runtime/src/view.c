@@ -10270,3 +10270,227 @@ void sz_view_focus(SzView *root, SzView *view) {
   }
   sync_tooltips(root);
 }
+
+struct SzA11ySnapshot {
+  SzA11yNode *nodes;
+  size_t count, capacity;
+};
+
+static char *a11y_copy(const char *text) {
+  size_t length = strlen(text ? text : "") + 1;
+  char *copy = malloc(length);
+  if (!copy) sz_panic("Accessibility snapshot allocation fails");
+  memcpy(copy, text ? text : "", length);
+  return copy;
+}
+
+static unsigned a11y_actions(const SzView *view) {
+  int edit = view_is_edit(view) && view->sig_str;
+  unsigned actions = 0;
+  if (edit || (sz_view_is_tap_target(view) && view->kind != SZ_VIEW_SELECT_OPTION))
+    actions |= SZ_A11Y_FOCUS;
+  if (edit) actions |= SZ_A11Y_ACTIVATE | SZ_A11Y_SET_TEXT | SZ_A11Y_SET_SELECTION;
+  if ((view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_SPLIT) && view->sig_int)
+    return actions | SZ_A11Y_INCREMENT | SZ_A11Y_DECREMENT | SZ_A11Y_SET_VALUE;
+  if (view->kind == SZ_VIEW_SCROLL)
+    return actions | SZ_A11Y_INCREMENT | SZ_A11Y_DECREMENT;
+  if (sz_view_is_tap_target(view)) {
+    int button = view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_ICON_BUTTON ||
+      view->kind == SZ_VIEW_FAB || view->kind == SZ_VIEW_OUTLINED_BUTTON ||
+      view->kind == SZ_VIEW_TEXT_BUTTON || view->kind == SZ_VIEW_ACTION_CHIP ||
+      view->kind == SZ_VIEW_INK_WELL;
+    if (!button || view->on_tap) actions |= SZ_A11Y_ACTIVATE;
+  }
+  return actions;
+}
+
+static SzRect a11y_bounds(SzView *view, SzRect viewport) {
+  SzRect bounds = sz_view_control_frame(view);
+  if (view->inline_action && view->action_count) {
+    for (int i = 1; i < view->action_count; i++) {
+      SzRect next = display_rect(view, view->action_boxes[i]);
+      float right = fmaxf(bounds.x + bounds.w, next.x + next.w);
+      float bottom = fmaxf(bounds.y + bounds.h, next.y + next.h);
+      bounds.x = fminf(bounds.x, next.x);
+      bounds.y = fminf(bounds.y, next.y);
+      bounds.w = right - bounds.x;
+      bounds.h = bottom - bounds.y;
+    }
+  }
+  if (!rects_intersect(bounds, viewport, &bounds)) return (SzRect){0};
+  for (SzView *p = view->parent; p; p = p->parent) {
+    /* A select popup uses viewport coordinates outside its ancestor clips. */
+    if (p->kind == SZ_VIEW_SELECT) break;
+    if (view_clips_children(p) && !rects_intersect(bounds, sz_view_frame(p), &bounds))
+      return (SzRect){0};
+  }
+  return bounds;
+}
+
+static SzA11yNode *a11y_append(SzA11ySnapshot *snapshot) {
+  if (snapshot->count == snapshot->capacity) {
+    size_t capacity = snapshot->capacity ? snapshot->capacity * 2 : 16;
+    if (capacity < snapshot->capacity || capacity > SIZE_MAX / sizeof(SzA11yNode))
+      sz_panic("Accessibility snapshot is too large");
+    SzA11yNode *nodes = realloc(snapshot->nodes, capacity * sizeof(*nodes));
+    if (!nodes) sz_panic("Accessibility snapshot allocation fails");
+    snapshot->nodes = nodes;
+    snapshot->capacity = capacity;
+  }
+  SzA11yNode *node = &snapshot->nodes[snapshot->count++];
+  memset(node, 0, sizeof(*node));
+  node->checked = node->selected = node->expanded = -1;
+  return node;
+}
+
+static void a11y_snapshot_walk(SzView *view, uintptr_t parent, SzRect viewport,
+                                SzA11ySnapshot *snapshot) {
+  if (!view || !view_is_shown(view) || view->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
+      size_collapsed(view)) return;
+  SzRect bounds = a11y_bounds(view, viewport);
+  int semantic = view->a11y_role != SZ_A11Y_NONE &&
+    view->kind != SZ_VIEW_VISIBILITY && view->kind != SZ_VIEW_OFFSTAGE &&
+    view->kind != SZ_VIEW_UNCONSTRAINED_BOX;
+  if (semantic && bounds.w > 0 && bounds.h > 0) {
+    SzA11yInfo info = a11y_node_info(view);
+    SzA11yNode *node = a11y_append(snapshot);
+    node->id = view->id;
+    node->parent_id = parent;
+    node->role = view->a11y_role;
+    node->bounds = bounds;
+    node->label = a11y_copy(info.label);
+    node->actions = a11y_actions(view);
+    node->focused = view->focused;
+    node->editable = view_is_edit(view) && view->sig_str;
+    node->multiline = view->kind == SZ_VIEW_EDITOR;
+    node->number = info.num;
+    const char *value = "";
+    char number[24];
+    if (node->editable) {
+      value = field_cstr(view);
+      node->selection_start = view->sel_anchor;
+      node->selection_end = view->caret;
+    } else if (view->kind == SZ_VIEW_SELECT) {
+      value = sz_view_select_text(view);
+      node->expanded = view->select_open;
+    } else if (info.cls == 2) {
+      snprintf(number, sizeof number, "%lld", (long long)info.num);
+      value = number;
+    }
+    node->value = a11y_copy(value);
+    SzView *tooltip = sz_view_tooltip_owner(view);
+    node->description = a11y_copy(tooltip ? tooltip->text : "");
+    if (view->kind == SZ_VIEW_EXPANSION_TILE) node->expanded = info.num != 0;
+    else if (info.cls == 1 && !a11y_kind_flag(view->kind) && view->kind != SZ_VIEW_TOOLTIP) {
+      if (view->a11y_role == SZ_A11Y_TAB || view->a11y_role == SZ_A11Y_OPTION)
+        node->selected = info.num != 0;
+      else node->checked = info.num != 0;
+    }
+    if (view->kind == SZ_VIEW_SLIDER) {
+      node->minimum = view->range_minimum;
+      node->maximum = view->range_maximum;
+      node->step = view->range_step;
+    } else if (view->kind == SZ_VIEW_SPLIT || view->kind == SZ_VIEW_PROGRESS ||
+               view->kind == SZ_VIEW_CIRCULAR_PROGRESS) {
+      node->maximum = 100;
+      node->step = 1;
+    }
+    parent = node->id;
+    sz_free(info.live);
+  }
+  if (!a11y_recurse(view)) return;
+  for (int i = 0; i < view->child_count; i++)
+    a11y_snapshot_walk(view->children[i], parent, viewport, snapshot);
+}
+
+SzA11ySnapshot *sz_view_a11y_snapshot(SzView *root, SzRect viewport) {
+  SzA11ySnapshot *snapshot = calloc(1, sizeof(*snapshot));
+  if (!snapshot) sz_panic("Accessibility snapshot allocation fails");
+  if (!isfinite(viewport.x) || !isfinite(viewport.y) || !isfinite(viewport.w) ||
+      !isfinite(viewport.h) || viewport.w <= 0 || viewport.h <= 0) return snapshot;
+  SzView *scope = sz_view_input_scope(root);
+  for (SzView *p = scope; p; p = p->parent) {
+    if (!view_is_shown(p) || p->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
+        (p != scope && !a11y_recurse(p))) return snapshot;
+  }
+  a11y_snapshot_walk(scope, 0, viewport, snapshot);
+  return snapshot;
+}
+
+size_t sz_a11y_snapshot_count(const SzA11ySnapshot *snapshot) {
+  return snapshot ? snapshot->count : 0;
+}
+
+const SzA11yNode *sz_a11y_snapshot_node(const SzA11ySnapshot *snapshot, size_t index) {
+  return snapshot && index < snapshot->count ? &snapshot->nodes[index] : NULL;
+}
+
+void sz_a11y_snapshot_free(SzA11ySnapshot *snapshot) {
+  if (!snapshot) return;
+  for (size_t i = 0; i < snapshot->count; i++) {
+    free((void *)snapshot->nodes[i].label);
+    free((void *)snapshot->nodes[i].value);
+    free((void *)snapshot->nodes[i].description);
+  }
+  free(snapshot->nodes);
+  free(snapshot);
+}
+
+int sz_view_a11y_action(SzView *root, const SzA11yRequest *request) {
+  if (!root || !request || !request->id) return 0;
+  SzA11ySnapshot *snapshot = sz_view_a11y_snapshot(root,
+    (SzRect){0, 0, root->viewport_w, root->viewport_h});
+  const SzA11yNode *node = NULL;
+  for (size_t i = 0; i < snapshot->count; i++)
+    if (snapshot->nodes[i].id == request->id) { node = &snapshot->nodes[i]; break; }
+  SzView *view = node ? sz_view_find(root, request->id) : NULL;
+  int result = 0;
+  if (view && (node->actions & request->action)) {
+    switch (request->action) {
+    case SZ_A11Y_FOCUS:
+      sz_view_focus(root, view);
+      result = 1;
+      break;
+    case SZ_A11Y_ACTIVATE: {
+      SzRect bounds = sz_view_control_frame(view);
+      result = sz_view_activate(root, view, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
+      break;
+    }
+    case SZ_A11Y_SET_TEXT:
+      sz_view_focus(root, view);
+      result = sz_view_handle_text(root, request->text);
+      break;
+    case SZ_A11Y_SET_SELECTION:
+      sz_view_focus(root, view);
+      result = view->kind == SZ_VIEW_EDITOR
+        ? sz_view_set_editor_sel(view, request->selection_start, request->selection_end)
+        : sz_view_set_text_field_sel(view, request->selection_start, request->selection_end);
+      break;
+    case SZ_A11Y_INCREMENT:
+    case SZ_A11Y_DECREMENT:
+      if (view->kind == SZ_VIEW_SCROLL) {
+        float distance = (view->scroll_h ? view->frame.w : view->frame.h) * .8f;
+        if (request->action == SZ_A11Y_DECREMENT) distance = -distance;
+        result = sz_view_scroll_pan(view, view->scroll_h ? distance : 0,
+                                     view->scroll_h ? 0 : distance);
+        break;
+      }
+      /* Use wide arithmetic across the full signed range. */
+      {
+        __int128 value = (__int128)node->number +
+          (request->action == SZ_A11Y_INCREMENT ? (__int128)node->step : -(__int128)node->step);
+        int64_t next = value < node->minimum ? node->minimum :
+          value > node->maximum ? node->maximum : (int64_t)value;
+        if (view->kind == SZ_VIEW_SPLIT) result = split_set_fraction(view, next);
+        else { sz_signal_int_set(view->sig_int, slider_value(view, next)); result = 1; }
+      }
+      break;
+    case SZ_A11Y_SET_VALUE:
+      if (view->kind == SZ_VIEW_SPLIT) result = split_set_fraction(view, request->value);
+      else { sz_signal_int_set(view->sig_int, slider_value(view, request->value)); result = 1; }
+      break;
+    }
+  }
+  sz_a11y_snapshot_free(snapshot);
+  return result;
+}
