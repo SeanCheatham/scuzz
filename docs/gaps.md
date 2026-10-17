@@ -72,7 +72,7 @@ Allocation counts do not measure CPU time. These samples do not establish a gene
 
 **Proof.** Run Counter on one device with `scuzz package` and the platform toolchain. Physical-device work is outside the review arc.
 
-The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. iOS `Net.httpGetToFile` compiles, but the current Net proof app does not launch with the SDK scene-lifecycle requirement. Its runtime proof stays open. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
+The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Hosted simulator checks cover HTTP requests, streamed downloads, cancellation, certificate trust, and reactive network UI. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
 
 ## Known gaps
 
@@ -155,7 +155,7 @@ Software and OpenGL replay produce exact native and evaluator timelines and clai
 The OpenGL campaign completes within the probe limits with Mesa worker threads disabled.
 Default-renderer replay and clean Headless UI checks pass.
 Package CI and the rebuilt CLI manual checks pass.
-Apple SDK execution remains unverified on this host.
+Hosted macOS and arm64 iOS simulator checks cover native startup, network UI, source reload, state retention, keyboard viewport changes, and shutdown.
 Real-device styled text checks remain open.
 Opacity transitions use the shared pump clock and retain input state.
 Renderer checks cover overlap, nested layers, clips, transparency, and GPU orientation.
@@ -191,7 +191,8 @@ Android emulator checks cover initial preferences, live changes, visible input, 
 The Android viewport excludes the system bars and display cutout.
 Android emulator checks cover keyboard insets, typing, dismissal, reopening, and retained text.
 Apple preference sources read the initial setting and observe native notifications.
-Their SDK compilation and execution remain unverified.
+Hosted SDK checks cover both sources with forced preference values and native notification delivery.
+Real operating-system preference changes remain unverified on Apple platforms.
 Real-device motion checks remain open.
 Operating-system theme selection and real-device theme checks remain open.
 
