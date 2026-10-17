@@ -6,7 +6,9 @@ The portable text build, compiler cache checks, C runtime suite, and exact View 
 The product CLI rebuild passes.
 
 - The full local kernel slice passes.
-- Check the iOS proof link with nested text objects and the C++ runtime.
+- The iOS network proof passes with nested text objects and the C++ runtime.
+- Check portable text builds and cache reuse in paths with spaces.
+- Complete the iOS source reload proof.
 - Require successful hosted CI, including iOS and all Linux check jobs.
 - Remove this plan when validation is complete.
 - Merge the PR and check main.

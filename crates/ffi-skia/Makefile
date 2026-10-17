@@ -15,7 +15,11 @@ SRC := src/image.c src/image_dec.c src/sk_sw.c src/png_enc.c src/sk_mono.c src/s
 OBJ := $(SRC:src/%.c=build/%.o)
 TEXT_DIR ?= build
 TEXT_FLAGS ?=
-TEXT_OBJS := $(TEXT_DIR)/harfbuzz.o $(TEXT_DIR)/sheenbidi.o $(TEXT_DIR)/fonts.o $(TEXT_DIR)/sk_native_text.o
+# Escape spaces in targets. Quote output paths in recipes.
+TEXT_EMPTY :=
+TEXT_SPACE := $(TEXT_EMPTY) $(TEXT_EMPTY)
+TEXT_TARGET_DIR := $(subst $(TEXT_SPACE),\$(TEXT_SPACE),$(TEXT_DIR))
+TEXT_OBJS := $(TEXT_TARGET_DIR)/harfbuzz.o $(TEXT_TARGET_DIR)/sheenbidi.o $(TEXT_TARGET_DIR)/fonts.o $(TEXT_TARGET_DIR)/sk_native_text.o
 SHIM_OBJS := build/sk_capi_skia.o build/sk_capi_skia_bridge.o
 HB_REV := $(shell awk -F= '/^harfbuzz_revision=/{print $$2; exit}' "$(PIN)")
 HB_SHA := $(shell awk -F= '/^harfbuzz_sha256=/{print $$2; exit}' "$(PIN)")
@@ -74,9 +78,9 @@ build/image_dec.o: src/stb_image.h
 
 build/sk_sw.o: src/sk_native_text.h
 
-$(TEXT_DIR)/sk_native_text.o: src/sk_native_text.cpp src/sk_native_text.h src/sk_text_shape.h $(HB_DIR)/.stamp $(SB_DIR)/.stamp
-	@mkdir -p "$(@D)"
-	$(CXX) -std=c++17 -Wall -Wextra -Werror -O2 $(TEXT_FLAGS) -fPIC -I$(HB_DIR) -I$(SB_DIR)/Headers -c $< -o $@
+$(TEXT_TARGET_DIR)/sk_native_text.o: src/sk_native_text.cpp src/sk_native_text.h src/sk_text_shape.h $(HB_DIR)/.stamp $(SB_DIR)/.stamp
+	@mkdir -p "$(TEXT_DIR)"
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -O2 $(TEXT_FLAGS) -fPIC -I$(HB_DIR) -I$(SB_DIR)/Headers -c $< -o "$@"
 
 build/sk_gpu.o: src/sk_gpu.c src/sk_gpu.h | build
 	$(CC) $(CFLAGS) -Wno-deprecated-declarations $(INCLUDES) -c $< -o $@
@@ -110,9 +114,9 @@ $(HB_DIR)/.source-stamp: $(HB_DIR)/.stamp
 	@test -f $(HB_DIR)/Source/harfbuzz.cc
 	@echo "$(HB_REV)" > $@
 
-$(TEXT_DIR)/harfbuzz.o: $(HB_DIR)/.source-stamp
-	@mkdir -p "$(@D)"
-	$(CXX) -std=c++17 -O2 $(TEXT_FLAGS) -fPIC -c $(HB_DIR)/Source/harfbuzz.cc -o $@
+$(TEXT_TARGET_DIR)/harfbuzz.o: $(HB_DIR)/.source-stamp
+	@mkdir -p "$(TEXT_DIR)"
+	$(CXX) -std=c++17 -O2 $(TEXT_FLAGS) -fPIC -c $(HB_DIR)/Source/harfbuzz.cc -o "$@"
 
 $(HB_DIR)/arabic_joining.h: $(HB_DIR)/.stamp $(ROOT)/scripts/arabic_joining.py
 	python3 "$(ROOT)/scripts/arabic_joining.py" build/harfbuzz.tar.gz "$(HB_SHA)" $@
@@ -127,9 +131,9 @@ $(SB_DIR)/.stamp: $(PIN) | build
 	@test -f $(SB_DIR)/Headers/SheenBidi/SheenBidi.h
 	@echo "$(SB_REV)" > $@
 
-$(TEXT_DIR)/sheenbidi.o: $(SB_DIR)/.stamp
-	@mkdir -p "$(@D)"
-	$(CC) $(CFLAGS) $(TEXT_FLAGS) -Wno-unused-parameter -Wno-unused-function -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o $@
+$(TEXT_TARGET_DIR)/sheenbidi.o: $(SB_DIR)/.stamp
+	@mkdir -p "$(TEXT_DIR)"
+	$(CC) $(CFLAGS) $(TEXT_FLAGS) -Wno-unused-parameter -Wno-unused-function -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o "$@"
 
 build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h src/sk_text_shape.h include/sk_text.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
 	$(CXX) -std=c++17 -O2 -fPIC -c src/sk_capi_skia.cpp -o $@ \
@@ -141,9 +145,9 @@ build/fonts.S: $(ROOT)/scripts/fetch_fonts.py $(ROOT)/third_party/fonts/PIN | bu
 ensure-fonts: | build
 	python3 "$(ROOT)/scripts/fetch_fonts.py" build/fonts
 
-$(TEXT_DIR)/fonts.o: build/fonts.S | ensure-fonts
-	@mkdir -p "$(@D)"
-	$(CC) $(TEXT_FLAGS) -fPIC -c $< -o $@
+$(TEXT_TARGET_DIR)/fonts.o: build/fonts.S | ensure-fonts
+	@mkdir -p "$(TEXT_DIR)"
+	$(CC) $(TEXT_FLAGS) -fPIC -c $< -o "$@"
 
 build/sk_capi_skia_bridge.o: src/sk_capi_skia_bridge.c include/sk_capi.h include/sk_text.h src/sk_capi_skia.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
