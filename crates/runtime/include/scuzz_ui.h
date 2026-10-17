@@ -50,7 +50,8 @@ typedef enum SzInputKind {
   SZ_INPUT_TEXT_EDIT = 8, /* append text, or backspace if text NULL/empty */
   SZ_INPUT_KEY = 9,       /* named key + optional UTF-8 insert; not KEYBOARD */
   SZ_INPUT_COMPOSE = 10,  /* IME preedit; empty text commits into the buffer */
-  SZ_INPUT_REDUCED_MOTION = 11
+  SZ_INPUT_REDUCED_MOTION = 11,
+  SZ_INPUT_ACCESSIBILITY = 12
 } SzInputKind;
 
 /* SZ_INPUT_KEY modifier bits (combine with |). */
@@ -77,6 +78,10 @@ typedef struct SzInputEvent {
   int key_repeat;               /* SZ_INPUT_KEY: 1 = auto-repeat; same path as a discrete key */
   int pointer_button;           /* SZ_INPUT_POINTER: 0 hover, 1 primary, 3 secondary */
   int reduced_motion;           /* SZ_INPUT_REDUCED_MOTION */
+  uintptr_t a11y_id;            /* SZ_INPUT_ACCESSIBILITY: current View identity. */
+  int a11y_action;              /* SzA11yAction. Set text uses `text`. */
+  int a11y_start, a11y_end;      /* UTF-8 selection byte offsets. */
+  int64_t a11y_value;
 } SzInputEvent;
 
 /* Styled text. */
@@ -737,6 +742,52 @@ typedef enum SzA11yRole {
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
 const char *sz_view_a11y_label(const SzView *view);
+
+typedef enum SzA11yAction {
+  SZ_A11Y_FOCUS = 1,
+  SZ_A11Y_ACTIVATE = 2,
+  SZ_A11Y_SET_TEXT = 4,
+  SZ_A11Y_SET_SELECTION = 8,
+  SZ_A11Y_INCREMENT = 16,
+  SZ_A11Y_DECREMENT = 32,
+  SZ_A11Y_SET_VALUE = 64,
+  SZ_A11Y_CLEAR_FOCUS = 128
+} SzA11yAction;
+
+typedef struct SzA11yNode {
+  uintptr_t id, parent_id;
+  SzA11yRole role;
+  SzRect bounds;
+  const char *label, *value, *description;
+  unsigned actions;
+  int focused, editable, multiline;
+  /* -1 when the state does not apply. */
+  int checked, selected, expanded;
+  int selection_start, selection_end;
+  int64_t number, minimum, maximum, step;
+} SzA11yNode;
+
+typedef struct SzA11ySnapshot SzA11ySnapshot;
+/* Create after layout on the runtime worker. Nodes own their strings.
+ * The snapshot remains valid after View changes. Other threads can read it. */
+SzA11ySnapshot *sz_view_a11y_snapshot(SzView *root, SzRect viewport);
+/* Make layout current and copy the session semantics. Call on the runtime worker. */
+SzA11ySnapshot *sz_ui_session_a11y_snapshot(SzUiSession *session);
+size_t sz_a11y_snapshot_count(const SzA11ySnapshot *snapshot);
+const SzA11yNode *sz_a11y_snapshot_node(const SzA11ySnapshot *snapshot, size_t index);
+/* Release after all readers stop. */
+void sz_a11y_snapshot_free(SzA11ySnapshot *snapshot);
+
+typedef struct SzA11yRequest {
+  uintptr_t id;
+  SzA11yAction action;
+  const char *text;
+  int selection_start, selection_end; /* UTF-8 byte offsets. */
+  int64_t value;
+} SzA11yRequest;
+/* Use the current visible semantic tree. Reject stale and excluded targets.
+ * Call on the runtime worker after layout. */
+int sz_view_a11y_action(SzView *root, const SzA11yRequest *request);
 /* Live TextField string, or "" if not a field. */
 const char *sz_view_text_field_value(const SzView *view);
 /* Live editor buffer, or "" if not an editor. */

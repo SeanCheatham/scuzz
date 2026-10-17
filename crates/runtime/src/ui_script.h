@@ -12,6 +12,7 @@ int sz_ui_scroll_index_xy(SzUiSession *session, int index, float dx, float dy);
  * The inject schema v=1 (`{"v":1,"kind":"inject","events":[...]}`) is the
  * only script format. A script path must end in `.json`. */
 void sz_ui_script_play_json(SzUiSession *session, const char *text);
+const char *sz_ui_a11y_action_name(int action);
 /* Paint one explicit transition step. Finish built-in motion. */
 void sz_ui_session_script_begin(SzUiSession *session);
 void sz_ui_session_script_end(SzUiSession *session);
