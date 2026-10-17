@@ -6,6 +6,7 @@
 #define SK_CAPI_SKIA_H
 
 #include <stddef.h>
+#include "../include/sk_text.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -19,6 +20,12 @@ int scuzz_skia_surface_width(const void *surface);
 int scuzz_skia_surface_height(const void *surface);
 const uint8_t *scuzz_skia_surface_peek_pixels(const void *surface,
                                               size_t *out_size);
+void *scuzz_skia_image_make(const uint8_t *pixels, int width, int height);
+void scuzz_skia_image_unref(void *image);
+int scuzz_skia_image_width(const void *image);
+int scuzz_skia_image_height(const void *image);
+void scuzz_skia_canvas_draw_image(void *canvas, const void *image, float x,
+                                  float y, float w, float h, float opacity);
 void scuzz_skia_canvas_clear(void *canvas, uint8_t r, uint8_t g, uint8_t b,
                              uint8_t a);
 void scuzz_skia_canvas_draw_rect(void *canvas, float x, float y, float w,
@@ -28,7 +35,9 @@ void scuzz_skia_canvas_draw_string(void *canvas, const char *text, float x,
 void scuzz_skia_canvas_draw_string_mono(void *canvas, const char *text, float x,
                                         float y, const void *paint);
 void scuzz_skia_canvas_save(void *canvas);
+int scuzz_skia_canvas_save_layer_alpha(void *canvas, uint8_t alpha);
 void scuzz_skia_canvas_restore(void *canvas);
+int scuzz_skia_canvas_scale(void *canvas, float factor, float pivot_x, float pivot_y);
 void scuzz_skia_canvas_clip_rect(void *canvas, float x, float y, float w,
                                  float h);
 void *scuzz_skia_paint_new(void);
@@ -37,6 +46,13 @@ void scuzz_skia_paint_set_color(void *paint, uint8_t r, uint8_t g, uint8_t b,
                                 uint8_t a);
 void scuzz_skia_paint_set_text_size(void *paint, float size);
 float scuzz_skia_paint_get_text_size(const void *paint);
+void scuzz_skia_font_text_positions(SkTextRange text, float font_px, int style, float *leading, float *trailing);
+void scuzz_skia_text_cluster_breaks(const char *text, size_t bytes, uint8_t *breaks);
+void scuzz_skia_font_metrics(float font_px, int style, float *ascent, float *descent);
+void scuzz_skia_font_span_metrics(SkTextRange text, float font_px, int style, float *ascent, float *descent);
+float scuzz_skia_font_measure_span(SkTextRange text, float font_px, int style);
+void scuzz_skia_canvas_draw_span(void *canvas, SkTextRange text,
+                                float x, float y, const void *paint, int style);
 float scuzz_skia_font_measure_string(const char *text, float font_px);
 float scuzz_skia_font_measure_string_mono(const char *text, float font_px);
 int scuzz_skia_encode_png(const void *surface, uint8_t **out_bytes,

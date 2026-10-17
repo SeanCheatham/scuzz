@@ -12,6 +12,7 @@
 #define SCUZZ_HAVE_XIM 1
 #endif
 #endif
+#include <dbus/dbus.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,6 +89,172 @@ static char *clip_dup(const char *s) {
     return NULL;
   memcpy(out, s, n + 1);
   return out;
+}
+
+#define PORTAL_NAME "org.freedesktop.portal.Desktop"
+#define PORTAL_PATH "/org/freedesktop/portal/desktop"
+#define PORTAL_SETTINGS "org.freedesktop.portal.Settings"
+#define PORTAL_NAMESPACE "org.freedesktop.appearance"
+
+static DBusConnection *g_motion_bus;
+static char *g_motion_owner;
+static dbus_uint32_t g_motion_serial;
+static int g_motion_started;
+static int g_motion_reduced;
+
+static void motion_owner(const char *owner) {
+  free(g_motion_owner);
+  g_motion_owner = owner && *owner ? clip_dup(owner) : NULL;
+  g_motion_serial = 0;
+}
+
+static int motion_value(DBusMessage *message, int *value) {
+  DBusMessageIter outer, inner;
+  dbus_uint32_t raw;
+  if (!dbus_message_iter_init(message, &outer) ||
+      dbus_message_iter_get_arg_type(&outer) != DBUS_TYPE_VARIANT)
+    return 0;
+  dbus_message_iter_recurse(&outer, &inner);
+  if (dbus_message_iter_get_arg_type(&inner) != DBUS_TYPE_UINT32 ||
+      dbus_message_iter_next(&outer))
+    return 0;
+  dbus_message_iter_get_basic(&inner, &raw);
+  *value = raw == 1;
+  return 1;
+}
+
+static DBusMessage *motion_request(void) {
+  const char *space = PORTAL_NAMESPACE, *key = "reduced-motion";
+  DBusMessage *message;
+  if (!g_motion_owner)
+    return NULL;
+  message = dbus_message_new_method_call(g_motion_owner, PORTAL_PATH,
+                                         PORTAL_SETTINGS, "ReadOne");
+  if (!message)
+    return NULL;
+  dbus_message_set_auto_start(message, FALSE);
+  if (!dbus_message_append_args(message, DBUS_TYPE_STRING, &space,
+                                DBUS_TYPE_STRING, &key, DBUS_TYPE_INVALID)) {
+    dbus_message_unref(message);
+    return NULL;
+  }
+  return message;
+}
+
+static void motion_read_later(void) {
+  DBusMessage *message = motion_request();
+  if (message) {
+    (void)dbus_connection_send(g_motion_bus, message, &g_motion_serial);
+    dbus_message_unref(message);
+  }
+}
+
+static void motion_shutdown(void) {
+  if (g_motion_bus) {
+    dbus_connection_close(g_motion_bus);
+    dbus_connection_unref(g_motion_bus);
+  }
+  g_motion_bus = NULL;
+  motion_owner(NULL);
+  g_motion_started = 0;
+  g_motion_reduced = 0;
+}
+
+int sz_embedder_reduced_motion(void) {
+  DBusMessage *message, *reply;
+  const char *name = PORTAL_NAME, *owner;
+  const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
+  if (g_motion_started)
+    return g_motion_reduced;
+  g_motion_started = 1;
+  /* Do not start a session bus when the desktop has none. */
+  if (!address || !*address)
+    return 0;
+  g_motion_bus = dbus_bus_get_private(DBUS_BUS_SESSION, NULL);
+  if (!g_motion_bus)
+    return 0;
+  dbus_connection_set_exit_on_disconnect(g_motion_bus, FALSE);
+  dbus_bus_add_match(g_motion_bus,
+      "type='signal',sender='org.freedesktop.DBus',"
+      "interface='org.freedesktop.DBus',member='NameOwnerChanged',"
+      "path='/org/freedesktop/DBus',arg0='" PORTAL_NAME "'", NULL);
+  dbus_bus_add_match(g_motion_bus,
+      "type='signal',sender='" PORTAL_NAME "',interface='" PORTAL_SETTINGS
+      "',member='SettingChanged',path='" PORTAL_PATH "'", NULL);
+  message = dbus_message_new_method_call(DBUS_SERVICE_DBUS, DBUS_PATH_DBUS,
+                                         DBUS_INTERFACE_DBUS, "GetNameOwner");
+  if (!message)
+    return 0;
+  dbus_message_append_args(message, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
+  reply = dbus_connection_send_with_reply_and_block(g_motion_bus, message, 100, NULL);
+  dbus_message_unref(message);
+  if (reply) {
+    if (dbus_message_get_args(reply, NULL, DBUS_TYPE_STRING, &owner, DBUS_TYPE_INVALID))
+      motion_owner(owner);
+    dbus_message_unref(reply);
+  }
+  message = motion_request();
+  if (!message)
+    return 0;
+  reply = dbus_connection_send_with_reply_and_block(g_motion_bus, message, 100, NULL);
+  dbus_message_unref(message);
+  if (reply) {
+    (void)motion_value(reply, &g_motion_reduced);
+    dbus_message_unref(reply);
+  }
+  return g_motion_reduced;
+}
+
+static void motion_poll(void) {
+  DBusMessage *message;
+  if (!g_motion_bus || !dbus_connection_get_is_connected(g_motion_bus))
+    return;
+  dbus_connection_read_write(g_motion_bus, 0);
+  for (int i = 0; i < 64 && (message = dbus_connection_pop_message(g_motion_bus)); i++) {
+    const char *sender = dbus_message_get_sender(message);
+    if (dbus_message_is_signal(message, DBUS_INTERFACE_DBUS, "NameOwnerChanged") &&
+        sender && !strcmp(sender, DBUS_SERVICE_DBUS) &&
+        dbus_message_has_path(message, DBUS_PATH_DBUS)) {
+      const char *name, *old_owner, *new_owner;
+      if (dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name,
+          DBUS_TYPE_STRING, &old_owner, DBUS_TYPE_STRING, &new_owner, DBUS_TYPE_INVALID) &&
+          !strcmp(name, PORTAL_NAME)) {
+        motion_owner(new_owner);
+        motion_read_later();
+      }
+    } else if (g_motion_owner && sender && !strcmp(sender, g_motion_owner)) {
+      if (g_motion_serial && dbus_message_get_reply_serial(message) == g_motion_serial) {
+        (void)motion_value(message, &g_motion_reduced);
+        g_motion_serial = 0;
+      } else if (dbus_message_is_signal(message, PORTAL_SETTINGS, "SettingChanged") &&
+                 dbus_message_has_path(message, PORTAL_PATH)) {
+        DBusMessageIter iter, value;
+        const char *space, *key;
+        dbus_uint32_t raw;
+        if (dbus_message_iter_init(message, &iter) &&
+            dbus_message_iter_get_arg_type(&iter) == DBUS_TYPE_STRING) {
+          dbus_message_iter_get_basic(&iter, &space);
+          if (dbus_message_iter_next(&iter) &&
+              dbus_message_iter_get_arg_type(&iter) == DBUS_TYPE_STRING) {
+            dbus_message_iter_get_basic(&iter, &key);
+            if (!strcmp(space, PORTAL_NAMESPACE) && !strcmp(key, "reduced-motion") &&
+                dbus_message_iter_next(&iter) &&
+                dbus_message_iter_get_arg_type(&iter) == DBUS_TYPE_VARIANT) {
+              dbus_message_iter_recurse(&iter, &value);
+              if (dbus_message_iter_get_arg_type(&value) == DBUS_TYPE_UINT32 &&
+                  !dbus_message_iter_next(&iter)) {
+                dbus_message_iter_get_basic(&value, &raw);
+                g_motion_reduced = raw == 1;
+                /* A change signal supersedes an older read reply. */
+                g_motion_serial = 0;
+              }
+            }
+          }
+        }
+      }
+    }
+    dbus_message_unref(message);
+  }
 }
 
 static void x11_clip_atoms(void) {
@@ -387,6 +554,15 @@ static void x11_drain_pending(void) {
 }
 
 int sz_embedder_poll_event(SzInputEvent *out) {
+  if (!out)
+    return 0;
+  int previous = g_motion_reduced;
+  motion_poll();
+  if (out && previous != g_motion_reduced) {
+    *out = (SzInputEvent){.kind = SZ_INPUT_REDUCED_MOTION,
+                          .reduced_motion = g_motion_reduced};
+    return 1;
+  }
   x11_drain_pending();
   if (!out || g_q_head == g_q_tail)
     return 0;
@@ -1048,16 +1224,15 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
   /* Do not probe DISPLAY after the connection is open. */
   if (!(g_dpy || ensure_window(title, width, height)))
     return 0;
-  /* Catch events that landed since the pump drained. A user resize in
-   * flight must win over this frame. */
+  /* Read events that arrive after the last pump. A pending user resize
+   * takes priority over this frame. */
   x11_drain_pending();
   if (!g_dpy || !g_ready)
     return 0; /* shutdown ran during the drain */
   if (!ensure_frame(width, height))
     return 0;
-  /* App-driven size change (inject `resize`): move the window to the
-   * frame. A queued resize event means the WM is resizing; the next
-   * present catches up. Never fight the WM. */
+  /* Resize the window for an injected frame size. A queued window manager
+   * resize takes priority. The next frame uses that size. */
   if ((g_win_w != width || g_win_h != height) && !resize_queued())
     XResizeWindow(g_dpy, g_win, (unsigned)width, (unsigned)height);
 
@@ -1087,6 +1262,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
 }
 
 void sz_embedder_shutdown(void) {
+  motion_shutdown();
   x11_xim_shutdown();
   if (g_img) {
     /* XDestroyImage frees g_img_data */

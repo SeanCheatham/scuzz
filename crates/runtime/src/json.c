@@ -16,7 +16,7 @@
 #include <xlocale.h>
 #endif
 
-/* Blessed Json parse/stringify. Pure. ADT tags match the injected Json enum:
+/* Built-in Json parse/stringify. Pure. ADT tags match the injected Json enum:
  * Null | Bool | Int | Float | Str | Arr | Obj. Both calls return Result
  * (Err = 0, Ok = 1), same as IO.attempt. */
 

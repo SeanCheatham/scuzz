@@ -1,11 +1,14 @@
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE 200809L
 #include "scuzz_ui.h"
+#include "../src/text.h"
 #include "sk_capi.h"
 #include "../src/ui_script.h"
 
 #include <assert.h>
 #include <stdatomic.h>
 #include <math.h>
+#include <limits.h>
+#include <float.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -17,10 +20,28 @@
 #include <unistd.h>
 
 const int32_t sz_eval_value_tag_base = 42;
+const int32_t sz_eval_view_tag = 70;
 
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
 int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event);
+
+static SzView *image_fixture(int width, int height, uint32_t color, const char *label) {
+  SkSurface *surface = sk_surface_make_raster_n32_premul(width, height);
+  assert(surface);
+  sk_canvas_clear(sk_surface_get_canvas(surface), sk_color_argb(color));
+  uint8_t *bytes = NULL;
+  size_t len = 0;
+  assert(sk_encode_png(surface, &bytes, &len));
+  const char *error = NULL;
+  SzImage *image = sz_image_decode(bytes, len, &error);
+  assert(image && !error);
+  SzView *view = sz_view_image(image, label);
+  sz_image_free(image);
+  free(bytes);
+  sk_surface_unref(surface);
+  return view;
+}
 
 static int files_equal(const char *a, const char *b) {
   FILE *fa = fopen(a, "rb");
@@ -146,8 +167,9 @@ static void test_code_block_wheel_pans_x(void) {
   fr = sz_view_frame(scrolls[0]);
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_SCROLL;
-  ev.x = fr.x + 8.f;
-  ev.y = fr.y + 8.f;
+  assert(fr.w > 0.f && fr.h > 0.f);
+  ev.x = fr.x + fr.w * .5f;
+  ev.y = fr.y + fr.h * .5f;
   ev.dy = 24.f;
   assert(sz_ui_inject_sync(session, &ev));
   assert(sz_view_scroll_x(scrolls[0]) == 24.f);
@@ -246,7 +268,7 @@ static void test_button_press_feedback(void) {
 }
 
 static void test_session_snapshot(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalInt *count;
   SzView *root, *btn, *view;
   SzUiSession *session;
@@ -321,7 +343,7 @@ static void test_session_snapshot(void) {
 }
 
 static void test_signals_layout_hit(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalInt *count;
   SzView *root, *btn;
   SzUiSession *session;
@@ -374,7 +396,7 @@ static void test_signals_layout_hit(void) {
 }
 
 static void test_replace_root_keeps_signals(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalInt *count;
   SzView *root1, *root2, *btn1, *btn2;
   SzUiSession *session;
@@ -491,7 +513,7 @@ static SzView *watch_rebuild(void *env) {
 }
 
 static void test_watch_rebuild_keeps_signals(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   WatchRebuildEnv *env;
   SzView *root;
   SzUiSession *session;
@@ -771,7 +793,7 @@ static SzAdt *json_arr_find_str(SzAdt *j, const char *key, const char *want,
 }
 
 static void test_dump_json_schema(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalInt *count;
   SzSignalInt *flag;
   SzSignalStr *text;
@@ -999,7 +1021,7 @@ static SzAdt *json_slurp_parse(const char *path) {
 }
 
 static void test_script_json_inject(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *count;
@@ -1058,7 +1080,7 @@ static void test_script_json_inject(void) {
 }
 
 static void test_script_tap_named_id(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *count;
@@ -1115,7 +1137,7 @@ static void test_script_tap_named_id(void) {
 }
 
 static void test_record_json(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn;
   SzSignalInt *count;
@@ -1157,8 +1179,14 @@ static void test_record_json(void) {
   events = json_doc_key(json, "events");
   assert(events && sz_json_is_arr(events) == 1);
   arr = sz_json_arr(events);
-  assert(sz_list_len(arr) == 1);
+  assert(sz_list_len(arr) == 3);
+  assert(sz_jev_bool(json, "manualPumps"));
   ev0 = (SzAdt *)sz_list_head(arr);
+  assert(json_str_eq(ev0, "op", "reduceMotion"));
+  assert(sz_json_is_bool(sz_jev_key(ev0, "value")) && !sz_jev_bool(ev0, "value"));
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(arr));
+  assert(json_str_eq(ev0, "op", "pump") && json_doc_int(ev0, "k", 0) == 1);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(arr)));
   assert(json_str_eq(ev0, "op", "tap"));
   assert(json_doc_int(ev0, "i", -1) == 0);
   sz_release(arr);
@@ -1174,8 +1202,8 @@ static void test_record_json(void) {
   json = (SzAdt *)sz_adt_payload(parsed);
   events = json_doc_key(json, "events");
   arr = sz_json_arr(events);
-  assert(sz_list_len(arr) == 2);
-  ev0 = (SzAdt *)sz_list_head(sz_list_tail(arr));
+  assert(sz_list_len(arr) == 4);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(sz_list_tail(arr))));
   assert(json_str_eq(ev0, "op", "xy"));
   assert(sz_json_float_or(json_doc_key(ev0, "x"), 0.0) == 190.0);
   sz_release(arr);
@@ -1191,8 +1219,8 @@ static void test_record_json(void) {
   json = (SzAdt *)sz_adt_payload(parsed);
   events = json_doc_key(json, "events");
   arr = sz_json_arr(events);
-  assert(sz_list_len(arr) == 3);
-  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(arr)));
+  assert(sz_list_len(arr) == 5);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(sz_list_tail(sz_list_tail(arr)))));
   assert(json_str_eq(ev0, "op", "key"));
   assert(json_str_eq(ev0, "key", "s"));
   mods = json_doc_key(ev0, "mods");
@@ -1251,7 +1279,7 @@ static int dump_has(SzUiSession *session, const char *needle) {
 }
 
 static SzUiSession *mount_kind(SzUiRuntimeKind kind, SzView *root) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   memset(&cfg, 0, sizeof cfg);
   cfg.kind = kind;
   cfg.width = 160;
@@ -1456,7 +1484,7 @@ static void test_pump_motion(void) {
 }
 
 static void test_quiesce(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzSignalInt *sig;
   SzView *root;
@@ -1533,7 +1561,7 @@ static int64_t dump_i64(const char *s, const char *key) {
 }
 
 static void test_session_debug_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn, *search;
   SzSignalInt *count;
@@ -1661,7 +1689,7 @@ static void test_session_debug_dump(void) {
 }
 
 static void test_xy_hit_and_miss(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn;
   SzSignalInt *count;
@@ -1733,7 +1761,7 @@ static void test_xy_hit_and_miss(void) {
 }
 
 static void test_record_live_not_script(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn;
   SzSignalInt *count;
@@ -1799,7 +1827,7 @@ static void test_record_live_not_script(void) {
 }
 
 static void test_record_live_scroll(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *list, *scroll;
   SzInputEvent ev;
@@ -1856,7 +1884,7 @@ static void test_record_live_scroll(void) {
 }
 
 static void test_studio_shaped_xy(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *home, *banner, *inc_btn, *add_btn;
   SzSignalInt *count;
@@ -1932,7 +1960,7 @@ static void test_studio_shaped_xy(void) {
 }
 
 static void test_session_inject_script(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn;
   SzSignalInt *count;
@@ -1977,7 +2005,7 @@ static void test_session_inject_script(void) {
 }
 
 static void test_session_inject_grows_past_4k(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn;
   SzSignalInt *count;
@@ -2027,7 +2055,7 @@ static void test_session_inject_grows_past_4k(void) {
 }
 
 static void test_session_inject_control(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   WatchRebuildEnv *env;
   SzView *root, *first;
@@ -2171,7 +2199,7 @@ static void test_session_inject_control(void) {
 }
 
 static void test_idle_pump_skips_paint(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzInputEvent tap;
@@ -2217,7 +2245,7 @@ static void test_idle_pump_skips_paint(void) {
 }
 
 static void test_session_dump_now_needs_path(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
 
@@ -2262,7 +2290,7 @@ static void test_session_dump_now_needs_path(void) {
 }
 
 static void test_session_inject_scroll(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *row, *scroll, *scroll2, *list, *list2;
   const char *path = "/tmp/scuzz_ui_inject_scroll.json";
@@ -2283,8 +2311,8 @@ static void test_session_inject_scroll(void) {
   scroll = sz_view_scroll(list);
   scroll2 = sz_view_scroll(list2);
   row = sz_view_row();
-  sz_view_add_child(row, sz_view_expanded(scroll));
-  sz_view_add_child(row, sz_view_expanded(scroll2));
+  sz_view_add_child(row, sz_view_expanded(1, scroll));
+  sz_view_add_child(row, sz_view_expanded(1, scroll2));
   sz_view_add_child(root, row);
 
   memset(&cfg, 0, sizeof(cfg));
@@ -2320,7 +2348,7 @@ static void test_session_inject_scroll(void) {
 }
 
 static void test_script_run_file_long_line(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2365,7 +2393,7 @@ static void test_script_run_file_long_line(void) {
 }
 
 static void test_session_inject_backspace(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2406,7 +2434,7 @@ static void test_session_inject_backspace(void) {
 }
 
 static void test_session_inject_type(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2455,7 +2483,7 @@ static void test_session_inject_type(void) {
 }
 
 static void test_session_inject_key(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2507,7 +2535,7 @@ static void test_session_inject_key(void) {
 }
 
 static void test_session_inject_key_utf8_backspace(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2546,7 +2574,7 @@ static void test_session_inject_key_utf8_backspace(void) {
 }
 
 static void test_record_live_key(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2599,7 +2627,7 @@ static void test_record_live_key(void) {
 }
 
 static void test_record_type_escapes(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2639,7 +2667,7 @@ static void test_record_type_escapes(void) {
 }
 
 static void test_session_inject_key_repeat(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2712,7 +2740,7 @@ static void test_session_inject_key_repeat(void) {
 }
 
 static void test_session_inject_compose(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field, *ed;
   SzSignalStr *draft, *buf;
@@ -2831,7 +2859,7 @@ static void test_session_inject_compose(void) {
 }
 
 static void test_record_live_hover_secondary(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn, *tip;
   SzSignalInt *count;
@@ -2896,7 +2924,7 @@ static void test_record_live_hover_secondary(void) {
 }
 
 static void test_session_inject_caret(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -2988,7 +3016,7 @@ static void test_session_inject_caret(void) {
 }
 
 static void test_session_inject_hover_secondary(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn, *tip;
   SzSignalInt *count;
@@ -3083,7 +3111,7 @@ static void test_session_inject_hover_secondary(void) {
 }
 
 static void test_on_secondary_script_fires(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *btn, *wrap;
   SzSignalInt *primary;
@@ -3282,7 +3310,7 @@ static void test_code_copy_and_heading(void) {
 }
 
 static void test_session_inject_selection_clipboard(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
@@ -3429,7 +3457,7 @@ static void test_session_inject_selection_clipboard(void) {
 }
 
 static void test_session_inject_field_index(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalStr *draft, *query;
@@ -3500,7 +3528,7 @@ static void test_button_set_and_show_when(void) {
   SzView *root, *home, *other, *set_btn, *inc_btn;
   SetEnv *set_env;
   const SzTheme *theme = sz_theme_default();
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzInputEvent tap;
   float hx, hy;
@@ -3561,6 +3589,65 @@ static void test_button_set_and_show_when(void) {
   sz_signal_int_free(count);
 }
 
+static void test_bitmap_images(void) {
+  size_t before_bytes, before_count, after_bytes, after_count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  SkSurface *source = sk_surface_make_raster_n32_premul(2, 1);
+  assert(source);
+  sk_canvas_clear(sk_surface_get_canvas(source), sk_color_rgba(120, 60, 20, 255));
+  uint8_t *bytes = NULL;
+  size_t len = 0;
+  assert(sk_encode_png(source, &bytes, &len));
+  SzString *input = sz_string_from_bytes((const char *)bytes, len);
+  SzAdt *result = sz_lang_image_decode(input);
+  assert(sz_adt_tag(result) == 1);
+  SzImage *image = (SzImage *)sz_adt_payload(result);
+  assert(sz_image_width(image) == 2 && sz_image_height(image) == 1);
+  assert(sz_rc_kind(image) == SZ_RC_IMAGE && sz_rc_count(image) == 1);
+  SzView *a = sz_view_image(image, "A");
+  SzView *b = sz_view_image(image, "B");
+  assert(sz_rc_count(image) == 3);
+  sz_release(result);
+  sz_release(input);
+  assert(sz_rc_count(image) == 2);
+  SzView *root = sz_view_sized(80, 80, sz_view_opacity(50, a));
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0;
+  SkSurface *surface = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surface);
+  assert(sz_view_paint(root, sk_surface_get_canvas(surface), 80, 80, &theme));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(pixels[3] == 0);
+  const uint8_t *middle = pixels + (40 * 80 + 40) * 4;
+  assert(abs(middle[0] - 60) <= 1 && abs(middle[1] - 30) <= 1 && abs(middle[2] - 10) <= 1 && abs(middle[3] - 128) <= 1);
+  sz_view_layout(a, 120, 120, &theme);
+  assert(fabsf(sz_view_frame(a).w - 2.f) < 0.01f && fabsf(sz_view_frame(a).h - 1.f) < 0.01f);
+  theme.px_scale = 2.f;
+  sz_view_layout(a, 120, 120, &theme);
+  assert(fabsf(sz_view_frame(a).w - 4.f) < 0.01f && fabsf(sz_view_frame(a).h - 2.f) < 0.01f);
+  sz_view_free(root);
+  assert(sz_rc_count(image) == 1);
+  theme.px_scale = 1.f;
+  root = sz_view_sized(80, 40, sz_view_radius(12, b));
+  assert(sz_view_paint(root, sk_surface_get_canvas(surface), 80, 80, &theme));
+  pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(pixels[3] == 0 && pixels[(20 * 80 + 40) * 4] == 120);
+  SzString *labels = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(labels), "image:B"));
+  sz_release(labels);
+  sz_view_free(root);
+  sk_surface_unref(source);
+  sk_surface_unref(surface);
+  free(bytes);
+  input = sz_string_from_cstr("invalid");
+  result = sz_lang_image_decode(input);
+  assert(sz_adt_tag(result) == 0 && sz_rc_kind(sz_adt_payload(result)) == SZ_RC_STRING);
+  sz_release(result);
+  sz_release(input);
+  sz_alloc_stats(&after_bytes, &after_count);
+  assert(before_bytes == after_bytes && before_count == after_count);
+}
+
 static void test_widgets(void) {
   SzView *col, *scroll, *list, *field, *img, *icon;
   SzSignalStr *draft;
@@ -3569,7 +3656,7 @@ static void test_widgets(void) {
   draft = sz_signal_str("hi");
   col = sz_view_column();
   field = sz_view_text_field(draft, "type");
-  img = sz_view_image(16, 16, 0xFF112233u, "i");
+  img = image_fixture(16, 16, 0xFF112233u, "i");
   icon = sz_view_icon('X', 0xFF000000u);
   list = sz_view_list();
   sz_view_add_child(list, sz_view_text("a"));
@@ -3597,7 +3684,7 @@ static void test_expanded_column(void) {
   list = sz_view_list();
   sz_view_add_child(list, sz_view_text("a"));
   scroll = sz_view_scroll(list);
-  exp = sz_view_expanded(scroll);
+  exp = sz_view_expanded(1, scroll);
   btn = sz_view_button("Go", NULL, NULL);
   sz_view_add_child(col, title);
   sz_view_add_child(col, exp);
@@ -3623,7 +3710,7 @@ static void test_expanded_row(void) {
   row = sz_view_row();
   left = sz_view_button("L", NULL, NULL);
   mid = sz_view_text("mid");
-  exp = sz_view_expanded(mid);
+  exp = sz_view_expanded(1, mid);
   right = sz_view_button("R", NULL, NULL);
   sz_view_add_child(row, left);
   sz_view_add_child(row, exp);
@@ -3698,7 +3785,7 @@ static void test_stack(void) {
   SzRect sf, bf, tf;
 
   stack = sz_view_stack();
-  bot = sz_view_image(40, 40, 0xFF112233u, "");
+  bot = image_fixture(40, 40, 0xFF112233u, "");
   top = sz_view_icon('+', 0xFFFFFFFFu);
   sz_view_add_child(stack, bot);
   sz_view_add_child(stack, top);
@@ -3721,7 +3808,7 @@ static void test_positioned(void) {
   SzRect bf, pf;
 
   stack = sz_view_stack();
-  bot = sz_view_image(40, 40, 0xFF112233u, "");
+  bot = image_fixture(40, 40, 0xFF112233u, "");
   badge = sz_view_icon('+', 0xFFFFFFFFu);
   pos = sz_view_positioned(10, 6, badge);
   sz_view_add_child(stack, bot);
@@ -4096,8 +4183,11 @@ static void test_edit_paint_scale_and_clip(void) {
       }
       pixels = sk_surface_peek_pixels(surf, &bytes);
       assert(pixels && bytes == 240 * 180 * 4);
-      assert(px_rgb(pixels, 240, (int)ceilf(caret.x), (int)ceilf(caret.y + 2.f * scale),
-                    0x24, 0x23, 0x1F));
+      int caret_ink = 0;
+      for (int x = (int)floorf(caret.x); x < (int)ceilf(caret.x + caret.w); x++)
+        caret_ink |= px_rgb(pixels, 240, x, (int)ceilf(caret.y + 2.f * scale),
+                            0x24, 0x23, 0x1F);
+      assert(caret_ink);
       if (!editor) {
         sz_signal_str_set(text, "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM");
         assert(sz_view_paint(root, canvas, 240, 180, &theme));
@@ -4296,7 +4386,7 @@ static void test_expanded_text_fills_tight_slot(void) {
   col = sz_view_column();
   title = sz_view_text("Title");
   body = sz_view_text("Hi");
-  exp = sz_view_expanded(body);
+  exp = sz_view_expanded(1, body);
   btn = sz_view_button("Go", NULL, NULL);
   sz_view_add_child(col, title);
   sz_view_add_child(col, exp);
@@ -4321,7 +4411,7 @@ static void test_min_size_inside_expanded(void) {
   title = sz_view_text("T");
   child = sz_view_text("Hi");
   box = sz_view_min_size(0, 40, child);
-  exp = sz_view_expanded(box);
+  exp = sz_view_expanded(1, box);
   sz_view_add_child(col, title);
   sz_view_add_child(col, exp);
   sz_view_layout(col, 180.f, max_h, theme);
@@ -4618,6 +4708,709 @@ static SzView *grid_two_sized(int cols, int w1, int h1, int w2, int h2) {
   sz_view_add_child(g, sz_view_sized(w1, h1, sz_view_text("a")));
   sz_view_add_child(g, sz_view_sized(w2, h2, sz_view_text("b")));
   return g;
+}
+
+static void test_container_child_list_ownership(void) {
+  for (int list_first = 0; list_first <= 1; list_first++) {
+    size_t before_bytes, before_count, after_bytes, after_count;
+    sz_alloc_stats(&before_bytes, &before_count);
+    SzView *grid = sz_view_grid(3);
+    SzList *children = NULL;
+    SzView *last = NULL;
+    for (int i = 11; i >= 0; i--) {
+      char label[32];
+      snprintf(label, sizeof label, "cell%d", i);
+      SzView *child = sz_view_button(label, NULL, NULL);
+      if (i == 11)
+        last = child;
+      SzList *next = sz_list_cons(child, children);
+      sz_list_free(children);
+      sz_view_free(child);
+      children = next;
+    }
+    assert(sz_rc_count(last) == 1);
+    assert(sz_lang_view_add_children(grid, children) == NULL);
+    assert(sz_rc_count(last) == 2);
+    if (list_first) {
+      sz_list_free(children);
+      assert(sz_rc_count(last) == 1);
+    }
+    sz_view_layout(grid, 960.f, 560.f, sz_theme_default());
+    SzRect frame = sz_view_frame(last);
+    assert(sz_view_hit_test(grid, frame.x + 2.f, frame.y + 2.f) == last);
+    SzString *dump = sz_view_a11y_dump(grid);
+    assert(strstr(sz_string_cstr(dump), "button:cell11"));
+    sz_string_free(dump);
+    sz_view_free(grid);
+    if (!list_first) {
+      assert(sz_rc_count(last) == 1);
+      assert(strcmp(sz_view_a11y_label(last), "cell11") == 0);
+      sz_list_free(children);
+    }
+    sz_alloc_stats(&after_bytes, &after_count);
+    assert(before_bytes == after_bytes && before_count == after_count);
+  }
+  SzView *empty = sz_view_column();
+  assert(sz_lang_view_add_children(empty, NULL) == NULL);
+  sz_view_free(empty);
+}
+
+static void assert_missing_aborts(void (*fn)(void), const char *expect);
+
+static int virtual_builds, virtual_keys;
+static SzView *virtual_first_field;
+
+static void *virtual_test_key(void *value, void *env) {
+  (void)env;
+  virtual_keys++;
+  SzList *fields = sz_adt_payload(value);
+  sz_retain(fields->head);
+  return fields->head;
+}
+
+static void *virtual_test_caption(void *value, void *env) {
+  (void)env;
+  SzList *fields = sz_adt_payload(value);
+  sz_retain(fields->tail->head);
+  return fields->tail->head;
+}
+
+static SzView *virtual_test_row(SzSignal *item, void *env) {
+  (void)env;
+  virtual_builds++;
+  SzSignal *label = sz_signal_derive(item, virtual_test_caption, NULL, 2, NULL);
+  SzSignalStr *draft = sz_signal_str("draft");
+  SzView *field = sz_view_text_field(draft, "edit");
+  void *value = sz_signal_read(item);
+  SzList *fields = sz_adt_payload(value);
+  if (sz_unbox_i64(fields->head) == 0) virtual_first_field = field;
+  sz_release(value);
+  SzView *body = sz_view_column();
+  sz_view_add_child(body, sz_lang_view_bind_text(label));
+  sz_view_add_child(body, field);
+  return body;
+}
+
+static SzAdt *virtual_test_item(int64_t key, const char *label) {
+  void *id = sz_box_i64(key);
+  SzString *text = sz_string_from_cstr(label);
+  SzList *tail = sz_list_cons(text, NULL);
+  SzList *fields = sz_list_cons(id, tail);
+  SzAdt *item = sz_adt_new(700, fields);
+  sz_release(id);
+  sz_release(text);
+  sz_release(tail);
+  sz_release(fields);
+  return item;
+}
+
+static void test_virtual_list_window_and_identity(void) {
+  size_t before_bytes, before_count, base_bytes, base_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  const int length = 100000;
+  SzList *items = NULL;
+  for (int i = length - 1; i >= 0; i--) {
+    SzAdt *item = virtual_test_item(i, "row");
+    SzList *next = sz_list_cons(item, items);
+    sz_release(item);
+    sz_release(items);
+    items = next;
+  }
+  SzSignalList *source = sz_signal_list(items);
+  sz_release(items);
+  virtual_builds = virtual_keys = 0;
+  virtual_first_field = NULL;
+  SzView *root = sz_view_virtual_list(120, source, virtual_test_key, NULL,
+                                     virtual_test_row, NULL);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(virtual_keys == length);
+  assert(virtual_builds <= 5);
+  SzView *first = virtual_first_field;
+  sz_view_focus(root, first);
+  assert(sz_view_handle_key(root, "", "!", 0));
+  assert(sz_view_has_focused_text_field(root));
+  int built = virtual_builds;
+  for (int i = 0; i < 30; i++)
+    sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(virtual_builds == built && virtual_keys == length);
+  SzAdt *updated = virtual_test_item(0, "updated");
+  SzList *new_items = sz_list_cons(updated, sz_signal_list_get(source)->tail);
+  sz_release(updated);
+  sz_signal_list_set(source, new_items);
+  sz_release(new_items);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(virtual_builds == built);
+  assert(sz_view_text_field_target(root) == first);
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "updated"));
+  assert(strstr(sz_view_text_field_value(first), "!"));
+  sz_release(dump);
+  SzList *reversed = sz_list_reverse(sz_signal_list_get(source));
+  sz_signal_list_set(source, reversed);
+  sz_release(reversed);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(sz_view_text_field_target(root) == first);
+  assert(sz_view_has_focused_text_field(root));
+  assert(sz_view_scroll_y(root) > 100000.f);
+  sz_alloc_stats(&base_bytes, &base_count);
+  int key_calls = virtual_keys;
+  for (int i = 0; i < 40; i++) {
+    sz_view_scroll_by(root, i % 2 ? 3000000.f : -3000000.f);
+    sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+    SzView *fields[16];
+    int visible = sz_view_collect_text_fields(root, fields, 16);
+    assert(visible <= 5);
+    assert(virtual_keys == key_calls);
+    sz_alloc_stats(&bytes, &count);
+    assert(bytes < base_bytes + 16384 && count < base_count + 100);
+  }
+  sz_signal_list_set(source, NULL);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(sz_view_scroll_y(root) == 0.f);
+  SzView *fields[2];
+  assert(sz_view_collect_text_fields(root, fields, 2) == 0);
+  sz_view_free(root);
+  sz_signal_list_free(source);
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+}
+
+static void test_measured_list_window_and_identity(void) {
+  size_t before_bytes, before_count, base_bytes, base_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  const int length = 100000;
+  SzList *items = NULL;
+  for (int i = length - 1; i >= 0; i--) {
+    SzAdt *item = virtual_test_item(i, "row");
+    SzList *next = sz_list_cons(item, items);
+    sz_release(item);
+    sz_release(items);
+    items = next;
+  }
+  SzSignalList *source = sz_signal_list(items);
+  sz_release(items);
+  virtual_builds = virtual_keys = 0;
+  virtual_first_field = NULL;
+  SzView *root = sz_view_measured_list(80, source, virtual_test_key, NULL,
+                                     virtual_test_row, NULL);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(virtual_keys == length);
+  assert(virtual_builds <= 8);
+  SzView *first = virtual_first_field;
+  sz_view_focus(root, first);
+  assert(sz_view_handle_key(root, "", "!", 0));
+  assert(sz_view_has_focused_text_field(root));
+  int built = virtual_builds;
+  for (int i = 0; i < 30; i++)
+    sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(virtual_builds == built && virtual_keys == length);
+  SzAdt *updated = virtual_test_item(0, "updated");
+  SzList *new_items = sz_list_cons(updated, sz_signal_list_get(source)->tail);
+  sz_release(updated);
+  sz_signal_list_set(source, new_items);
+  sz_release(new_items);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(virtual_builds == built);
+  assert(sz_view_text_field_target(root) == first);
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "updated"));
+  assert(strstr(sz_view_text_field_value(first), "!"));
+  sz_release(dump);
+  SzList *reversed = sz_list_reverse(sz_signal_list_get(source));
+  sz_signal_list_set(source, reversed);
+  sz_release(reversed);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(sz_view_text_field_target(root) == first);
+  assert(sz_view_has_focused_text_field(root));
+  assert(sz_view_scroll_y(root) > 100000.f);
+  sz_alloc_stats(&base_bytes, &base_count);
+  int key_calls = virtual_keys;
+  for (int i = 0; i < 40; i++) {
+    sz_view_scroll_by(root, i % 2 ? 3000000.f : -3000000.f);
+    sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+    SzView *fields[16];
+    int visible = sz_view_collect_text_fields(root, fields, 16);
+    assert(visible <= 8);
+    assert(virtual_keys == key_calls);
+    sz_alloc_stats(&bytes, &count);
+    assert(bytes < base_bytes + 32768 && count < base_count + 100);
+  }
+  sz_signal_list_set(source, NULL);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  assert(sz_view_scroll_y(root) == 0.f);
+  SzView *fields[2];
+  assert(sz_view_collect_text_fields(root, fields, 2) == 0);
+  sz_view_free(root);
+  sz_signal_list_free(source);
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+}
+
+static SzView *measured_test_row(SzSignal *item, void *env) {
+  (void)env;
+  virtual_builds++;
+  void *value = sz_signal_read(item);
+  SzList *fields = sz_adt_payload(value);
+  int64_t key = sz_unbox_i64(fields->head);
+  char label[32];
+  snprintf(label, sizeof label, "row%lld", (long long)key);
+  sz_release(value);
+  return sz_view_sized(0, (int)(key % 3 + 1) * 20, sz_view_button(label, NULL, NULL));
+}
+
+static void test_measured_list_height_index(void) {
+  size_t before_bytes, before_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  const int length = 100000;
+  SzList *items = NULL;
+  for (int i = length - 1; i >= 0; i--) {
+    SzAdt *item = virtual_test_item(i, "row");
+    SzList *next = sz_list_cons(item, items);
+    sz_release(item);
+    sz_release(items);
+    items = next;
+  }
+  SzSignalList *source = sz_signal_list(items);
+  sz_release(items);
+  for (int estimate = 1; estimate <= 10000; estimate *= 10000) {
+    virtual_builds = virtual_keys = 0;
+    SzView *root = sz_view_measured_list(estimate, source, virtual_test_key, NULL,
+                                       measured_test_row, NULL);
+    sz_view_layout(root, 320, 300, sz_theme_default());
+    assert(virtual_keys == length && virtual_builds < 18);
+    SzView *buttons[32];
+    int n = sz_view_collect_tap_targets(root, buttons, 32);
+    assert(n > 3 && n < 18);
+    for (int i = 1; i < n; i++) {
+      SzRect previous = sz_view_frame(buttons[i - 1]);
+      SzRect current = sz_view_frame(buttons[i]);
+      assert(fabsf(previous.y + previous.h - current.y) < 0.01f);
+    }
+    sz_view_scroll_by(root, 18000);
+    sz_view_layout(root, 320, 300, sz_theme_default());
+    n = sz_view_collect_tap_targets(root, buttons, 32);
+    int first = 0;
+    while (first < n && sz_view_frame(buttons[first]).y + sz_view_frame(buttons[first]).h <= 12) first++;
+    assert(first < n);
+    SzView *anchor = buttons[first];
+    SzRect frame = sz_view_frame(anchor);
+    int builds = virtual_builds;
+    for (int i = 0; i < 20; i++) sz_view_layout(root, 320, 300, sz_theme_default());
+    assert(virtual_builds == builds && virtual_keys == length);
+    assert(fabsf(sz_view_frame(anchor).y - frame.y) < 0.01f);
+    sz_view_layout(root, 400, 300, sz_theme_default());
+    assert(fabsf(sz_view_frame(anchor).y - frame.y) < 0.01f);
+    sz_view_scroll_by(root, 2000000000.f);
+    builds = virtual_builds;
+    sz_view_layout(root, 400, 300, sz_theme_default());
+    n = sz_view_collect_tap_targets(root, buttons, 32);
+    assert(n > 3 && n < 18 && virtual_builds - builds < 18);
+    assert(!strcmp(sz_view_a11y_label(buttons[n - 1]), "row99999"));
+    frame = sz_view_frame(buttons[n - 1]);
+    assert(fabsf(frame.y + frame.h - 288.f) < 0.01f);
+    assert(sz_view_hit_test(root, frame.x + 5, frame.y + 5) == buttons[n - 1]);
+    for (int i = 0; i < 20; i++) sz_view_layout(root, 400, 300, sz_theme_default());
+    assert(fabsf(sz_view_frame(buttons[n - 1]).y - frame.y) < 0.01f);
+    assert(sz_view_scroll_pan(root, 0, -1));
+    sz_view_layout(root, 400, 300, sz_theme_default());
+    assert(fabsf(sz_view_frame(buttons[n - 1]).y - frame.y - 1.f) < 0.01f);
+    assert(sz_view_scroll_pan(root, 0, 1));
+    sz_view_layout(root, 400, 300, sz_theme_default());
+    assert(fabsf(sz_view_frame(buttons[n - 1]).y - frame.y) < 0.01f);
+    sz_view_layout(root, 400, 0, sz_theme_default());
+    sz_view_scroll_by(root, 2000000000.f);
+    sz_view_layout(root, 400, 0, sz_theme_default());
+    assert(isfinite(sz_view_scroll_y(root)));
+    assert(sz_view_collect_tap_targets(root, buttons, 32) == 0);
+    sz_view_layout(root, 400, 300, sz_theme_default());
+    n = sz_view_collect_tap_targets(root, buttons, 32);
+    assert(n > 3 && n < 18);
+    assert(!strcmp(sz_view_a11y_label(buttons[n - 1]), "row99999"));
+    sz_view_free(root);
+  }
+  sz_signal_list_free(source);
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+}
+
+static SzView *measured_wrap_row(SzSignal *item, void *env) {
+  (void)env;
+  virtual_builds++;
+  void *value = sz_signal_read(item);
+  SzList *fields = sz_adt_payload(value);
+  char title[32];
+  snprintf(title, sizeof title, "Item %lld", (long long)sz_unbox_i64(fields->head));
+  sz_release(value);
+  SzSignal *caption = sz_signal_derive(item, virtual_test_caption, NULL, 2, NULL);
+  SzSignalStr *draft = sz_signal_str("");
+  SzView *body = sz_view_column();
+  sz_view_add_child(body, sz_view_button(title, NULL, NULL));
+  sz_view_add_child(body, sz_lang_view_bind_text(caption));
+  sz_view_add_child(body, sz_view_text_field(draft, "Note"));
+  return body;
+}
+
+static void test_measured_list_wrap_and_focus(void) {
+  SzList *items = NULL;
+  for (int i = 99; i >= 0; i--) {
+    SzAdt *item = virtual_test_item(i,
+      "This row has enough text to wrap onto several lines. The available width controls its height. "
+      "A measured list keeps its visible item in place when the window width changes.");
+    SzList *next = sz_list_cons(item, items);
+    sz_release(item);
+    sz_release(items);
+    items = next;
+  }
+  SzSignalList *source = sz_signal_list(items);
+  sz_release(items);
+  SzView *root = sz_view_measured_list(160, source, virtual_test_key, NULL, measured_wrap_row, NULL);
+  sz_view_layout(root, 640, 300, sz_theme_default());
+  sz_view_scroll_by(root, 400);
+  sz_view_layout(root, 640, 300, sz_theme_default());
+  SzView *buttons[16], *fields[16];
+  int n = sz_view_collect_tap_targets(root, buttons, 16);
+  assert(n >= 3 && n < 16);
+  SzView *anchor = buttons[1];
+  SzRect frame = sz_view_frame(anchor);
+  sz_view_layout(root, 240, 300, sz_theme_default());
+  assert(fabsf(sz_view_frame(anchor).y - frame.y) < 0.01f);
+  n = sz_view_collect_text_fields(root, fields, 16);
+  assert(n >= 2 && n < 8);
+  SzView *focused = fields[1];
+  sz_view_focus(root, focused);
+  sz_view_handle_key(root, "", "kept", 0);
+  SzList *reversed = sz_list_reverse(sz_signal_list_get(source));
+  sz_signal_list_set(source, reversed);
+  sz_release(reversed);
+  sz_view_layout(root, 240, 300, sz_theme_default());
+  assert(sz_view_focused(root) == focused);
+  assert(!strcmp(sz_view_text_field_value(focused), "kept"));
+  frame = sz_view_frame(focused);
+  assert(frame.y >= 12.f - 0.01f && frame.y + frame.h <= 288.f + 0.01f);
+  SzTheme scaled = *sz_theme_default();
+  scaled.font_px *= 2;
+  scaled.pad *= 2;
+  scaled.gap *= 2;
+  scaled.control_h *= 2;
+  scaled.px_scale = 2;
+  sz_view_layout(root, 480, 600, &scaled);
+  assert(sz_view_focused(root) == focused);
+  frame = sz_view_frame(focused);
+  assert(frame.y >= 24.f - 0.01f && frame.y + frame.h <= 576.f + 0.01f);
+  SzTheme *large = sz_theme_metrics(NULL, 22, 10, 16, 12, 52);
+  sz_view_layout(root, 360, 600, large);
+  assert(sz_view_focused(root) == focused);
+  assert(!strcmp(sz_view_text_field_value(focused), "kept"));
+  frame = sz_view_frame(focused);
+  assert(frame.h == 52.f && frame.y >= 16.f - .01f && frame.y + frame.h <= 584.f + .01f);
+  SzTheme *spaced = sz_theme_metrics(large, 22, 20, 16, 12, 52);
+  sz_view_layout(root, 360, 600, spaced);
+  assert(sz_view_focused(root) == focused);
+  frame = sz_view_frame(focused);
+  assert(frame.y >= 16.f - .01f && frame.y + frame.h <= 584.f + .01f);
+  sz_release(spaced);
+  sz_release(large);
+  SzAdt *short_item = virtual_test_item(999, "short");
+  SzList *one = sz_list_cons(short_item, NULL);
+  sz_signal_list_set(source, one);
+  sz_release(short_item);
+  sz_release(one);
+  sz_view_layout(root, 320, 300, sz_theme_default());
+  assert(sz_view_scroll_y(root) == 0.f);
+  assert(sz_view_collect_text_fields(root, fields, 16) == 1);
+  frame = sz_view_frame(fields[0]);
+  assert(sz_view_hit_test(root, frame.x + 5, frame.y + 5) == fields[0]);
+  sz_view_free(root);
+  sz_signal_list_free(source);
+}
+
+static void *virtual_duplicate_key(void *value, void *env) {
+  (void)value;
+  (void)env;
+  return sz_box_i64(0);
+}
+
+static void virtual_list_duplicate_keys(void) {
+  SzAdt *a = virtual_test_item(0, "first");
+  SzAdt *b = virtual_test_item(1, "second");
+  SzList *tail = sz_list_cons(b, NULL);
+  SzList *items = sz_list_cons(a, tail);
+  sz_release(a);
+  sz_release(b);
+  sz_release(tail);
+  SzSignalList *source = sz_signal_list(items);
+  sz_release(items);
+  SzView *root = sz_view_virtual_list(120, source, virtual_duplicate_key, NULL,
+                                     virtual_test_row, NULL);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+}
+
+static void test_virtual_list_duplicate_keys(void) {
+  assert_missing_aborts(virtual_list_duplicate_keys, "requires unique keys");
+}
+
+static void test_virtual_list_scale_and_resize(void) {
+  SzList *items = NULL;
+  for (int i = 999; i >= 0; i--) {
+    SzAdt *item = virtual_test_item(i, "row");
+    SzList *next = sz_list_cons(item, items);
+    sz_release(item);
+    sz_release(items);
+    items = next;
+  }
+  SzSignalList *source = sz_signal_list(items);
+  sz_release(items);
+  SzView *root = sz_view_virtual_list(120, source, virtual_test_key, NULL,
+                                     virtual_test_row, NULL);
+  sz_view_layout(root, 320.f, 300.f, sz_theme_default());
+  SzView *before[16], *after[16];
+  int initial = sz_view_collect_text_fields(root, before, 16);
+  SzRect first = sz_view_frame(before[0]);
+  int builds = virtual_builds;
+  SzTheme theme = *sz_theme_default();
+  theme.px_scale = 2.f;
+  theme.pad *= 2.f;
+  theme.gap *= 2.f;
+  theme.font_px *= 2.f;
+  theme.control_h *= 2.f;
+  sz_view_layout(root, 640.f, 600.f, &theme);
+  assert(sz_view_collect_text_fields(root, after, 16) == initial);
+  assert(virtual_builds == builds);
+  for (int i = 0; i < initial; i++) assert(before[i] == after[i]);
+  SzRect scaled = sz_view_frame(after[0]);
+  assert(fabsf(scaled.x - first.x * 2.f) < 0.01f);
+  assert(fabsf(scaled.y - first.y * 2.f) < 0.01f);
+  assert(fabsf(scaled.h - first.h * 2.f) < 0.01f);
+  sz_view_layout(root, 640.f, 960.f, &theme);
+  int enlarged = sz_view_collect_text_fields(root, after, 16);
+  assert(enlarged > initial && enlarged <= 7);
+  for (int i = 0; i < initial; i++) assert(before[i] == after[i]);
+  sz_view_free(root);
+  sz_signal_list_free(source);
+}
+
+static void test_virtual_list_pointer_removal(void) {
+  SzAdt *item = virtual_test_item(0, "row");
+  SzList *items = sz_list_cons(item, NULL);
+  sz_release(item);
+  SzSignalList *source = sz_signal_list(items);
+  sz_release(items);
+  SzView *root = sz_view_virtual_list(120, source, virtual_test_key, NULL,
+                                     virtual_test_row, NULL);
+  SzUiConfig cfg = {0};
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 320;
+  cfg.height = 300;
+  cfg.scale = 1;
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(sz_ui_pump_sync(session));
+  SzView *field = virtual_first_field;
+  uintptr_t id = sz_view_id(field);
+  SzRect frame = sz_view_frame(field);
+  SzInputEvent event;
+  memset(&event, 0, sizeof(event));
+  event.kind = SZ_INPUT_POINTER;
+  event.pointer_button = 1;
+  event.pointer_phase = SZ_POINTER_DOWN;
+  event.x = frame.x + 2.f;
+  event.y = frame.y + 2.f;
+  assert(sz_ui_inject_sync(session, &event));
+  sz_signal_list_set(source, NULL);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_find(root, id) == NULL);
+  event.pointer_phase = SZ_POINTER_MOVE;
+  event.x += 5.f;
+  assert(sz_ui_inject_sync(session, &event));
+  event.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &event));
+  assert(!sz_view_has_focused_text_field(root));
+  sz_ui_unmount(session);
+  sz_view_free(root);
+  sz_signal_list_free(source);
+}
+
+static void test_adaptive_width_and_input(void) {
+  size_t before_bytes, before_count, after_bytes, after_count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = (float)scale;
+    SzView *compact = sz_view_button("compact", NULL, NULL);
+    SzView *wide = sz_view_button("wide", NULL, NULL);
+    SzView *adaptive = sz_view_adaptive(200, compact, wide);
+    for (int width = 1; width <= 600; width++) {
+      sz_view_layout(adaptive, (float)width, 100.f * scale, &theme);
+      SzView *active = width < 200 * scale ? compact : wide;
+      SzView *inactive = active == compact ? wide : compact;
+      SzRect frame = sz_view_frame(active);
+      assert(frame.w > 0.f && frame.w <= width);
+      assert(sz_view_frame(inactive).w == 0.f);
+      assert(sz_view_hit_test(adaptive, frame.x + frame.w / 2.f,
+                              frame.y + frame.h / 2.f) == active);
+      SzString *dump = sz_view_a11y_dump(adaptive);
+      const char *text = sz_string_cstr(dump);
+      assert(strstr(text, active == compact ? "button:compact" : "button:wide"));
+      assert(!strstr(text, active == compact ? "button:wide" : "button:compact"));
+      sz_string_free(dump);
+    }
+    sz_view_layout(adaptive, 0.f, 0.f, &theme);
+    assert(sz_view_frame(wide).w > 0.f && sz_view_frame(compact).w == 0.f);
+    SzView *nested = sz_view_max_size(199, 0, adaptive);
+    sz_view_layout(nested, 1000.f, 300.f, &theme);
+    assert(sz_view_frame(compact).w > 0.f && sz_view_frame(wide).w == 0.f);
+    sz_view_free(nested);
+  }
+  for (int container = 0; container < 4; container++) {
+    SzView *compact = sz_view_text("compact");
+    SzView *wide = sz_view_text("wide");
+    SzView *adaptive = sz_view_adaptive(200, compact, wide);
+    SzView *parent;
+    if (container == 0) parent = sz_view_padding(20, adaptive);
+    else if (container == 1) parent = sz_view_card(adaptive);
+    else {
+      parent = container == 2 ? sz_view_column() : sz_view_wrap();
+      sz_view_add_child(parent, adaptive);
+    }
+    for (int width = 1; width <= 40; width++) {
+      sz_view_layout(parent, (float)width, 100.f, sz_theme_default());
+      assert(sz_view_frame(compact).w > 0.f);
+      assert(sz_view_frame(wide).w == 0.f);
+    }
+    sz_view_free(parent);
+  }
+  SzView *small = sz_view_adaptive(INT64_MIN, sz_view_text("compact"), sz_view_text("wide"));
+  sz_view_layout(small, 1.f, 0.f, sz_theme_default());
+  SzString *dump = sz_view_a11y_dump(small);
+  assert(strstr(sz_string_cstr(dump), "wide"));
+  sz_string_free(dump);
+  sz_view_free(small);
+  SzView *large = sz_view_adaptive(INT64_MAX, sz_view_text("compact"), sz_view_text("wide"));
+  sz_view_layout(large, 1000.f, 0.f, sz_theme_default());
+  dump = sz_view_a11y_dump(large);
+  assert(strstr(sz_string_cstr(dump), "compact"));
+  sz_string_free(dump);
+  sz_view_free(large);
+  sz_alloc_stats(&after_bytes, &after_count);
+  assert(before_bytes == after_bytes && before_count == after_count);
+}
+
+static void test_adaptive_focus_and_shared_state(void) {
+  SzSignalStr *draft = sz_signal_str("shared");
+  SzView *compact = sz_view_text_field(draft, "compact");
+  SzView *wide = sz_view_text_field(draft, "wide");
+  SzView *root = sz_view_adaptive(200, compact, wide);
+  SzView *fields[2];
+  sz_view_layout(root, 400.f, 100.f, sz_theme_default());
+  assert(sz_view_collect_text_fields(root, fields, 2) == 1 && fields[0] == wide);
+  sz_view_focus(root, compact);
+  assert(!sz_view_has_focused_text_field(root));
+  assert(!sz_view_activate(root, compact, 1.f, 1.f));
+  sz_view_focus(root, wide);
+  assert(sz_view_has_focused_text_field(root));
+  sz_view_layout(root, 100.f, 100.f, sz_theme_default());
+  assert(!sz_view_has_focused_text_field(root));
+  assert(sz_view_collect_text_fields(root, fields, 2) == 1 && fields[0] == compact);
+  assert(sz_view_text_field_target(root) == compact);
+  sz_view_focus(root, compact);
+  assert(sz_view_handle_key(root, "", "!", 0));
+  assert(strstr(sz_signal_str_get(draft), "!"));
+  sz_view_layout(root, 400.f, 100.f, sz_theme_default());
+  assert(!sz_view_has_focused_text_field(root));
+  assert(sz_view_text_field_target(root) == wide);
+  assert(strstr(sz_signal_str_get(draft), "!"));
+  sz_view_free(root);
+  sz_signal_str_free(draft);
+  SzSignalStr *buffer = sz_signal_str("code");
+  SzView *compact_editor = sz_view_editor(buffer);
+  SzView *wide_editor = sz_view_editor(buffer);
+  root = sz_view_adaptive(200, compact_editor, wide_editor);
+  sz_view_layout(root, 100.f, 200.f, sz_theme_default());
+  assert(sz_view_first_editor(root) == compact_editor);
+  sz_view_layout(root, 400.f, 200.f, sz_theme_default());
+  assert(sz_view_first_editor(root) == wide_editor);
+  sz_view_free(root);
+  sz_signal_str_free(buffer);
+}
+
+static void test_auto_grid_widths(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    for (int gap = 0; gap <= 13; gap += 13) {
+      SzTheme theme = *sz_theme_default();
+      theme.px_scale = (float)scale;
+      SzView *g = sz_view_auto_grid(80);
+      SzView *root = sz_view_gap(gap, g);
+      SzView *cells[7];
+      for (int i = 0; i < 7; i++) {
+        cells[i] = sz_view_sized(10000, 10 + i, sz_view_text("cell"));
+        sz_view_add_child(g, cells[i]);
+      }
+      /* Check the packing rules across every integer width and each resize. */
+      for (int width = 1; width <= 900; width++) {
+        sz_view_layout(root, (float)width, 0.f, &theme);
+        SzRect first = sz_view_frame(cells[0]);
+        int columns = 1;
+        while (columns < 7 && fabsf(sz_view_frame(cells[columns]).y - first.y) < 0.01f)
+          columns++;
+        float spacing = (float)(gap * scale);
+        float inner = (float)width - 2.f * first.x;
+        assert(fabsf(sz_view_frame(g).w - (float)width) < 0.01f);
+        assert(columns == 1 || first.w >= 80.f * scale - 0.01f);
+        assert(columns == 7 || inner < (columns + 1) * 80.f * scale + columns * spacing);
+        for (int i = 0; i < 7; i++) {
+          SzRect cell = sz_view_frame(cells[i]);
+          assert(cell.w > 0.f && isfinite(cell.h));
+          assert(fabsf(cell.w - first.w) < 0.01f);
+          assert(cell.x >= 0.f && cell.x + cell.w <= width + 0.01f);
+          if (i % columns != 0) {
+            SzRect previous = sz_view_frame(cells[i - 1]);
+            assert(fabsf(cell.y - previous.y) < 0.01f);
+            assert(fabsf(cell.x - previous.x - previous.w - spacing) < 0.01f);
+          } else if (i > 0) {
+            assert(cell.y > sz_view_frame(cells[i - 1]).y);
+          }
+        }
+      }
+      sz_view_free(root);
+    }
+  }
+}
+
+static void test_auto_grid_visibility_and_input(void) {
+  SzSignalInt *shown = sz_signal_int(0);
+  SzView *g = sz_view_auto_grid(80);
+  SzView *a = sz_view_button("A", NULL, NULL);
+  SzView *hidden = sz_view_show_when(shown, 1, sz_view_button("hidden", NULL, NULL));
+  SzView *b = sz_view_button("B", NULL, NULL);
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, hidden);
+  sz_view_add_child(g, b);
+  sz_view_layout(g, 220.f, 200.f, sz_theme_default());
+  SzRect af = sz_view_frame(a), bf = sz_view_frame(b);
+  assert(fabsf(af.y - bf.y) < 0.01f);
+  assert(sz_view_frame(hidden).w == 0.f);
+  assert(sz_view_hit_test(g, bf.x + 2.f, bf.y + 2.f) == b);
+  sz_signal_int_set(shown, 1);
+  sz_view_layout(g, 220.f, 200.f, sz_theme_default());
+  assert(sz_view_frame(b).y > sz_view_frame(a).y);
+  sz_view_layout(g, 500.f, 200.f, sz_theme_default());
+  assert(fabsf(sz_view_frame(a).y - sz_view_frame(b).y) < 0.01f);
+  SzString *dump = sz_view_a11y_dump(g);
+  assert(strstr(sz_string_cstr(dump), "button:B"));
+  sz_string_free(dump);
+  sz_view_layout(g, 0.f, 0.f, sz_theme_default());
+  assert(sz_view_frame(b).y > sz_view_frame(hidden).y);
+  sz_view_free(g);
+  sz_signal_int_free(shown);
+
+  g = sz_lang_view_auto_grid(INT64_MAX);
+  sz_view_add_child(g, sz_view_text("one"));
+  sz_view_add_child(g, sz_view_text("two"));
+  sz_view_layout(g, 500.f, 0.f, sz_theme_default());
+  sz_view_free(g);
+  g = sz_lang_view_auto_grid(INT64_MIN);
+  sz_view_layout(g, 500.f, 0.f, sz_theme_default());
+  sz_view_free(g);
 }
 
 static void test_grid_kind(void) {
@@ -4966,7 +5759,7 @@ static void test_scroll_h_hit_test(void) {
 }
 
 static void test_scroll_h_pointer_drag(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *scroll, *row, *left, *right;
   SzInputEvent ev;
@@ -5009,7 +5802,7 @@ static void test_scroll_h_pointer_drag(void) {
 }
 
 static void test_scroll_h_inject_script(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *scroll, *row, *left, *right;
   const char *path = "/tmp/scuzz_ui_inject_scroll_h.json";
@@ -5140,6 +5933,52 @@ static void test_center_second_pass_keeps_child_size(void) {
   sz_view_free(wrap);
 }
 
+static void test_expanded_weights(void) {
+  const int64_t weights[][2] = {{1, 2}, {3, 7}, {0, -4},
+                               {INT64_MIN, 1}, {INT64_MAX, INT64_MAX},
+                               {INT64_MAX, INT64_MAX / 2}};
+  for (int axis = 0; axis < 2; axis++) {
+    for (int scale = 1; scale <= 2; scale++) {
+      for (unsigned k = 0; k < sizeof weights / sizeof weights[0]; k++) {
+        SzTheme theme = *sz_theme_default();
+        theme.px_scale = (float)scale;
+        SzSignalInt *shown = sz_signal_int(1);
+        SzView *root = axis ? sz_view_column() : sz_view_row();
+        SzView *fixed = sz_view_sized(20, 20, sz_view_text("fixed"));
+        SzView *a = sz_view_button("A", NULL, NULL);
+        SzView *b = sz_view_button("B", NULL, NULL);
+        SzView *ea = sz_view_expanded(weights[k][0], a);
+        SzView *eb = sz_view_stretch(sz_view_expanded(weights[k][1], b));
+        sz_view_show_when(shown, 1, eb);
+        sz_view_add_child(root, fixed);
+        sz_view_add_child(root, ea);
+        sz_view_add_child(root, eb);
+        double wa = weights[k][0] < 1 ? 1.0 : (double)weights[k][0];
+        double wb = weights[k][1] < 1 ? 1.0 : (double)weights[k][1];
+        for (int size = 240; size <= 900; size += 11) {
+          sz_view_layout(root, (float)size, (float)size, &theme);
+          SzRect f = sz_view_frame(fixed), af = sz_view_frame(a), bf = sz_view_frame(b);
+          float fixed_size = axis ? f.h : f.w;
+          float free_space = size - 2.f * theme.pad - fixed_size - 2.f * theme.gap;
+          assert(fabsf((axis ? af.h : af.w) - (float)(free_space * wa / (wa + wb))) < 0.01f);
+          assert(fabsf((axis ? bf.h : bf.w) - (float)(free_space * wb / (wa + wb))) < 0.01f);
+          assert(fabsf((axis ? bf.y - af.y - af.h : bf.x - af.x - af.w) - theme.gap) < 0.01f);
+          assert(sz_view_hit_test(root, bf.x + bf.w / 2.f, bf.y + bf.h / 2.f) == b);
+          sz_signal_int_set(shown, 0);
+          sz_view_layout(root, (float)size, (float)size, &theme);
+          af = sz_view_frame(a);
+          free_space = size - 2.f * theme.pad - fixed_size - theme.gap;
+          assert(fabsf((axis ? af.h : af.w) - free_space) < 0.01f);
+          assert(sz_view_frame(eb).w == 0.f && sz_view_frame(eb).h == 0.f);
+          sz_signal_int_set(shown, 1);
+        }
+        sz_view_free(root);
+        sz_signal_int_free(shown);
+      }
+    }
+  }
+}
+
 static void test_expanded_row_text_fills_width(void) {
   SzView *row, *left, *mid, *right, *exp;
   const SzTheme *theme = sz_theme_default();
@@ -5149,7 +5988,7 @@ static void test_expanded_row_text_fills_width(void) {
   row = sz_view_row();
   left = sz_view_button("L", NULL, NULL);
   mid = sz_view_text("mid");
-  exp = sz_view_expanded(mid);
+  exp = sz_view_expanded(1, mid);
   right = sz_view_button("R", NULL, NULL);
   sz_view_add_child(row, left);
   sz_view_add_child(row, exp);
@@ -5224,7 +6063,7 @@ static void test_stretch_does_not_take_flex_height(void) {
   body = sz_view_text("Hi");
   wrap = sz_view_stretch(body);
   btn = sz_view_button("Go", NULL, NULL);
-  exp = sz_view_expanded(sz_view_text("flex"));
+  exp = sz_view_expanded(1, sz_view_text("flex"));
   sz_view_add_child(col, title);
   sz_view_add_child(col, wrap);
   sz_view_add_child(col, exp);
@@ -5269,7 +6108,7 @@ static void test_stretch_wrapping_expanded_still_flexes(void) {
   col = sz_view_column();
   title = sz_view_text("T");
   body = sz_view_text("Hi");
-  exp = sz_view_expanded(body);
+  exp = sz_view_expanded(1, body);
   wrap = sz_view_stretch(exp);
   btn = sz_view_button("Go", NULL, NULL);
   sz_view_add_child(col, title);
@@ -5296,7 +6135,7 @@ static void test_expanded_wrapping_stretch_still_flexes(void) {
   title = sz_view_text("T");
   body = sz_view_text("Hi");
   wrap = sz_view_stretch(body);
-  exp = sz_view_expanded(wrap);
+  exp = sz_view_expanded(1, wrap);
   btn = sz_view_button("Go", NULL, NULL);
   sz_view_add_child(col, title);
   sz_view_add_child(col, exp);
@@ -5320,7 +6159,7 @@ static void test_stretch_row_does_not_take_leftover_width(void) {
   left = sz_view_button("L", NULL, NULL);
   mid = sz_view_text("Hi");
   wrap = sz_view_stretch(mid);
-  exp = sz_view_expanded(sz_view_text("flex"));
+  exp = sz_view_expanded(1, sz_view_text("flex"));
   right = sz_view_button("R", NULL, NULL);
   sz_view_add_child(row, left);
   sz_view_add_child(row, wrap);
@@ -5337,7 +6176,7 @@ static void test_stretch_row_does_not_take_leftover_width(void) {
 }
 
 static void test_mobile_pointer_scroll_lifecycle(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalStr *draft;
   SzView *root, *scroll, *list, *field;
   SzUiSession *session;
@@ -6711,6 +7550,142 @@ static void test_radius_does_not_grow_button(void) {
   sz_view_free(wrap);
 }
 
+/* Check the tap array separately from the accessibility tree. */
+static void check_control_tap_dump_count(SzView *control, const char *desc,
+                                         const char *label, int count) {
+  SzUiConfig cfg = {0};
+  SzView *root = sz_view_column();
+  SzUiSession *session;
+  SzAdt *parsed, *taps, *tap;
+  SzList *hold;
+  char path[] = "/tmp/scuzz_ui_control_tap.XXXXXX";
+  int fd = mkstemp(path);
+  char *dump;
+  assert(fd >= 0);
+  close(fd);
+  sz_view_add_child(root, control);
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.f;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, desc));
+  free(dump);
+  parsed = json_slurp_parse(path);
+  taps = json_doc_key((SzAdt *)sz_adt_payload(parsed), "taps");
+  assert(taps && sz_json_is_arr(taps));
+  tap = json_arr_head(taps, &hold);
+  assert(sz_list_len(hold) == count);
+  assert(tap && json_str_eq(tap, "label", label));
+  assert(json_doc_int(tap, "i", -1) == 0);
+  sz_release(hold);
+  sz_release(parsed);
+  sz_ui_unmount(session);
+  remove(path);
+}
+
+static void check_control_tap_dump(SzView *control, const char *desc, const char *label) {
+  check_control_tap_dump_count(control, desc, label, 1);
+}
+
+static void test_control_tap_dumps(void) {
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_checkbox(sig, "Done"), "checkbox:Done=0", "Done");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_switch(sig, "On"), "switch:On=0", "On");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_chip(sig, "Pin"), "chip:Pin=0", "Pin");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_checkbox_list_tile(sig, "Star"), "checktile:Star=0", "Star");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_switch_list_tile(sig, "Quiet"), "switchtile:Quiet=0", "Quiet");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_radio_list_tile(sig, 1, "Night"), "radiotile:Night=0", "Night");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump_count(sz_view_segmented(sig, "Layout", (const char *[]){"List", "Grid"}, 2), "choicechip:List=1", "List", 2);
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_filter_chip(sig, "Tag"), "filterchip:Tag=0", "Tag");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(1);
+    check_control_tap_dump(sz_view_choice_chip(sig, 0, "Day"), "choicechip:Day=0", "Day");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_input_chip(sig, "In"), "inputchip:In=0", "In");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_radio(sig, 1, "On"), "radio:On=0", "On");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(40);
+    check_control_tap_dump(sz_view_slider(sig, "Level", 0, 100, 1), "slider:Level=40", "Level");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_icon_button("i", counter_tap, sig), "iconbutton:i", "i");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_fab("+", counter_tap, sig), "fab:+", "+");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_outlined_button("Edit", counter_tap, sig), "outlined:Edit", "Edit");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_text_button("Open", counter_tap, sig), "textbutton:Open", "Open");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_action_chip("Go", counter_tap, sig), "actionchip:Go", "Go");
+    sz_signal_int_free(sig);
+  }
+  {
+    SzSignalInt *sig = sz_signal_int(0);
+    check_control_tap_dump(sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S")), "inkwell:face", "face");
+    sz_signal_int_free(sig);
+  }
+}
+
 static void test_checkbox_sizes(void) {
   SzView *box;
   SzSignalInt *sig;
@@ -6978,7 +7953,7 @@ static void test_tap_collect_tree_order(void) {
 }
 
 static void test_activate_offscreen_button(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *hits[8];
   SzSignalInt *sig;
@@ -7007,36 +7982,6 @@ static void test_activate_offscreen_button(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_checkbox_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_checkbox.dump";
-  char *dump;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_checkbox(sig, "Done"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "checkbox:Done=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "Done") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_switch_sizes(void) {
   SzView *sw;
@@ -7152,36 +8097,6 @@ static void test_switch_paint_off_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_switch_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_switch.dump";
-  char *dump;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_switch(sig, "On"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "switch:On=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "On") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_chip_sizes(void) {
   SzView *ch;
@@ -7282,7 +8197,7 @@ static void test_selection_tabs_without_color(void) {
                      kind == 1 ? sz_view_choice_chip(sig, 1, "Label") :
                      kind == 2 ? sz_view_filter_chip(sig, "Label") :
                      kind == 3 ? sz_view_input_chip(sig, "Label") :
-                                 sz_view_segmented(sig, "Left", "Right");
+                                 sz_view_segmented(sig, "Direction", (const char *[]){"Left", "Right"}, 2);
       SkSurface *surf = sk_surface_make_raster_n32_premul(400, 100);
       SkCanvas *canvas = sk_surface_get_canvas(surf);
       size_t bytes;
@@ -7341,36 +8256,6 @@ static void test_chip_paint_off_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_chip.dump";
-  char *dump;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_chip(sig, "Pin"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "chip:Pin=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "Pin") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_list_tile_sizes(void) {
   SzView *tile;
@@ -7466,7 +8351,7 @@ static void test_list_tile_paint(void) {
 }
 
 static void test_list_tile_trailing_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -7658,7 +8543,7 @@ static void test_badge_paint_mark(void) {
 }
 
 static void test_badge_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig, *pin;
@@ -7801,7 +8686,7 @@ static void test_card_paint_pad(void) {
 }
 
 static void test_card_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -7934,7 +8819,7 @@ static void test_divider_in_column(void) {
 }
 
 static void test_divider_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -7966,6 +8851,128 @@ static void test_divider_not_in_taps_dump(void) {
   sz_ui_unmount(session);
   sz_signal_int_free(sig);
   remove(path);
+}
+
+static void test_expansion_body_and_focus(void) {
+  SzSignalInt *open = sz_signal_int(1);
+  SzSignalInt *show = sz_signal_int(0);
+  SzSignalStr *name = sz_signal_str("kept");
+  SzView *text = sz_view_text("Passive body");
+  SzView *field = sz_view_text_field(name, "Details name");
+  SzView *body = sz_view_column();
+  sz_view_add_child(body, text);
+  sz_view_add_child(body, field);
+  SzView *tile = sz_view_expansion_tile(open, "Details", sz_view_padding(12, body));
+  SzView *root = sz_view_column();
+  sz_view_add_child(root, tile);
+  SzView *conditional = sz_view_expansion_tile(open, "Conditional",
+    sz_view_show_when(show, 1, sz_view_text("Conditional body")));
+  sz_view_add_child(root, conditional);
+  SzView *outside = sz_view_button("Outside", NULL, NULL);
+  sz_view_add_child(root, outside);
+  sz_view_layout(root, 400, 360, sz_theme_default());
+  SzRect header = sz_view_control_frame(tile);
+  assert(header.h == sz_theme_default()->control_h && header.h < sz_view_frame(tile).h);
+  SzRect frame = sz_view_frame(text);
+  assert(!sz_view_handle_tap(root, frame.x + 10, frame.y + frame.h / 2));
+  assert(sz_signal_int_get(open) == 1);
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(!strstr(sz_string_cstr(dump), "Conditional body"));
+  sz_release(dump);
+  sz_signal_int_set(show, 1);
+  sz_view_layout(root, 400, 360, sz_theme_default());
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "Conditional body"));
+  sz_release(dump);
+  sz_signal_int_set(open, -3);
+  sz_view_layout(root, 400, 360, sz_theme_default());
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "Passive body"));
+  sz_release(dump);
+  sz_view_focus(root, tile);
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 400, 360, sz_theme_default());
+  assert(sz_signal_int_get(open) == 0 && sz_view_focused(root) == tile);
+  sz_view_handle_key(root, "Space", "", 0);
+  sz_view_layout(root, 400, 360, sz_theme_default());
+  assert(sz_signal_int_get(open) == 1);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == field);
+  sz_view_focus(root, tile);
+  SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 400, .height = 360, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&config, root);
+  sz_ui_session_take_root(session);
+  sz_ui_session_focus_view(session, field);
+  assert(sz_ui_session_keyboard_visible(session));
+  sz_signal_int_set(open, 0);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_focused(root) == tile && !sz_ui_session_keyboard_visible(session));
+  assert(!strcmp(sz_signal_str_get(name), "kept"));
+  sz_signal_int_set(open, 1);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_focused(root) == tile);
+  sz_ui_session_focus_view(session, outside);
+  sz_signal_int_set(open, 0);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_focused(root) == outside);
+  sz_signal_int_set(open, 1);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_focused(root) == outside);
+  sz_ui_unmount(session);
+  sz_signal_int_free(open);
+  sz_signal_int_free(show);
+  sz_signal_str_free(name);
+}
+
+static void test_expansion_geometry_and_identity(void) {
+  SzSignalInt *first_open = sz_signal_int(0);
+  SzSignalInt *second_open = sz_signal_int(0);
+  SzView *first = sz_view_expansion_tile(first_open, "More", sz_view_text("First"));
+  SzView *second = sz_view_expansion_tile(second_open, "More", sz_view_text("Second"));
+  SzView *root = sz_view_column();
+  sz_view_add_child(root, first);
+  sz_view_add_child(root, second);
+  assert(sz_view_id(first) != sz_view_id(second));
+  for (int scale = 1; scale <= 3; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.pad *= scale;
+    theme.gap *= scale;
+    sz_view_layout(root, 400 * scale, 360 * scale, &theme);
+    sz_view_focus(root, first);
+    sz_view_handle_key(root, "Enter", "", 0);
+    sz_view_layout(root, 400 * scale, 360 * scale, &theme);
+    assert(sz_signal_int_get(first_open) == 1 && sz_signal_int_get(second_open) == 0);
+    assert(sz_view_control_frame(first).h == theme.control_h);
+    assert(sz_view_control_frame(first).h < sz_view_frame(first).h);
+    assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == second);
+    sz_view_handle_key(root, "Space", "", 0);
+    sz_view_layout(root, 400 * scale, 360 * scale, &theme);
+    assert(sz_signal_int_get(second_open) == 1);
+    SzRect header = sz_view_control_frame(first);
+    assert(sz_view_handle_tap(root, header.x + header.w / 2, header.y + header.h / 2));
+    assert(sz_signal_int_get(first_open) == 0 && sz_signal_int_get(second_open) == 1);
+    sz_signal_int_set(second_open, 0);
+  }
+  sz_view_free(root);
+  sz_signal_int_set(first_open, 1);
+  SzView *tile = sz_view_expansion_tile(first_open, "Clipped",
+    sz_view_sized(200, 200, sz_view_button("Inside", NULL, NULL)));
+  root = sz_view_sized(200, 50, sz_view_clip(tile));
+  SkSurface *surface = sk_surface_make_raster_n32_premul(200, 100);
+  const SzTheme *theme = sz_theme_default();
+  assert(sz_view_paint(root, sk_surface_get_canvas(surface), 200, 100, theme));
+  size_t bytes;
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, &bytes);
+  assert(pixels && bytes == 200 * 100 * 4);
+  assert(px_rgb(pixels, 200, 20, 70, (theme->background >> 16) & 255,
+    (theme->background >> 8) & 255, theme->background & 255));
+  assert(!sz_view_hit_test(root, 20, 70));
+  sk_surface_unref(surface);
+  sz_view_free(root);
+  sz_signal_int_free(first_open);
+  sz_signal_int_free(second_open);
 }
 
 static void test_expansion_tile_sizes_collapsed(void) {
@@ -8092,7 +9099,7 @@ static void test_expansion_tile_paint(void) {
 }
 
 static void test_expansion_tile_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -8215,38 +9222,6 @@ static void test_icon_button_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_icon_button_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_iconbutton.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_icon_button("i", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "iconbutton:i") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "i") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_vertical_divider_sizes(void) {
   SzView *d;
@@ -8348,7 +9323,7 @@ static void test_vertical_divider_in_row(void) {
 }
 
 static void test_vertical_divider_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -8389,7 +9364,7 @@ static void test_circular_progress_sizes(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   sz_view_layout(p, 200.f, 200.f, theme);
   assert(sz_view_kind(p) == SZ_VIEW_CIRCULAR_PROGRESS);
   f = sz_view_frame(p);
@@ -8405,13 +9380,13 @@ static void test_circular_progress_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(40);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:40") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=40") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, 7);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:7") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=7") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -8423,13 +9398,13 @@ static void test_circular_progress_clamps_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(150);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:100") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=100") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, -3);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "circular:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "circular:Completion=0") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -8442,7 +9417,7 @@ static void test_circular_progress_not_tap_target(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   sz_view_layout(p, 80.f, 80.f, theme);
   f = sz_view_frame(p);
   assert(!sz_view_is_tap_target(p));
@@ -8465,7 +9440,7 @@ static void test_circular_progress_paint_ring(void) {
   int tx, ty, cx, cy;
 
   sig = sz_signal_int(100);
-  root = sz_view_circular_progress(sig);
+  root = sz_view_circular_progress(sig, "Completion");
   sz_view_layout(root, 80.f, 80.f, theme);
   f = sz_view_frame(root);
   surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -8500,7 +9475,7 @@ static void test_circular_progress_in_row(void) {
 
   sig = sz_signal_int(40);
   row = sz_view_row();
-  p = sz_view_circular_progress(sig);
+  p = sz_view_circular_progress(sig, "Completion");
   sz_view_add_child(row, sz_view_button("Go", NULL, NULL));
   sz_view_add_child(row, p);
   sz_view_layout(row, 200.f, 200.f, theme);
@@ -8514,7 +9489,7 @@ static void test_circular_progress_in_row(void) {
 }
 
 static void test_circular_progress_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -8524,7 +9499,7 @@ static void test_circular_progress_not_in_taps_dump(void) {
 
   sig = sz_signal_int(40);
   root = sz_view_row();
-  sz_view_add_child(root, sz_view_circular_progress(sig));
+  sz_view_add_child(root, sz_view_circular_progress(sig, "Completion"));
   sz_view_add_child(root, sz_view_button("Go", counter_tap, sig));
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
@@ -8537,7 +9512,7 @@ static void test_circular_progress_not_in_taps_dump(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
-  assert(strstr(dump, "circular:40") != NULL);
+  assert(strstr(dump, "circular:Completion=40") != NULL);
   taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "circular") == NULL);
@@ -8637,7 +9612,7 @@ static void test_avatar_in_row(void) {
 }
 
 static void test_avatar_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -8777,38 +9752,6 @@ static void test_checkbox_list_tile_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_checkbox_list_tile_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_checktile.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_checkbox_list_tile(sig, "Star"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "checktile:Star=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Star") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_switch_list_tile_sizes(void) {
   SzView *t;
@@ -8923,38 +9866,6 @@ static void test_switch_list_tile_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_switch_list_tile_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_switchtile.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_switch_list_tile(sig, "Quiet"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "switchtile:Quiet=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Quiet") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_radio_list_tile_sizes(void) {
   SzView *t;
@@ -9091,37 +10002,104 @@ static void test_radio_list_tile_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_radio_list_tile_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_radiotile.dump";
-  char *dump;
-  const char *taps;
 
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_radio_list_tile(sig, 1, "Night"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "radiotile:Night=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Night") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
+static void test_segmented_keyboard(void) {
+  SzSignalInt *selected = sz_signal_int(1);
+  const char *labels[] = {"List", "Grid", "Columns"};
+  SzView *first = sz_view_segmented(selected, "Layout", labels, 3);
+  SzView *second = sz_view_segmented(selected, "Preview", labels, 3);
+  SzView *after = sz_view_button("After", NULL, NULL);
+  SzSignalStr *name = sz_signal_str("kept");
+  SzView *root = sz_view_column();
+  sz_view_add_child(root, first);
+  sz_view_add_child(root, second);
+  sz_view_add_child(root, after);
+  sz_view_add_child(root, sz_view_text_field(name, "Name"));
+  sz_view_layout(root, 600, 300, sz_theme_default());
+  SzView *targets[8];
+  assert(sz_view_collect_tap_targets(root, targets, 8) == 7);
+  for (int i = 0; i < 3; i++) {
+    SzRect frame = sz_view_frame(targets[i]);
+    assert(fabsf(frame.w - sz_view_frame(first).w / 3) < .01f);
+    assert(sz_view_tab_stop(targets[i]) == (i == 1));
+  }
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == targets[1]);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(selected) == 2 && sz_view_focused(root) == targets[2]);
+  sz_view_handle_key(root, "ArrowDown", "", 0);
+  assert(sz_signal_int_get(selected) == 0 && sz_view_focused(root) == targets[0]);
+  sz_view_handle_key(root, "ArrowUp", "", 0);
+  assert(sz_signal_int_get(selected) == 2 && sz_view_focused(root) == targets[2]);
+  sz_view_handle_key(root, "Home", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_handle_key(root, "End", "", 0);
+  assert(sz_signal_int_get(selected) == 2);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == targets[5]);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == after);
+  assert(sz_view_focus_next(root, 1, 0) && sz_view_focused(root) == targets[5]);
+  assert(sz_view_focus_next(root, 1, 0) && sz_view_focused(root) == targets[2]);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_signal_int_get(selected) == 1 && sz_view_focused(root) == targets[1]);
+  sz_view_handle_key(root, "q", "q", 0);
+  sz_view_handle_key(root, "ArrowLeft", "", SZ_KEY_CTRL);
+  assert(!strcmp(sz_signal_str_get(name), "kept") && sz_signal_int_get(selected) == 1);
+  SzRect frame = sz_view_frame(targets[0]);
+  assert(sz_view_handle_tap(root, frame.x + frame.w / 2, frame.y + frame.h / 2));
+  assert(sz_signal_int_get(selected) == 0 && sz_view_focused(root) == targets[0]);
+  sz_view_handle_key(root, "Enter", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_free(root);
+  sz_signal_str_free(name);
+
+  SzString *label = sz_string_from_cstr("Owned group");
+  SzString *choice = sz_string_from_cstr("Owned choice");
+  SzList *choices = sz_list_cons(choice, sz_list_nil());
+  sz_signal_int_set(selected, -1);
+  root = sz_lang_view_segmented(selected, label, choices);
+  sz_release(label);
+  sz_release(choice);
+  sz_release(choices);
+  sz_view_layout(root, 200, 100, sz_theme_default());
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "radiogroup:Owned group"));
+  assert(strstr(sz_string_cstr(dump), "choicechip:Owned choice=0"));
+  sz_release(dump);
+  assert(sz_view_focus_next(root, 0, 0));
+  sz_view_handle_key(root, "Space", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_free(root);
+
+  const char *many[100];
+  for (int i = 0; i < 100; i++) many[i] = "Same";
+  sz_signal_int_set(selected, 99);
+  root = sz_view_segmented(selected, "Many", many, 100);
+  SzTheme scaled = *sz_theme_default();
+  scaled.px_scale = 2;
+  sz_view_layout(root, 2000, 200, &scaled);
+  assert(sz_view_focus_next(root, 0, 0));
+  SzView *last = sz_view_focused(root);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(selected) == 0 && sz_view_focused(root) != last);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_signal_int_get(selected) == 99 && sz_view_focused(root) == last);
+  sz_view_free(root);
+
+  sz_signal_int_set(selected, INT64_MAX);
+  root = sz_view_segmented(selected, "Empty", NULL, 0);
+  sz_view_layout(root, 200, 100, sz_theme_default());
+  assert(!sz_view_focus_next(root, 0, 1));
+  assert(sz_signal_int_get(selected) == INT64_MAX && sz_view_frame(root).h == 0);
+  sz_view_free(root);
+  root = sz_view_segmented(selected, "One", labels, 1);
+  sz_view_layout(root, 200, 100, sz_theme_default());
+  assert(sz_signal_int_get(selected) == INT64_MAX);
+  assert(sz_view_focus_next(root, 0, 0));
+  sz_view_handle_key(root, "Space", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_free(root);
+  sz_signal_int_free(selected);
 }
 
 static void test_segmented_sizes(void) {
@@ -9131,7 +10109,7 @@ static void test_segmented_sizes(void) {
   SzRect f;
 
   sig = sz_signal_int(0);
-  t = sz_view_segmented(sig, "List", "Grid");
+  t = sz_view_segmented(sig, "Layout", (const char *[]){"List", "Grid"}, 2);
   sz_view_layout(t, 200.f, 200.f, theme);
   assert(sz_view_kind(t) == SZ_VIEW_SEGMENTED);
   f = sz_view_frame(t);
@@ -9147,13 +10125,13 @@ static void test_segmented_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(0);
-  t = sz_view_segmented(sig, "List", "Grid");
+  t = sz_view_segmented(sig, "Layout", (const char *[]){"List", "Grid"}, 2);
   dump = sz_view_a11y_dump(t);
-  assert(strstr(sz_string_cstr(dump), "segmented:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "choicechip:List=1") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, 1);
   dump = sz_view_a11y_dump(t);
-  assert(strstr(sz_string_cstr(dump), "segmented:1") != NULL);
+  assert(strstr(sz_string_cstr(dump), "choicechip:Grid=1") != NULL);
   sz_string_free(dump);
   sz_view_free(t);
   sz_signal_int_free(sig);
@@ -9166,10 +10144,10 @@ static void test_segmented_tap(void) {
   SzRect f;
 
   sig = sz_signal_int(0);
-  t = sz_view_segmented(sig, "List", "Grid");
+  t = sz_view_segmented(sig, "Layout", (const char *[]){"List", "Grid"}, 2);
   sz_view_layout(t, 200.f, 80.f, theme);
   f = sz_view_frame(t);
-  assert(sz_view_is_tap_target(t));
+  assert(!sz_view_is_tap_target(t));
   assert(sz_view_handle_tap(t, f.x + f.w - 8.f, f.y + f.h * 0.5f));
   assert(sz_signal_int_get(sig) == 1);
   assert(sz_view_handle_tap(t, f.x + 8.f, f.y + f.h * 0.5f));
@@ -9187,13 +10165,13 @@ static void test_segmented_hit_test(void) {
   SzRect f;
 
   sig = sz_signal_int(0);
-  t = sz_view_segmented(sig, "List", "Grid");
+  t = sz_view_segmented(sig, "Layout", (const char *[]){"List", "Grid"}, 2);
   sz_view_layout(t, 200.f, 80.f, theme);
   f = sz_view_frame(t);
   hit = sz_view_hit_test(t, f.x + 8.f, f.y + f.h * 0.5f);
-  assert(hit && sz_view_kind(hit) == SZ_VIEW_SEGMENTED);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_CHOICE_CHIP);
   hit = sz_view_hit_test(t, f.x + f.w - 8.f, f.y + f.h * 0.5f);
-  assert(hit && sz_view_kind(hit) == SZ_VIEW_SEGMENTED);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_CHOICE_CHIP);
   sz_view_free(t);
   sz_signal_int_free(sig);
 }
@@ -9210,7 +10188,7 @@ static void test_segmented_paint(void) {
   int lx, rx, y;
 
   sig = sz_signal_int(0);
-  root = sz_view_segmented(sig, "List", "Grid");
+  root = sz_view_segmented(sig, "Layout", (const char *[]){"List", "Grid"}, 2);
   sz_view_layout(root, 80.f, 80.f, theme);
   f = sz_view_frame(root);
   surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -9237,38 +10215,6 @@ static void test_segmented_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_segmented_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_segmented.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_segmented(sig, "List", "Grid"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "segmented:0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "segmented") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_fab_sizes(void) {
   SzView *b;
@@ -9361,38 +10307,6 @@ static void test_fab_paint(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_fab_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_fab.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_fab("+", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "fab:+") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "+") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_fab_tap_twice(void) {
   SzView *b;
@@ -9428,6 +10342,185 @@ static void test_fab_a11y_distinct(void) {
   sz_string_free(dump);
   sz_view_free(b);
   sz_signal_int_free(sig);
+}
+
+static void test_tooltip_focus_and_hover(void) {
+  SzSignalInt *count = sz_signal_int(0);
+  SzView *button = sz_view_button("Save", counter_tap, count);
+  SzView *tip = sz_view_tooltip("Save the current document", button);
+  SzView *next = sz_view_button("Next", counter_tap, count);
+  SzView *root = sz_view_column();
+  sz_view_add_child(root, tip);
+  sz_view_add_child(root, next);
+  sz_view_layout(root, 360, 240, sz_theme_default());
+  assert(!sz_view_tooltip_visible(tip));
+  assert(!sz_view_is_tap_target(tip));
+  assert(sz_view_tooltip_owner(button) == tip);
+  assert(sz_view_focus_next(root, 0, 1));
+  assert(sz_view_focused(root) == button);
+  assert(sz_view_tooltip_visible(tip));
+  assert(sz_signal_int_get(count) == 0);
+  SzRect trigger = sz_view_frame(button);
+  assert(sz_view_set_hover_at(root, trigger.x + 2, trigger.y + 2));
+  sz_view_handle_key(root, "Escape", "", 0);
+  assert(!sz_view_tooltip_visible(tip));
+  assert(sz_view_focused(root) == button);
+  for (int i = 0; i < 5; i++) {
+    sz_view_set_hover_at(root, trigger.x + 3, trigger.y + 3);
+    sz_view_layout(root, 360, 240, sz_theme_default());
+    assert(!sz_view_tooltip_visible(tip));
+  }
+  sz_view_focus_next(root, 0, 1);
+  assert(sz_view_focused(root) == next);
+  assert(!sz_view_tooltip_visible(tip));
+  sz_view_set_hover_at(root, -1, -1);
+  assert(sz_view_set_hover_at(root, trigger.x + 2, trigger.y + 2));
+  assert(sz_view_tooltip_visible(tip));
+  SzRect popup = sz_view_tooltip_frame(tip);
+  assert(popup.y == trigger.y + trigger.h);
+  assert(sz_view_set_hover_at(root, popup.x + popup.w / 2, popup.y + popup.h / 2));
+  assert(sz_view_tooltip_visible(tip));
+  assert(sz_view_hit_test(root, popup.x + 2, popup.y + 2) == tip);
+  assert(sz_view_handle_tap(root, popup.x + 2, popup.y + 2));
+  assert(sz_signal_int_get(count) == 0);
+  assert(sz_view_focused(root) == next);
+  sz_view_set_hover_at(root, 359, 239);
+  assert(!sz_view_tooltip_visible(tip));
+  sz_view_focus(root, button);
+  assert(sz_view_tooltip_visible(tip));
+  sz_view_focus(root, NULL);
+  assert(!sz_view_tooltip_visible(tip));
+  sz_view_free(root);
+  sz_signal_int_free(count);
+}
+
+static void test_tooltip_scope_and_geometry(void) {
+  SzSignalInt *shown = sz_signal_int(1);
+  SzView *button = sz_view_button("Help", NULL, NULL);
+  SzView *inner = sz_view_tooltip("A long description wraps inside a narrow viewport. It keeps accented text: café.", button);
+  SzView *outer = sz_view_tooltip("Outer help", inner);
+  SzView *conditional = sz_view_show_when(shown, 1, outer);
+  SzView *root = sz_view_stack();
+  sz_view_add_child(root, sz_view_positioned(150, 100, conditional));
+  sz_view_layout(root, 220, 150, sz_theme_default());
+  sz_view_focus(root, button);
+  assert(sz_view_tooltip_visible(inner));
+  assert(!sz_view_tooltip_visible(outer));
+  assert(sz_view_tooltip_owner(button) == inner);
+  SzRect popup = sz_view_tooltip_frame(inner);
+  assert(popup.x >= 0 && popup.y >= 0);
+  assert(popup.x + popup.w <= 220 && popup.y + popup.h <= 150);
+  assert(popup.h > 40);
+  assert(popup.y < sz_view_frame(button).y);
+  sz_signal_int_set(shown, 0);
+  sz_view_layout(root, 220, 150, sz_theme_default());
+  assert(!sz_view_tooltip_visible(inner));
+  assert(!sz_view_tooltip_at(root, 155, 105));
+  sz_signal_int_set(shown, 1);
+  sz_view_layout(root, 220, 150, sz_theme_default());
+  sz_view_focus(root, button);
+  SzTheme scale = *sz_theme_default();
+  scale.font_px *= 2; scale.pad *= 2; scale.gap *= 2; scale.control_h *= 2; scale.px_scale = 2;
+  sz_view_layout(root, 440, 300, &scale);
+  popup = sz_view_tooltip_frame(inner);
+  assert(popup.x >= 0 && popup.y >= 0);
+  assert(popup.x + popup.w <= 440 && popup.y + popup.h <= 300);
+  sz_view_layout(root, 20, 10, sz_theme_default());
+  popup = sz_view_tooltip_frame(inner);
+  assert(popup.w <= 20 && popup.h <= 10);
+  sz_view_free(root);
+  sz_signal_int_free(shown);
+
+  button = sz_view_button("Empty", NULL, NULL);
+  SzView *empty = sz_view_tooltip("", button);
+  sz_view_layout(empty, 200, 100, sz_theme_default());
+  sz_view_focus_next(empty, 0, 1);
+  assert(!sz_view_tooltip_visible(empty));
+  assert(!sz_view_tooltip_owner(button));
+  assert(!sz_view_set_hover_at(empty, 2, 2));
+  sz_view_free(empty);
+}
+
+static void test_tooltip_clipping_and_pointer(void) {
+  SzView *button = sz_view_button("Outside", NULL, NULL);
+  SzView *tip = sz_view_tooltip("Clipped help", button);
+  SzView *stack = sz_view_stack();
+  sz_view_add_child(stack, sz_view_positioned(0, 120, tip));
+  SzView *root = sz_view_sized(200, 80, sz_view_clip(stack));
+  sz_view_layout(root, 360, 240, sz_theme_default());
+  sz_view_focus(root, button);
+  assert(sz_view_frame(button).y >= 120);
+  assert(!sz_view_tooltip_visible(tip));
+  assert(!sz_view_tooltip_at(root, 2, 122));
+  sz_view_free(root);
+
+  for (int absorb = 0; absorb <= 1; absorb++) {
+    tip = sz_view_tooltip("Blocked help", sz_view_button("Blocked", NULL, NULL));
+    root = absorb ? sz_view_absorb_pointer(tip) : sz_view_ignore_pointer(tip);
+    sz_view_layout(root, 360, 240, sz_theme_default());
+    assert(!sz_view_set_hover_at(root, 2, 2));
+    assert(!sz_view_tooltip_visible(tip));
+    sz_view_free(root);
+  }
+
+  SzSignalInt *count = sz_signal_int(0);
+  button = sz_view_button("Save", counter_tap, count);
+  tip = sz_view_tooltip("Save the current document", button);
+  root = sz_view_column();
+  sz_view_add_child(root, tip);
+  sz_view_add_child(root, sz_view_button("Next", counter_tap, count));
+  SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 360, .height = 240, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_ui_session_focus_view(session, button);
+  assert(sz_ui_pump_sync(session));
+  SzRect popup = sz_view_tooltip_frame(tip);
+  assert(popup.w > 0 && popup.h > 0);
+  SzInputEvent event = {.kind = SZ_INPUT_POINTER, .pointer_button = 1,
+    .pointer_phase = SZ_POINTER_DOWN, .x = popup.x + 4, .y = popup.y + popup.h / 2};
+  assert(sz_ui_session_live_inject(session, &event));
+  event.pointer_phase = SZ_POINTER_UP;
+  (void)sz_ui_session_live_inject(session, &event);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 0);
+  assert(sz_view_focused(root) == button);
+  assert(sz_view_tooltip_visible(tip));
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+}
+
+static void test_tooltip_modal_escape(void) {
+  SzSignalInt *open = sz_signal_int(1);
+  SzSignalStr *value = sz_signal_str("");
+  SzView *field = sz_view_text_field(value, "Name");
+  SzView *help = sz_view_tooltip("Enter your name", field);
+  SzView *background = sz_view_tooltip("Background help", sz_view_button("Background", NULL, NULL));
+  SzView *dialog = sz_view_overlay(open, "Details", sz_view_card(help));
+  SzView *root = sz_view_stack();
+  sz_view_add_child(root, background);
+  sz_view_add_child(root, dialog);
+  sz_view_layout(root, 360, 240, sz_theme_default());
+  assert(sz_view_focused(root) == field);
+  assert(sz_view_tooltip_visible(help));
+  assert(!sz_view_tooltip_visible(background));
+  sz_view_handle_compose(root, "a");
+  sz_view_handle_key(root, "Escape", "", 0);
+  assert(sz_signal_int_get(open) == 1);
+  assert(sz_view_tooltip_visible(help));
+  sz_view_handle_key(root, "Escape", "", 0);
+  assert(sz_signal_int_get(open) == 1);
+  assert(!sz_view_tooltip_visible(help));
+  assert(sz_view_focused(root) == field);
+  sz_view_handle_key(root, "Escape", "", 0);
+  assert(sz_signal_int_get(open) == 0);
+  sz_view_layout(root, 360, 240, sz_theme_default());
+  assert(!sz_view_tooltip_visible(help));
+  assert(sz_view_tooltip_visible(background));
+  sz_view_free(root);
+  sz_signal_int_free(open);
+  sz_signal_str_free(value);
 }
 
 static void test_tooltip_sizes(void) {
@@ -9569,7 +10662,7 @@ static void test_tooltip_paint_hover(void) {
 }
 
 static void test_tooltip_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   const char *path = "/tmp/scuzz_ui_tooltip.dump";
@@ -9600,7 +10693,7 @@ static void test_tooltip_not_in_taps_dump(void) {
 }
 
 static void test_tooltip_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -9917,38 +11010,6 @@ static void test_outlined_button_paint_not_primary(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_outlined_button_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_outlined.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_outlined_button("Edit", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "outlined:Edit") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Edit") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_text_button_sizes(void) {
   SzView *b, *filled;
@@ -10222,38 +11283,6 @@ static void test_text_button_paint_not_filled(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_text_button_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_textbutton.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_text_button("Open", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "textbutton:Open") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Open") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_placeholder_sizes(void) {
   SzView *ph, *av;
@@ -10439,7 +11468,7 @@ static void test_placeholder_paint_empty(void) {
 }
 
 static void test_placeholder_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   const char *path = "/tmp/scuzz_ui_placeholder.dump";
@@ -10470,7 +11499,7 @@ static void test_placeholder_not_in_taps_dump(void) {
 }
 
 static void test_placeholder_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -10711,7 +11740,7 @@ static void test_semantics_paint_empty(void) {
 }
 
 static void test_semantics_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   const char *path = "/tmp/scuzz_ui_semantics.dump";
@@ -10742,7 +11771,7 @@ static void test_semantics_not_in_taps_dump(void) {
 }
 
 static void test_semantics_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -11000,7 +12029,7 @@ static void test_merge_semantics_paint_empty(void) {
 }
 
 static void test_merge_semantics_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   const char *path = "/tmp/scuzz_ui_merge_semantics.dump";
@@ -11031,7 +12060,7 @@ static void test_merge_semantics_not_in_taps_dump(void) {
 }
 
 static void test_merge_semantics_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -11384,41 +12413,9 @@ static void test_ink_well_paint_empty(void) {
   sz_view_free(root);
 }
 
-static void test_ink_well_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_ink_well.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S")));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "inkwell:face") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "face") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_ink_well_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -11719,7 +12716,7 @@ static void test_visibility_paint_empty(void) {
 }
 
 static void test_visibility_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -11752,7 +12749,7 @@ static void test_visibility_not_in_taps_dump(void) {
 }
 
 static void test_visibility_child_in_taps_on(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *vis_sig, *tap_sig;
@@ -11787,7 +12784,7 @@ static void test_visibility_child_in_taps_on(void) {
 }
 
 static void test_visibility_child_not_in_taps_off(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *vis_sig, *tap_sig;
@@ -12125,7 +13122,7 @@ static void test_offstage_paint_empty(void) {
 }
 
 static void test_offstage_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -12158,7 +13155,7 @@ static void test_offstage_not_in_taps_dump(void) {
 }
 
 static void test_offstage_child_in_taps_on(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *off_sig, *tap_sig;
@@ -12193,7 +13190,7 @@ static void test_offstage_child_in_taps_on(void) {
 }
 
 static void test_offstage_child_not_in_taps_off(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *off_sig, *tap_sig;
@@ -12440,7 +13437,7 @@ static void test_unconstrained_box_paint_empty(void) {
 }
 
 static void test_unconstrained_box_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   const char *path = "/tmp/scuzz_ui_unconstrained.dump";
@@ -12471,7 +13468,7 @@ static void test_unconstrained_box_not_in_taps_dump(void) {
 }
 
 static void test_unconstrained_box_child_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -12760,38 +13757,6 @@ static void test_filter_chip_paint_mark_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_filter_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_filterchip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_filter_chip(sig, "Tag"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "filterchip:Tag=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Tag") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_choice_chip_sizes(void) {
   SzView *ch, *plain;
@@ -13025,38 +13990,6 @@ static void test_choice_chip_group_exclusive(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_choice_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_choicechip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(1);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_choice_chip(sig, 0, "Day"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "choicechip:Day=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Day") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_action_chip_sizes(void) {
   SzView *ch, *wide;
@@ -13309,38 +14242,6 @@ static void test_action_chip_paint_not_primary(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_action_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_actionchip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_action_chip("Go", counter_tap, sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "actionchip:Go") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "Go") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_input_chip_sizes(void) {
   SzView *ch, *plain;
@@ -13575,38 +14476,6 @@ static void test_input_chip_paint_mark_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_input_chip_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_inputchip.dump";
-  char *dump;
-  const char *taps;
-
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_input_chip(sig, "In"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "inputchip:In=0") != NULL);
-  taps = strstr(dump, "\"taps\":[");
-  assert(taps != NULL);
-  assert(strstr(taps, "In") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_radio_sizes(void) {
   SzView *r;
@@ -13736,35 +14605,228 @@ static void test_radio_paint_off_on(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_radio_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_radio.dump";
-  char *dump;
 
-  sig = sz_signal_int(0);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_radio(sig, 1, "On"));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
+static void test_split_keyboard(void) {
+  SzSignalInt *fraction = sz_signal_int(40);
+  SzSignalStr *name = sz_signal_str("kept");
+  SzView *field = sz_view_text_field(name, "Primary name");
+  SzView *end = sz_view_button("Secondary", NULL, NULL);
+  SzView *split = sz_view_split(fraction, "Tools", field, end);
+  SzView *root = sz_view_column();
+  SzView *after = sz_view_button("After", NULL, NULL);
+  sz_view_add_child(root, split);
+  sz_view_add_child(root, after);
+  const SzTheme *theme = sz_theme_default();
+  sz_view_layout(root, 400, 200, theme);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == field);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == split);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == end);
+  assert(sz_view_focus_next(root, 1, 0) && sz_view_focused(root) == split);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(fraction) == 41);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_signal_int_get(fraction) == 40);
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 400, 200, theme);
+  assert(sz_signal_int_get(fraction) == 0 && sz_view_focused(root) == split);
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "split:Tools=0") && !strstr(sz_string_cstr(dump), "Primary name"));
+  sz_release(dump);
+  assert(sz_view_focus_next(root, 1, 1) && sz_view_focused(root) == after);
+  sz_view_focus(root, field);
+  assert(sz_view_focused(root) == after);
+  sz_view_focus(root, split);
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 400, 200, theme);
+  assert(sz_signal_int_get(fraction) == 40 && !strcmp(sz_signal_str_get(name), "kept"));
+  sz_view_handle_key(root, "End", "", 0);
+  sz_view_layout(root, 400, 200, theme);
+  assert(sz_signal_int_get(fraction) == 100);
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "Primary name") && !strstr(sz_string_cstr(dump), "button:Secondary"));
+  sz_release(dump);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == after);
+  sz_view_focus(root, split);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(fraction) == 100);
+  sz_view_handle_key(root, "Home", "", 0);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_signal_int_get(fraction) == 0);
+  sz_view_handle_key(root, "Enter", "", 0);
+  assert(sz_signal_int_get(fraction) == 100);
+  sz_view_handle_key(root, "q", "q", 0);
+  sz_view_handle_key(root, "ArrowLeft", "", SZ_KEY_CTRL);
+  assert(sz_signal_int_get(fraction) == 100 && !strcmp(sz_signal_str_get(name), "kept"));
+  sz_signal_int_set(fraction, 40);
+  sz_view_layout(root, 400, 200, theme);
+  SzRect handle = sz_view_control_frame(split);
+  SzRect frame = sz_view_frame(split);
+  assert(sz_view_hit_test(root, handle.x + handle.w / 2, handle.y + 10) == split);
+  assert(sz_view_hit_test(root, frame.x + 10, frame.y + 10) == field);
+  assert(sz_view_split_set_at(split, handle.x + handle.w / 2));
+  assert(sz_signal_int_get(fraction) == 40);
+  assert(!sz_view_split_set_at(split, NAN));
+  sz_view_split_set_at(split, frame.x - 10);
+  assert(sz_signal_int_get(fraction) == 0);
+  sz_view_split_set_at(split, frame.x + frame.w + 10);
+  assert(sz_signal_int_get(fraction) == 100);
+  SzTheme scaled = *theme;
+  scaled.px_scale = 2;
+  sz_signal_int_set(fraction, 25);
+  sz_view_layout(root, 800, 400, &scaled);
+  handle = sz_view_control_frame(split);
+  assert(handle.w == 12);
+  sz_view_split_set_at(split, handle.x + handle.w / 2);
+  assert(sz_signal_int_get(fraction) == 25);
+  for (int scale = 1; scale <= 4; scale++) {
+    scaled.px_scale = scale / 2.f;
+    for (int n = 0; n <= 100; n++) {
+      sz_signal_int_set(fraction, n);
+      sz_view_layout(root, 400 * scaled.px_scale, 200 * scaled.px_scale, &scaled);
+      handle = sz_view_control_frame(split);
+      sz_view_split_set_at(split, handle.x + handle.w / 2);
+      assert(sz_signal_int_get(fraction) == n);
+    }
+  }
+  sz_signal_int_set(fraction, 40);
+  sz_view_layout(root, 400, 200, theme);
+  sz_view_focus(root, field);
+  sz_signal_int_set(fraction, 0);
+  sz_view_layout(root, 400, 200, theme);
+  assert(sz_view_focused(root) == NULL);
+  SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 400, .height = 200, .scale = 1};
+  sz_signal_int_set(fraction, 40);
+  SzUiSession *session = sz_ui_mount(&config, root);
   sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "radio:On=0") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "On") != NULL);
-  free(dump);
+  sz_ui_session_focus_view(session, field);
+  assert(sz_ui_session_keyboard_visible(session));
+  handle = sz_view_control_frame(split);
+  SzInputEvent input = {.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN,
+    .pointer_button = 1, .x = handle.x + handle.w / 2, .y = handle.y + 10};
+  assert(sz_ui_inject_sync(session, &input));
+  assert(sz_view_focused(root) == split && !sz_ui_session_keyboard_visible(session));
+  input.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &input));
+  sz_view_handle_key(root, "q", "q", 0);
+  assert(!strcmp(sz_signal_str_get(name), "kept"));
   sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
+  sz_signal_int_free(fraction);
+  sz_signal_str_free(name);
+}
+
+static void test_slider_ranges(void) {
+  SzSignalInt *value = sz_signal_int(-14);
+  SzView *slider = sz_view_slider(value, "Temperature", -60, 120, 3);
+  assert(sz_signal_int_get(value) == -14 && sz_view_slider_value(slider) == -15);
+  assert(sz_view_slider_minimum(slider) == -60 && sz_view_slider_maximum(slider) == 120);
+  sz_view_layout(slider, 200, 100, sz_theme_default());
+  sz_view_focus(slider, slider);
+  assert(sz_view_handle_key(slider, "ArrowUp", "", 0));
+  assert(sz_signal_int_get(value) == -12);
+  sz_view_handle_key(slider, "PageUp", "", 0);
+  assert(sz_signal_int_get(value) == 18);
+  sz_view_handle_key(slider, "PageDown", "", 0);
+  assert(sz_signal_int_get(value) == -12);
+  sz_view_handle_key(slider, "Home", "", 0);
+  assert(sz_signal_int_get(value) == -60);
+  sz_view_handle_key(slider, "End", "", 0);
+  assert(sz_signal_int_get(value) == 120);
+  sz_view_handle_key(slider, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(value) == 120);
+  sz_view_slider_set_at(slider, 100);
+  assert(sz_signal_int_get(value) == 30);
+  sz_view_slider_set_at(slider, -100);
+  assert(sz_signal_int_get(value) == -60);
+  sz_view_slider_set_at(slider, 1000);
+  assert(sz_signal_int_get(value) == 120);
+  sz_view_free(slider);
+  slider = sz_view_slider(value, "Uneven", -10, 10, 6);
+  assert(sz_view_slider_maximum(slider) == 8);
+  sz_signal_int_set(value, -7);
+  assert(sz_view_slider_value(slider) == -4);
+  sz_signal_int_set(value, INT64_MAX);
+  assert(sz_view_slider_value(slider) == 8);
+  sz_view_free(slider);
+  slider = sz_view_slider(value, "Constant", 5, 5, 1);
+  sz_view_focus(slider, slider);
+  sz_view_handle_key(slider, "PageUp", "", 0);
+  assert(sz_signal_int_get(value) == 5);
+  sz_view_free(slider);
+  slider = sz_view_slider(value, "Large step", INT64_MIN, INT64_MAX, INT64_MAX);
+  assert(sz_view_slider_maximum(slider) == INT64_MAX - 1);
+  sz_view_layout(slider, 200, 100, sz_theme_default());
+  sz_view_slider_set_at(slider, 100);
+  assert(sz_signal_int_get(value) == -1);
+  sz_view_focus(slider, slider);
+  sz_view_handle_key(slider, "PageDown", "", 0);
+  assert(sz_signal_int_get(value) == INT64_MIN);
+  sz_view_handle_key(slider, "PageUp", "", 0);
+  assert(sz_signal_int_get(value) == INT64_MAX - 1);
+  sz_view_free(slider);
+  slider = sz_view_slider(value, "Full Int", INT64_MIN, INT64_MAX, 1);
+  sz_view_layout(slider, 200, 100, sz_theme_default());
+  assert(sz_view_slider_maximum(slider) == INT64_MAX);
+  sz_view_slider_set_at(slider, 50);
+  assert(sz_signal_int_get(value) == INT64_C(-4611686018427387904));
+  sz_view_slider_set_at(slider, 100);
+  assert(sz_signal_int_get(value) == 0);
+  sz_view_slider_set_at(slider, 150);
+  assert(sz_signal_int_get(value) == INT64_C(4611686018427387903));
+  sz_view_slider_set_at(slider, 0);
+  assert(sz_signal_int_get(value) == INT64_MIN);
+  sz_view_slider_set_at(slider, 200);
+  assert(sz_signal_int_get(value) == INT64_MAX);
+  sz_view_focus(slider, slider);
+  sz_view_handle_key(slider, "PageUp", "", 0);
+  assert(sz_signal_int_get(value) == INT64_MAX);
+  sz_view_handle_key(slider, "ArrowLeft", "", 0);
+  assert(sz_signal_int_get(value) == INT64_MAX - 1);
+  sz_view_handle_key(slider, "Home", "", 0);
+  sz_view_handle_key(slider, "ArrowDown", "", 0);
+  assert(sz_signal_int_get(value) == INT64_MIN);
+  sz_view_free(slider);
+  sz_signal_int_free(value);
+}
+
+static void test_slider_pointer_focus_and_removal(void) {
+  SzSignalInt *value = sz_signal_int(0), *hits = sz_signal_int(0);
+  SzSignalStr *text = sz_signal_str("");
+  SzView *root = sz_view_column();
+  SzView *field = sz_view_text_field(text, "Name");
+  SzView *slider = sz_view_slider(value, "Level", 0, 100, 1);
+  sz_view_add_child(root, field);
+  SzView *holder = sz_view_column();
+  sz_view_add_child(holder, slider);
+  sz_view_add_child(root, holder);
+  SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 320, .height = 200, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  sz_ui_session_focus_view(session, field);
+  assert(sz_ui_session_keyboard_visible(session));
+  SzInputEvent keyboard = {.kind = SZ_INPUT_KEYBOARD, .keyboard_visible = 0};
+  assert(sz_ui_inject_sync(session, &keyboard));
+  sz_ui_session_focus_view(session, field);
+  assert(!sz_ui_session_keyboard_visible(session));
+  sz_ui_session_focus_view(session, slider);
+  sz_ui_session_focus_view(session, field);
+  assert(sz_ui_session_keyboard_visible(session));
+  SzRect frame = sz_view_frame(slider);
+  SzInputEvent pointer = {.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN,
+    .pointer_button = 1, .x = frame.x + 10, .y = frame.y + 10};
+  assert(sz_ui_inject_sync(session, &pointer));
+  assert(sz_view_focused(root) == slider);
+  assert(!sz_ui_session_keyboard_visible(session));
+  sz_view_handle_key(root, "q", "q", 0);
+  assert(!strcmp(sz_signal_str_get(text), ""));
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(value) > 0);
+  sz_view_clear_children(holder);
+  sz_view_add_child(holder, sz_view_button("Replacement", counter_tap, hits));
+  pointer.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &pointer));
+  assert(sz_signal_int_get(hits) == 0);
+  sz_ui_unmount(session); sz_view_free(root);
+  sz_signal_int_free(value); sz_signal_int_free(hits); sz_signal_str_free(text);
 }
 
 static void test_slider_sizes(void) {
@@ -13774,7 +14836,7 @@ static void test_slider_sizes(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   sz_view_layout(sl, 200.f, 200.f, theme);
   assert(sz_view_kind(sl) == SZ_VIEW_SLIDER);
   f = sz_view_frame(sl);
@@ -13790,13 +14852,13 @@ static void test_slider_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(40);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   dump = sz_view_a11y_dump(sl);
-  assert(strstr(sz_string_cstr(dump), "slider:40") != NULL);
+  assert(strstr(sz_string_cstr(dump), "slider:Level=40") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, 7);
   dump = sz_view_a11y_dump(sl);
-  assert(strstr(sz_string_cstr(dump), "slider:7") != NULL);
+  assert(strstr(sz_string_cstr(dump), "slider:Level=7") != NULL);
   sz_string_free(dump);
   sz_view_free(sl);
   sz_signal_int_free(sig);
@@ -13808,13 +14870,13 @@ static void test_slider_clamps_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(150);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   dump = sz_view_a11y_dump(sl);
-  assert(strstr(sz_string_cstr(dump), "slider:100") != NULL);
+  assert(strstr(sz_string_cstr(dump), "slider:Level=100") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, -3);
   dump = sz_view_a11y_dump(sl);
-  assert(strstr(sz_string_cstr(dump), "slider:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "slider:Level=0") != NULL);
   sz_string_free(dump);
   sz_view_free(sl);
   sz_signal_int_free(sig);
@@ -13827,7 +14889,7 @@ static void test_slider_tap_sets_from_x(void) {
   SzRect f;
 
   sig = sz_signal_int(0);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   sz_view_layout(sl, 200.f, 80.f, theme);
   f = sz_view_frame(sl);
   assert(sz_view_handle_tap(sl, f.x + f.w * 0.5f, f.y + f.h * 0.5f));
@@ -13845,7 +14907,7 @@ static void test_slider_tap_clamps_edges(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   sz_view_layout(sl, 200.f, 80.f, theme);
   f = sz_view_frame(sl);
   assert(sz_view_handle_tap(sl, f.x - 8.f, f.y + f.h * 0.5f) == 0);
@@ -13864,7 +14926,7 @@ static void test_slider_hit_test(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   sz_view_layout(sl, 200.f, 80.f, theme);
   f = sz_view_frame(sl);
   hit = sz_view_hit_test(sl, f.x + f.w * 0.5f, f.y + f.h * 0.5f);
@@ -13885,7 +14947,7 @@ static void test_slider_paint_fill(void) {
   SzRect f;
 
   sig = sz_signal_int(100);
-  root = sz_view_slider(sig);
+  root = sz_view_slider(sig, "Level", 0, 100, 1);
   sz_view_layout(root, 80.f, 80.f, theme);
   f = sz_view_frame(root);
   surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -13906,39 +14968,9 @@ static void test_slider_paint_fill(void) {
   sz_signal_int_free(sig);
 }
 
-static void test_slider_in_taps_dump(void) {
-  SzUiConfig cfg;
-  SzUiSession *session;
-  SzView *root;
-  SzSignalInt *sig;
-  const char *path = "/tmp/scuzz_ui_slider.dump";
-  char *dump;
-
-  sig = sz_signal_int(40);
-  root = sz_view_column();
-  sz_view_add_child(root, sz_view_slider(sig));
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-  cfg.width = 200;
-  cfg.height = 80;
-  cfg.scale = 1.0;
-  session = sz_ui_mount(&cfg, root);
-  assert(session);
-  sz_ui_session_take_root(session);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_write_dump(session, path));
-  dump = slurp_cstr(path);
-  assert(strstr(dump, "slider:40") != NULL);
-  assert(strstr(dump, "\"taps\":[") != NULL);
-  assert(strstr(dump, "slider") != NULL);
-  free(dump);
-  sz_ui_unmount(session);
-  sz_signal_int_free(sig);
-  remove(path);
-}
 
 static void test_slider_pointer_drag(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *sl;
   SzSignalInt *sig;
@@ -13947,7 +14979,7 @@ static void test_slider_pointer_drag(void) {
   SzRect f;
 
   sig = sz_signal_int(0);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   root = sz_view_column();
   sz_view_add_child(root, sl);
   memset(&cfg, 0, sizeof(cfg));
@@ -13978,7 +15010,7 @@ static void test_slider_pointer_drag(void) {
 }
 
 static void test_replace_root_drops_pointer(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root1, *root2, *sl;
   SzSignalInt *sig;
@@ -13988,7 +15020,7 @@ static void test_replace_root_drops_pointer(void) {
   int64_t v0;
 
   sig = sz_signal_int(0);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   root1 = sz_view_column();
   sz_view_add_child(root1, sl);
   memset(&cfg, 0, sizeof(cfg));
@@ -14021,7 +15053,7 @@ static void test_replace_root_drops_pointer(void) {
 }
 
 static void test_slider_live_records_xy(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root, *sl;
   SzSignalInt *sig;
@@ -14033,7 +15065,7 @@ static void test_slider_live_records_xy(void) {
 
   remove(record);
   sig = sz_signal_int(0);
-  sl = sz_view_slider(sig);
+  sl = sz_view_slider(sig, "Level", 0, 100, 1);
   root = sz_view_column();
   sz_view_add_child(root, sl);
   memset(&cfg, 0, sizeof(cfg));
@@ -14065,6 +15097,950 @@ static void test_slider_live_records_xy(void) {
   remove(record);
 }
 
+static void size_step(SzView *root, SzView *size, SkCanvas *canvas,
+                      int width, int height, const SzTheme *theme) {
+  int scale = (int)theme->px_scale;
+  assert(sz_view_paint(root, canvas, 400 * scale, 400 * scale, theme));
+  SzRect frame = sz_view_frame(size);
+  assert(frame.w == width * scale && frame.h == height * scale);
+}
+
+static void test_animated_size_steps(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0;
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.background = 0xffffffff;
+    SzSignalInt *width = sz_signal_int(80), *height = sz_signal_int(60);
+    SzSignalInt *taps = sz_signal_int(0);
+    SzView *child = sz_view_ink_well("Moving", counter_tap, taps,
+      sz_view_unconstrained_box(sz_view_sized(360, 320,
+        sz_view_background(0xffff0000, sz_view_text("")))));
+    SzView *size = sz_view_animated_size(width, height, 8, child);
+    SzView *root = sz_view_column(), *after = sz_view_button("After", NULL, NULL);
+    sz_view_add_child(root, size); sz_view_add_child(root, after);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400 * scale, 400 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    size_step(root, size, canvas, 80, 60, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(width, 240); sz_signal_int_set(height, 180);
+    for (int step = 1; step <= 8; step++) {
+      int w = 80 + step * 20, h = 60 + step * 15;
+      size_step(root, size, canvas, w, h, &theme);
+      assert(sz_view_frame(after).y == h * scale);
+      assert(sz_view_hit_test(root, (w - 1.f) * scale, (h - 1.f) * scale) == child);
+      assert(sz_view_hit_test(root, (w + 1.f) * scale, h * scale / 2.f) == NULL);
+      const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+      assert(px_rgb(pixels, 400 * scale, 1, 1, 255, 0, 0));
+      assert(px_rgb(pixels, 400 * scale, w * scale + 1, h * scale / 2, 255, 255, 255));
+      assert(px_rgb(pixels, 400 * scale, 1, h * scale + (int)theme.control_h + 1, 255, 255, 255));
+      assert(sz_view_transition_pending(root) == (step < 8));
+    }
+    sz_signal_int_set(width, 80); sz_signal_int_set(height, 60);
+    size_step(root, size, canvas, 220, 165, &theme);
+    size_step(root, size, canvas, 200, 150, &theme);
+    sz_signal_int_set(width, 40); sz_signal_int_set(height, 30);
+    for (int step = 1; step <= 8; step++)
+      size_step(root, size, canvas, 200 - step * 20, 150 - step * 15, &theme);
+    sz_view_pause_motion(root, 1);
+    sz_signal_int_set(width, 240); sz_signal_int_set(height, 180);
+    for (int step = 0; step < 3; step++) size_step(root, size, canvas, 40, 30, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_view_pause_motion(root, 0);
+    size_step(root, size, canvas, 65, 49, &theme);
+    sz_view_reduce_motion(root, 1);
+    size_step(root, size, canvas, 240, 180, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(width, INT64_MIN); sz_signal_int_set(height, INT64_MAX);
+    size_step(root, size, canvas, 0, 400, &theme);
+    assert(sz_signal_int_get(width) == INT64_MIN && sz_signal_int_get(height) == INT64_MAX);
+    SzString *dump = sz_view_a11y_dump(root);
+    assert(strstr(sz_string_cstr(dump), "size:Moving=0,2147483647\n"));
+    assert(!strstr(sz_string_cstr(dump), "inkwell:Moving"));
+    sz_string_free(dump);
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(width); sz_signal_int_free(height); sz_signal_int_free(taps);
+  }
+}
+
+static void test_animated_size_unbounded_limits(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale;
+    SzSignalInt *width = sz_signal_int(INT64_MAX), *height = sz_signal_int(INT64_MAX);
+    SzView *size = sz_view_animated_size(width, height, 4,
+      sz_view_background(0xffff0000, sz_view_text("")));
+    SzView *root = sz_view_unconstrained_box(size);
+    sz_view_reduce_motion(root, 1);
+    int edge = 64 * scale;
+    SkSurface *surface = sk_surface_make_raster_n32_premul(edge, edge);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    assert(sz_view_paint(root, canvas, edge, edge, &theme));
+    SzRect frame = sz_view_frame(size);
+    assert(frame.w == (float)INT_MAX * scale && frame.h == (float)INT_MAX * scale);
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, edge, 0, 0, 255, 0, 0));
+    assert(px_rgb(pixels, edge, edge - 1, edge - 1, 255, 0, 0));
+    assert(sz_signal_int_get(width) == INT64_MAX && sz_signal_int_get(height) == INT64_MAX);
+    sz_signal_int_set(width, INT64_MIN); sz_signal_int_set(height, INT64_MIN);
+    assert(sz_view_paint(root, canvas, edge, edge, &theme));
+    pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, edge, 0, 0, 0xf3, 0xef, 0xe3));
+    assert(!sz_view_transition_pending(root));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(width); sz_signal_int_free(height);
+  }
+}
+
+static void test_animated_size_retains_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *width = sz_signal_int(200), *height = sz_signal_int(80), *visible = sz_signal_int(1);
+  SzSignalStr *text = sz_signal_str("Kept");
+  SzSignalInt *alpha = sz_signal_int(100);
+  SzView *field = sz_view_text_field(text, "Retained size field");
+  SzView *fade = sz_view_animated_opacity(alpha, 8, field);
+  SzView *size = sz_view_animated_size(width, height, 4, fade);
+  SzView *root = sz_view_visibility(visible, size);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  size_step(root, size, canvas, 200, 80, &theme);
+  sz_view_focus(root, field); sz_view_set_text_field_caret(field, 2);
+  sz_signal_int_set(width, 100); sz_signal_int_set(height, 40);
+  size_step(root, size, canvas, 175, 70, &theme);
+  assert(sz_view_focused(root) == field && sz_view_text_field_caret(field) == 2);
+  assert(!strcmp(sz_signal_str_get(text), "Kept"));
+  sz_signal_int_set(width, 0); sz_signal_int_set(height, 0);
+  for (int step = 0; step < 4; step++) assert(sz_view_paint(root, canvas, 400, 400, &theme));
+  assert(sz_view_focused(root) == NULL);
+  SzView *fields[2];
+  assert(sz_view_collect_text_fields(root, fields, 2) == 0);
+  assert(sz_view_hit_test(root, 1, 1) == NULL);
+  assert(sz_view_edit_target(root) == NULL);
+  assert(!sz_view_handle_text_edit(root, "hidden", 0));
+  assert(!strcmp(sz_signal_str_get(text), "Kept"));
+  FILE *file = tmpfile();
+  assert(file);
+  sz_view_transitions_dump_json(root, file);
+  rewind(file);
+  char json[512];
+  size_t bytes = fread(json, 1, sizeof json - 1, file);
+  json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"size\",\"width\":0,\"height\":0,\"targetWidth\":0,\"targetHeight\":0,\"remaining\":0"));
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(!strstr(sz_string_cstr(dump), "textfield:Retained size field"));
+  sz_string_free(dump);
+  sz_signal_int_set(alpha, 0);
+  assert(sz_view_paint(root, canvas, 400, 400, &theme));
+  assert(sz_view_animated_opacity_value(fade) == 0 && !sz_view_transition_pending(root));
+  sz_signal_int_set(visible, 0);
+  sz_signal_int_set(width, 300); sz_signal_int_set(height, 120);
+  assert(sz_view_paint(root, canvas, 400, 400, &theme));
+  assert(!sz_view_transition_pending(root));
+  sz_signal_int_set(visible, 1);
+  size_step(root, size, canvas, 300, 120, &theme);
+  assert(!sz_view_transition_pending(root));
+  assert(!strcmp(sz_signal_str_get(text), "Kept") && sz_view_text_field_caret(field) == 2);
+  sk_surface_unref(surface); sz_view_free(root);
+  sz_signal_int_free(alpha); sz_signal_int_free(width); sz_signal_int_free(height); sz_signal_int_free(visible); sz_signal_str_free(text);
+}
+
+static void test_animated_content_size_steps(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale;
+    theme.font_px *= scale; theme.control_h *= scale; theme.background = 0xffffffff;
+    SzSignalInt *choice = sz_signal_int(0), *taps = sz_signal_int(0);
+    SzView *choices = sz_view_stack();
+    sz_view_add_child(choices, sz_view_show_when(choice, 0,
+      sz_view_sized(80, 60, sz_view_background(0xffff0000, sz_view_text("")))));
+    sz_view_add_child(choices, sz_view_show_when(choice, 1,
+      sz_view_sized(240, 180, sz_view_background(0xffff0000, sz_view_text("")))));
+    sz_view_add_child(choices, sz_view_show_when(choice, 2,
+      sz_view_sized(40, 30, sz_view_background(0xffff0000, sz_view_text("")))));
+    SzView *child = sz_view_ink_well("Measured bounds", counter_tap, taps, choices);
+    SzView *size = sz_view_animated_content_size(8, child);
+    SzView *after = sz_view_button("After content", NULL, NULL), *root = sz_view_column();
+    sz_view_add_child(root, size); sz_view_add_child(root, after);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400 * scale, 400 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    size_step(root, size, canvas, 80, 60, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(choice, 1);
+    for (int step = 1; step <= 8; step++) {
+      int width = 80 + 20 * step, height = 60 + 15 * step;
+      size_step(root, size, canvas, width, height, &theme);
+      assert(sz_view_frame(child).w == 240 * scale && sz_view_frame(child).h == 180 * scale);
+      assert(sz_view_frame(after).y == height * scale);
+      assert(sz_view_hit_test(root, (width - 1.f) * scale, (height - 1.f) * scale) == child);
+      assert(sz_view_hit_test(root, (width + 1.f) * scale, height * scale / 2.f) == NULL);
+      const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+      assert(px_rgb(pixels, 400 * scale, 1, 1, 255, 0, 0));
+      assert(px_rgb(pixels, 400 * scale, width * scale + 1, height * scale / 2, 255, 255, 255));
+      if (step < 8)
+        assert(px_rgb(pixels, 400 * scale, 1, height * scale + (int)theme.control_h + 1, 255, 255, 255));
+      assert(sz_view_transition_pending(root) == (step < 8));
+    }
+    sz_signal_int_set(choice, 0);
+    size_step(root, size, canvas, 220, 165, &theme);
+    size_step(root, size, canvas, 200, 150, &theme);
+    sz_signal_int_set(choice, 2);
+    for (int step = 1; step <= 8; step++)
+      size_step(root, size, canvas, 200 - 20 * step, 150 - 15 * step, &theme);
+    SzString *dump = sz_view_a11y_dump(root);
+    assert(strstr(sz_string_cstr(dump), "contentSize:Measured bounds=40.000,30.000\n"));
+    sz_string_free(dump);
+    sz_signal_int_set(choice, 3);
+    for (int step = 1; step <= 8; step++) {
+      assert(sz_view_paint(root, canvas, 400 * scale, 400 * scale, &theme));
+      assert(sz_view_frame(size).w == (40.f - 5.f * step) * scale);
+      assert(sz_view_frame(size).h == (30.f - 3.75f * step) * scale);
+    }
+    assert(!sz_view_transition_pending(root));
+    assert(sz_view_hit_test(root, 1, (int)theme.control_h + 1) == NULL);
+    FILE *file = tmpfile(); assert(file);
+    sz_view_transitions_dump_json(root, file); rewind(file);
+    char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file);
+    json[bytes] = 0; fclose(file);
+    assert(strstr(json, "\"kind\":\"contentSize\",\"width\":0,\"height\":0,\"targetWidth\":0,\"targetHeight\":0,\"remaining\":0"));
+    sz_signal_int_set(choice, 1);
+    assert(sz_view_paint(root, canvas, 400 * scale, 400 * scale, &theme));
+    assert(sz_view_frame(size).w == 30.f * scale && sz_view_frame(size).h == 22.5f * scale);
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(choice); sz_signal_int_free(taps);
+  }
+}
+
+static void test_animated_content_size_fractional(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale;
+    SzView *child = sz_view_fraction(25, 25, sz_view_text(""));
+    SzView *root = sz_view_animated_content_size(4, child);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400 * scale, 400 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    assert(sz_view_paint(root, canvas, 101 * scale, 103 * scale, &theme));
+    assert(sz_view_frame(root).w == 25.25f * scale && sz_view_frame(root).h == 25.75f * scale);
+    assert(!sz_view_transition_pending(root));
+    for (int repeat = 0; repeat < 3; repeat++) {
+      sz_view_layout(root, 201 * scale, 203 * scale, &theme);
+      assert(sz_view_frame(root).w == 25.25f * scale && sz_view_frame(root).h == 25.75f * scale);
+      assert(sz_view_frame(child).w == 50.25f * scale && sz_view_frame(child).h == 50.75f * scale);
+      assert(sz_view_hit_test(root, 1, 1) == NULL);
+    }
+    for (int step = 1; step <= 4; step++) {
+      assert(sz_view_paint(root, canvas, 201 * scale, 203 * scale, &theme));
+      assert(sz_view_frame(root).w == (25.25f + 6.25f * step) * scale);
+      assert(sz_view_frame(root).h == (25.75f + 6.25f * step) * scale);
+    }
+    sz_view_pause_motion(root, 1);
+    for (int repeat = 0; repeat < 3; repeat++) {
+      assert(sz_view_paint(root, canvas, 301 * scale, 303 * scale, &theme));
+      assert(sz_view_frame(root).w == 50.25f * scale && sz_view_frame(root).h == 50.75f * scale);
+    }
+    assert(!sz_view_transition_pending(root));
+    sz_view_pause_motion(root, 0);
+    assert(sz_view_paint(root, canvas, 301 * scale, 303 * scale, &theme));
+    assert(sz_view_frame(root).w == 56.5f * scale && sz_view_frame(root).h == 57.f * scale);
+    sz_view_reduce_motion(root, 1);
+    assert(sz_view_paint(root, canvas, 301 * scale, 303 * scale, &theme));
+    assert(sz_view_frame(root).w == 75.25f * scale && sz_view_frame(root).h == 75.75f * scale);
+    assert(!sz_view_transition_pending(root));
+    sk_surface_unref(surface); sz_view_free(root);
+  }
+}
+
+static void test_animated_content_size_retains_input(void) {
+  for (int hidden = 0; hidden < 3; hidden++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalInt *expanded = sz_signal_int(0), *shown = sz_signal_int(1), *reduced = sz_signal_int(0);
+    SzSignalStr *text = sz_signal_str("Retained content input");
+    SzView *field = sz_view_text_field(text, "Measured name");
+    SzView *content = sz_view_stack();
+    sz_view_add_child(content, sz_view_sized(80, 40, field));
+    sz_view_add_child(content, sz_view_show_when(expanded, 1, sz_view_sized(240, 180, sz_view_text(""))));
+    SzView *size = sz_view_animated_content_size(4, content);
+    SzView *motion = sz_view_reduced_motion(reduced, size);
+    SzView *root = hidden == 0 ? sz_view_visibility(shown, motion) :
+      hidden == 1 ? sz_view_show_when(shown, 1, motion) : sz_view_offstage(shown, motion);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    size_step(root, size, canvas, 80, 40, &theme);
+    sz_view_focus(root, field); sz_view_set_text_field_caret(field, 3);
+    sz_signal_int_set(expanded, 1);
+    size_step(root, size, canvas, 120, 75, &theme);
+    assert(sz_view_focused(root) == field && sz_view_text_field_caret(field) == 3);
+    assert(!strcmp(sz_signal_str_get(text), "Retained content input"));
+    sz_signal_int_set(shown, 0);
+    assert(sz_view_paint(root, canvas, 400, 400, &theme));
+    assert(!sz_view_transition_pending(root) && sz_view_focused(root) == NULL);
+    sz_signal_int_set(expanded, 0);
+    assert(sz_view_paint(root, canvas, 400, 400, &theme));
+    sz_signal_int_set(shown, 1);
+    size_step(root, size, canvas, 80, 40, &theme);
+    assert(!sz_view_transition_pending(root));
+    assert(!strcmp(sz_signal_str_get(text), "Retained content input") && sz_view_text_field_caret(field) == 3);
+    sz_signal_int_set(reduced, 1); sz_signal_int_set(expanded, 1);
+    size_step(root, size, canvas, 240, 180, &theme);
+    assert(!sz_view_transition_pending(root));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(expanded); sz_signal_int_free(shown); sz_signal_int_free(reduced); sz_signal_str_free(text);
+  }
+}
+
+static void test_animated_content_size_wrapping(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale;
+    theme.font_px *= scale; theme.line_gap *= scale;
+    SzSignalStr *text = sz_signal_str("Short");
+    SzView *child = sz_view_text_signal_str(text), *reference = sz_view_text_signal_str(text);
+    SzView *root = sz_view_animated_content_size(4, child);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400 * scale, 400 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    assert(sz_view_paint(root, canvas, 180 * scale, 400 * scale, &theme));
+    sz_view_layout(reference, 180 * scale, 400 * scale, &theme);
+    SzRect start = sz_view_frame(root);
+    assert(start.w == sz_view_frame(reference).w && start.h == sz_view_frame(reference).h);
+    sz_signal_str_set(text, "Content grows when these words wrap into several lines. Keep the full measurement independent of the animated box.");
+    sz_view_layout(reference, 180 * scale, 400 * scale, &theme);
+    SzRect target = sz_view_frame(reference);
+    assert(target.h > start.h);
+    for (int step = 1; step <= 2; step++) {
+      assert(sz_view_paint(root, canvas, 180 * scale, 400 * scale, &theme));
+      SzRect current = sz_view_frame(root), measured = sz_view_frame(child);
+      assert(measured.w == target.w && measured.h == target.h);
+      assert(fabsf(current.w - (start.w + (target.w - start.w) * step / 4.f)) < 0.001f);
+      assert(fabsf(current.h - (start.h + (target.h - start.h) * step / 4.f)) < 0.001f);
+    }
+    start = sz_view_frame(root);
+    sz_view_layout(reference, 72 * scale, 400 * scale, &theme);
+    target = sz_view_frame(reference);
+    assert(target.h > start.h);
+    for (int step = 1; step <= 4; step++) {
+      assert(sz_view_paint(root, canvas, 72 * scale, 400 * scale, &theme));
+      SzRect current = sz_view_frame(root), measured = sz_view_frame(child);
+      float width = fminf(72.f * scale, start.w + (target.w - start.w) * step / 4.f);
+      assert(measured.w == target.w && measured.h == target.h);
+      assert(fabsf(current.w - width) < 0.001f);
+      assert(fabsf(current.h - (start.h + (target.h - start.h) * step / 4.f)) < 0.001f);
+    }
+    assert(!sz_view_transition_pending(root));
+    for (int repeat = 0; repeat < 3; repeat++) {
+      assert(sz_view_paint(root, canvas, 72 * scale, 400 * scale, &theme));
+      assert(sz_view_frame(root).h == target.h && !sz_view_transition_pending(root));
+    }
+    sk_surface_unref(surface); sz_view_free(root); sz_view_free(reference); sz_signal_str_free(text);
+  }
+}
+
+static void test_animated_content_size_constraints(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *shown = sz_signal_int(1);
+  SzSignalStr *text = sz_signal_str("Kept at zero");
+  SzView *field = sz_view_text_field(text, "Zero content field");
+  SzView *size = sz_view_animated_content_size(4, sz_view_show_when(shown, 1, sz_view_sized(80, 40, field)));
+  SzView *root = sz_view_min_size(90, 70, size);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  size_step(root, size, canvas, 90, 70, &theme);
+  sz_view_focus(root, field);
+  sz_signal_int_set(shown, 0);
+  for (int step = 0; step < 4; step++) size_step(root, size, canvas, 90, 70, &theme);
+  assert(!sz_view_transition_pending(root));
+  assert(sz_view_paint(root, canvas, 50, 30, &theme));
+  assert(sz_view_frame(size).w == 50.f && sz_view_frame(size).h == 30.f);
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(shown); sz_signal_str_free(text);
+
+  text = sz_signal_str("Zero retains state");
+  field = sz_view_text_field(text, "Zero content field");
+  root = sz_view_animated_content_size(4, sz_view_sized(0, 0, field));
+  surface = sk_surface_make_raster_n32_premul(100, 100); canvas = sk_surface_get_canvas(surface);
+  assert(sz_view_paint(root, canvas, 100, 100, &theme));
+  SzView *fields[2];
+  assert(sz_view_frame(root).w == 0 && sz_view_frame(root).h == 0);
+  assert(sz_view_collect_text_fields(root, fields, 2) == 0);
+  assert(sz_view_hit_test(root, 1, 1) == NULL && sz_view_edit_target(root) == NULL);
+  sz_view_focus(root, field);
+  assert(sz_view_focused(root) == NULL);
+  assert(!sz_view_handle_text_edit(root, "hidden", 0));
+  assert(!strcmp(sz_signal_str_get(text), "Zero retains state"));
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(!strstr(sz_string_cstr(dump), "textfield:Zero content field")); sz_string_free(dump);
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_str_free(text);
+}
+
+static SzView *scale_scene(SzView *content) {
+  SzView *stack = sz_view_stack();
+  sz_view_add_child(stack, sz_view_sized(320, 240, sz_view_text("")));
+  sz_view_add_child(stack, sz_view_positioned(100, 80, content));
+  return sz_view_sized(320, 240, sz_view_clip(stack));
+}
+
+static void assert_scale_frame(SzView *view, float x, float y, float w, float h) {
+  SzRect frame = sz_view_frame(view);
+  assert(frame.x == x && frame.y == y && frame.w == w && frame.h == h);
+}
+
+static void test_scale_geometry(void) {
+  for (int device = 1; device <= 2; device++) for (int clipped = 0; clipped <= 1; clipped++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = device; theme.background = 0xffffffff;
+    SzSignalInt *taps = sz_signal_int(0);
+    SzView *button = sz_view_ink_well("Scaled card", counter_tap, taps,
+      sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+    SzView *scaled = sz_view_scale(200, button);
+    SzView *root = scale_scene(clipped ? sz_view_clip(scaled) : scaled);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(320 * device, 240 * device);
+    assert(surface);
+    assert(sz_view_paint(root, sk_surface_get_canvas(surface), 320 * device, 240 * device, &theme));
+    assert_scale_frame(button, 60 * device, 60 * device, 160 * device, 80 * device);
+    assert_scale_frame(root, 0, 0, 320 * device, 240 * device);
+    assert(sz_view_paint_scale(button) == 2);
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, 320 * device, 140 * device, 100 * device, 255, 0, 0));
+    assert(px_rgb(pixels, 320 * device, 210 * device, 100 * device,
+      255, clipped ? 255 : 0, clipped ? 255 : 0));
+    assert(sz_view_hit_test(root, 210.f * device, 100.f * device) == (clipped ? NULL : button));
+    assert(sz_view_hit_test(root, 59.f * device, 100.f * device) == NULL);
+    assert(sz_view_handle_tap(root, 140.f * device, 100.f * device));
+    assert(sz_signal_int_get(taps) == 1);
+    sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(taps);
+  }
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzView *child = sz_view_sized(80, 40, sz_view_text("nested"));
+  SzView *root = scale_scene(sz_view_scale(200, sz_view_scale(50, child)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert_scale_frame(child, 100, 80, 80, 40);
+  assert(sz_view_paint_scale(child) == 1);
+  sz_view_free(root);
+}
+
+static void test_animated_scale_steps(void) {
+  SzTheme theme = *sz_theme_default();
+  theme.pad = theme.gap = 0; theme.px_scale = 1; theme.background = 0xffffffff;
+  SzSignalInt *value = sz_signal_int(100), *taps = sz_signal_int(0);
+  SzView *child = sz_view_ink_well("Scale card", counter_tap, taps,
+    sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+  SzView *scale = sz_view_animated_scale(value, 8, child);
+  SzView *root = scale_scene(scale);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 100, 80, 80, 40);
+  assert(!sz_view_transition_pending(root));
+  sz_signal_int_set(value, 200);
+  for (int repeat = 0; repeat < 3; repeat++) {
+    sz_view_layout(root, 320, 240, &theme);
+    assert_scale_frame(child, 100, 80, 80, 40);
+    assert(sz_view_hit_test(root, 95, 100) == NULL);
+  }
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 94.8f, 77.4f, 90.4f, 45.2f);
+  assert(sz_view_hit_test(root, 96, 100) == child);
+  FILE *file = tmpfile(); assert(file);
+  sz_view_transitions_dump_json(root, file); rewind(file);
+  char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file);
+  json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"scale\",\"value\":113,\"target\":200,\"remaining\":7"));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, 96, 100, 255, 0, 0));
+  assert(px_rgb(pixels, 320, 92, 100, 255, 255, 255));
+  sz_signal_int_set(value, 50);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == 1.05f);
+  sz_view_pause_motion(root, 1);
+  sz_signal_int_set(value, 150);
+  for (int repeat = 0; repeat < 3; repeat++) {
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_scale(child) == 1.05f);
+  }
+  assert(!sz_view_transition_pending(root));
+  sz_view_pause_motion(root, 0);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == 1.11f);
+  const int remaining[] = {116, 122, 128, 133, 139, 144, 150};
+  for (int i = 0; i < 7; i++) {
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_scale(child) == remaining[i] / 100.f);
+  }
+  assert(!sz_view_transition_pending(root));
+  sz_view_reduce_motion(root, 1);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 80, 70, 120, 60);
+  assert(!sz_view_transition_pending(root));
+  sz_signal_int_set(value, -1);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_hit_test(root, 140, 100) == NULL);
+  assert(sz_view_paint_scale(child) == 0);
+  assert(sz_signal_int_get(value) == -1);
+  sz_view_reduce_motion(root, 0);
+  sz_signal_int_set(value, 100);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == .13f);
+  assert(sz_view_hit_test(root, 140, 100) == child);
+  sk_surface_unref(surface); sz_view_free(root);
+  sz_signal_int_free(value); sz_signal_int_free(taps);
+}
+
+static void test_scale_field_input(void) {
+  for (int hidden = 0; hidden < 3; hidden++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalInt *value = sz_signal_int(100), *shown = sz_signal_int(1);
+    SzSignalStr *text = sz_signal_str("Retained scale input");
+    SzView *field = sz_view_text_field(text, "Scale name");
+    SzView *scale = sz_view_animated_scale(value, 8, sz_view_sized(120, 40, field));
+    SzView *visible = hidden == 0 ? sz_view_visibility(shown, scale) :
+      hidden == 1 ? sz_view_show_when(shown, 1, scale) : sz_view_offstage(shown, scale);
+    SzView *root = scale_scene(visible);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    sz_view_focus(root, field); sz_view_set_text_field_sel(field, 2, 5);
+    sz_signal_int_set(value, 200);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_focused(root) == field);
+    assert(sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 5);
+    sz_view_reduce_motion(root, 1);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert_scale_frame(field, 40, 60, 240, 80);
+    float positions[21], trailing[21];
+    const char *source = sz_signal_str_get(text);
+    sk_font_text_positions(sk_text_range(source, strlen(source)), theme.font_px, 0, positions, trailing);
+    float x = 40 + (6 + positions[4]) * 2;
+    assert(sz_view_handle_tap(root, x, 100));
+    assert(sz_view_text_field_caret(field) == 4);
+    assert(sz_view_edit_extend_to_xy(field, 40 + (6 + positions[8]) * 2, 100));
+    assert(sz_view_text_field_sel_start(field) == 4 && sz_view_text_field_sel_end(field) == 8);
+    SzRect caret = sz_view_caret_rect(root, &theme);
+    assert(fabsf(caret.x - (40 + (6 + positions[8]) * 2)) < .01f && caret.w == 2);
+    sz_signal_int_set(shown, 0); sz_signal_int_set(value, 50);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_focused(root) == NULL);
+    sz_signal_int_set(shown, 1);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_scale(field) == .5f);
+    assert(!strcmp(sz_signal_str_get(text), "Retained scale input"));
+    sz_view_focus(root, field); sz_signal_int_set(value, 0);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    SzView *fields[2];
+    assert(sz_view_collect_text_fields(root, fields, 2) == 0 && sz_view_focused(root) == NULL);
+    assert(!sz_view_handle_text_edit(root, "hidden", 0));
+    SzString *dump = sz_view_a11y_dump(root);
+    assert(!strstr(sz_string_cstr(dump), "textfield:Scale name")); sz_string_free(dump);
+    assert(!strcmp(sz_signal_str_get(text), "Retained scale input"));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(value); sz_signal_int_free(shown); sz_signal_str_free(text);
+  }
+}
+
+static void test_scale_range_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *value = sz_signal_int(0);
+  SzView *slider = sz_view_slider(value, "Scale range", 0, 100, 1);
+  SzView *root = scale_scene(sz_view_scale(200, sz_view_sized(80, 40, slider)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert_scale_frame(slider, 60, 60, 160, 80);
+  assert(sz_view_slider_set_at(slider, 180));
+  assert(sz_signal_int_get(value) == 75);
+  assert(sz_view_handle_tap(root, 100, 100));
+  assert(sz_signal_int_get(value) == 25);
+  sz_view_free(root); sz_signal_int_free(value);
+}
+
+static SzSignalList *select_test_options(const char *const *labels, int count);
+
+static void test_scale_popup_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *count = sz_signal_int(0);
+  SzView *button = sz_view_ink_well("Scale tip trigger", counter_tap, count,
+    sz_view_sized(80, 40, sz_view_text("")));
+  SzView *tip = sz_view_tooltip("Scaled trigger", button);
+  SzView *root = scale_scene(sz_view_scale(200, tip));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_tooltip_at(root, 210, 100) == tip);
+  assert(sz_view_set_hover_at(root, 210, 100));
+  assert(sz_view_tooltip_visible(tip));
+  SzRect popup = sz_view_tooltip_frame(tip);
+  assert(popup.x == 60 && popup.y == 140);
+  assert(sz_view_hit_test(root, popup.x + 2, popup.y + 2) == tip);
+  sz_view_free(root); sz_signal_int_free(count);
+
+  const char *labels[] = {"First", "Second", "Third"};
+  SzSignalList *options = select_test_options(labels, 3);
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *select = sz_view_select(selected, "Scaled select", options);
+  root = scale_scene(sz_view_scale(200, sz_view_sized(80, 40, select)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_handle_tap(root, 210, 100));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_select_open(select));
+  popup = sz_view_frame(sz_view_select_popup(select));
+  assert(popup.x == 60 && popup.y == 140 && popup.w == 160);
+  SzView *option = sz_view_select_active_option(select);
+  SzRect row = sz_view_control_frame(option);
+  assert(row.x == popup.x && row.y == popup.y && row.w == 160 && row.h == theme.control_h);
+  assert(sz_view_paint_scale(option) == 1);
+  assert(sz_view_hit_test(root, row.x + 2, row.y + row.h / 2) == option);
+  assert(sz_view_handle_key(root, "ArrowDown", "", 0));
+  assert(sz_view_handle_key(root, "Enter", "", 0));
+  assert(sz_signal_int_get(selected) == 1 && !sz_view_select_open(select));
+  sz_view_free(root); sz_signal_int_free(selected); sz_signal_list_free(options);
+}
+
+static void test_scale_drag_input(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *fraction = sz_signal_int(50);
+  SzView *split = sz_view_split(fraction, "Scale split", sz_view_text("A"), sz_view_text("B"));
+  SzView *root = scale_scene(sz_view_scale(200, sz_view_sized(80, 40, split)));
+  sz_view_layout(root, 320, 240, &theme);
+  SzRect handle = sz_view_control_frame(split);
+  assert(handle.x == 134 && handle.y == 60 && handle.w == 12 && handle.h == 80);
+  assert(sz_view_hit_test(root, 140, 100) == split);
+  assert(sz_view_split_set_at(split, 177));
+  assert(sz_signal_int_get(fraction) == 75);
+  sz_view_free(root); sz_signal_int_free(fraction);
+
+  SzView *scroll = sz_view_scroll(sz_view_sized(80, 400, sz_view_text("")));
+  root = sz_view_theme(&theme, scale_scene(sz_view_scale(200, sz_view_sized(80, 40, scroll))));
+  SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 320, .height = 240, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&config, root);
+  assert(session && sz_ui_pump_sync(session));
+  assert(sz_view_scroll_at(root, 210, 100) == scroll);
+  SzInputEvent event = {.kind = SZ_INPUT_SCROLL, .x = 140, .y = 100, .dy = 20};
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_view_scroll_y(scroll) == 10);
+  event = (SzInputEvent){.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN, .x = 140, .y = 100};
+  assert(sz_ui_inject_sync(session, &event));
+  event.pointer_phase = SZ_POINTER_MOVE; event.y = 80;
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_view_scroll_y(scroll) == 20);
+  event.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &event));
+  sz_ui_unmount(session); sz_view_free(root);
+}
+
+static void test_scale_limits(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1; theme.background = 0xffffffff;
+  SzSignalInt *value = sz_signal_int(INT64_MAX), *count = sz_signal_int(0);
+  SzView *child = sz_view_ink_well("Scale limits", counter_tap, count,
+    sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+  SzView *root = scale_scene(sz_view_animated_scale(value, INT_MAX, child));
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == (float)INT_MAX / 100.f);
+  assert(sz_signal_int_get(value) == INT64_MAX);
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, 2, 2, 255, 0, 0));
+  assert(sz_view_hit_test(root, 2, 2) == child);
+  assert(sz_view_hit_test(root, 321, 2) == NULL);
+  sz_signal_int_set(value, 0);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  FILE *file = tmpfile(); assert(file);
+  sz_view_transitions_dump_json(root, file); rewind(file);
+  char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file); json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"scale\",\"value\":2147483646,\"target\":0,\"remaining\":2147483646"));
+  sz_view_reduce_motion(root, 1); sz_signal_int_set(value, INT64_MIN);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_scale(child) == 0 && sz_signal_int_get(value) == INT64_MIN);
+  assert(sz_view_hit_test(root, 140, 100) == NULL);
+  pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, 140, 100, 255, 255, 255));
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(value); sz_signal_int_free(count);
+}
+
+static void test_scale_small_input(void) {
+  for (int editor = 0; editor <= 1; editor++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalStr *text = sz_signal_str(editor ? "first\nlast" : "abcdef");
+    SzView *field = editor ? sz_view_editor(text) : sz_view_text_field(text, "Small field");
+    SzView *root = scale_scene(sz_view_scale(1, sz_view_sized(120, 40, field)));
+    sz_view_layout(root, 320, 240, &theme);
+    assert(sz_view_edit_extend_to_xy(field, FLT_MAX, FLT_MAX));
+    assert((editor ? sz_view_editor_caret(field) : sz_view_text_field_caret(field)) == (editor ? 10 : 6));
+    assert(sz_view_edit_extend_to_xy(field, -FLT_MAX, -FLT_MAX));
+    assert((editor ? sz_view_editor_caret(field) : sz_view_text_field_caret(field)) == 0);
+    assert(!sz_view_edit_extend_to_xy(field, NAN, 100));
+    sz_view_free(root); sz_signal_str_free(text);
+  }
+}
+
+static void test_scale_record_bounds(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzView *button = sz_view_ink_well("Fractional scale", NULL, NULL, sz_view_sized(80, 40, sz_view_text("")));
+  SzView *root = sz_view_theme(&theme, scale_scene(sz_view_scale(113, button)));
+  SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 320, .height = 240, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&config, root);
+  assert(session && sz_ui_pump_sync(session));
+  const char *path = "build/test_scale_bounds.json";
+  assert(sz_ui_session_write_dump(session, path));
+  char *dump = slurp_cstr(path);
+  const char *taps = strstr(dump, "\"taps\":["); assert(taps);
+  const char *tap = strstr(taps, "\"label\":\"Fractional scale\"");
+  assert(tap);
+  double x, y, w, h;
+  assert(sscanf(tap, "\"label\":\"Fractional scale\",\"x\":%lf,\"y\":%lf,\"w\":%lf,\"h\":%lf", &x, &y, &w, &h) == 4);
+  assert(fabs(x - 94.8) < .001 && fabs(y - 77.4) < .001);
+  assert(fabs(w - 90.4) < .001 && fabs(h - 45.2) < .001);
+  free(dump); remove(path);
+  sz_ui_unmount(session); sz_view_free(root);
+}
+
+static void scale_wrapping_geometry(SzView *root, SzView *text, SzView *marker, SzRect reference, int percent) {
+  SzRect displayed = sz_view_frame(text), following = sz_view_frame(marker), column = sz_view_frame(root);
+  assert(fabsf(following.y - reference.h) < .01f);
+  assert(fabsf(column.h - reference.h - 8) < .01f);
+  assert(fabsf(displayed.w - reference.w * percent / 100.f) < .01f);
+  assert(fabsf(displayed.h - reference.h * percent / 100.f) < .01f);
+}
+
+static void test_scale_wrapping(void) {
+  const char *sources[] = {
+    "This paragraph uses several short words. The layout keeps each word on one line.",
+    "مرحبا بالعالم. This paragraph uses Arabic and Latin words. مرحبا بالعالم.",
+    "नमस्ते दुनिया. This paragraph uses several short words. नमस्ते दुनिया."
+  };
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  const int widths[] = {80, 120, 160};
+  const int steps[] = {113, 125, 138, 150, 163, 175, 188, 200};
+  for (int sample = 0; sample < 3; sample++) {
+    SzView *reference = sz_view_text(sources[sample]);
+    SzView *text = sz_view_text(sources[sample]);
+    SzSignalInt *value = sz_signal_int(100);
+    SzView *marker = sz_view_sized(80, 8, sz_view_text(""));
+    SzView *root = sz_view_column();
+    sz_view_add_child(root, sz_view_animated_scale(value, 8, text));
+    sz_view_add_child(root, marker);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(240, 640);
+    assert(surface);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    sz_view_layout(reference, 80, 640, &theme);
+    SzRect frame = sz_view_frame(reference);
+    assert(frame.h > theme.font_px * 2);
+    assert(sz_view_paint(root, canvas, 80, 640, &theme));
+    scale_wrapping_geometry(root, text, marker, frame, 100);
+    sz_signal_int_set(value, 200);
+    for (int repeat = 0; repeat < 3; repeat++) {
+      sz_view_layout(root, 80, 640, &theme);
+      scale_wrapping_geometry(root, text, marker, frame, 100);
+    }
+    for (int step = 0; step < 8; step++) {
+      assert(sz_view_paint(root, canvas, 80, 640, &theme));
+      scale_wrapping_geometry(root, text, marker, frame, steps[step]);
+    }
+    for (int i = 0; i < 3; i++) {
+      sz_view_layout(reference, widths[i], 640, &theme);
+      frame = sz_view_frame(reference);
+      assert(sz_view_paint(root, canvas, widths[i], 640, &theme));
+      scale_wrapping_geometry(root, text, marker, frame, 200);
+    }
+    sz_view_reduce_motion(root, 1); sz_signal_int_set(value, 0);
+    assert(sz_view_paint(root, canvas, 160, 640, &theme));
+    scale_wrapping_geometry(root, text, marker, frame, 0);
+    sk_surface_unref(surface); sz_view_free(root); sz_view_free(reference); sz_signal_int_free(value);
+  }
+}
+
+static void position_step(SzView *root, SzView *child, SkCanvas *canvas,
+                          int x, int y, const SzTheme *theme) {
+  int scale = (int)theme->px_scale;
+  assert(sz_view_paint(root, canvas, 400 * scale, 400 * scale, theme));
+  SzRect frame = sz_view_frame(child);
+  assert(frame.x == x * scale && frame.y == y * scale);
+}
+
+static void test_animated_position_steps(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale; theme.background = 0xffffffff;
+    SzSignalInt *x = sz_signal_int(16), *y = sz_signal_int(16), *taps = sz_signal_int(0);
+    SzView *child = sz_view_ink_well("Moving card", counter_tap, taps,
+      sz_view_sized(40, 30, sz_view_background(0xffff0000, sz_view_text(""))));
+    SzView *position = sz_view_animated_position(x, y, 8, child), *stack = sz_view_stack();
+    sz_view_add_child(stack, sz_view_sized(320, 240, sz_view_text("")));
+    sz_view_add_child(stack, position);
+    SzView *root = sz_view_sized(320, 240, sz_view_clip(stack));
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400 * scale, 400 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    position_step(root, child, canvas, 16, 16, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(x, 176); sz_signal_int_set(y, 136);
+    for (int repeat = 0; repeat < 3; repeat++) {
+      sz_view_layout(root, 400 * scale, 400 * scale, &theme);
+      assert(sz_view_frame(child).x == 16 * scale && sz_view_frame(child).y == 16 * scale);
+    }
+    for (int step = 1; step <= 8; step++) {
+      int px = 16 + 20 * step, py = 16 + 15 * step;
+      position_step(root, child, canvas, px, py, &theme);
+      assert(sz_view_frame(child).w == 40 * scale && sz_view_frame(child).h == 30 * scale);
+      assert(sz_view_frame(position).w == (px + 40) * scale && sz_view_frame(position).h == (py + 30) * scale);
+      const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+      assert(px_rgb(pixels, 400 * scale, (px + 1) * scale, (py + 1) * scale, 255, 0, 0));
+      assert(px_rgb(pixels, 400 * scale, 17 * scale, 17 * scale, 255, 255, 255));
+      assert(sz_view_hit_test(root, (px + 1.f) * scale, (py + 1.f) * scale) == child);
+      assert(sz_view_hit_test(root, 17.f * scale, 17.f * scale) == NULL);
+      assert(sz_view_transition_pending(root) == (step < 8));
+    }
+    assert(!sz_view_handle_tap(root, 17.f * scale, 17.f * scale));
+    assert(sz_signal_int_get(taps) == 0);
+    assert(sz_view_handle_tap(root, 177.f * scale, 137.f * scale));
+    assert(sz_signal_int_get(taps) == 1);
+    sz_signal_int_set(x, 16); sz_signal_int_set(y, 16);
+    position_step(root, child, canvas, 156, 121, &theme);
+    position_step(root, child, canvas, 136, 106, &theme);
+    sz_signal_int_set(x, 56); sz_signal_int_set(y, 26);
+    for (int step = 1; step <= 8; step++)
+      position_step(root, child, canvas, 136 - 10 * step, 106 - 10 * step, &theme);
+    sz_signal_int_set(x, 136);
+    position_step(root, child, canvas, 66, 26, &theme);
+    sz_signal_int_set(y, 106);
+    position_step(root, child, canvas, 75, 36, &theme);
+    sz_view_pause_motion(root, 1);
+    sz_signal_int_set(x, 155); sz_signal_int_set(y, 116);
+    for (int repeat = 0; repeat < 3; repeat++) position_step(root, child, canvas, 75, 36, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_view_pause_motion(root, 0);
+    position_step(root, child, canvas, 85, 46, &theme);
+    sz_view_reduce_motion(root, 1);
+    position_step(root, child, canvas, 155, 116, &theme);
+    assert(!sz_view_transition_pending(root));
+    sz_signal_int_set(x, 300); sz_signal_int_set(y, 220);
+    position_step(root, child, canvas, 300, 220, &theme);
+    assert(sz_view_frame(child).w == 20 * scale && sz_view_frame(child).h == 20 * scale);
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, 400 * scale, 319 * scale, 239 * scale, 255, 0, 0));
+    assert(px_rgb(pixels, 400 * scale, 321 * scale, 239 * scale, 255, 255, 255));
+    assert(px_rgb(pixels, 400 * scale, 319 * scale, 241 * scale, 255, 255, 255));
+    assert(sz_view_hit_test(root, 319.f * scale, 239.f * scale) == child);
+    assert(sz_view_hit_test(root, 321.f * scale, 239.f * scale) == NULL);
+    sz_signal_int_set(x, 330); sz_signal_int_set(y, 250);
+    position_step(root, child, canvas, 330, 250, &theme);
+    assert(sz_view_hit_test(root, 331.f * scale, 251.f * scale) == NULL);
+    pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, 400 * scale, 331 * scale, 251 * scale, 255, 255, 255));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(x); sz_signal_int_free(y); sz_signal_int_free(taps);
+  }
+}
+
+static void test_animated_position_retains_input(void) {
+  for (int hidden = 0; hidden < 3; hidden++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalInt *x = sz_signal_int(16), *y = sz_signal_int(16);
+    SzSignalInt *shown = sz_signal_int(1), *reduced = sz_signal_int(0);
+    SzSignalStr *text = sz_signal_str("Retained position input");
+    SzView *field = sz_view_text_field(text, "Moving name");
+    SzView *position = sz_view_animated_position(x, y, 8, sz_view_sized(120, 40, field));
+    SzView *motion = sz_view_reduced_motion(reduced, position);
+    SzView *root = hidden == 0 ? sz_view_visibility(shown, motion) :
+      hidden == 1 ? sz_view_show_when(shown, 1, motion) : sz_view_offstage(shown, motion);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    position_step(root, field, canvas, 16, 16, &theme);
+    sz_view_focus(root, field); sz_view_set_text_field_sel(field, 2, 5);
+    sz_signal_int_set(x, 176); sz_signal_int_set(y, 136);
+    position_step(root, field, canvas, 36, 31, &theme);
+    assert(sz_view_focused(root) == field && sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 5);
+    SzView *fields[2]; assert(sz_view_collect_text_fields(root, fields, 2) == 1 && fields[0] == field);
+    FILE *file = tmpfile(); assert(file);
+    sz_view_transitions_dump_json(root, file); rewind(file);
+    char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file);
+    json[bytes] = 0; fclose(file);
+    assert(strstr(json, "\"kind\":\"position\",\"x\":36,\"y\":31,\"targetX\":176,\"targetY\":136,\"remaining\":7"));
+    SzString *dump = sz_view_a11y_dump(root);
+    assert(strstr(sz_string_cstr(dump), "position:Moving name=36,31\n")); sz_string_free(dump);
+    sz_signal_int_set(shown, 0);
+    assert(sz_view_paint(root, canvas, 400, 400, &theme));
+    assert(!sz_view_transition_pending(root) && sz_view_focused(root) == NULL);
+    assert(sz_view_collect_text_fields(root, fields, 2) == 0);
+    sz_signal_int_set(x, 80); sz_signal_int_set(y, 64);
+    assert(sz_view_paint(root, canvas, 400, 400, &theme));
+    sz_signal_int_set(shown, 1);
+    position_step(root, field, canvas, 80, 64, &theme);
+    assert(!sz_view_transition_pending(root));
+    assert(!strcmp(sz_signal_str_get(text), "Retained position input"));
+    assert(sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 5);
+    sz_signal_int_set(reduced, 1); sz_signal_int_set(x, 0); sz_signal_int_set(y, 16);
+    position_step(root, field, canvas, 0, 16, &theme);
+    assert(!sz_view_transition_pending(root));
+    assert(sz_view_collect_text_fields(root, fields, 2) == 1);
+    assert(sz_view_hit_test(root, 1, 17) == field);
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(x); sz_signal_int_free(y); sz_signal_int_free(shown); sz_signal_int_free(reduced); sz_signal_str_free(text);
+  }
+}
+
+static void test_animated_position_limits(void) {
+  const int64_t source[][2] = {{INT64_MAX, INT64_MAX}, {INT64_MIN, INT64_MAX}, {INT64_MAX, INT64_MIN}, {INT64_MIN, INT64_MIN}};
+  const int expected[][2] = {{INT_MAX, INT_MAX}, {0, INT_MAX}, {INT_MAX, 0}, {0, 0}};
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)scale; theme.background = 0xffffffff;
+    SzSignalInt *x = sz_signal_int(0), *y = sz_signal_int(0);
+    SzView *child = sz_view_sized(40, 30, sz_view_background(0xffff0000, sz_view_text("")));
+    SzView *position = sz_view_animated_position(x, y, 8, child);
+    SzView *root = sz_view_unconstrained_box(position);
+    sz_view_reduce_motion(root, 1);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(64 * scale, 64 * scale);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    for (size_t i = 0; i < sizeof source / sizeof source[0]; i++) {
+      sz_signal_int_set(x, source[i][0]); sz_signal_int_set(y, source[i][1]);
+      assert(sz_view_paint(root, canvas, 64 * scale, 64 * scale, &theme));
+      assert(sz_view_frame(child).x == (float)expected[i][0] * scale);
+      assert(sz_view_frame(child).y == (float)expected[i][1] * scale);
+      assert(sz_signal_int_get(x) == source[i][0] && sz_signal_int_get(y) == source[i][1]);
+      const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+      assert(px_rgb(pixels, 64 * scale, 1, 1, 255, i == 3 ? 0 : 255, i == 3 ? 0 : 255));
+      assert(!sz_view_transition_pending(root));
+    }
+    sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(x); sz_signal_int_free(y);
+  }
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  SzSignalInt *x = sz_signal_int(0), *y = sz_signal_int(0);
+  SzView *child = sz_view_sized(40, 30, sz_view_text(""));
+  SzView *root = sz_view_animated_position(x, y, INT_MAX, child);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(400, 400);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  position_step(root, child, canvas, 0, 0, &theme);
+  sz_signal_int_set(x, INT64_MAX); sz_signal_int_set(y, INT64_MAX);
+  position_step(root, child, canvas, 1, 1, &theme);
+  assert(sz_view_transition_pending(root));
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(x); sz_signal_int_free(y);
+}
+
+static void test_progress_named_range(void) {
+  const int64_t values[] = {INT64_MIN, -1, 0, 17, 100, INT64_MAX};
+  const int expected[] = {0, 0, 0, 17, 100, 100};
+  assert(sz_view_progress_value(NULL) == 0);
+  for (int kind = 0; kind < 2; kind++) {
+    SzSignalInt *sig = sz_signal_int(0);
+    SzView *view = kind ? sz_view_circular_progress(sig, "Copy \"data\" ✓") :
+                          sz_view_progress(sig, "Copy \"data\" ✓");
+    assert(!strcmp(sz_view_a11y_label(view), "Copy \"data\" ✓"));
+    for (size_t i = 0; i < sizeof values / sizeof *values; i++) {
+      char json[512], needle[64];
+      FILE *file = tmpfile();
+      assert(file);
+      sz_signal_int_set(sig, values[i]);
+      assert(sz_view_progress_value(view) == expected[i]);
+      sz_view_a11y_dump_json(view, file);
+      rewind(file);
+      size_t size = fread(json, 1, sizeof json - 1, file);
+      json[size] = 0;
+      fclose(file);
+      snprintf(needle, sizeof needle, "\"value\":%d,", expected[i]);
+      assert(strstr(json, needle));
+      assert(strstr(json, "\"label\":\"Copy \\\"data\\\" ✓\""));
+      assert(strstr(json, "\"minimum\":0,\"maximum\":100"));
+      assert(sz_signal_int_get(sig) == values[i]);
+    }
+    sz_view_free(view);
+    sz_signal_int_free(sig);
+  }
+}
+
 static void test_progress_sizes(void) {
   SzView *p;
   SzSignalInt *sig;
@@ -14072,7 +16048,7 @@ static void test_progress_sizes(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   sz_view_layout(p, 200.f, 200.f, theme);
   assert(sz_view_kind(p) == SZ_VIEW_PROGRESS);
   f = sz_view_frame(p);
@@ -14089,7 +16065,7 @@ static void test_progress_unbounded_width(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   sz_view_layout(p, 0.f, 80.f, theme);
   f = sz_view_frame(p);
   assert(fabsf(f.w - 120.f) < 0.5f);
@@ -14103,13 +16079,13 @@ static void test_progress_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:40") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=40") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, 7);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:7") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=7") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -14121,13 +16097,13 @@ static void test_progress_clamps_a11y(void) {
   SzString *dump;
 
   sig = sz_signal_int(150);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:100") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=100") != NULL);
   sz_string_free(dump);
   sz_signal_int_set(sig, -3);
   dump = sz_view_a11y_dump(p);
-  assert(strstr(sz_string_cstr(dump), "progress:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Completion=0") != NULL);
   sz_string_free(dump);
   sz_view_free(p);
   sz_signal_int_free(sig);
@@ -14140,7 +16116,7 @@ static void test_progress_not_tap_target(void) {
   SzRect f;
 
   sig = sz_signal_int(40);
-  p = sz_view_progress(sig);
+  p = sz_view_progress(sig, "Completion");
   sz_view_layout(p, 200.f, 80.f, theme);
   f = sz_view_frame(p);
   assert(!sz_view_is_tap_target(p));
@@ -14162,7 +16138,7 @@ static void test_progress_amount_without_accent(void) {
     theme.primary = theme.surface;
     for (int kind = 0; kind < 2; kind++) {
       SzSignalInt *sig = sz_signal_int(0);
-      SzView *view = kind ? sz_view_circular_progress(sig) : sz_view_progress(sig);
+      SzView *view = kind ? sz_view_circular_progress(sig, "Completion") : sz_view_progress(sig, "Completion");
       SkSurface *surf = sk_surface_make_raster_n32_premul(160 * scale, 60 * scale);
       SkCanvas *canvas = sk_surface_get_canvas(surf);
       int previous = -1;
@@ -14203,7 +16179,7 @@ static void test_progress_paint_fill(void) {
   SzRect f;
 
   sig = sz_signal_int(100);
-  root = sz_view_progress(sig);
+  root = sz_view_progress(sig, "Completion");
   sz_view_layout(root, 80.f, 80.f, theme);
   f = sz_view_frame(root);
   surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -14225,7 +16201,7 @@ static void test_progress_paint_fill(void) {
 }
 
 static void test_progress_not_in_taps_dump(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *sig;
@@ -14235,7 +16211,7 @@ static void test_progress_not_in_taps_dump(void) {
 
   sig = sz_signal_int(40);
   root = sz_view_column();
-  sz_view_add_child(root, sz_view_progress(sig));
+  sz_view_add_child(root, sz_view_progress(sig, "Completion"));
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
   cfg.width = 200;
@@ -14247,7 +16223,7 @@ static void test_progress_not_in_taps_dump(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
-  assert(strstr(dump, "progress:40") != NULL);
+  assert(strstr(dump, "progress:Completion=40") != NULL);
   taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "progress") == NULL);
@@ -14732,7 +16708,7 @@ static void test_view_each_map_button(void) {
   const SzTheme *theme = sz_theme_default();
   SzList *xs;
   SzRect f;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   const char *path = "/tmp/scuzz_ui_each_map.dump";
   char *dump;
@@ -14774,7 +16750,7 @@ static SzView *each_map_studio_row(SzString *item, void *env) {
   SzView *row = sz_view_row();
   const char *s = item ? sz_string_cstr(item) : "";
   (void)env;
-  sz_view_add_child(row, sz_view_expanded(sz_view_text(s)));
+  sz_view_add_child(row, sz_view_expanded(1, sz_view_text(s)));
   sz_view_add_child(row, sz_view_button("Del", NULL, NULL));
   return row;
 }
@@ -14783,7 +16759,7 @@ static void test_each_expanded_row_in_scroll(void) {
   SzSignalList *items;
   SzView *col, *list, *scroll, *exp;
   SzList *xs;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   const char *path = "/tmp/scuzz_ui_each_scroll.dump";
   char *dump;
@@ -14801,7 +16777,7 @@ static void test_each_expanded_row_in_scroll(void) {
   col = sz_view_column();
   list = sz_view_each_map(items, each_map_studio_row, NULL);
   scroll = sz_view_scroll(list);
-  exp = sz_view_expanded(scroll);
+  exp = sz_view_expanded(1, scroll);
   sz_view_add_child(col, sz_view_text("title"));
   sz_view_add_child(col, exp);
 
@@ -15066,6 +17042,36 @@ static void test_signal_mirror_revision(void) {
   sz_signal_free(derived);
   sz_signal_free(visible);
   sz_signal_free(mirror);
+}
+
+static void *map_counting_value(void *value, void *env) {
+  (void)env;
+  g_map_calls++;
+  sz_retain(value);
+  return value;
+}
+
+static void test_signal_nan_alias(void) {
+  double nan = NAN;
+  int64_t bits;
+  memcpy(&bits, &nan, sizeof bits);
+  void *box = sz_box_float_bits(bits);
+  void *values[] = {box, sz_adt_new(7, box), sz_list_cons(box, NULL)};
+  for (size_t i = 0; i < sizeof values / sizeof values[0]; i++) {
+    g_map_calls = 0;
+    SzSignal *source = sz_signal_new(values[i], 4, NULL);
+    SzSignal *mapped = sz_signal_derive(source, map_counting_value, NULL, 4, NULL);
+    for (int step = 1; step <= 3; step++) {
+      sz_signal_write(source, values[i]);
+      void *value = sz_signal_read(mapped);
+      sz_release(value);
+      assert(g_map_calls == step + 1);
+    }
+    sz_signal_free(mapped);
+    sz_signal_free(source);
+    if (i) sz_release(values[i]);
+  }
+  sz_release(box);
 }
 
 static void test_signal_map_caches_unchanged_source(void) {
@@ -15534,7 +17540,7 @@ static void test_signal_list_spine_collect(void) {
 }
 
 static void test_alloc_each_pump_flat(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalList *items;
   SzView *root;
   SzUiSession *session;
@@ -15580,7 +17586,7 @@ static void test_hidden_editor_marks(void) {
   SzSignalInt *shown = sz_signal_int(0);
   SzView *editor = sz_view_editor(buffer);
   SzView *root = sz_view_show_when(shown, 1, editor);
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *visible[1];
   SzList *data = NULL;
@@ -15615,7 +17621,7 @@ static void test_hidden_editor_marks(void) {
 static void test_view_editor(void) {
   SzSignalStr *buf, *field_sig;
   SzView *root, *ed, *field, *btn;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   const SzTheme *theme = sz_theme_default();
   const char *path = "/tmp/scuzz_ui_inject_editor.json";
@@ -15766,7 +17772,7 @@ static void test_view_editor(void) {
 static void test_view_editor_viewport(void) {
   SzSignalStr *buf;
   SzView *root, *ed;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   const SzTheme *theme = sz_theme_default();
   const char *path = "/tmp/scuzz_ui_editor_viewport.json";
@@ -15898,7 +17904,7 @@ static void test_view_editor_viewport(void) {
 static void test_view_editor_undo_gutter(void) {
   SzSignalStr *buf;
   SzView *root, *ed;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   const char *path = "/tmp/scuzz_ui_editor_undo.json";
   const char *dump = "/tmp/scuzz_ui_editor_undo.dump";
@@ -16144,7 +18150,7 @@ static void test_view_focus_split_overlay(void) {
   SzSignalInt *frac;
   SzSignalInt *open;
   SzView *root, *field, *btn, *split, *overlay, *pop_field;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   const char *path = "/tmp/scuzz_ui_a8.json";
   const char *dump = "/tmp/scuzz_ui_a8.dump";
@@ -16161,14 +18167,14 @@ static void test_view_focus_split_overlay(void) {
     SzView *col = sz_view_column();
     field = sz_view_text_field(draft, "main");
     btn = sz_view_button("Go", noop_tap, NULL);
-    split = sz_view_split(frac, sz_view_text("L"), sz_view_text("R"));
+    split = sz_view_split(frac, "Primary pane", sz_view_text("L"), sz_view_text("R"));
     sz_view_add_child(col, field);
     sz_view_add_child(col, btn);
     sz_view_add_child(col, split);
     sz_view_add_child(root, col);
   }
   pop_field = sz_view_text_field(pop, "pop");
-  overlay = sz_view_overlay(open, pop_field);
+  overlay = sz_view_overlay(open, "Dialog", pop_field);
   sz_view_add_child(root, overlay);
 
   memset(&cfg, 0, sizeof(cfg));
@@ -16228,7 +18234,7 @@ static void test_view_focus_split_overlay(void) {
   ev.y = fr.y + 8.f;
   assert(sz_ui_inject_sync(session, &ev));
   ev.pointer_phase = SZ_POINTER_MOVE;
-  ev.x = fr.x + fr.w * 0.25f;
+  ev.x = fr.x + (fr.w - 6.f) * 0.25f + 3.f;
   assert(sz_ui_inject_sync(session, &ev));
   ev.pointer_phase = SZ_POINTER_UP;
   assert(sz_ui_inject_sync(session, &ev));
@@ -16360,7 +18366,7 @@ static void test_docs_nav_widgets(void) {
   SzRect cur_r;
   float sep_w;
   const SzTheme *theme = sz_theme_default();
-  float caption_h;
+  float image_h;
 
   page = sz_view_column();
   sz_view_add_child(page, sz_view_link("Open GUI", "gui"));
@@ -16371,7 +18377,7 @@ static void test_docs_nav_widgets(void) {
   sz_view_add_child(crumb, docs);
   sz_view_add_child(crumb, cur);
   sz_view_add_child(page, crumb);
-  img = sz_view_image(80, 32, 0xFFE8EF48u, "Scuzz Docs");
+  img = image_fixture(80, 32, 0xFFE8EF48u, "Scuzz Docs");
   icon = sz_view_icon('B', 0xFF923D24u);
   sz_view_add_child(page, img);
   sz_view_add_child(page, icon);
@@ -16393,8 +18399,8 @@ static void test_docs_nav_widgets(void) {
   assert(strstr(sz_string_cstr(dump), "image:Scuzz Docs") != NULL);
   assert(strstr(sz_string_cstr(dump), "icon:B") != NULL);
   sz_string_free(dump);
-  caption_h = sz_view_frame(img).h;
-  assert(caption_h > 32.f);
+  image_h = sz_view_frame(img).h;
+  assert(fabsf(image_h - 32.f) < 0.01f);
   assert(sz_view_collect_tap_targets(root, taps, 16) >= 5);
   assert(sz_view_is_tap_target(taps[0]));
   assert(sz_view_tap_label(root, "Open GUI"));
@@ -16502,7 +18508,7 @@ static void test_view_focus_group_keys(void) {
   SzSignalInt *open;
   SzSignalStr *draft;
   SzView *root, *group, *ba, *bb, *btn, *field, *overlay;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   const char *path = "/tmp/scuzz_ui_focus_group.json";
   const char *dump = "/tmp/scuzz_ui_focus_group.dump";
@@ -16526,7 +18532,7 @@ static void test_view_focus_group_keys(void) {
     group = sz_view_focus_group(list);
     field = sz_view_text_field(draft, "main");
     btn = sz_view_button("Go", counter_tap, go);
-    overlay = sz_view_overlay(open, sz_view_text("Palette"));
+    overlay = sz_view_overlay(open, "Dialog", sz_view_text("Palette"));
     sz_view_add_child(col, group);
     sz_view_add_child(col, field);
     sz_view_add_child(col, btn);
@@ -16587,9 +18593,9 @@ static void test_view_focus_group_keys(void) {
   write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"ArrowDown\"},{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(b) == 1);
-  assert(strcmp(sz_view_focus_kind(root), "overlay") == 0);
+  assert(strcmp(sz_view_focus_kind(root), "overlay:Dialog") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "\"focus\":\"overlay\"") != NULL);
+  assert(strstr(body, "\"focus\":\"overlay:Dialog\"") != NULL);
   free(body);
 
   sz_signal_int_set(open, 0);
@@ -16600,9 +18606,9 @@ static void test_view_focus_group_keys(void) {
   write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":2},{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(go) == 1);
-  assert(strcmp(sz_view_focus_kind(root), "none") == 0);
+  assert(strcmp(sz_view_focus_kind(root), "button:Go") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "\"focus\":\"none\"") != NULL);
+  assert(strstr(body, "\"focus\":\"button:Go\"") != NULL);
   free(body);
 
   write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"ArrowDown\"}]}");
@@ -16654,7 +18660,7 @@ static void test_text_field_edit(void) {
 
   /* Inject path: TEXT_EDIT empty -> backspace. */
   {
-    SzUiConfig cfg;
+    SzUiConfig cfg = {0};
     SzUiSession *session;
     SzInputEvent ev;
     memset(&cfg, 0, sizeof(cfg));
@@ -16681,7 +18687,7 @@ static void test_text_field_edit(void) {
 static void test_app_chord_save(void) {
   SzSignalInt *n;
   SzView *root, *btn;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzInputEvent ev;
 
@@ -16715,7 +18721,7 @@ static void test_app_chord_palette(void) {
   SzSignalInt *complete;
   SzSignalInt *palette;
   SzView *root, *btn;
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzInputEvent ev;
 
@@ -16798,7 +18804,7 @@ static void test_caret_metrics(void) {
 
 /* Mount a static label and pump repeatedly: live_count stays flat. */
 static void test_alloc_pump_flat(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzView *view;
   SzUiSession *session;
   size_t base_count = 0, base_bytes = 0;
@@ -16842,7 +18848,7 @@ static void *map_count_label(void *value, void *env) {
 
 /* Counter-shaped UI (Signal.map + bindText + taps): live_count flat over pumps. */
 static void test_alloc_counter_pump_flat(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalInt *count;
   SzSignalStr *label;
   SzView *root, *btn;
@@ -16915,7 +18921,7 @@ static void list_env_tap(SzView *self, void *env) {
 }
 
 static void test_tap_env_retain_release(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzSignalInt *count;
   SzList *env;
   SzView *root, *btn;
@@ -17109,7 +19115,7 @@ SzIo *scuzz_reload_later;
 
 static void test_session_load_code(void) {
   static char source[] = "old";
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *count;
@@ -17180,7 +19186,7 @@ static void test_session_load_code(void) {
 }
 
 static void test_stamp_loads_reload_code(void) {
-  SzUiConfig cfg;
+  SzUiConfig cfg = {0};
   SzUiSession *session;
   SzView *root;
   SzSignalInt *count;
@@ -17295,7 +19301,7 @@ static void test_mirror_signal_session(void) {
   sz_release(dump);
   sz_signal_int_free(visible);
   void *view = getenv("SCUZZ_EVAL_MIRROR")
-                   ? (void *)sz_adt_new(sz_eval_value_tag_base + 26, NULL)
+                   ? (void *)sz_adt_new(sz_eval_view_tag, NULL)
                    : (void *)sz_view_text("value");
   SzString *view_name = sz_string_from_cstr("view");
   SzSignal *view_signal = sz_signal_new(view, 4, view_name);
@@ -17321,7 +19327,2551 @@ static void test_mirror_signal_session(void) {
   sz_release(view);
 }
 
+static void *scope_map_with_cell(void *value, void *env) {
+  (void)env;
+  SzSignalInt *late = sz_signal_int(sz_unbox_i64(value));
+  sz_signal_name(late, "late row cell");
+  return sz_string_from_int(sz_unbox_i64(value));
+}
+
+static void test_signal_name_index(void) {
+  size_t before_bytes, before_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  const int length = 4096;
+  SzSignal **ints = sz_alloc_zero((size_t)length * sizeof(*ints));
+  SzSignal **texts = sz_alloc_zero((size_t)length * sizeof(*texts));
+  for (int i = 0; i < length; i++) {
+    char key[64];
+    snprintf(key, sizeof(key), "index-cell-%d", i);
+    SzString *name = sz_string_from_cstr(key);
+    void *value = sz_box_i64(i);
+    ints[i] = sz_signal_new(value, 1, name);
+    SzString *text = sz_string_from_cstr("value");
+    texts[i] = sz_signal_new(text, 2, name);
+    sz_release(text);
+    sz_release(value);
+    sz_release(name);
+  }
+  for (int i = length - 1; i >= 0; i--) {
+    char key[64];
+    snprintf(key, sizeof(key), "index-cell-%d", i);
+    SzString *name = sz_string_from_cstr(key);
+    assert(sz_property_signal_int(name) == i);
+    SzString *text = sz_property_signal_str(name);
+    assert(strcmp(sz_string_cstr(text), "value") == 0);
+    sz_release(text);
+    sz_release(name);
+  }
+  sz_signal_name(ints[0], "index-cell-1");
+  SzString *name = sz_string_from_cstr("index-cell-1");
+  assert(sz_property_signal_int(name) == 0);
+  SzString *text = sz_property_signal_str(name);
+  assert(strcmp(sz_string_cstr(text), "value") == 0);
+  sz_release(text);
+  sz_signal_name(ints[0], "");
+  sz_signal_name(ints[1], "index-cell-1");
+  assert(sz_property_signal_int(name) == 1);
+  sz_release(name);
+  for (int i = 0; i < length; i++) {
+    int index = i * 31 % length;
+    sz_signal_free(ints[index]);
+    sz_signal_free(texts[index]);
+  }
+  sz_free(ints);
+  sz_free(texts);
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+}
+
+static void test_signal_scope_ownership(void) {
+  size_t before_bytes, before_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  const int unrelated_count = 50000;
+  SzSignal **unrelated = sz_alloc_zero((size_t)unrelated_count * sizeof(*unrelated));
+  for (int i = 0; i < unrelated_count; i++) unrelated[i] = sz_signal_int(i);
+  SzSignalScope *parent = sz_signal_scope_new();
+  SzSignalScope *previous = sz_signal_scope_enter(parent);
+  SzSignalInt *source = sz_signal_int(1);
+  (void)sz_signal_derive(source, map_label_int, NULL, 2, NULL);
+  sz_signal_scope_enter(previous);
+  SzSignalStr *survivor = sz_signal_derive(source, map_label_int, NULL, 2, NULL);
+  SzSignalScope *child = sz_signal_scope_new();
+  previous = sz_signal_scope_enter(child);
+  SzSignalStr *nested = sz_signal_derive(source, scope_map_with_cell, NULL, 2, NULL);
+  SzSignalInt *local = sz_signal_int(2);
+  SzSignalStr *mapped = sz_signal_derive(local, scope_map_with_cell, NULL, 2, NULL);
+  sz_signal_scope_enter(previous);
+  SzSignalInt *outside = sz_signal_int(99);
+  sz_signal_int_set(source, 7);
+  sz_signal_scope_free(parent);
+  assert(strcmp(sz_signal_str_get(survivor), "7") == 0);
+  assert(strcmp(sz_signal_str_get(nested), "7") == 0);
+  sz_signal_int_set(local, 3);
+  assert(strcmp(sz_signal_str_get(mapped), "3") == 0);
+  sz_signal_scope_free(child);
+  assert(sz_signal_int_get(outside) == 99);
+  SzString *dump = sz_signal_dump_json_string();
+  assert(!strstr(sz_string_cstr(dump), "late row cell"));
+  sz_release(dump);
+  sz_signal_str_free(survivor);
+  sz_signal_int_free(outside);
+  for (int i = 0; i < unrelated_count; i++) {
+    assert(sz_signal_int_get(unrelated[i]) == i);
+    sz_signal_free(unrelated[i]);
+  }
+  sz_free(unrelated);
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+}
+
+static void keyboard_count(SzView *view, void *env) {
+  (void)view;
+  SzSignalInt *count = env;
+  sz_signal_int_set(count, sz_signal_int_get(count) + 1);
+}
+
+static void test_keyboard_controls(void) {
+  SzSignalInt *count = sz_signal_int(0);
+  SzSignalInt *value = sz_signal_int(50);
+  SzSignalInt *checked = sz_signal_int(0);
+  SzSignalInt *shown = sz_signal_int(0);
+  SzSignalStr *text = sz_signal_str("");
+  SzView *root = sz_view_column();
+  SzView *first = sz_view_button("First", keyboard_count, count);
+  SzView *field = sz_view_text_field(text, "Name");
+  SzView *slider = sz_view_slider(value, "Level", 0, 100, 1);
+  SzView *toggle = sz_view_checkbox(checked, "Check");
+  SzView *last = sz_view_button("Last", keyboard_count, count);
+  sz_view_add_child(root, first);
+  sz_view_add_child(root, field);
+  sz_view_add_child(root, slider);
+  sz_view_add_child(root, toggle);
+  sz_view_add_child(root, sz_view_show_when(shown, 1, sz_view_button("Hidden", NULL, NULL)));
+  sz_view_add_child(root, last);
+  sz_view_layout(root, 320, 600, sz_theme_default());
+  assert(sz_view_handle_key(root, "Tab", "", 0));
+  assert(sz_view_focused(root) == first);
+  assert(!strcmp(sz_view_focus_kind(root), "button:First"));
+  assert(sz_view_handle_key(root, "Enter", "", 0));
+  assert(sz_signal_int_get(count) == 1 && sz_view_focused(root) == first);
+  sz_view_handle_key(root, "x", "x", 0);
+  assert(!strcmp(sz_signal_str_get(text), ""));
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == field);
+  sz_view_handle_key(root, "x", "x", 0);
+  assert(!strcmp(sz_signal_str_get(text), "x"));
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == slider);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(value) == 51);
+  sz_view_handle_key(root, "Home", "", 0);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_signal_int_get(value) == 0);
+  sz_view_handle_key(root, "End", "", 0);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(value) == 100);
+  sz_signal_int_set(value, INT64_MIN);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_signal_int_get(value) == 0);
+  sz_signal_int_set(value, INT64_MAX);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(value) == 100);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == toggle);
+  sz_view_handle_key(root, "Space", "", 0);
+  assert(sz_signal_int_get(checked) == 1 && sz_view_focused(root) == toggle);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == last);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == first);
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+  assert(sz_view_focused(root) == last);
+  sz_view_free(root);
+  sz_signal_int_free(count);
+  sz_signal_int_free(value);
+  sz_signal_int_free(checked);
+  sz_signal_int_free(shown);
+  sz_signal_str_free(text);
+}
+
+static void test_keyboard_many_targets(void) {
+  SzView *root = sz_view_column();
+  SzView *buttons[100];
+  for (int i = 0; i < 100; i++) {
+    buttons[i] = sz_view_button("item", NULL, NULL);
+    sz_view_add_child(root, buttons[i]);
+  }
+  sz_view_layout(root, 320, 100000, sz_theme_default());
+  for (int i = 0; i < 110; i++) {
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == buttons[i % 100]);
+  }
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+  assert(sz_view_focused(root) == buttons[8]);
+  sz_view_free(root);
+}
+
+static void test_keyboard_radio_group(void) {
+  SzSignalInt *selected = sz_signal_int(1);
+  SzSignalInt *other = sz_signal_int(1);
+  SzView *root = sz_view_column();
+  SzView *a = sz_view_radio(selected, 1, "A");
+  SzView *b = sz_view_radio(selected, 2, "B");
+  SzView *c = sz_view_radio_list_tile(selected, 3, "C");
+  sz_view_add_child(root, a);
+  sz_view_add_child(root, sz_view_radio(other, 2, "Other"));
+  sz_view_add_child(root, b);
+  sz_view_add_child(root, c);
+  sz_view_layout(root, 320, 600, sz_theme_default());
+  sz_view_focus(root, a);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == b && sz_signal_int_get(selected) == 2);
+  assert(sz_signal_int_get(other) == 1);
+  sz_view_handle_key(root, "End", "", 0);
+  assert(sz_view_focused(root) == c && sz_signal_int_get(selected) == 3);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == a && sz_signal_int_get(selected) == 1);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_view_focused(root) == c && sz_signal_int_get(selected) == 3);
+  sz_view_handle_key(root, "Home", "", 0);
+  assert(sz_view_focused(root) == a && sz_signal_int_get(selected) == 1);
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+  sz_signal_int_free(other);
+}
+
+static void test_keyboard_tab_list(void) {
+  SzSignalInt *selected = sz_signal_int(1);
+  SzView *sections = sz_view_column();
+  SzView *first_body = sz_view_button("Body first", NULL, NULL);
+  SzView *second_body = sz_view_button("Body second", NULL, NULL);
+  sz_view_add_child(sections, sz_view_section("first", "First", first_body));
+  sz_view_add_child(sections, sz_view_section("second", "Second", second_body));
+  SzView *root = sz_view_tabs(selected, sections);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  sz_view_handle_key(root, "Tab", "", 0);
+  SzView *tab = sz_view_focused(root);
+  assert(tab && !strcmp(sz_view_a11y_label(tab), "Second"));
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == second_body);
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+  assert(sz_view_focused(root) == tab);
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
+static void test_keyboard_modal_text(void) {
+  SzSignalInt *open = sz_signal_int(1);
+  SzSignalStr *background = sz_signal_str("");
+  SzSignalStr *foreground = sz_signal_str("");
+  SzView *root = sz_view_stack();
+  SzView *back = sz_view_text_field(background, "Background");
+  SzView *front = sz_view_text_field(foreground, "Foreground");
+  sz_view_add_child(root, back);
+  sz_view_add_child(root, sz_view_overlay(open, "Dialog", front));
+  sz_view_layout(root, 320, 300, sz_theme_default());
+  sz_view_focus(root, back);
+  assert(sz_view_focused(root) == front);
+  sz_view_handle_key(root, "x", "x", 0);
+  assert(!strcmp(sz_signal_str_get(background), ""));
+  assert(!strcmp(sz_signal_str_get(foreground), "x"));
+  assert(sz_view_focused(root) == front);
+  sz_view_free(root);
+  sz_signal_int_free(open);
+  sz_signal_str_free(background);
+  sz_signal_str_free(foreground);
+}
+
+static void test_keyboard_overlay_and_editor(void) {
+  SzSignalInt *open = sz_signal_int(1);
+  SzSignalStr *text = sz_signal_str("");
+  SzView *root = sz_view_stack();
+  SzView *base = sz_view_button("Base", NULL, NULL);
+  SzView *modal = sz_view_column();
+  SzView *a = sz_view_button("A", NULL, NULL);
+  SzView *b = sz_view_button("B", NULL, NULL);
+  sz_view_add_child(modal, a);
+  sz_view_add_child(modal, b);
+  sz_view_add_child(root, base);
+  sz_view_add_child(root, sz_view_overlay(open, "Dialog", modal));
+  sz_view_layout(root, 320, 300, sz_theme_default());
+  assert(sz_view_focused(root) == a);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == b);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == a);
+  sz_view_handle_key(root, "Escape", "", 0);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == base);
+  sz_view_free(root);
+  root = sz_view_column();
+  SzView *editor = sz_view_editor(text);
+  SzView *after = sz_view_button("After", NULL, NULL);
+  sz_view_add_child(root, editor);
+  sz_view_add_child(root, after);
+  sz_view_layout(root, 320, 300, sz_theme_default());
+  sz_view_focus(root, editor);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(!strcmp(sz_signal_str_get(text), "  "));
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_CTRL);
+  assert(sz_view_focused(root) == after);
+  sz_view_free(root);
+  sz_signal_int_free(open);
+  sz_signal_str_free(text);
+}
+
+static void test_modal_pointer_surface(void) {
+  SzSignalInt *open = sz_signal_int(1), *background_hits = sz_signal_int(0);
+  SzSignalInt *actions = sz_signal_int(0), *secondary = sz_signal_int(0);
+  SzView *root = sz_view_stack();
+  SzView *background = sz_view_scroll(sz_view_tooltip("Background tip",
+    sz_view_on_secondary(sz_view_sized(640, 1600, sz_view_text("Background")), keyboard_count, background_hits)));
+  sz_view_add_child(root, background);
+  SzView *body = sz_view_column();
+  SzView *button = sz_view_button("Action", keyboard_count, actions);
+  sz_view_add_child(body, sz_view_text("Read the details."));
+  sz_view_add_child(body, button);
+  SzView *card = sz_view_card(body);
+  SzView *tip = sz_view_tooltip("Dialog tip", sz_view_on_secondary(card, keyboard_count, secondary));
+  SzView *modal = sz_view_overlay(open, "Details", sz_view_center(sz_view_sized(240, 160, tip)));
+  sz_view_add_child(root, modal);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_view_input_scope(root) == modal);
+  SzRect frame = sz_view_frame(card);
+  assert(sz_view_hit_test(root, frame.x + 20, frame.y + 20) == card);
+  assert(sz_view_handle_tap(root, frame.x + 20, frame.y + 20));
+  assert(sz_signal_int_get(open) == 1 && sz_view_focused(root) == button);
+  assert(sz_view_handle_tap(root, frame.x + 4, frame.y + frame.h - 4));
+  assert(sz_signal_int_get(open) == 1);
+  SzRect action = sz_view_frame(button);
+  assert(sz_view_handle_tap(root, action.x + 8, action.y + 8));
+  assert(sz_signal_int_get(actions) == 1);
+  assert(sz_view_tooltip_at(root, 40, 40) == NULL);
+  assert(!sz_view_set_hover_at(root, 40, 40));
+  assert(!sz_view_handle_secondary(root, 40, 40));
+  assert(sz_signal_int_get(background_hits) == 0);
+  assert(sz_view_scroll_at(root, 40, 40) == NULL);
+  assert(sz_view_scroll_wheel_target(root, 40, 40, 0, 40) == NULL);
+  assert(sz_view_tooltip_at(root, frame.x + 20, frame.y + 20) == tip);
+  assert(sz_view_handle_secondary(root, frame.x + 20, frame.y + 20));
+  assert(sz_signal_int_get(secondary) == 1);
+  assert(sz_view_handle_tap(root, 40, 40));
+  assert(sz_signal_int_get(open) == 0);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_view_input_scope(root) == root);
+  assert(sz_view_scroll_at(root, 40, 40) == background);
+  assert(sz_view_scroll_wheel_target(root, 40, 40, 0, 40) == background);
+  assert(sz_view_tooltip_at(root, 40, 40));
+  assert(sz_view_handle_secondary(root, 40, 40));
+  assert(sz_signal_int_get(background_hits) == 1);
+  sz_view_free(root);
+  sz_signal_int_free(open); sz_signal_int_free(background_hits);
+  sz_signal_int_free(actions); sz_signal_int_free(secondary);
+}
+
+static void test_modal_scroll_boundary(void) {
+  SzSignalInt *open = sz_signal_int(1), *hits = sz_signal_int(0);
+  SzView *inner = sz_view_scroll(sz_view_sized(200, 1000, sz_view_text("Long details")));
+  SzView *modal = sz_view_overlay(open, "Details", sz_view_center(sz_view_sized(240, 160, sz_view_card(inner))));
+  SzView *content = sz_view_column();
+  sz_view_add_child(content, sz_view_sized(640, 480, modal));
+  sz_view_add_child(content, sz_view_sized(640, 1000, sz_view_text("Background")));
+  SzView *background = sz_view_scroll(content);
+  SzView *root = sz_view_sized(640, 480, background);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  SzRect frame = sz_view_frame(inner);
+  float x = frame.x + 10, y = frame.y + 10;
+  assert(sz_view_scroll_at(root, x, y) == inner);
+  assert(sz_view_scroll_wheel_target(root, x, y, 0, 40) == inner);
+  float background_y = sz_view_scroll_y(background);
+  assert(sz_view_scroll_pan(inner, 0, 10000));
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_view_scroll_wheel_target(root, x, y, 0, 40) == NULL);
+  assert(sz_view_scroll_y(background) == background_y);
+  sz_signal_int_set(open, 0);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  frame = sz_view_frame(background);
+  assert(sz_view_scroll_at(root, frame.x + frame.w / 2, frame.y + frame.h / 2) == background);
+  sz_view_free(root);
+  root = sz_view_overlay(open, "Action", sz_view_center(sz_view_sized(240, 160,
+    sz_view_ink_well("Card action", keyboard_count, hits, sz_view_card(sz_view_text("Tap this card"))))));
+  sz_signal_int_set(open, 1);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_view_handle_tap(root, 320, 240));
+  assert(sz_signal_int_get(hits) == 1 && sz_signal_int_get(open) == 1);
+  sz_view_free(root);
+  sz_signal_int_free(open); sz_signal_int_free(hits);
+}
+
+static void test_modal_pointer_capture(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzSignalInt *open = sz_signal_int(0);
+    SzView *root = sz_view_stack();
+    SzView *background = sz_view_scroll(sz_view_sized(640, 1600, sz_view_text("Background")));
+    sz_view_add_child(root, sz_view_sized(640, 480, background));
+    sz_view_add_child(root, sz_view_overlay(open, "Details", sz_view_center(sz_view_sized(240, 160, sz_view_card(sz_view_text("Details"))))));
+    SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 640, .height = 480, .scale = scale};
+    SzUiSession *session = sz_ui_mount(&cfg, root);
+    assert(session && sz_ui_pump_sync(session));
+    SzRect viewport = sz_view_frame(background);
+    SzInputEvent input = {.kind = SZ_INPUT_POINTER, .pointer_button = 1,
+      .pointer_phase = SZ_POINTER_DOWN, .x = viewport.x + 10, .y = viewport.y + 200};
+    assert(sz_ui_inject_sync(session, &input));
+    sz_signal_int_set(open, 1);
+    assert(sz_ui_pump_sync(session));
+    input.pointer_phase = SZ_POINTER_MOVE; input.y = viewport.y + 100;
+    assert(sz_ui_inject_sync(session, &input));
+    input.pointer_phase = SZ_POINTER_UP;
+    assert(sz_ui_inject_sync(session, &input));
+    assert(sz_signal_int_get(open) == 1 && sz_view_scroll_y(background) == 0);
+    input.kind = SZ_INPUT_SCROLL; input.dy = 40;
+    assert(!sz_ui_inject_sync(session, &input));
+    assert(sz_view_scroll_y(background) == 0);
+    sz_signal_int_set(open, 0);
+    assert(sz_ui_pump_sync(session));
+    input.kind = SZ_INPUT_POINTER; input.pointer_phase = SZ_POINTER_DOWN; input.y = viewport.y + 200;
+    assert(sz_ui_inject_sync(session, &input));
+    input.pointer_phase = SZ_POINTER_MOVE; input.y = viewport.y + 100;
+    assert(sz_ui_inject_sync(session, &input));
+    input.pointer_phase = SZ_POINTER_UP;
+    assert(sz_ui_inject_sync(session, &input));
+    assert(sz_view_scroll_y(background) > 0);
+    sz_ui_unmount(session); sz_view_free(root); sz_signal_int_free(open);
+  }
+}
+
+static void test_modal_keyboard_sync(void) {
+  for (int kind = SZ_UI_RUNTIME_HEADLESS; kind <= SZ_UI_RUNTIME_MOBILE; kind++) {
+    SzSignalInt *open = sz_signal_int(0);
+    SzSignalStr *text = sz_signal_str("");
+    SzView *root = sz_view_stack();
+    SzView *opener = sz_view_button("Open", NULL, NULL);
+    sz_view_add_child(root, opener);
+    SzView *field = sz_view_text_field(text, "Name");
+    sz_view_add_child(root, sz_view_overlay(open, "Edit", field));
+    SzUiConfig cfg = {.kind = kind, .width = 320, .height = 240, .scale = 1};
+    SzUiSession *session = sz_ui_mount(&cfg, root);
+    assert(session && sz_ui_pump_sync(session));
+    sz_view_focus(root, opener);
+    sz_signal_int_set(open, 1);
+    assert(sz_ui_pump_sync(session));
+    assert(sz_view_focused(root) == field);
+    assert(sz_ui_session_keyboard_visible(session));
+    SzInputEvent input = {.kind = SZ_INPUT_KEYBOARD, .keyboard_visible = 0};
+    assert(sz_ui_inject_sync(session, &input));
+    assert(sz_ui_pump_sync(session));
+    assert(!sz_ui_session_keyboard_visible(session));
+    sz_signal_int_set(open, 0);
+    assert(sz_ui_pump_sync(session));
+    assert(sz_view_focused(root) == opener);
+    assert(!sz_ui_session_keyboard_visible(session));
+    sz_signal_int_set(open, 1);
+    assert(sz_ui_pump_sync(session));
+    assert(sz_ui_session_keyboard_visible(session));
+    sz_ui_unmount(session);
+    sz_view_free(root);
+    sz_signal_int_free(open); sz_signal_str_free(text);
+  }
+}
+
+static void test_modal_lifecycle(void) {
+  size_t before_bytes, before_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  SzSignalInt *open = sz_signal_int(0), *nested = sz_signal_int(0);
+  SzView *root = sz_view_stack();
+  SzView *base = sz_view_column();
+  SzView *opener = sz_view_button("Open", NULL, NULL);
+  SzView *fallback = sz_view_button("Fallback", NULL, NULL);
+  sz_view_add_child(base, opener);
+  sz_view_add_child(root, base);
+  sz_view_add_child(root, fallback);
+  SzView *body = sz_view_stack();
+  SzView *content = sz_view_column();
+  SzView *first = sz_view_button("First", NULL, NULL);
+  SzView *next = sz_view_button("Next", NULL, NULL);
+  sz_view_add_child(content, first);
+  sz_view_add_child(content, next);
+  sz_view_add_child(body, content);
+  SzView *inner = sz_view_overlay(nested, "Confirm", sz_view_text("Read this message"));
+  sz_view_add_child(body, inner);
+  SzView *outer = sz_view_overlay(open, "Edit details", body);
+  sz_view_add_child(root, outer);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  sz_view_focus(root, opener);
+  sz_signal_int_set(open, 1);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  assert(sz_view_focused(root) == first);
+  assert(!strcmp(sz_view_a11y_label(outer), "Edit details"));
+  sz_view_focus(root, fallback);
+  assert(sz_view_focused(root) == first);
+  assert(!sz_view_activate(root, fallback, 0, 0));
+  SzView *targets[8];
+  assert(sz_view_collect_tap_targets(root, targets, 8) == 2);
+  assert(targets[0] == first && targets[1] == next);
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+  assert(sz_view_focused(root) == next);
+  sz_signal_int_set(nested, 1);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  assert(sz_view_focused(root) == inner);
+  assert(sz_view_handle_key(root, "Tab", "", 0));
+  assert(sz_view_focused(root) == inner);
+  sz_view_handle_key(root, "Escape", "", 0);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  assert(sz_signal_int_get(open) == 1 && sz_signal_int_get(nested) == 0);
+  assert(sz_view_focused(root) == next);
+  sz_signal_int_set(open, 0);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  assert(sz_view_focused(root) == opener);
+  sz_signal_int_set(open, 1);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  sz_view_clear_children(base);
+  sz_signal_int_set(open, 0);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  assert(sz_view_focused(root) == fallback);
+  sz_signal_int_set(open, 1);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  sz_view_focus(root, next);
+  sz_signal_int_set(nested, 1);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  sz_signal_int_set(open, 0);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  assert(sz_view_focused(root) == fallback);
+  sz_signal_int_set(nested, 0);
+  sz_view_clear_children(root);
+  sz_view_layout(root, 500, 400, sz_theme_default());
+  assert(sz_view_focused(root) == NULL);
+  sz_view_free(root);
+  sz_signal_int_free(open); sz_signal_int_free(nested);
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+}
+
+static void test_color_theme_scope(void) {
+  size_t before_bytes, before_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  for (int i = 0; i < 100; i++) {
+    SzTheme *palette = sz_theme_dark();
+    SzView *view = sz_view_theme(palette, sz_view_text("theme"));
+    sz_release(palette);
+    sz_view_free(view);
+  }
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+  SzTheme *dark = sz_theme_dark();
+  SzTheme *light = sz_theme_light();
+  SzView *body = sz_view_stack();
+  SzView *inner = sz_view_theme(light, sz_view_sized(80, 60, sz_view_text("")));
+  SzView *button = sz_view_button("Action", NULL, NULL);
+  sz_view_add_child(body, sz_view_positioned(12, 12, inner));
+  sz_view_add_child(body, sz_view_positioned(120, 20, sz_view_sized(100, 40, button)));
+  SzView *root = sz_view_theme(dark, sz_view_sized(240, 160, body));
+  sz_release(light);
+  sz_release(dark);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(240, 160);
+  assert(surface);
+  assert(sz_view_paint(root, sk_surface_get_canvas(surface), 240, 160, sz_theme_default()));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 240, 2, 2, 0x24, 0x23, 0x1F));
+  SzRect nested_frame = sz_view_frame(inner);
+  assert(px_rgb(pixels, 240, (int)nested_frame.x + 5, (int)nested_frame.y + 5, 0xF3, 0xEF, 0xE3));
+  assert(px_rgb(pixels, 240, 100, 100, 0x24, 0x23, 0x1F));
+  SzRect frame = sz_view_frame(button);
+  assert(px_rgb(pixels, 240, (int)frame.x + 5, (int)frame.y + 5, 0xE8, 0xEF, 0x48));
+  assert(frame.w == 96.f && frame.h == 40.f);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == button);
+  SzTheme scaled = *sz_theme_default();
+  scaled.px_scale = 2.f;
+  sz_view_layout(root, 480, 320, &scaled);
+  frame = sz_view_frame(button);
+  assert(frame.w == 192.f && frame.h == 80.f);
+  sk_surface_unref(surface);
+  sz_view_free(root);
+}
+
+static void test_composite_tab_capacity(void) {
+  SzSignalInt *selected = sz_signal_int(99);
+  SzView *sections = sz_view_column();
+  for (int i = 0; i < 100; i++) {
+    char id[24], title[24];
+    snprintf(id, sizeof id, "panel%d", i);
+    snprintf(title, sizeof title, "Tab %d", i);
+    sz_view_add_child(sections, sz_view_section(id, title, sz_view_button("Body", NULL, NULL)));
+  }
+  SzView *root = sz_view_tabs(selected, sections);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) && !strcmp(sz_view_a11y_label(sz_view_focused(root)), "Tab 99"));
+  SzView *last = sz_view_focused(root);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_view_focused(root) == last);
+  sz_view_handle_key(root, "Home", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Tab 0"));
+  assert(sz_signal_int_get(selected) == 99);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Tab 0"));
+  sz_view_handle_key(root, "ArrowDown", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Tab 0"));
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Body"));
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Body"));
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Tab 0"));
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
+static void test_composite_radio_tab_stop(void) {
+  SzSignalInt *selected = sz_signal_int(2);
+  SzView *root = sz_view_column();
+  SzView *before = sz_view_button("Before", NULL, NULL);
+  SzView *a = sz_view_radio(selected, 1, "A");
+  SzView *b = sz_view_radio(selected, 2, "B");
+  SzView *after = sz_view_button("After", NULL, NULL);
+  sz_view_add_child(root, before);
+  sz_view_add_child(root, a);
+  sz_view_add_child(root, b);
+  sz_view_add_child(root, after);
+  sz_view_layout(root, 320, 500, sz_theme_default());
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == before);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == b);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == after);
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+  assert(sz_view_focused(root) == b);
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
+static void test_composite_named_radios(void) {
+  SzSignalInt *selected = sz_signal_int(2);
+  SzView *root = sz_view_column();
+  SzView *a = sz_view_radio(selected, 1, "Same");
+  SzView *b = sz_view_radio(selected, 2, "Same");
+  SzView *c = sz_view_radio(selected, 1, "Same");
+  SzView *d = sz_view_radio(selected, 2, "Same");
+  SzView *first = sz_view_column();
+  SzView *second = sz_view_column();
+  sz_view_add_child(first, a);
+  sz_view_add_child(first, b);
+  sz_view_add_child(second, c);
+  sz_view_add_child(second, d);
+  sz_view_add_child(root, sz_view_radio_group("First", first));
+  sz_view_add_child(root, sz_view_radio_group("Second", second));
+  sz_view_layout(root, 400, 500, sz_theme_default());
+  assert(sz_view_tab_stop(b) && sz_view_tab_stop(d));
+  assert(!sz_view_tab_stop(a) && !sz_view_tab_stop(c));
+  assert(sz_view_focus_next(root, 0, 0));
+  assert(sz_view_focused(root) == b);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == a && sz_signal_int_get(selected) == 1);
+  assert(sz_view_focus_next(root, 0, 0));
+  assert(sz_view_focused(root) == c);
+  assert(!sz_view_focus_next(root, 0, 0));
+  assert(sz_view_focused(root) == c);
+  assert(sz_view_focus_next(root, 1, 0));
+  assert(sz_view_focused(root) == a);
+  sz_signal_int_set(selected, 0);
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
+static void test_composite_hidden_radios(void) {
+  SzSignalInt *selected = sz_signal_int(2);
+  SzSignalInt *shown = sz_signal_int(0);
+  SzView *root = sz_view_column();
+  SzView *a = sz_view_radio(selected, 1, "A");
+  SzView *b = sz_view_radio(selected, 2, "B");
+  SzView *c = sz_view_radio(selected, 3, "C");
+  sz_view_add_child(root, a);
+  sz_view_add_child(root, sz_view_visibility(shown, b));
+  sz_view_add_child(root, c);
+  sz_view_layout(root, 400, 500, sz_theme_default());
+  assert(sz_view_tab_stop(a) && !sz_view_tab_stop(b) && !sz_view_tab_stop(c));
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == a);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == c && sz_signal_int_get(selected) == 3);
+  sz_view_focus(root, NULL);
+  sz_signal_int_set(selected, 0);
+  assert(sz_view_tab_stop(a) && !sz_view_tab_stop(c));
+  sz_view_handle_key(root, "Tab", "", 0);
+  sz_view_handle_key(root, "Space", "", 0);
+  assert(sz_signal_int_get(selected) == 1);
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+  sz_signal_int_free(shown);
+}
+
+static void test_composite_modal_radios(void) {
+  for (int named = 0; named < 2; named++) {
+    SzSignalInt *selected = sz_signal_int(2), *open = sz_signal_int(1);
+    SzView *root = sz_view_stack();
+    SzView *background = sz_view_radio(selected, 2, "Background");
+    sz_view_add_child(root, background);
+    SzView *items = sz_view_column();
+    SzView *a = sz_view_radio(selected, 1, "A");
+    SzView *b = sz_view_radio(selected, 2, "B");
+    sz_view_add_child(items, a);
+    sz_view_add_child(items, b);
+    sz_view_add_child(root, sz_view_overlay(open, "Dialog", items));
+    if (named) root = sz_view_radio_group("Shared", root);
+    sz_view_layout(root, 400, 500, sz_theme_default());
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == b);
+    sz_view_handle_key(root, "ArrowRight", "", 0);
+    assert(sz_view_focused(root) == a && sz_signal_int_get(selected) == 1);
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == a);
+    assert(!sz_view_tab_stop(background));
+    sz_view_free(root);
+    sz_signal_int_free(selected);
+    sz_signal_int_free(open);
+  }
+}
+
+static void test_composite_duplicate_focus(void) {
+  SzView *items = sz_view_column();
+  SzView *last = NULL;
+  for (int i = 0; i < 100; i++) {
+    last = sz_view_button("Same", NULL, NULL);
+    sz_view_add_child(items, last);
+  }
+  SzView *root = sz_view_focus_group(sz_view_scroll(items));
+  sz_view_layout(root, 400, 300, sz_theme_default());
+  sz_view_focus(root, last);
+  sz_view_layout(root, 400, 300, sz_theme_default());
+  assert(sz_view_focused(root) == last);
+  sz_view_handle_key(root, "ArrowUp", "", 0);
+  SzView *previous = sz_view_focused(root);
+  assert(previous && previous != last);
+  sz_view_layout(root, 400, 300, sz_theme_default());
+  assert(sz_view_focused(root) == previous);
+  sz_view_handle_key(root, "ArrowDown", "", 0);
+  assert(sz_view_focused(root) == last);
+  sz_view_free(root);
+}
+
+static void test_composite_panel_stop(void) {
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *sections = sz_view_column();
+  sz_view_add_child(sections, sz_view_section("text", "Text", sz_view_text("Content")));
+  sz_view_add_child(sections, sz_view_section("button", "Button", sz_view_button("Action", NULL, NULL)));
+  SzView *root = sz_view_tabs(selected, sections);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Text"));
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_a11y_role(sz_view_focused(root)) == SZ_A11Y_TAB_PANEL);
+  sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_signal_int_get(selected) == 1);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Action"));
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
+static void theme_metrics_bad_font(void) {
+  (void)sz_theme_metrics(NULL, 0, 6, 12, 8, 40);
+}
+
+static void theme_metrics_bad_height(void) {
+  (void)sz_theme_metrics(NULL, 22, 10, 12, 8, 20);
+}
+
+static void test_theme_metrics_scope(void) {
+  assert_missing_aborts(theme_metrics_bad_font, "Theme metrics need");
+  assert_missing_aborts(theme_metrics_bad_height, "Theme metrics need");
+  SzTheme *small = sz_theme_metrics(NULL, 1, 0, 0, 0, 1);
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *control = sz_view_checkbox(selected, "Small");
+  SzView *small_root = sz_view_theme(small, control);
+  sz_view_layout(small_root, 100, 100, sz_theme_default());
+  assert(sz_view_frame(control).w >= 0.f && sz_view_frame(control).h == 1.f);
+  sz_view_free(small_root);
+  sz_signal_int_free(selected);
+  sz_release(small);
+
+  SzTheme *base = sz_theme_dark();
+  SzTheme *large = sz_theme_metrics(base, 22, 9, 4, 3, 40);
+  assert(base->font_px == 14.f && base->pad == 12.f && base->line_gap == 6.f);
+  assert(large->background == base->background && large->font_px == 22.f);
+  SzSignalStr *value = sz_signal_str("WWii");
+  SzView *field = sz_view_text_field(value, "Name");
+  SzView *paragraph = sz_view_text("One\nTwo");
+  SzView *plain = sz_view_text("One\nTwo");
+  SzView *body = sz_view_column();
+  sz_view_add_child(body, paragraph);
+  sz_view_add_child(body, field);
+  sz_view_add_child(body, sz_view_theme(base, plain));
+  SzView *root = sz_view_theme(large, body);
+  sz_release(large);
+  sz_release(base);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_view_frame(paragraph).h == 62.f);
+  assert(sz_view_frame(field).h == 40.f);
+  assert(sz_view_frame(plain).h == 40.f);
+  sz_view_focus(root, field);
+  sz_view_set_text_field_caret(field, 2);
+  SzRect caret = sz_view_caret_rect(root, sz_theme_default());
+  assert(caret.h == 22.f);
+  SzRect frame = sz_view_frame(field);
+  sz_view_activate(root, field, frame.x + 6.f + sk_font_measure_string("WW", 22.f), frame.y + 20.f);
+  assert(sz_view_text_field_caret(field) == 2);
+  SzTheme scaled = *sz_theme_default();
+  scaled.font_px *= 2.f;
+  scaled.pad *= 2.f;
+  scaled.gap *= 2.f;
+  scaled.control_h *= 2.f;
+  scaled.px_scale = 2.f;
+  sz_view_layout(root, 1280, 960, &scaled);
+  assert(sz_view_frame(paragraph).h == 124.f);
+  assert(sz_view_frame(plain).h == 80.f);
+  frame = sz_view_frame(field);
+  sz_view_activate(root, field, frame.x + 12.f + sk_font_measure_string("WW", 44.f), frame.y + 40.f);
+  assert(sz_view_text_field_caret(field) == 2);
+  caret = sz_view_caret_rect(root, &scaled);
+  assert(caret.h == 44.f);
+
+  sz_view_free(root);
+  sz_signal_str_free(value);
+}
+
+static void test_theme_metrics_editor(void) {
+  SzTheme *large = sz_theme_metrics(NULL, 22, 9, 4, 3, 40);
+  SzSignalStr *value = sz_signal_str("abcd\nabcd\nabcd\nabcd\nabcd\nabcd");
+  SzView *editor = sz_view_editor(value);
+  SzView *root = sz_view_theme(large, sz_view_sized(240, 62, editor));
+  sz_release(large);
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.font_px *= scale;
+    theme.pad *= scale;
+    theme.gap *= scale;
+    theme.control_h *= scale;
+    theme.px_scale = scale;
+    sz_signal_str_set(value, "abcd\nabcd\nabcd\nabcd\nabcd\nabcd");
+    sz_view_layout(root, 640 * scale, 480 * scale, &theme);
+    sz_view_set_editor_caret(editor, 0);
+    sz_view_focus(root, editor);
+    SzRect frame = sz_view_frame(editor);
+    float gutter = sz_view_editor_gutter_w(editor);
+    sz_view_activate(root, editor, frame.x + gutter + 6.f * scale,
+                     frame.y + (6.f + 31.f) * scale);
+    assert(sz_view_editor_caret(editor) == 5);
+    sz_view_handle_key(root, "PageDown", "", 0);
+    assert(sz_view_editor_caret(editor) == 15);
+    assert(sz_view_editor_scroll_y(editor) >= 31.f);
+    sz_view_scroll_pan(editor, 0.f, 10000.f);
+    assert(fabsf(sz_view_editor_scroll_y(editor) - 130.f) < .01f);
+    sz_view_scroll_pan(editor, 0.f, -10000.f);
+    sz_signal_str_set(value, "IéЖΩx");
+    sz_view_layout(root, 640 * scale, 480 * scale, &theme);
+    frame = sz_view_frame(editor);
+    gutter = sz_view_editor_gutter_w(editor);
+    float cell = sk_font_mono_cell(22.f * scale);
+    const int offsets[] = {0, 1, 3, 5, 7, 8};
+    for (int column = 0; column <= 5; column++) {
+      float x = frame.x + gutter + 6.f * scale + column * cell;
+      sz_view_activate(root, editor, x + .1f * cell, frame.y + 8.f * scale);
+      assert(sz_view_editor_caret(editor) == offsets[column]);
+      SzRect caret = sz_view_caret_rect(root, &theme);
+      assert(fabsf(caret.x - x) < .01f);
+      if (column < 5) {
+        sz_view_handle_key(root, "ArrowRight", "", 0);
+        assert(sz_view_editor_caret(editor) == offsets[column + 1]);
+      }
+    }
+    assert(sz_view_set_editor_caret(editor, 5));
+    sz_view_handle_key(root, "X", "X", 0);
+    assert(strcmp(sz_signal_str_get(value), "IéЖXΩx") == 0);
+  }
+  sz_view_free(root);
+  sz_signal_str_free(value);
+}
+
+typedef struct TextProbe {
+  int count, dots;
+  int starts[32], ends[32], styles[32];
+  float x[32], baseline[32], fonts[32];
+} TextProbe;
+
+static void text_probe(SkTextRange context, int start, int end,
+  float x, float baseline, float width, float font, float line_height,
+  int style, uint32_t color, int colored, int ellipsis, int action,
+  float context_x, void *env) {
+  const char *source = context.source;
+  (void)context; (void)context_x;
+  (void)action;
+  (void)source; (void)width; (void)line_height; (void)color; (void)colored;
+  TextProbe *probe = env;
+  if (probe->count < 32) {
+    int i = probe->count;
+    probe->starts[i] = start; probe->ends[i] = end; probe->styles[i] = style;
+    probe->x[i] = x; probe->baseline[i] = baseline; probe->fonts[i] = font;
+  }
+  probe->count++;
+  probe->dots += ellipsis;
+}
+
+static SzText *test_text_span(const char *source) {
+  SzString *value = sz_string_from_cstr(source);
+  SzText *text = sz_text_span(value);
+  sz_release(value);
+  return text;
+}
+
+static SzText *test_text_pair(SzText *a, SzText *b) {
+  SzList *tail = sz_list_cons(b, NULL);
+  SzList *values = sz_list_cons(a, tail);
+  sz_release(tail);
+  SzText *text = sz_text_concat(values);
+  sz_release(values);
+  return text;
+}
+
+static void test_shaped_field_marks(void) {
+  const char *source[] = {"AV fi é", "ȩ́", "مَ", "שׁ", "ปู่", "कि"};
+  const int rtl[] = {0, 0, 1, 1, 0, 0};
+  for (int size = 16; size <= 32; size += 16) for (int i = 0; i < 6; i++) {
+    SzTheme theme = *sz_theme_default();
+    theme.font_px = (float)size;
+    SzSignalStr *value = sz_signal_str(source[i]);
+    SzView *field = sz_view_text_field(value, "Name");
+    sz_view_layout(field, 320, 100, &theme);
+    sz_view_focus(field, field);
+    SzRect frame = sz_view_frame(field);
+    int end = (int)strlen(source[i]);
+    sz_view_activate(field, field, rtl[i] ? frame.x + 1 : frame.x + frame.w - 1, frame.y + frame.h / 2);
+    assert(sz_view_text_field_caret(field) == end);
+    sz_view_handle_text_edit(field, "Kept", 0);
+    char expected[128];
+    snprintf(expected, sizeof expected, "%sKept", source[i]);
+    assert(!strcmp(sz_signal_str_get(value), expected));
+    sz_signal_str_set(value, source[i]);
+    sz_view_set_text_field_caret(field, 0);
+    for (int step = 0; step < end; step++) sz_view_handle_key(field, rtl[i] ? "ArrowLeft" : "ArrowRight", "", 0);
+    assert(sz_view_text_field_caret(field) == end);
+    sz_view_handle_text_edit(field, "Kept", 0);
+    assert(!strcmp(sz_signal_str_get(value), expected));
+    sz_view_free(field);
+    sz_signal_str_free(value);
+  }
+  SzSignalStr *value = sz_signal_str("fi");
+  SzView *field = sz_view_text_field(value, "Name");
+  sz_view_layout(field, 320, 100, sz_theme_default());
+  sz_view_focus(field, field);
+  sz_view_set_text_field_caret(field, 0);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 1);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 2);
+  sz_view_free(field);
+  sz_signal_str_free(value);
+}
+
+static void test_shaped_field_geometry(void) {
+  assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
+  SzSignalStr *value = sz_signal_str("אב");
+  SzView *field = sz_view_text_field(value, "Name");
+  sz_view_layout(field, 320, 100, sz_theme_default());
+  sz_view_focus(field, field);
+  sz_view_set_text_field_caret(field, 0);
+  SzRect start = sz_view_caret_rect(field, sz_theme_default());
+  sz_view_set_text_field_caret(field, 4);
+  SzRect end = sz_view_caret_rect(field, sz_theme_default());
+  assert(start.x > end.x + 5.f);
+  sz_view_activate(field, field, start.x, start.y + 2);
+  assert(sz_view_text_field_caret(field) == 0);
+  sz_view_activate(field, field, end.x, end.y + 2);
+  assert(sz_view_text_field_caret(field) == 4);
+  sz_view_set_text_field_caret(field, 0);
+  sz_view_handle_key(field, "ArrowLeft", "", 0);
+  assert(sz_view_text_field_caret(field) == 2);
+  sz_view_handle_key(field, "ArrowLeft", "", 0);
+  assert(sz_view_text_field_caret(field) == 4);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 2);
+  sz_view_handle_text_edit(field, "X", 0);
+  assert(strcmp(sz_signal_str_get(value), "אXב") == 0);
+  sz_signal_str_set(value, "ab");
+  sz_view_set_text_field_sel(field, 0, 2);
+  sz_view_handle_compose(field, "لا");
+  SzRect preview = sz_view_caret_rect(field, sz_theme_default());
+  assert(fabsf(preview.x - (sz_view_frame(field).x + 6.f)) < .01f);
+  assert(strcmp(sz_signal_str_get(value), "ab") == 0);
+  sz_view_handle_key(field, "Escape", "", 0);
+  assert(strcmp(sz_signal_str_get(value), "ab") == 0);
+  sz_view_set_text_field_sel(field, 0, 2);
+  sz_view_handle_compose(field, "لا");
+  sz_view_handle_compose(field, "");
+  assert(strcmp(sz_signal_str_get(value), "لا") == 0);
+  sz_signal_str_set(value, "ab אב 12");
+  sz_view_set_text_field_sel(field, 3, 7);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 100);
+  assert(surface);
+  assert(sz_view_paint(field, sk_surface_get_canvas(surface), 320, 100, sz_theme_default()));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  const SzTheme *theme = sz_theme_default();
+  float prefix = sk_font_measure_string("ab ", 14);
+  int selected_x = (int)(6.f + prefix + sk_font_measure_string("12 ", 14) + sk_font_measure_string("אב", 14) * .5f);
+  int number_x = (int)(6.f + prefix + sk_font_measure_string("12", 14) * .5f);
+  assert(px_rgb(pixels, 320, selected_x, 14, (theme->selection >> 16) & 255, (theme->selection >> 8) & 255, theme->selection & 255));
+  assert(px_rgb(pixels, 320, number_x, 14, (theme->surface >> 16) & 255, (theme->surface >> 8) & 255, theme->surface & 255));
+  sk_surface_unref(surface);
+  sz_view_free(field);
+  sz_signal_str_free(value);
+}
+
+static void test_shaped_text_wrapping(void) {
+  assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
+  const char *source = "ééé";
+  SzText *text = test_text_span(source);
+  float width = sk_font_measure_span(sk_text_range(source, 3), 14, 0);
+  TextProbe probe = {0};
+  SzTextMetrics metrics = sz_text_layout(text, 14, 1, 6, width + .01f, 0, 0, text_probe, &probe);
+  assert(metrics.lines == 3 && probe.count == 3);
+  for (int i = 0; i < 3; i++) assert(probe.starts[i] == 3 * i && probe.ends[i] == 3 * (i + 1));
+  sz_release(text);
+  text = test_text_span("éééééééééé");
+  probe = (TextProbe){0};
+  metrics = sz_text_layout(text, 14, 1, 6, width + sk_font_measure_span(sk_text_range("...", 3), 14, 0) + .01f,
+    1, 1, text_probe, &probe);
+  assert(metrics.truncated && probe.dots == 1);
+  for (int i = 0; i < probe.count; i++) assert(probe.starts[i] % 3 == 0 && probe.ends[i] % 3 == 0);
+  sz_release(text);
+
+  SzView *plain = sz_view_text(source);
+  SzView *root = sz_view_max_size((int)ceilf(width + 4.f), 0, plain);
+  sz_view_layout(root, 320, 240, sz_theme_default());
+  assert(sz_view_frame(plain).h == 60.f);
+  sz_view_free(root);
+
+  char long_line[401];
+  memset(long_line, 'M', 400); long_line[400] = 0;
+  plain = sz_view_text(long_line);
+  sz_view_layout(plain, 6400, 80, sz_theme_default());
+  float full_width = sk_font_measure_span(sk_text_range(long_line, 400), 14, 0);
+  assert(sz_view_frame(plain).w >= full_width);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(6400, 80);
+  assert(surface);
+  assert(sz_view_paint(plain, sk_surface_get_canvas(surface), 6400, 80, sz_theme_default()));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  int ink = 0;
+  for (int y = 0; y < 40; y++) for (int x = (int)(full_width * .9f); x < (int)full_width; x++) {
+    const uint8_t *pixel = pixels + ((size_t)y * 6400 + x) * 4;
+    if (pixel[0] < 100 && pixel[1] < 100 && pixel[2] < 100) ink++;
+  }
+  assert(ink > 0);
+  sk_surface_unref(surface);
+  sz_view_free(plain);
+}
+
+static void test_opacity_transition_frames(void) {
+  size_t before_bytes, before_count, end_bytes, end_count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  SzSignalInt *value = sz_signal_int(100), *reduced = sz_signal_int(0), *visible = sz_signal_int(1);
+  SzView *content = sz_view_stack();
+  sz_view_add_child(content, sz_view_background(0xffff0000, sz_view_sized(20, 12, sz_view_text(""))));
+  sz_view_add_child(content, sz_view_background(0xff0000ff, sz_view_sized(20, 12, sz_view_text(""))));
+  SzView *animation = sz_view_animated_opacity(value, 4, content);
+  SzView *root = sz_view_visibility(visible, sz_view_reduced_motion(reduced, animation));
+  SkSurface *surface = sk_surface_make_raster_n32_premul(20, 12);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  SzTheme theme = *sz_theme_default(); theme.background = 0xffffffff; theme.pad = 0; theme.gap = 0;
+  assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 100 && !sz_view_motion_pending(root));
+  assert(px_rgb(sk_surface_peek_pixels(surface, NULL), 20, 5, 5, 0, 0, 255));
+  sz_signal_int_set(value, 0);
+  for (int i = 0; i < 3; i++) sz_view_layout(root, 20, 12, &theme);
+  assert(sz_view_animated_opacity_value(animation) == 100 && sz_view_motion_pending(root));
+  assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 75);
+  const uint8_t *faded = sk_surface_peek_pixels(surface, NULL) + (5 * 20 + 5) * 4;
+  if (faded[0] != 64 || faded[1] != 64 || faded[2] != 255)
+    fprintf(stderr, "Opacity pixel at 75 percent: %u %u %u %u\n",
+            faded[0], faded[1], faded[2], faded[3]);
+  /* Allow one channel value for intermediate alpha rounding. */
+  assert(abs((int)faded[0] - 64) <= 1 && abs((int)faded[1] - 64) <= 1 &&
+         faded[2] == 255 && faded[3] == 255);
+  assert(sz_signal_int_get(value) == 0);
+  assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 50);
+  sz_signal_int_set(value, 100);
+  const int reversed[] = {63, 75, 88, 100};
+  for (int i = 0; i < 4; i++) {
+    assert(sz_view_paint(root, canvas, 20, 12, &theme));
+    assert(sz_view_animated_opacity_value(animation) == reversed[i]);
+  }
+  assert(!sz_view_motion_pending(root));
+  sz_signal_int_set(value, INT64_MIN);
+  for (int i = 0; i < 4; i++) assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 0 && sz_signal_int_get(value) == INT64_MIN);
+  assert(px_rgb(sk_surface_peek_pixels(surface, NULL), 20, 5, 5, 255, 255, 255));
+  sz_signal_int_set(value, INT64_MAX);
+  assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 25 && sz_signal_int_get(value) == INT64_MAX);
+  sz_signal_int_set(reduced, 1);
+  assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 100 && !sz_view_motion_pending(root));
+  sz_signal_int_set(reduced, 0); sz_signal_int_set(value, 0);
+  assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 75);
+  sz_signal_int_set(visible, 0);
+  sz_view_layout(root, 20, 12, &theme);
+  assert(sz_view_animated_opacity_value(animation) == 0 && !sz_view_motion_pending(root));
+  sz_signal_int_set(value, 100);
+  sz_view_layout(root, 20, 12, &theme);
+  sz_signal_int_set(visible, 1);
+  assert(sz_view_paint(root, canvas, 20, 12, &theme));
+  assert(sz_view_animated_opacity_value(animation) == 100 && !sz_view_motion_pending(root));
+  sk_surface_unref(surface); sz_view_free(root);
+  sz_signal_int_free(value); sz_signal_int_free(reduced); sz_signal_int_free(visible);
+  SzSignalInt *presses = sz_signal_int(0), *preference = sz_signal_int(1);
+  SzView *button = sz_view_button("Press", counter_tap, presses);
+  root = sz_view_reduced_motion(preference, button);
+  sz_view_layout(root, 100, 100, &theme);
+  assert(sz_view_activate(root, button, 5, 5));
+  assert(sz_signal_int_get(presses) == 1 && !sz_view_motion_pending(root));
+  sz_signal_int_set(preference, 0);
+  sz_view_layout(root, 100, 100, &theme);
+  assert(sz_view_activate(root, button, 5, 5));
+  assert(sz_signal_int_get(presses) == 2 && sz_view_motion_pending(root));
+  sz_view_reduce_motion(root, 1);
+  sz_view_layout(root, 100, 100, &theme);
+  assert(!sz_view_motion_pending(root));
+  sz_view_free(root); sz_signal_int_free(presses); sz_signal_int_free(preference);
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(end_bytes == before_bytes && end_count == before_count);
+}
+
+static void test_opacity_session_pause_and_reduction(void) {
+  SzSignalInt *value = sz_signal_int(100);
+  SzSignalStr *text = sz_signal_str("Keep this text");
+  SzView *field = sz_view_text_field(text, "Name");
+  SzView *root = sz_view_animated_opacity(value, 4, field);
+  SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 240, .height = 100, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  sz_view_focus(root, field);
+  sz_signal_int_set(value, 0);
+  assert(sz_ui_pump_sync(session) && sz_view_animated_opacity_value(root) == 75);
+  SzInputEvent event = {.kind = SZ_INPUT_LIFECYCLE, .lifecycle = SZ_LIFECYCLE_PAUSE};
+  assert(sz_ui_inject_sync(session, &event));
+  for (int i = 0; i < 3; i++) assert(sz_ui_pump_sync(session));
+  assert(sz_view_animated_opacity_value(root) == 75 && !sz_view_motion_pending(root));
+  sz_signal_int_set(value, 100);
+  assert(sz_ui_pump_sync(session) && sz_view_animated_opacity_value(root) == 75);
+  event.lifecycle = SZ_LIFECYCLE_RESUME;
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_ui_pump_sync(session) && sz_view_animated_opacity_value(root) == 81);
+  for (int i = 0; i < 3; i++) assert(sz_ui_pump_sync(session));
+  assert(sz_view_animated_opacity_value(root) == 100 && !sz_view_motion_pending(root));
+  sz_signal_int_set(value, 0);
+  event.kind = SZ_INPUT_REDUCED_MOTION; event.reduced_motion = 1;
+  assert(sz_ui_inject_sync(session, &event) && sz_ui_pump_sync(session));
+  assert(sz_view_animated_opacity_value(root) == 0 && !sz_view_motion_pending(root));
+  assert(sz_view_focused(root) == field);
+  SzView *fields[1];
+  assert(sz_view_collect_text_fields(root, fields, 1) == 1 && fields[0] == field);
+  event.kind = SZ_INPUT_TEXT; event.text = "Retained input";
+  assert(sz_ui_inject_sync(session, &event));
+  assert(!strcmp(sz_signal_str_get(text), "Retained input"));
+  event.kind = SZ_INPUT_REDUCED_MOTION; event.reduced_motion = 0;
+  assert(sz_ui_inject_sync(session, &event));
+  sz_signal_int_set(value, 100);
+  assert(sz_ui_pump_sync(session) && sz_view_animated_opacity_value(root) == 25);
+  sz_ui_unmount(session); sz_view_free(root);
+  root = sz_view_animated_opacity(value, INT_MAX, sz_view_text("long"));
+  session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  sz_signal_int_set(value, 0);
+  assert(sz_ui_quiesce(session) == SZ_QUIESCE_BUDGET_TRIPPED);
+  assert(sz_view_motion_pending(root) && sz_view_animated_opacity_value(root) == 100);
+  event.kind = SZ_INPUT_REDUCED_MOTION; event.reduced_motion = 1;
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_ui_quiesce(session) == SZ_QUIESCE_SETTLED);
+  assert(sz_view_animated_opacity_value(root) == 0);
+  event.kind = SZ_INPUT_LIFECYCLE; event.lifecycle = SZ_LIFECYCLE_PAUSE;
+  assert(sz_ui_inject_sync(session, &event));
+  SzView *old = root;
+  root = sz_view_animated_opacity(value, 8, sz_view_text("replacement"));
+  assert(sz_ui_session_replace_root(session, root));
+  sz_view_free(old);
+  assert(sz_ui_pump_sync(session));
+  sz_signal_int_set(value, 100);
+  assert(sz_ui_pump_sync(session) && sz_view_animated_opacity_value(root) == 100);
+  event.kind = SZ_INPUT_REDUCED_MOTION; event.reduced_motion = 0;
+  assert(sz_ui_inject_sync(session, &event));
+  sz_signal_int_set(value, 0);
+  assert(sz_ui_pump_sync(session) && sz_view_animated_opacity_value(root) == 100);
+  assert(!sz_view_motion_pending(root));
+  sz_ui_unmount(session); sz_view_free(root);
+  sz_signal_int_free(value); sz_signal_str_free(text);
+}
+
+static void test_opacity_utf8_labels(void) {
+  const struct { int length; const char *glyph; int keep, expected; } cases[] = {
+    {63, "é", 0, 63}, {62, "é", 1, 62},
+    {62, "中", 0, 62}, {61, "中", 1, 61},
+    {61, "😀", 0, 61}, {60, "😀", 1, 60},
+    {65, "中", 0, 64}, {0, "中", 1, 0}
+  };
+  char ascii[80]; memset(ascii, 'a', 79); ascii[79] = 0;
+  SzSignalInt *value = sz_signal_int(50);
+  for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+    char label[100], expected[80], line[120];
+    snprintf(label, sizeof label, "%.*s%s", cases[i].length, ascii, cases[i].glyph);
+    snprintf(expected, sizeof expected, "%.*s%s", cases[i].expected, ascii,
+      cases[i].keep ? cases[i].glyph : "");
+    SzView *root = sz_view_animated_opacity(value, 8, sz_view_text(label));
+    sz_view_layout(root, 800, 160, sz_theme_default());
+    SzString *dump = sz_view_a11y_dump(root);
+    snprintf(line, sizeof line, "opacity:%s=50\n", expected);
+    assert(!strncmp(sz_string_cstr(dump), line, strlen(line)));
+    snprintf(line, sizeof line, "target:opacity:%s=50\n", expected);
+    assert(strstr(sz_string_cstr(dump), line));
+    snprintf(line, sizeof line, "pumps:opacity:%s=0\n", expected);
+    assert(strstr(sz_string_cstr(dump), line));
+    sz_string_free(dump); sz_view_free(root);
+  }
+  sz_signal_int_free(value);
+}
+
+static void test_initial_motion_recording(void) {
+  const char *path = "/tmp/scuzz-initial-motion.json";
+  for (int initial = 0; initial <= 1; initial++) for (int taps = 0; taps <= 9; taps++) {
+    SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 240,
+                     .height = 100, .scale = 1, .reduced_motion = initial};
+    SzSignalInt *value = sz_signal_int(20);
+    SzView *button = sz_view_button("Increment", counter_tap, value);
+    SzView *root = sz_view_animated_opacity(value, 8, button);
+    SzUiSession *session = sz_ui_mount(&cfg, root);
+    assert(session && sz_ui_pump_sync(session));
+    sz_view_focus(root, button);
+    assert(sz_ui_session_set_record(session, path));
+    for (int i = 0; i < taps; i++) {
+      SzInputEvent event = {.kind = SZ_INPUT_KEY, .key = "Space"};
+      assert(sz_ui_session_live_inject(session, &event));
+    }
+    assert(sz_ui_pump_sync(session));
+    int displayed = sz_view_animated_opacity_value(root);
+    int pending = sz_view_motion_pending(root);
+    assert(displayed == 20 + (initial ? taps : (taps + 4) / 8));
+    assert(sz_signal_int_get(value) == 20 + taps);
+    SzString *expected = sz_view_a11y_dump(root);
+    char *record = slurp_cstr(path);
+    assert(strstr(record, initial
+        ? "\"events\":[{\"op\":\"reduceMotion\",\"value\":true}"
+        : "\"events\":[{\"op\":\"reduceMotion\",\"value\":false}"));
+    sz_ui_unmount(session); sz_view_free(root); sz_signal_int_free(value);
+
+    cfg.reduced_motion = !initial;
+    value = sz_signal_int(20);
+    button = sz_view_button("Increment", counter_tap, value);
+    root = sz_view_animated_opacity(value, 8, button);
+    session = sz_ui_mount(&cfg, root);
+    assert(session && sz_ui_pump_sync(session));
+    sz_view_focus(root, button);
+    sz_ui_script_run_file(session, path);
+    assert(sz_signal_int_get(value) == 20 + taps);
+    assert(sz_view_animated_opacity_value(root) == displayed);
+    assert(sz_view_motion_pending(root) == pending);
+    SzString *actual = sz_view_a11y_dump(root);
+    assert(!strcmp(sz_string_cstr(expected), sz_string_cstr(actual)));
+    sz_string_free(expected); sz_string_free(actual); free(record);
+    sz_ui_unmount(session); sz_view_free(root); sz_signal_int_free(value);
+  }
+  remove(path);
+}
+
+static void test_opacity_recorded_pumps(void) {
+  const char *path = "/tmp/scuzz-opacity-journal.json";
+  SzSignalInt *value = sz_signal_int(0);
+  SzView *button = sz_view_button("Increment", counter_tap, value);
+  SzView *root = sz_view_animated_opacity(value, 8, button);
+  SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 240, .height = 100, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  sz_view_focus(root, button);
+  assert(sz_ui_session_set_record(session, path));
+  SzInputEvent event = {.kind = SZ_INPUT_KEY, .key = "Space"};
+  assert(sz_ui_session_live_inject(session, &event));
+  assert(sz_ui_session_live_inject(session, &event));
+  assert(sz_signal_int_get(value) == 2 && sz_view_animated_opacity_value(root) == 0);
+  for (int i = 0; i < 2; i++) assert(sz_ui_pump_sync(session));
+  assert(sz_view_animated_opacity_value(root) == 1);
+  event.kind = SZ_INPUT_REDUCED_MOTION; event.reduced_motion = 1;
+  assert(sz_ui_session_live_inject(session, &event) && sz_ui_pump_sync(session));
+  assert(sz_view_animated_opacity_value(root) == 2 && !sz_view_motion_pending(root));
+  char *record = slurp_cstr(path);
+  assert(strstr(record, "\"manualPumps\":true") && strstr(record, "\"op\":\"pump\",\"k\":2"));
+  assert(strstr(record, "\"op\":\"reduceMotion\",\"value\":true"));
+  sz_ui_unmount(session); sz_view_free(root); sz_signal_int_free(value);
+  value = sz_signal_int(0);
+  button = sz_view_button("Increment", counter_tap, value);
+  root = sz_view_animated_opacity(value, 8, button);
+  session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  sz_view_focus(root, button);
+  sz_ui_script_run_file(session, path);
+  assert(sz_signal_int_get(value) == 2 && sz_view_animated_opacity_value(root) == 2);
+  assert(!sz_view_motion_pending(root) && sz_view_focused(root) == button);
+  sz_ui_unmount(session); sz_view_free(root); sz_signal_int_free(value);
+  free(record); remove(path);
+}
+
+static SzSignalList *select_test_options(const char *const *labels, int count) {
+  SzList *items = NULL;
+  for (int i = count - 1; i >= 0; i--) {
+    SzString *label = sz_string_from_cstr(labels[i]);
+    SzList *next = sz_list_cons(label, items);
+    sz_release(label); sz_release(items);
+    items = next;
+  }
+  SzSignalList *options = sz_signal_list(items);
+  sz_release(items);
+  return options;
+}
+
+static void test_select_keyboard_window(void) {
+  size_t before_bytes, before_count, end_bytes, end_count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  SzSignalInt *selected = sz_signal_int(0);
+  SzSignalList *options = sz_signal_list(NULL);
+  SzView *empty = sz_view_select(selected, "Empty", options);
+  sz_view_layout(empty, 280, 720, sz_theme_default());
+  assert(!sz_view_is_tap_target(empty) && !sz_view_tab_stop(empty));
+  assert(!sz_view_activate(empty, empty, 10, 10));
+  assert(!sz_view_select_open(empty));
+  sz_view_free(empty);
+  sz_signal_list_free(options);
+  char labels[1000][24];
+  const char *choices[1000];
+  for (int i = 0; i < 1000; i++) {
+    snprintf(labels[i], sizeof labels[i], "Item%04d", i);
+    choices[i] = i < 3 ? "Same" : labels[i];
+  }
+  options = select_test_options(choices, 1000);
+  SzView *select = sz_view_select(selected, "Language", options);
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(end_bytes - before_bytes < 200000);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_select_count(select) == 1000 && !strcmp(sz_view_select_text(select), "Same"));
+  sz_view_focus(select, select);
+  assert(sz_view_handle_key(select, "ArrowDown", "", 0));
+  assert(sz_view_select_open(select) && sz_view_select_active(select) == 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  uintptr_t first_id = sz_view_id(sz_view_select_active_option(select));
+  assert(first_id);
+  SzView *taps[32];
+  int count = sz_view_collect_tap_targets(select, taps, 32);
+  assert(count >= 2 && count <= 10);
+  assert(sz_view_focused(select) == select);
+  sz_view_handle_key(select, "s", "", 0);
+  assert(sz_view_select_active(select) == 1 && sz_signal_int_get(selected) == 0);
+  sz_view_handle_key(select, "S", "", 0);
+  assert(sz_view_select_active(select) == 2);
+  sz_view_handle_key(select, "Escape", "", 0);
+  assert(!sz_view_select_open(select) && sz_signal_int_get(selected) == 0);
+  sz_view_handle_key(select, "End", "", 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_select_active(select) == 999 && sz_signal_int_get(selected) == 0);
+  SzView *last = sz_view_select_active_option(select);
+  assert(last && sz_view_id(last) != first_id);
+  SzRect option = sz_view_control_frame(last);
+  SzView *popup = sz_view_select_popup(select);
+  SzRect frame = sz_view_frame(popup);
+  assert(option.y >= frame.y && option.y + option.h <= frame.y + frame.h + .01f);
+  assert(sz_view_hit_test(select, option.x + 2, option.y + 2) == last);
+  sz_view_set_hover_at(select, option.x + 2, option.y + 2);
+  sz_view_handle_key(select, "PageUp", "", 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_select_active(select) == 989);
+  sz_view_set_hover_at(select, option.x + 2, option.y + 2);
+  assert(sz_view_select_active(select) == 989);
+  sz_view_layout(select, 180, 160, sz_theme_default());
+  assert(sz_view_select_active(select) == 989 && sz_view_select_active_option(select));
+  frame = sz_view_frame(popup);
+  assert(frame.x >= 0 && frame.y >= 0 && frame.x + frame.w <= 180 && frame.y + frame.h <= 160);
+  sz_view_handle_key(select, "End", "", 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  sz_view_handle_key(select, "Enter", "", 0);
+  assert(!sz_view_select_open(select) && sz_signal_int_get(selected) == 999);
+  sz_view_handle_key(select, "Home", "", 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_id(sz_view_select_active_option(select)) == first_id);
+  sz_view_handle_key(select, "PageDown", "", 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_select_active(select) == 10 && sz_signal_int_get(selected) == 999);
+  sz_signal_int_set(selected, 42);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_select_active(select) == 42 && sz_view_select_active_option(select));
+  sz_view_handle_key(select, "Escape", "", 0);
+  assert(sz_signal_int_get(selected) == 42);
+  sz_signal_int_set(selected, INT64_MIN);
+  sz_view_handle_key(select, "ArrowDown", "", 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_select_active(select) == 0 && !strcmp(sz_view_select_text(select), ""));
+  assert(sz_signal_int_get(selected) == INT64_MIN);
+  sz_view_handle_key(select, "Enter", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_input_time(select, 0);
+  sz_view_handle_key(select, "I", "", 0);
+  sz_view_handle_key(select, "t", "", 0);
+  assert(sz_view_select_active(select) == 3);
+  sz_view_input_time(select, 1001);
+  sz_view_handle_key(select, "s", "", 0);
+  assert(sz_view_select_active(select) == 0);
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_handle_key(select, "End", "", 0);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_scroll_wheel_target(select, 10, 10, 0, 80) == NULL);
+  assert(sz_view_scroll_pan(popup, 0, -10000));
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_select_active(select) < 800 && sz_view_select_active_option(select));
+  assert(sz_signal_int_get(selected) == 0);
+  sz_view_handle_key(select, "Escape", "", 0);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(280, 720);
+  sz_view_handle_key(select, "ArrowDown", "", 0);
+  assert(sz_view_paint(select, sk_surface_get_canvas(surface), 280, 720, sz_theme_default()));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  frame = sz_view_control_frame(sz_view_select_active_option(select));
+  assert(px_rgb(pixels, 280, (int)(frame.x + frame.w - 3), (int)(frame.y + frame.h * .5f),
+    (sz_theme_default()->selection >> 16) & 255, (sz_theme_default()->selection >> 8) & 255, sz_theme_default()->selection & 255));
+  sk_surface_unref(surface);
+  sz_view_free(select);
+  sz_signal_list_free(options);
+  sz_signal_int_free(selected);
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(end_bytes == before_bytes && end_count == before_count);
+}
+
+static void select_test_replace(SzSignalList *options, const char *const *labels, int count) {
+  SzSignalList *next = select_test_options(labels, count);
+  sz_signal_list_set(options, sz_signal_list_get(next));
+  sz_signal_list_free(next);
+}
+
+static void test_select_reactive_options(void) {
+  size_t bytes, count, end_bytes, end_count;
+  sz_alloc_stats(&bytes, &count);
+  const char *initial[] = {"Alpha", "Beta", "中文"};
+  const char *replacement[] = {"New", "Same", "Same", "Last"};
+  const char *shorter[] = {"Only"};
+  SzSignalList *options = select_test_options(initial, 3);
+  SzSignalInt *value = sz_signal_int(1);
+  SzSignalStr *name = sz_signal_str("Retained");
+  SzView *select = sz_view_select(value, "Language", options);
+  SzView *field = sz_view_text_field(name, "Name");
+  SzView *root = sz_view_column();
+  sz_view_add_child(root, select); sz_view_add_child(root, field);
+  SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 280, .height = 360, .scale = 1.f};
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  uintptr_t control = sz_view_id(select), field_id = sz_view_id(field);
+  sz_view_focus(root, select);
+  sz_view_handle_key(root, "End", "", 0);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  SzView *old_option = sz_view_select_active_option(select);
+  uintptr_t old_id = sz_view_id(old_option);
+  select_test_replace(options, replacement, 4);
+  assert(!sz_ui_session_activate_view(session, old_option));
+  assert(!sz_view_find(root, old_id));
+  assert(!sz_view_select_open(select) && sz_signal_int_get(value) == 1);
+  assert(sz_view_focused(root) == select && !strcmp(sz_view_select_text(select), "Same"));
+  assert(sz_view_id(select) == control && sz_view_id(field) == field_id);
+  sz_view_handle_key(root, "End", "", 0);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  SzView *last = sz_view_select_active_option(select);
+  SzRect frame = sz_view_control_frame(last);
+  SzInputEvent event = {.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN,
+    .x = frame.x + 3, .y = frame.y + frame.h * .5f};
+  assert(sz_ui_inject_sync(session, &event));
+  select_test_replace(options, initial, 3);
+  event.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_signal_int_get(value) == 1 && !sz_view_select_open(select));
+  sz_view_handle_key(root, "End", "", 0);
+  select_test_replace(options, shorter, 1);
+  /* Focus transfer cannot commit an index from the old list. */
+  sz_view_focus(root, field);
+  assert(sz_signal_int_get(value) == 1 && !sz_view_select_open(select));
+  assert(!strcmp(sz_view_select_text(select), ""));
+  sz_view_focus(root, select);
+  sz_view_handle_key(root, "Home", "", 0);
+  sz_view_handle_key(root, "Enter", "", 0);
+  assert(sz_signal_int_get(value) == 0 && !strcmp(sz_view_select_text(select), "Only"));
+  select_test_replace(options, initial, 3);
+  sz_view_handle_key(root, "B", "", 0);
+  assert(sz_view_select_active(select) == 1);
+  sz_signal_list_set(options, NULL);
+  sz_view_handle_key(root, "Enter", "", 0);
+  assert(sz_view_select_count(select) == 0 && !sz_view_select_open(select));
+  assert(!sz_view_tab_stop(select) && !sz_view_is_tap_target(select));
+  assert(sz_signal_int_get(value) == 0);
+  for (int i = 0; i < 30; i++) {
+    select_test_replace(options, replacement, 4);
+    select_test_replace(options, initial, 3);
+    assert(sz_ui_pump_sync(session));
+    assert(sz_view_select_count(select) == 3 && !strcmp(sz_view_select_text(select), "Alpha"));
+    sz_view_handle_key(root, "B", "", 0);
+    assert(sz_view_select_active(select) == 1);
+  }
+  assert(sz_view_focused(root) == select);
+  assert(!strcmp(sz_signal_str_get(name), "Retained"));
+  sz_ui_unmount(session); sz_view_free(root);
+  sz_signal_list_free(options); sz_signal_int_free(value); sz_signal_str_free(name);
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(bytes == end_bytes && count == end_count);
+}
+
+static void test_select_pointer_identity(void) {
+  const char *labels[100];
+  for (int i = 0; i < 100; i++) labels[i] = "Same";
+  SzSignalInt *value = sz_signal_int(0);
+  SzSignalList *options = select_test_options(labels, 100);
+  SzView *root = sz_view_select(value, "Items", options);
+  SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 280, .height = 360, .scale = 1.f};
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  sz_view_focus(root, root);
+  sz_view_handle_key(root, "Home", "", 0);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  SzView *option = sz_view_select_active_option(root);
+  uintptr_t first = sz_view_id(option);
+  sz_signal_int_set(value, 99);
+  assert(!sz_ui_session_activate_view(session, option));
+  assert(sz_signal_int_get(value) == 99 && !sz_view_find(root, first));
+  SzRect fr = sz_view_control_frame(sz_view_select_active_option(root));
+  SzInputEvent event = {.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN,
+    .x = fr.x + 3, .y = fr.y + fr.h * .5f};
+  assert(sz_ui_inject_sync(session, &event));
+  sz_signal_int_set(value, 0);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  event.pointer_phase = SZ_POINTER_UP;
+  sz_ui_inject_sync(session, &event);
+  assert(sz_signal_int_get(value) == 0);
+  sz_view_handle_key(root, "End", "", 0);
+  sz_signal_int_set(value, 42);
+  sz_view_focus(root, NULL);
+  assert(sz_signal_int_get(value) == 42);
+  sz_ui_unmount(session);
+  sz_view_free(root); sz_signal_list_free(options); sz_signal_int_free(value);
+}
+
+static void test_select_scope_and_journal(void) {
+  const char *choices[] = {"Alpha", "Alpine", "Beta", "Bravo", "中文"};
+  SzSignalInt *value = sz_signal_int(0), *dialog = sz_signal_int(0);
+  SzSignalStr *text = sz_signal_str("Keep this text");
+  SzSignalList *options = select_test_options(choices, 5);
+  SzView *select = sz_view_select(value, "Language", options);
+  SzView *field = sz_view_text_field(text, "Name");
+  SzView *column = sz_view_column();
+  sz_view_add_child(column, select); sz_view_add_child(column, field);
+  SzView *dialog_select = sz_view_select(value, "Dialog choice", options);
+  SzView *card = sz_view_card(dialog_select);
+  SzView *overlay = sz_view_overlay(dialog, "Settings", card);
+  SzView *root = sz_view_stack();
+  sz_view_add_child(root, column); sz_view_add_child(root, overlay);
+  SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 280, .height = 360, .scale = 1.0};
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session); sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_view_focus(root, select);
+  sz_view_handle_key(root, "End", "", 0);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  assert(sz_view_input_scope(root) == select);
+  SzView *fields[8];
+  assert(sz_view_collect_text_fields(root, fields, 8) == 0);
+  assert(sz_view_activate(root, field, 10, 60));
+  assert(!sz_view_select_open(select) && sz_signal_int_get(value) == 0);
+  assert(!strcmp(sz_signal_str_get(text), "Keep this text"));
+  assert(sz_view_focused(root) == select);
+  sz_view_handle_key(root, "End", "", 0);
+  sz_view_focus(root, field);
+  assert(sz_signal_int_get(value) == 4 && !sz_view_select_open(select));
+  sz_signal_int_set(dialog, 1);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  assert(sz_view_focused(root) == dialog_select);
+  sz_view_handle_key(root, "Home", "", 0);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  SzRect popup = sz_view_frame(sz_view_select_popup(dialog_select));
+  assert(popup.y >= 0 && popup.y + popup.h <= 360);
+  assert(sz_view_input_scope(root) == dialog_select);
+  sz_view_handle_key(root, "Escape", "", 0);
+  assert(sz_signal_int_get(dialog) == 1 && !sz_view_select_open(dialog_select));
+  sz_view_handle_key(root, "Escape", "", 0);
+  assert(sz_signal_int_get(dialog) == 0);
+  sz_view_layout(root, 280, 360, sz_theme_default());
+  sz_view_focus(root, select);
+  const char *record = "/tmp/scuzz-select-time.json";
+  remove(record);
+  assert(sz_ui_session_set_record(session, record));
+  SzInputEvent key = {.kind = SZ_INPUT_KEY, .key = "B"};
+  assert(sz_ui_session_live_inject(session, &key));
+  assert(sz_view_select_active(select) == 2 && sz_signal_int_get(value) == 4);
+  sz_ui_session_input_time(session, 1001);
+  key.key = "r";
+  assert(sz_ui_session_live_inject(session, &key));
+  assert(sz_view_select_active(select) == 2);
+  key.key = "Enter";
+  assert(sz_ui_session_live_inject(session, &key));
+  assert(sz_signal_int_get(value) == 2);
+  char *body = slurp_cstr(record);
+  assert(strstr(body, "\"op\":\"inputTime\"") && strstr(body, "\"key\":\"r\""));
+  sz_ui_unmount(session);
+  sz_signal_int_free(dialog); sz_signal_str_free(text); sz_signal_int_free(value);
+  value = sz_signal_int(4);
+  root = sz_view_select(value, "Language", options);
+  session = sz_ui_mount(&cfg, root);
+  assert(session); sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_view_focus(root, root);
+  sz_ui_script_run_file(session, record);
+  assert(sz_signal_int_get(value) == 2 && !sz_view_select_open(root));
+  free(body); remove(record);
+  sz_ui_unmount(session); sz_signal_list_free(options); sz_signal_int_free(value);
+}
+
+static void test_fallback_text_layout(void) {
+  assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
+  const char *source[] = {"क्षि", "ปู่", "中文漢字"};
+  for (int i = 0; i < 3; i++) {
+    SzText *span = test_text_span(source[i]);
+    SzText *large = sz_text_size(32, span);
+    SzText *styled = sz_text_italic(large);
+    TextProbe probe = {0};
+    SzTextMetrics metrics = sz_text_layout(styled, 14, 1, 6, 400, 0, 0, text_probe, &probe);
+    assert(metrics.lines == 1 && probe.count == 1);
+    float ascent, descent;
+    sk_font_span_metrics(sk_text_range(source[i], strlen(source[i])), 32, SK_TEXT_ITALIC, &ascent, &descent);
+    assert(probe.baseline[0] >= ascent && metrics.height >= probe.baseline[0] + descent);
+    SzView *plain = sz_view_text(source[i]);
+    SzView *root = sz_view_font_size(32, plain);
+    sz_view_layout(root, 400, 100, sz_theme_default());
+    SzRect frame = sz_view_frame(plain);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(400, 100);
+    assert(sz_view_paint(root, sk_surface_get_canvas(surface), 400, 100, sz_theme_default()));
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    int ink = 0;
+    for (int y = 0; y < 100; y++) for (int x = 0; x < 400; x++) {
+      const uint8_t *pixel = pixels + (y * 400 + x) * 4;
+      if (pixel[0] < 100 && pixel[1] < 100 && pixel[2] < 100) {
+        ink++;
+        assert(y >= frame.y && y < ceilf(frame.y + frame.h));
+      }
+    }
+    assert(ink > 20);
+    sk_surface_unref(surface);
+    sz_view_free(root);
+    sz_release(styled); sz_release(large); sz_release(span);
+  }
+  SzText *span = test_text_span("क्षिक्षिक्षि");
+  TextProbe probe = {0};
+  SzTextMetrics metrics = sz_text_layout(span, 14, 1, 6, 14.f, 0, 0, text_probe, &probe);
+  assert(metrics.lines == 3 && probe.count == 3);
+  for (int i = 0; i < 3; i++) assert(probe.starts[i] == i * 12 && probe.ends[i] == (i + 1) * 12);
+  sz_release(span);
+  SzSignalStr *value = sz_signal_str("中文");
+  SzView *field = sz_view_text_field(value, "Name");
+  sz_view_layout(field, 320, 100, sz_theme_default());
+  sz_view_focus(field, field);
+  sz_view_set_text_field_caret(field, 0);
+  SzRect start = sz_view_caret_rect(field, sz_theme_default());
+  sz_view_set_text_field_caret(field, 6);
+  SzRect end = sz_view_caret_rect(field, sz_theme_default());
+  assert(fabsf(end.x - start.x - 28.f) < .01f);
+  sz_view_activate(field, field, start.x + 14.f, start.y + 2);
+  assert(sz_view_text_field_caret(field) == 3);
+  sz_view_set_text_field_sel(field, 0, 6);
+  sz_view_handle_compose(field, "क्षि");
+  assert(!strcmp(sz_signal_str_get(value), "中文"));
+  sz_view_handle_compose(field, "");
+  assert(!strcmp(sz_signal_str_get(value), "क्षि"));
+  sz_view_free(field); sz_signal_str_free(value);
+}
+
+static void test_styled_text_values(void) {
+  size_t before_bytes, before_count, bytes, count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  SzText *a = test_text_span("Scu");
+  SzText *b = test_text_span("zz λ🙂");
+  SzText *bold = sz_text_bold(a);
+  SzText *colored = sz_text_color(0xffbb2200, b);
+  SzText *joined = test_text_pair(bold, colored);
+  assert(a->runs[0].style == 0 && b->runs[0].colored == 0);
+  assert(joined->runs[0].style == SK_TEXT_BOLD && joined->runs[1].colored);
+  SzString *plain = sz_text_plain(joined);
+  assert(!strcmp(sz_string_cstr(plain), "Scuzz λ🙂"));
+  SzText *italic = sz_text_italic(joined);
+  SzText *underlined = sz_text_underline(italic);
+  SzText *mono = sz_text_monospace(underlined);
+  assert(mono->runs[0].style == (SK_TEXT_BOLD | SK_TEXT_ITALIC | SK_TEXT_MONO | SK_TEXT_UNDERLINE));
+  sz_release(plain); sz_release(a); sz_release(b); sz_release(bold); sz_release(colored);
+  sz_release(italic); sz_release(underlined); sz_release(mono); sz_release(joined);
+  SzText *piece = test_text_span("x");
+  SzList *pieces = NULL;
+  for (int i = 0; i < 512; i++) {
+    SzList *next = sz_list_cons(piece, pieces);
+    sz_release(pieces); pieces = next;
+  }
+  SzText *many = sz_text_concat(pieces);
+  sz_release(pieces); sz_release(piece);
+  TextProbe probe = {0};
+  SzTextMetrics many_metrics = sz_text_layout(many, 14, 1, 6, 0, 0, 0, text_probe, &probe);
+  assert(many->length == 512 && probe.count == 512 && many_metrics.lines == 1);
+  sz_release(many);
+  SzText *empty = sz_text_concat(NULL);
+  SzTextMetrics metrics = sz_text_layout(empty, 14, 1, 6, 100, 0, 0, NULL, NULL);
+  assert(metrics.lines == 1 && metrics.width == 0.f && metrics.height == 20.f);
+  sz_release(empty);
+  empty = test_text_span("");
+  SzText *large_empty = sz_text_size(24, empty);
+  TextProbe empty_probe = {0};
+  metrics = sz_text_layout(large_empty, 14, 1, 6, 100, 0, 0, text_probe, &empty_probe);
+  assert(metrics.lines == 1 && empty_probe.count == 1 && empty_probe.fonts[0] == 24.f);
+  sz_release(empty); sz_release(large_empty);
+  sz_alloc_stats(&bytes, &count);
+  assert(bytes == before_bytes && count == before_count);
+}
+
+static void test_font_change_joining(void) {
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
+  const char *first[] = {"م", "م", "م", "ل", "د", "م ", "مَ", "م‌", "د‍", "م\n", "م", "م", "Latin\nم", "\xe2\x80\xadم", "\xe2\x80\xadم", ("\xe2\x80\xae" "Aم"), "م", "م", "\xe2\x80\xadمع", ("\xe2\x80\xad" "fiم"), "م", "م", "م", "م"};
+  const char *last[] = {"ر", "ر", "ر", "ا", "ر", "ر", "ر", "ر", "ر", "ر", "ر", "م", "ر", "ر\xe2\x80\xac", "م\xe2\x80\xac", "ر\xe2\x80\xac", "\xe2\x80\xaeر\xe2\x80\xac", "\xe2\x81\xa7ر\xe2\x81\xa9", "م\xe2\x80\xac", "م\xe2\x80\xac", "مممممممممر", "مممممممممد", "\xe2\x81\xa7\xe2\x81\xa9ر", "\xe2\x81\xa7\xe2\x81\xa9ر"};
+  const char *first_form[] = {"ﻣ", "ﻣ", "ﻣ", "ﻟ", "ﺩ", "ﻡ ", "ﻣَ", "ﻡ", "ﺩ", "ﻡ\n", "ﻡ", "ﻣ", "Latin\nﻣ", "ﻡ", "ﻢ", ("\xe2\x80\xae" "Aﻣ\xe2\x80\xac"), "ﻡ", "ﻡ", "\xe2\x80\xadﻢﻌ\xe2\x80\xac", "fiﻢ", "ﻡ...", "ﻣ", "ﻡ", "ﻡ"};
+  const char *last_form[] = {"ﺮ", "ﺮ", "ﺮ", "ﺎ", "ﺭ", "ﺭ", "ﺮ", "ﺭ", "ﺮ", "ﺭ", "ﺭ", "ﻤ", "ﺮ", "ﺭ", "ﻣ", "ﺮ", "ﺭ", "ﺭ", "ﻣ", "ﻣ", NULL, "ﻢ...", "ﺭ", "ﺭ"};
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  for (int i = 0; i < 24; i++) {
+    SzText *a = test_text_span(first[i]), *b = test_text_span(last[i]);
+    int style = i == 1 ? SK_TEXT_ITALIC : i == 2 || i == 22 ? 0 : SK_TEXT_BOLD;
+    float size = i == 2 || i == 11 ? 32 : 24;
+    SzText *styled = style == SK_TEXT_ITALIC ? sz_text_italic(a) : sz_text_bold(a);
+    SzText *sized = sz_text_size((int)size, style ? styled : a);
+    SzText *middle = i == 11 ? sz_text_italic(b) : sz_text_color(theme.foreground, b);
+    SzText *text = test_text_pair(sized, middle);
+    if (i == 11) {
+      SzText *third = test_text_span("ر"), *small = sz_text_size(18, third);
+      SzText *joined = test_text_pair(text, small);
+      sz_release(text); text = joined;
+      sz_release(third); sz_release(small);
+    }
+    int width = i == 10 ? (int)ceilf(sk_font_measure_span(sk_text_range("ﻡ", strlen("ﻡ")), 24, style)) + 5 : 400;
+    int ellipsis = i == 20 || i == 21;
+    if (ellipsis) {
+      float reference = sk_font_measure_span(sk_text_range(first_form[i], strlen(first_form[i])), size, style);
+      if (last_form[i]) reference += sk_font_measure_span(sk_text_range(last_form[i], strlen(last_form[i])), 24, 0);
+      width = (int)ceilf(reference) + 4;
+    }
+    TextProbe probe = {0};
+    SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width - 4, ellipsis, ellipsis, text_probe, &probe);
+    if (i == 15) {
+      SzTextMetrics fit = sz_text_layout(text, 24, 1, 6, nextafterf(metrics.width, 0.f), 0, 0, NULL, NULL);
+      SzTextMetrics narrow = sz_text_layout(text, 24, 1, 6, metrics.width - 1.f, 0, 0, NULL, NULL);
+      assert(fit.lines == 1 && narrow.lines > 1);
+    }
+    int two_lines = i == 9 || i == 10 || i == 12;
+    assert(metrics.lines == (two_lines ? 2 : 1));
+    if (ellipsis) {
+      assert(metrics.truncated && probe.dots == 1);
+      assert(probe.ends[probe.count - 1] == (i == 20 ? 2 : 4));
+    }
+    SzView *label = sz_view_rich_text(text);
+    SzView *root = ellipsis ? sz_view_ellipsis(sz_view_max_lines(1, label)) : label;
+    SkSurface *actual = sk_surface_make_raster_n32_premul(width, 128);
+    SkSurface *expected = sk_surface_make_raster_n32_premul(width, 128);
+    assert(actual && expected);
+    assert(sz_view_paint(root, sk_surface_get_canvas(actual), width, 128, &theme));
+    assert(!strcmp(sz_view_a11y_label(label), sz_text_source(text)));
+    SkCanvas *canvas = sk_surface_get_canvas(expected);
+    sk_canvas_clear(canvas, sk_color_argb(0));
+    SkPaint *paint = sk_paint_new();
+    sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+    const char *pieces[] = {first_form[i], last_form[i], "ﺮ"};
+    float sizes[] = {size, 24, 18};
+    int flags[] = {style, i == 11 ? SK_TEXT_ITALIC : 0, 0};
+    float reference_width = 0, baseline = probe.baseline[probe.count - 1];
+    if (two_lines) {
+      const char *prefix = i == 12 ? "Latin" : "ﻡ";
+      sk_paint_set_text_size(paint, size);
+      SkTextRange range = sk_text_range(prefix, strlen(prefix));
+      sk_canvas_draw_span(canvas, range, 2, probe.baseline[0], paint, style);
+      reference_width = sk_font_measure_span(range, size, style);
+      pieces[0] = i == 12 ? "ﻣ" : NULL;
+    }
+    float x = 2, positions[3] = {0};
+    int parts = i == 11 ? 3 : 2;
+    for (int j = parts - 1; j >= 0; j--) {
+      if (!pieces[j]) continue;
+      int part = i == 13 || i == 14 || i == 18 || i == 19 ? parts - 1 - j : j;
+      positions[part] = x;
+      x += sk_font_measure_span(sk_text_range(pieces[part], strlen(pieces[part])), sizes[part], flags[part]);
+    }
+    for (int j = 0; j < parts; j++) {
+      if (!pieces[j]) continue;
+      sk_paint_set_text_size(paint, sizes[j]);
+      sk_canvas_draw_span(canvas, sk_text_range(pieces[j], strlen(pieces[j])), positions[j], baseline, paint, flags[j]);
+    }
+    if (fabsf(metrics.width - fmaxf(reference_width, x - 2)) >= .01f)
+      fprintf(stderr, "joining width case %d: %f != %f\n", i, metrics.width, fmaxf(reference_width, x - 2));
+    assert(fabsf(metrics.width - fmaxf(reference_width, x - 2)) < .01f);
+    if (memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), (size_t)width * 128 * 4))
+      fprintf(stderr, "joining pixel case %d\n", i);
+    assert(!memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), (size_t)width * 128 * 4));
+    sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+    sz_view_free(root); sz_release(a); sz_release(b); sz_release(styled); sz_release(sized); sz_release(middle); sz_release(text);
+  }
+}
+
+static void test_font_change_direction(void) {
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
+  const char *first[] = {"אבג", "אבג", "אבג", "אב AB", "ab אב", "אב", "A\nאב", "אבגדהוז אב"};
+  const char *second[] = {"דהו", "דהו", "דהו", " CD", " גד", "גדהוזחטיכלמנסע", "גדהו", "גדהו"};
+  int first_style[] = {0, SK_TEXT_BOLD, SK_TEXT_ITALIC, 0, 0, 0, 0, 0};
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  for (int i = 0; i < 8; i++) {
+    SzText *a = test_text_span(first[i]), *b = test_text_span(second[i]);
+    SzText *styled = first_style[i] == SK_TEXT_BOLD ? sz_text_bold(a) :
+      first_style[i] == SK_TEXT_ITALIC ? sz_text_italic(a) : sz_text_size(32, a);
+    SzText *text = test_text_pair(styled, b);
+    TextProbe probe = {0};
+    int width = i == 5 ? 120 : 400;
+    if (i == 7) width = (int)ceilf(sk_font_measure_span(sk_text_range("אבגדהוז", strlen("אבגדהוז")), 32, 0)) + 5;
+    SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width - 4, i == 5 ? 1 : 0,
+      i == 5, text_probe, &probe);
+    assert(metrics.lines == (i >= 6 ? 2 : 1));
+    assert(probe.count >= 2 && metrics.width <= width - 4);
+    for (int j = 1; j < probe.count; j++) assert(probe.starts[j] >= probe.ends[j - 1]);
+    if (i < 3) assert(probe.x[0] > probe.x[1]);
+    if (i == 5) assert(probe.dots == 1 && fabsf(probe.x[probe.count - 1]) < .01f);
+    SzView *label = sz_view_rich_text(text);
+    SzView *root = i == 5 ? sz_view_ellipsis(sz_view_max_lines(1, label)) : label;
+    SkSurface *actual = sk_surface_make_raster_n32_premul(width, 128);
+    SkSurface *expected = sk_surface_make_raster_n32_premul(width, 128);
+    assert(actual && expected);
+    assert(sz_view_paint(root, sk_surface_get_canvas(actual), width, 128, &theme));
+    assert(!strcmp(sz_view_a11y_label(label), sz_text_source(text)));
+    SkCanvas *canvas = sk_surface_get_canvas(expected);
+    sk_canvas_clear(canvas, sk_color_argb(0));
+    SkPaint *paint = sk_paint_new();
+    sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+    const char *pieces[3] = {second[i], first[i], NULL};
+    int sizes[3] = {24, first_style[i] ? 24 : 32, 0};
+    int flags[3] = {0, first_style[i], 0};
+    int rtl[3] = {1, 1, 0};
+    char shortened[128];
+    float reference_width = 0.f;
+    if (i == 3) {
+      pieces[0] = "AB"; pieces[1] = " CD"; pieces[2] = "אב ";
+      sizes[0] = 32; sizes[1] = 24; sizes[2] = 32;
+      rtl[0] = 0; rtl[1] = 0; rtl[2] = 1;
+    } else if (i == 4) {
+      pieces[0] = "ab "; pieces[1] = " גד"; pieces[2] = "אב";
+      sizes[0] = 32; sizes[1] = 24; sizes[2] = 32;
+      rtl[0] = 0; rtl[1] = 1; rtl[2] = 1;
+    } else if (i == 5) {
+      int end = probe.ends[probe.count - 1];
+      assert(end > (int)strlen(first[i]));
+      snprintf(shortened, sizeof shortened, "%.*s...", end - (int)strlen(first[i]), second[i]);
+      pieces[0] = shortened;
+    } else if (i >= 6) {
+      pieces[1] = "אב";
+      sk_paint_set_text_size(paint, 32);
+      const char *prefix = i == 6 ? "A" : "אבגדהוז";
+      sk_canvas_draw_span(canvas, sk_text_range(prefix, strlen(prefix)), 2, probe.baseline[0], paint, 0);
+      reference_width = sk_font_measure_span(sk_text_range(prefix, strlen(prefix)), 32, 0);
+    }
+    float x = 2, baseline = probe.baseline[i >= 6 ? probe.count - 1 : 0];
+    for (int j = 0; j < 3 && pieces[j]; j++) {
+      char marked[256];
+      snprintf(marked, sizeof marked, "%s%s", rtl[j] ? "\xe2\x80\x8f" : "\xe2\x80\x8e", pieces[j]);
+      SkTextRange range = sk_text_range(marked, strlen(marked));
+      sk_paint_set_text_size(paint, sizes[j]);
+      sk_canvas_draw_span(canvas, range, x, baseline, paint, flags[j]);
+      x += sk_font_measure_span(range, sizes[j], flags[j]);
+    }
+    assert(fabsf(fmaxf(x - 2, reference_width) - metrics.width) < .01f);
+    if (memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), (size_t)width * 128 * 4))
+      fprintf(stderr, "font direction pixel case %d\n", i);
+    assert(!memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), (size_t)width * 128 * 4));
+    sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+    sz_view_free(root); sz_release(a); sz_release(b); sz_release(styled); sz_release(text);
+  }
+}
+
+static void test_wrapped_paragraph_direction(void) {
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
+  SzText *prefix = test_text_span("אבגדהוז ");
+  SzText *latin = test_text_span("AB ");
+  SzText *hebrew = test_text_span("אב");
+  SzText *colored = sz_text_color(0xff165ca0, latin);
+  SzText *tail = test_text_pair(colored, hebrew);
+  SzText *text = test_text_pair(prefix, tail);
+  float width = ceilf(sk_font_measure_span(sk_text_range("אבגדהוז", strlen("אבגדהוז")), 24, 0)) + 1.f;
+  TextProbe probe = {0};
+  SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, width, 0, 0, text_probe, &probe);
+  assert(metrics.lines == 2 && probe.count == 3);
+  assert(probe.baseline[1] == probe.baseline[2]);
+  /* The Latin run follows the Hebrew run in the RTL paragraph. */
+  assert(probe.x[1] > probe.x[2]);
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  SzView *view = sz_view_rich_text(text);
+  width += 4.f;
+  SkSurface *actual = sk_surface_make_raster_n32_premul((int)width, 96);
+  SkSurface *expected = sk_surface_make_raster_n32_premul((int)width, 96);
+  assert(actual && expected);
+  assert(sz_view_paint(view, sk_surface_get_canvas(actual), width, 96, &theme));
+  SkCanvas *canvas = sk_surface_get_canvas(expected);
+  sk_canvas_clear(canvas, sk_color_argb(0));
+  SkPaint *paint = sk_paint_new();
+  sk_paint_set_text_size(paint, 24); sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+  /* The direction mark gives the independent line the paragraph direction. */
+  const char *reference = "\xe2\x80\x8f" "AB אב";
+  sk_canvas_draw_span(canvas, sk_text_range(reference, strlen(reference)), 2, probe.baseline[1], paint, 0);
+  const uint8_t *a = sk_surface_peek_pixels(actual, NULL);
+  const uint8_t *b = sk_surface_peek_pixels(expected, NULL);
+  assert(!memcmp(a + (int)width * 30 * 4, b + (int)width * 30 * 4, (size_t)(int)width * 66 * 4));
+  sz_view_free(view);
+  view = sz_view_text(sz_text_source(text));
+  assert(sz_view_paint(view, sk_surface_get_canvas(actual), width, 96, &theme));
+  sk_canvas_clear(canvas, sk_color_argb(0));
+  sk_canvas_draw_span(canvas, sk_text_range(reference, strlen(reference)), 2, 56, paint, 0);
+  a = sk_surface_peek_pixels(actual, NULL);
+  b = sk_surface_peek_pixels(expected, NULL);
+  assert(!memcmp(a + (int)width * 30 * 4, b + (int)width * 30 * 4, (size_t)(int)width * 66 * 4));
+  sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+  sz_view_free(view);
+  sz_release(prefix); sz_release(latin); sz_release(hebrew);
+  sz_release(colored); sz_release(tail); sz_release(text);
+}
+
+static void test_rich_paragraph_ellipsis(void) {
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
+  const char *sources[] = {"שלום שלום שלום שלום", "שלום ABCDEF אב עוד",
+    "WWWWWW אבגד AB tail", "مرحبا بالعالم مرحبا", "AVAVAVAVAVAVAVAVAV"};
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  for (int style = 0; style < 2; style++) for (int i = 0; i < 5; i++) {
+    const char *source = sources[i];
+    SzText *first = test_text_span(source);
+    SzText *text = style ? sz_text_underline(first) : sz_text_color(theme.foreground, first);
+    sz_release(first);
+    TextProbe probe = {0};
+    SzTextMetrics metrics = sz_text_layout(text, 24, 1, 6, 86, 1, 1, text_probe, &probe);
+    assert(metrics.truncated && probe.dots == 1 && probe.count > 1);
+    if (i < 2 || i == 3) assert(fabsf(probe.x[probe.count - 1]) < .01f);
+    int end = probe.ends[probe.count - 1];
+    char reference[256];
+    const char *mark = i < 2 || i == 3 ? "\xe2\x80\x8f" : "\xe2\x80\x8e";
+    snprintf(reference, sizeof reference, "%s%.*s...", mark, end, source);
+    int flags = style ? SK_TEXT_UNDERLINE : 0;
+    float expected_width = sk_font_measure_span(sk_text_range(reference, strlen(reference)), 24, flags);
+    assert(fabsf(metrics.width - expected_width) < .01f && metrics.width <= 86);
+    SzView *label = sz_view_rich_text(text);
+    SzView *root = sz_view_ellipsis(sz_view_max_lines(1, label));
+    SkSurface *actual = sk_surface_make_raster_n32_premul(90, 64);
+    SkSurface *expected = sk_surface_make_raster_n32_premul(90, 64);
+    assert(actual && expected);
+    assert(sz_view_paint(root, sk_surface_get_canvas(actual), 90, 64, &theme));
+    assert(!strcmp(sz_view_a11y_label(label), source));
+    SkCanvas *canvas = sk_surface_get_canvas(expected);
+    sk_canvas_clear(canvas, sk_color_argb(0));
+    SkPaint *paint = sk_paint_new();
+    sk_paint_set_text_size(paint, 24); sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+    sk_canvas_draw_span(canvas, sk_text_range(reference, strlen(reference)), 2, probe.baseline[0], paint, flags);
+    assert(!memcmp(sk_surface_peek_pixels(actual, NULL), sk_surface_peek_pixels(expected, NULL), 90 * 64 * 4));
+    sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+    sz_view_free(root); sz_release(text);
+  }
+}
+
+static void test_plain_paragraph_direction(void) {
+  assert(sk_font_measure_string("i", 24) < sk_font_measure_string("W", 24));
+  const char *prefix[] = {"אבגדהוזחטיכלמנסע ", "אבגדהוזחטיכלמנסע\n",
+    ("\xe2\x80\xab" "AAAAAAAAAAAAAAAA "), "AAAAAAAAAAAAAAAA ",
+    "AAAAAAAAAAAAAAAA \xe2\x81\xa7", "אבגדהוזחטיכלמנסע ", "AAAAAAAAAAAAAAAA ", "אבגדהוזחטיכלמנסע "};
+  const char *line[] = {"AB אב", "AB אב", "AB אב", "אב AB", "AB אב", "12: AB אב!", "12 אב AB!", "AB אב"};
+  const char *suffix[] = {"", "", "\xe2\x80\xac", "", "\xe2\x81\xa9", "", "", "\nmore"};
+  const int rtl[] = {1, 0, 1, 0, 1, 1, 0, 1};
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0; theme.font_px = 24; theme.foreground = 0xff165ca0;
+  for (int i = 0; i < 8; i++) {
+    char source[256], reference[128];
+    snprintf(source, sizeof source, "%s%s%s", prefix[i], line[i], suffix[i]);
+    snprintf(reference, sizeof reference, "%s%s%s", rtl[i] ? "\xe2\x80\x8f" : "\xe2\x80\x8e", line[i], i == 7 ? "..." : "");
+    int width = (int)ceilf(sk_font_measure_span(sk_text_range(prefix[i], strlen(prefix[i])), 24, 0)) + 4;
+    SzView *text = sz_view_text(source);
+    SzView *root = i == 7 ? sz_view_ellipsis(sz_view_max_lines(2, text)) : text;
+    SkSurface *actual = sk_surface_make_raster_n32_premul(width, 96);
+    SkSurface *expected = sk_surface_make_raster_n32_premul(width, 96);
+    assert(actual && expected);
+    assert(sz_view_paint(root, sk_surface_get_canvas(actual), width, 96, &theme));
+    assert(fabsf(sz_view_frame(root).h - 60.f) < .001f);
+    assert(!strcmp(sz_view_a11y_label(text), source));
+    SkCanvas *canvas = sk_surface_get_canvas(expected);
+    sk_canvas_clear(canvas, sk_color_argb(0));
+    SkPaint *paint = sk_paint_new();
+    sk_paint_set_text_size(paint, 24); sk_paint_set_color(paint, sk_color_argb(theme.foreground));
+    sk_canvas_draw_span(canvas, sk_text_range(reference, strlen(reference)), 2, 56, paint, 0);
+    const uint8_t *a = sk_surface_peek_pixels(actual, NULL), *b = sk_surface_peek_pixels(expected, NULL);
+    assert(!memcmp(a + width * 30 * 4, b + width * 30 * 4, (size_t)width * 66 * 4));
+    sk_paint_delete(paint); sk_surface_unref(actual); sk_surface_unref(expected);
+    sz_view_free(root);
+  }
+}
+
+static void test_styled_shaping_context(void) {
+  size_t before_bytes, before_count, end_bytes, end_count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  const char *left[] = {"A", "f", "ل", "e", "क्"};
+  const char *right[] = {"V", "i", "ا", "́", "षि"};
+  SzText *(*styles[])(const SzText *) = {NULL, sz_text_underline, sz_text_bold, sz_text_italic, sz_text_monospace};
+  for (int style = 0; style < 5; style++) for (int i = 0; i < 5; i++) {
+    SzText *a = test_text_span(left[i]), *b = test_text_span(right[i]);
+    SzText *colored = sz_text_color(0xff165ca0, b);
+    SzText *split = test_text_pair(a, colored);
+    SzText *plain = test_text_span(sz_text_source(split));
+    if (styles[style]) {
+      SzText *next_split = styles[style](split), *next_plain = styles[style](plain);
+      sz_release(split); sz_release(plain);
+      split = next_split; plain = next_plain;
+    }
+    SzTextMetrics whole = sz_text_layout(plain, 32, 1, 6, 0, 0, 0, NULL, NULL);
+    SzTextMetrics parts = sz_text_layout(split, 32, 1, 6, 0, 0, 0, NULL, NULL);
+    assert(fabsf(whole.width - parts.width) < .01f);
+    assert(fabsf(whole.height - parts.height) < .01f);
+    parts = sz_text_layout(split, 32, 1, 6, whole.width + .01f, 0, 0, NULL, NULL);
+    assert(parts.lines == 1);
+    SzTheme theme = *sz_theme_default();
+    theme.background = 0; theme.font_px = 32; theme.foreground = 0xff165ca0;
+    SzView *plain_view = sz_view_rich_text(plain), *split_view = sz_view_rich_text(split);
+    int gpu = sk_gpu_available();
+    SkSurface *whole_surface = gpu ? sk_surface_make_gpu_n32_premul(256, 96) : sk_surface_make_raster_n32_premul(256, 96);
+    SkSurface *split_surface = gpu ? sk_surface_make_gpu_n32_premul(256, 96) : sk_surface_make_raster_n32_premul(256, 96);
+    assert(whole_surface && split_surface);
+    assert(sz_view_paint(plain_view, sk_surface_get_canvas(whole_surface), 256, 96, &theme));
+    assert(sz_view_paint(split_view, sk_surface_get_canvas(split_surface), 256, 96, &theme));
+    const uint8_t *whole_pixels = sk_surface_peek_pixels(whole_surface, NULL);
+    const uint8_t *split_pixels = sk_surface_peek_pixels(split_surface, NULL);
+    int ink = 0;
+    for (int p = 0; p < 256 * 96; p++) {
+      if (whole_pixels[p * 4 + 3] != split_pixels[p * 4 + 3]) fprintf(stderr, "style %d case %d pixel %d,%d alpha %u != %u\n", style, i, p % 256, p / 256, whole_pixels[p * 4 + 3], split_pixels[p * 4 + 3]);
+      assert(whole_pixels[p * 4 + 3] == split_pixels[p * 4 + 3]);
+      ink += whole_pixels[p * 4 + 3] > 0;
+    }
+    assert(ink > 0);
+    assert(!memcmp(whole_pixels, split_pixels, 256 * 96 * 4));
+    if (i != 3) {
+      theme.foreground = 0xffbd3a2a;
+      assert(sz_view_paint(split_view, sk_surface_get_canvas(split_surface), 256, 96, &theme));
+      split_pixels = sk_surface_peek_pixels(split_surface, NULL);
+      int red = 0, blue = 0;
+      for (int p = 0; p < 256 * 96; p++) {
+        const uint8_t *pixel = split_pixels + p * 4;
+        red += pixel[0] > pixel[1] && pixel[0] > pixel[2];
+        blue += pixel[2] > pixel[0] && pixel[2] > pixel[1];
+      }
+      assert(red > 0 && blue > 0);
+    }
+    sk_surface_unref(whole_surface); sk_surface_unref(split_surface);
+    sz_view_free(plain_view); sz_view_free(split_view);
+    sz_release(a); sz_release(b); sz_release(colored); sz_release(split); sz_release(plain);
+  }
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(before_bytes == end_bytes && before_count == end_count);
+}
+
+static void test_styled_text_wrap(void) {
+  SzText *a = test_text_span("hel");
+  SzText *b = test_text_span("lo world");
+  SzText *bold = sz_text_bold(a);
+  SzText *text = test_text_pair(bold, b);
+  float width = sk_font_measure_span(sk_text_range("hel", 3), 14, SK_TEXT_BOLD) +
+                sk_font_measure_span(sk_text_range("lo", 2), 14, 0);
+  width = fmaxf(width, sk_font_measure_span(sk_text_range("world", 5), 14, 0)) + .01f;
+  TextProbe probe = {0};
+  SzTextMetrics metrics = sz_text_layout(text, 14, 1, 6, width, 0, 0, text_probe, &probe);
+  assert(metrics.lines == 2 && probe.count == 3);
+  assert(probe.starts[0] == 0 && probe.ends[0] == 3);
+  assert(probe.starts[1] == 3 && probe.ends[1] == 5);
+  assert(probe.starts[2] == 6 && probe.ends[2] == 11);
+  assert(probe.baseline[0] == probe.baseline[1]);
+  assert(probe.baseline[2] == probe.baseline[0] + 20.f);
+  assert(metrics.width <= width && metrics.height == 40.f);
+  probe = (TextProbe){0};
+  metrics = sz_text_layout(text, 14, 1, 6, width, 1, 1, text_probe, &probe);
+  assert(metrics.lines == 1 && metrics.truncated && probe.dots == 1);
+  assert(metrics.width <= width + .01f);
+  sz_release(a); sz_release(b); sz_release(bold); sz_release(text);
+
+  a = test_text_span("word ");
+  bold = sz_text_bold(a);
+  b = test_text_span("Z");
+  SzText *big = sz_text_size(40, b);
+  SzText *part = test_text_pair(bold, big);
+  SzText *tail = test_text_span(" tail");
+  text = test_text_pair(part, tail);
+  width = sk_font_measure_span(sk_text_range("word ", 5), 14, SK_TEXT_BOLD) +
+          sk_font_measure_span(sk_text_range("Z", 1), 40, 0) + sk_font_measure_span(sk_text_range(" ", 1), 14, 0) + .01f;
+  probe = (TextProbe){0};
+  metrics = sz_text_layout(text, 14, 1, 6, width, 1, 1, text_probe, &probe);
+  assert(probe.count == 2 && probe.dots == 1);
+  assert(probe.fonts[1] == probe.fonts[0] && probe.styles[1] == probe.styles[0]);
+  sz_release(a); sz_release(bold); sz_release(b); sz_release(big);
+  sz_release(part); sz_release(tail); sz_release(text);
+
+  text = test_text_span("λ🙂");
+  width = sk_font_measure_span(sk_text_range("λ", 2), 14, 0) + .01f;
+  probe = (TextProbe){0};
+  metrics = sz_text_layout(text, 14, 1, 6, width, 0, 0, text_probe, &probe);
+  assert(metrics.lines == 2 && probe.count == 2);
+  assert(probe.starts[0] == 0 && probe.ends[0] == 2);
+  assert(probe.starts[1] == 2 && probe.ends[1] == 6);
+  sz_release(text);
+}
+
+static void test_styled_text_sizes(void) {
+  SzText *a = test_text_span("Large");
+  SzText *large = sz_text_size(30, a);
+  SzText *b = test_text_span(" small");
+  SzText *text = test_text_pair(large, b);
+  TextProbe probe = {0};
+  SzTextMetrics metrics = sz_text_layout(text, 14, 1, 6, 1000, 0, 0, text_probe, &probe);
+  assert(metrics.lines == 1 && metrics.height >= 36.f && probe.count == 2);
+  assert(probe.fonts[0] == 30.f && probe.fonts[1] == 14.f);
+  assert(probe.baseline[0] == 32.f && probe.baseline[1] == 32.f);
+  float measured = sk_font_measure_span(sk_text_range("Large", 5), 30, 0) + sk_font_measure_span(sk_text_range(" small", 6), 14, 0);
+  assert(fabsf(metrics.width - measured) < .01f);
+  probe = (TextProbe){0};
+  metrics = sz_text_layout(text, 28, 2, 12, 2000, 0, 0, text_probe, &probe);
+  assert(metrics.height >= 72.f && probe.baseline[0] == 64.f);
+  measured = sk_font_measure_span(sk_text_range("Large", 5), 60, 0) + sk_font_measure_span(sk_text_range(" small", 6), 28, 0);
+  assert(fabsf(metrics.width - measured) < .01f);
+  SzView *view = sz_view_rich_text(text);
+  sz_release(text);
+  sz_view_layout(view, 1000, 100, sz_theme_default());
+  float ascent, descent;
+  sk_font_metrics(30, 0, &ascent, &descent);
+  assert(sz_view_frame(view).h >= 32.f + descent);
+  assert(!strcmp(sz_view_a11y_label(view), "Large small"));
+  sz_view_free(view);
+  sz_release(a); sz_release(b); sz_release(large);
+  a = test_text_span("One\n\nTwo\n");
+  text = sz_text_size(24, a);
+  metrics = sz_text_layout(text, 14, 1, 6, 1000, 0, 0, NULL, NULL);
+  assert(metrics.lines == 4 && metrics.height >= 120.f);
+  sz_release(a); sz_release(text);
+  a = test_text_span("gy");
+  large = sz_text_size(200, a);
+  text = sz_text_underline(large);
+  probe = (TextProbe){0};
+  metrics = sz_text_layout(text, 14, 1, 6, 1000, 0, 0, text_probe, &probe);
+  assert(probe.count == 1);
+  assert(metrics.height >= probe.baseline[0] + 32.5f);
+  sz_release(a); sz_release(large); sz_release(text);
+}
+
+static void record_text_action(SzView *view, void *env) {
+  sz_signal_int_set(env, sz_view_text_action_id(view));
+}
+
+static void test_inline_text_actions(void) {
+  SzText *prefix = test_text_span("Before ");
+  SzText *first = test_text_span("wrapped ");
+  SzText *second = test_text_span("large ");
+  SzText *large = sz_text_size(22, second);
+  SzText *joined = test_text_pair(first, large);
+  SzText *action = sz_text_action(-7, joined);
+  SzText *gap = test_text_span(" after ");
+  SzText *end = test_text_span("End");
+  SzText *last = sz_text_action(INT64_MAX, end);
+  SzText *a = test_text_pair(prefix, action);
+  SzText *b = test_text_pair(a, gap);
+  SzText *c = test_text_pair(b, action);
+  SzText *text = test_text_pair(c, last);
+  sz_release(a); sz_release(b); sz_release(c);
+  assert(text->actions == 3 && action->actions == 1);
+  assert(action->runs[0].action == 1 && action->runs[1].action == 1);
+  assert(text->runs[1].action == 1 && text->runs[4].action == 2);
+  SzSignalInt *picked = sz_signal_int(0);
+  SzView *root = sz_view_action_text(text, record_text_action, picked);
+  float wrap_width = sk_font_measure_span(sk_text_range("Before wrapped ", 15), sz_theme_default()->font_px, 0) + 4.f;
+  sz_view_layout(root, wrap_width, 800, sz_theme_default());
+  SzView *targets[4];
+  assert(sz_view_collect_tap_targets(root, targets, 4) == 3);
+  assert(targets[0] != targets[1] && sz_view_text_action_id(targets[2]) == INT64_MAX);
+  SzRect box = sz_view_control_frame(targets[0]);
+  SzRect bounds = sz_view_frame(targets[0]);
+  assert(box.h < bounds.h && box.x > bounds.x);
+  assert(sz_view_hit_test(root, box.x + box.w / 2, box.y + box.h / 2) == targets[0]);
+  assert(sz_view_handle_tap(root, box.x + box.w / 2, box.y + box.h / 2));
+  assert(sz_signal_int_get(picked) == -7);
+  assert(!sz_view_hit_test(root, bounds.x + 1, box.y + box.h / 2));
+  assert(!sz_view_handle_tap(root, bounds.x + 1, box.y + box.h / 2));
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == targets[1]);
+  assert(sz_view_focus_next(root, 0, 0) && sz_view_focused(root) == targets[2]);
+  sz_view_handle_key(root, "Space", "", 0);
+  assert(sz_signal_int_get(picked) == INT64_MAX);
+  assert(sz_view_focus_next(root, 1, 0) && sz_view_focused(root) == targets[1]);
+  sz_view_handle_key(root, "Enter", "", 0);
+  assert(sz_signal_int_get(picked) == -7);
+  sz_view_free(root);
+  root = sz_view_rich_text(text);
+  sz_view_layout(root, 160, 800, sz_theme_default());
+  assert(sz_view_collect_tap_targets(root, targets, 4) == 0);
+  sz_view_free(root);
+
+  SzText *long_word = test_text_span("abcdefghijklmno");
+  SzText *long_action = sz_text_action(INT64_MIN, long_word);
+  root = sz_view_ellipsis(sz_view_max_lines(1, sz_view_action_text(long_action, record_text_action, picked)));
+  sz_view_layout(root, 70, 200, sz_theme_default());
+  assert(sz_view_collect_tap_targets(root, targets, 4) == 1);
+  box = sz_view_control_frame(targets[0]);
+  assert(sz_view_handle_tap(root, box.x + box.w / 2, box.y + box.h / 2));
+  assert(sz_signal_int_get(picked) == INT64_MIN);
+  assert(!sz_view_hit_test(root, box.x + box.w + 1, box.y + box.h / 2));
+  sz_view_free(root);
+  SzText *truncated = test_text_pair(long_word, last);
+  root = sz_view_ellipsis(sz_view_max_lines(1, sz_view_action_text(truncated, record_text_action, picked)));
+  sz_view_layout(root, 1000, 200, sz_theme_default());
+  assert(sz_view_focus_next(root, 0, 0));
+  sz_view_layout(root, 60, 200, sz_theme_default());
+  assert(sz_view_collect_tap_targets(root, targets, 4) == 0 && !sz_view_focused(root));
+  sz_view_free(root);
+  sz_release(truncated);
+  sz_release(long_action); sz_release(long_word);
+  SzText *unicode = test_text_span("café 😀");
+  SzText *marked = sz_text_action(42, unicode);
+  SzText *overridden = sz_text_action(17, marked);
+  assert(marked->actions == 1 && overridden->actions == 1);
+  assert(marked->runs[0].key == 42 && overridden->runs[0].key == 17);
+  SzString *plain = sz_text_plain(overridden);
+  assert(!strcmp(sz_string_cstr(plain), "café 😀"));
+  sz_release(plain);
+  SzText *many = test_text_span("");
+  for (int i = 0; i < 100; i++) {
+    SzText *next = test_text_pair(many, marked);
+    sz_release(many); many = next;
+  }
+  root = sz_view_action_text(many, record_text_action, picked);
+  SzTheme scaled = *sz_theme_default();
+  scaled.px_scale = 2; scaled.font_px *= 2; scaled.line_gap *= 2;
+  sz_view_layout(root, 2000, 2000, &scaled);
+  assert(sz_view_focus_next(root, 0, 1));
+  uintptr_t first_id = sz_view_id(sz_view_focused(root));
+  for (int i = 1; i < 100; i++) assert(sz_view_focus_next(root, 0, 0));
+  assert(sz_view_id(sz_view_focused(root)) != first_id);
+  sz_view_handle_key(root, "Enter", "", 0);
+  assert(sz_signal_int_get(picked) == 42);
+  assert(sz_view_focus_next(root, 0, 1) && sz_view_id(sz_view_focused(root)) == first_id);
+  sz_view_free(root); sz_release(many);
+  sz_release(overridden); sz_release(marked); sz_release(unicode);
+  sz_signal_int_free(picked);
+  sz_release(text); sz_release(last); sz_release(end);
+  sz_release(gap); sz_release(action); sz_release(joined);
+  sz_release(large); sz_release(second); sz_release(first); sz_release(prefix);
+}
+
+static void test_styled_text_long_paint(void) {
+  char source[601];
+  memset(source, 'M', sizeof(source) - 1); source[600] = 0;
+  SzText *text = test_text_span(source);
+  SzText *red = sz_text_color(0xffff0000, text);
+  SzText *bold = sz_text_bold(red);
+  SzView *view = sz_view_rich_text(bold);
+  sz_release(text); sz_release(red); sz_release(bold);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(10000, 40);
+  assert(sz_view_paint(view, sk_surface_get_canvas(surface), 10000, 40, sz_theme_default()));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  int ink = 0;
+  for (int y = 0; y < 30; y++) for (int x = 5000; x < 10000; x++) {
+    const uint8_t *p = pixels + ((size_t)y * 10000 + x) * 4;
+    ink += p[0] > 200 && p[1] < 80 && p[2] < 80;
+  }
+  assert(ink > 0);
+  sk_surface_unref(surface);
+  sz_view_free(view);
+}
+
+static void test_styled_text_clip_and_theme(void) {
+  SzText *source = test_text_span("MMMMMM");
+  SzText *sized = sz_text_size(24, source);
+  SzText *red = sz_text_color(0xffff0000, sized);
+  SzText *styled = sz_text_italic(red);
+  SzView *view = sz_view_rich_text(styled);
+  SzView *root = sz_view_opacity(50, sz_view_clip(sz_view_sized(64, 20, view)));
+  SzTheme theme = *sz_theme_default();
+  theme.background = 0;
+  SkSurface *surface = sk_surface_make_raster_n32_premul(100, 50);
+  assert(sz_view_paint(root, sk_surface_get_canvas(surface), 100, 50, &theme));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  int ink = 0;
+  for (int y = 0; y < 50; y++) for (int x = 0; x < 100; x++) {
+    const uint8_t *p = pixels + (y * 100 + x) * 4;
+    if (x >= 64 || y >= 20) assert(p[3] == 0);
+    assert(p[3] <= 128);
+    ink += p[3] > 100;
+  }
+  assert(ink > 0);
+  sk_surface_unref(surface);
+  sz_view_free(root);
+  sz_release(source); sz_release(sized); sz_release(red); sz_release(styled);
+
+  source = test_text_span("theme");
+  view = sz_view_rich_text(source);
+  SzTheme *large = sz_theme_metrics(NULL, 22, 10, 16, 12, 52);
+  root = sz_view_theme(large, view);
+  sz_release(large); sz_release(source);
+  sz_view_layout(root, 640, 480, sz_theme_default());
+  assert(sz_view_frame(view).h == 32.f);
+  sz_view_free(root);
+}
+
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--motion-preference-record")) {
+    test_record_json();
+    test_initial_motion_recording();
+    puts("initial motion recording tests ok"); return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--scale")) {
+    test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
+    test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds(); test_scale_wrapping();
+    puts("scale tests ok"); return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--animated-position")) {
+    test_animated_position_steps();
+    test_animated_position_retains_input();
+    test_animated_position_limits();
+    puts("animated position tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--animated-content-size")) {
+    test_animated_content_size_steps();
+    test_animated_content_size_fractional();
+    test_animated_content_size_retains_input();
+    test_animated_content_size_wrapping();
+    test_animated_content_size_constraints();
+    puts("animated content size tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--animated-size")) {
+    test_animated_size_steps();
+    test_animated_size_retains_input();
+    test_animated_size_unbounded_limits();
+    puts("animated size tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--progress")) {
+    test_progress_named_range();
+    test_progress_a11y();
+    test_progress_clamps_a11y();
+    test_progress_not_tap_target();
+    test_progress_amount_without_accent();
+    test_circular_progress_a11y();
+    test_circular_progress_clamps_a11y();
+    test_circular_progress_not_tap_target();
+    puts("named progress tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--paragraph-direction")) {
+    test_font_change_joining();
+    test_font_change_direction();
+    test_wrapped_paragraph_direction();
+    test_rich_paragraph_ellipsis();
+    test_plain_paragraph_direction();
+    puts("paragraph direction tests ok");
+    return 0;
+  }
+  if (argc == 2 && (!strcmp(argv[1], "--styled-shaping") || !strcmp(argv[1], "--styled-shaping-gpu"))) {
+    if (!strcmp(argv[1], "--styled-shaping-gpu")) assert(sk_gpu_available());
+    test_styled_shaping_context();
+    printf("styled shaping tests ok (%s)\n", sk_gpu_available() ? "OpenGL" : "raster");
+    return 0;
+  }
+
+  if (argc == 2 && !strcmp(argv[1], "--opacity")) {
+    test_opacity_transition_frames();
+    test_opacity_session_pause_and_reduction();
+    test_initial_motion_recording();
+  test_opacity_recorded_pumps();
+    test_opacity_utf8_labels();
+    puts("opacity tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--select")) {
+    test_select_keyboard_window();
+    test_select_reactive_options();
+    test_select_pointer_identity();
+    test_select_scope_and_journal();
+    puts("select tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--shaping")) {
+    test_shaped_field_marks();
+    test_shaped_field_geometry();
+    test_shaped_text_wrapping();
+    test_font_change_joining();
+    test_font_change_direction();
+    test_wrapped_paragraph_direction();
+    test_fallback_text_layout();
+    test_styled_shaping_context();
+    test_styled_text_wrap();
+    test_styled_text_sizes();
+    test_styled_text_long_paint();
+    test_inline_text_actions();
+    test_tooltip_focus_and_hover();
+    puts("text shaping tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--tooltips")) {
+    test_tooltip_focus_and_hover();
+    test_tooltip_scope_and_geometry();
+    test_tooltip_clipping_and_pointer();
+    test_tooltip_modal_escape();
+    test_tooltip_paint_hover();
+    puts("tooltip tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--inline-actions")) {
+    test_inline_text_actions();
+    test_styled_text_values();
+    test_styled_shaping_context();
+    test_styled_text_wrap();
+    test_styled_text_sizes();
+    puts("inline text action tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--disclosure")) {
+    test_expansion_body_and_focus();
+    test_expansion_geometry_and_identity();
+    test_expansion_tile_sizes_collapsed();
+    test_expansion_tile_sizes_expanded();
+    test_expansion_tile_a11y();
+    test_expansion_tile_tap_toggles();
+    test_expansion_tile_child_tap();
+    test_expansion_tile_paint();
+    test_expansion_tile_in_taps_dump();
+    puts("disclosure tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--segmented")) {
+    test_segmented_keyboard();
+    test_segmented_sizes();
+    test_segmented_a11y();
+    test_segmented_tap();
+    test_segmented_hit_test();
+    test_segmented_paint();
+    test_control_tap_dumps();
+    puts("segmented tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--split")) {
+    test_split_keyboard();
+    test_view_focus_split_overlay();
+    puts("split tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--range-slider")) {
+    test_slider_ranges();
+    test_slider_pointer_focus_and_removal();
+    test_slider_a11y();
+    test_slider_tap_sets_from_x();
+    puts("range slider tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--modal-pointer")) {
+    test_modal_pointer_surface();
+    test_modal_scroll_boundary();
+    test_modal_pointer_capture();
+    puts("modal pointer tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--modal")) {
+    test_modal_keyboard_sync();
+    test_modal_lifecycle();
+    test_view_focus_group_keys();
+    puts("modal tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--styled-text")) {
+    test_styled_text_values();
+    test_styled_shaping_context();
+    test_styled_text_wrap();
+    test_styled_text_sizes();
+    test_styled_text_long_paint();
+    test_styled_text_clip_and_theme();
+    puts("styled text tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--metrics")) {
+    test_theme_metrics_scope();
+    test_theme_metrics_editor();
+    puts("theme metrics tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--composite-tabs")) {
+    test_composite_tab_capacity();
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--composite")) {
+    test_composite_modal_radios();
+    test_composite_hidden_radios();
+    test_composite_duplicate_focus();
+    test_composite_named_radios();
+    test_composite_panel_stop();
+    test_composite_radio_tab_stop();
+    test_composite_tab_capacity();
+    puts("composite tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--measured-list")) {
+    test_measured_list_window_and_identity();
+    test_measured_list_height_index();
+    test_measured_list_wrap_and_focus();
+    puts("measured list tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--theme")) {
+    test_theme_metrics_scope();
+    test_theme_metrics_editor();
+    test_color_theme_scope();
+    puts("theme tests ok");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--keyboard")) {
+    test_modal_keyboard_sync();
+    test_modal_lifecycle();
+    test_keyboard_controls();
+    test_keyboard_radio_group();
+    test_keyboard_many_targets();
+    test_keyboard_tab_list();
+    test_keyboard_modal_text();
+    test_keyboard_overlay_and_editor();
+    puts("keyboard tests ok");
+    return 0;
+  }
+  if (argc == 2 && strcmp(argv[1], "--virtual-list") == 0) {
+    test_signal_name_index();
+    test_signal_scope_ownership();
+    test_virtual_list_window_and_identity();
+    test_virtual_list_duplicate_keys();
+    test_virtual_list_scale_and_resize();
+    test_virtual_list_pointer_removal();
+    puts("virtual list tests ok");
+    return 0;
+  }
   if (argc == 2 && strcmp(argv[1], "--mirror-session") == 0) {
     test_mirror_signal_session();
     return 0;
@@ -17390,6 +21940,7 @@ int main(int argc, char **argv) {
   test_viewport_record_replay();
   test_session_inject_field_index();
   test_button_set_and_show_when();
+  test_bitmap_images();
   test_widgets();
   test_expanded_column();
   test_expanded_row();
@@ -17433,6 +21984,18 @@ int main(int argc, char **argv) {
   test_wrap_gap_spaces_runs();
   test_wrap_show_when_skips();
   test_wrap_in_column_grows_height();
+  test_container_child_list_ownership();
+  test_virtual_list_window_and_identity();
+  test_measured_list_window_and_identity();
+  test_measured_list_height_index();
+  test_measured_list_wrap_and_focus();
+  test_virtual_list_duplicate_keys();
+  test_virtual_list_scale_and_resize();
+  test_virtual_list_pointer_removal();
+  test_adaptive_width_and_input();
+  test_adaptive_focus_and_shared_state();
+  test_auto_grid_widths();
+  test_auto_grid_visibility_and_input();
   test_grid_kind();
   test_grid_two_cols_one_row();
   test_grid_third_child_new_row();
@@ -17458,6 +22021,7 @@ int main(int argc, char **argv) {
   test_fraction_width_only_tightens_width();
   test_background_forwards_tight_slot();
   test_center_second_pass_keeps_child_size();
+  test_expanded_weights();
   test_expanded_row_text_fills_width();
   test_stretch_column_fills_width();
   test_stretch_row_fills_height();
@@ -17533,6 +22097,7 @@ int main(int argc, char **argv) {
   test_radius_clips_border_corners();
   test_radius_hit_test_reaches_child();
   test_radius_does_not_grow_button();
+  test_control_tap_dumps();
   test_checkbox_sizes();
   test_checkbox_a11y_off_on();
   test_a11y_dump_long_labels();
@@ -17544,14 +22109,12 @@ int main(int argc, char **argv) {
   test_control_labels_stay_in_bounds();
   test_tap_collect_tree_order();
   test_activate_offscreen_button();
-  test_checkbox_in_taps_dump();
   test_switch_sizes();
   test_switch_a11y_off_on();
   test_switch_nonzero_is_on();
   test_switch_tap_toggles();
   test_switch_hit_test();
   test_switch_paint_off_on();
-  test_switch_in_taps_dump();
   test_chip_sizes();
   test_chip_a11y_off_on();
   test_chip_nonzero_is_on();
@@ -17559,7 +22122,6 @@ int main(int argc, char **argv) {
   test_chip_hit_test();
   test_chip_paint_off_on();
   test_selection_tabs_without_color();
-  test_chip_in_taps_dump();
   test_list_tile_sizes();
   test_list_tile_unbounded_width();
   test_list_tile_a11y();
@@ -17588,6 +22150,8 @@ int main(int argc, char **argv) {
   test_divider_paint_line();
   test_divider_in_column();
   test_divider_not_in_taps_dump();
+  test_expansion_body_and_focus();
+  test_expansion_geometry_and_identity();
   test_expansion_tile_sizes_collapsed();
   test_expansion_tile_sizes_expanded();
   test_expansion_tile_a11y();
@@ -17600,7 +22164,6 @@ int main(int argc, char **argv) {
   test_icon_button_tap();
   test_icon_button_hit_test();
   test_icon_button_paint();
-  test_icon_button_in_taps_dump();
   test_vertical_divider_sizes();
   test_vertical_divider_tight_height();
   test_vertical_divider_a11y();
@@ -17626,34 +22189,34 @@ int main(int argc, char **argv) {
   test_checkbox_list_tile_tap();
   test_checkbox_list_tile_hit_test();
   test_checkbox_list_tile_paint();
-  test_checkbox_list_tile_in_taps_dump();
   test_switch_list_tile_sizes();
   test_switch_list_tile_a11y();
   test_switch_list_tile_tap();
   test_switch_list_tile_hit_test();
   test_switch_list_tile_paint();
-  test_switch_list_tile_in_taps_dump();
   test_radio_list_tile_sizes();
   test_radio_list_tile_a11y();
   test_radio_list_tile_tap();
   test_radio_list_tile_group_exclusive();
   test_radio_list_tile_hit_test();
   test_radio_list_tile_paint();
-  test_radio_list_tile_in_taps_dump();
+  test_segmented_keyboard();
   test_segmented_sizes();
   test_segmented_a11y();
   test_segmented_tap();
   test_segmented_hit_test();
   test_segmented_paint();
-  test_segmented_in_taps_dump();
   test_fab_sizes();
   test_fab_a11y();
   test_fab_tap();
   test_fab_hit_test();
   test_fab_paint();
-  test_fab_in_taps_dump();
   test_fab_tap_twice();
   test_fab_a11y_distinct();
+  test_tooltip_focus_and_hover();
+  test_tooltip_scope_and_geometry();
+  test_tooltip_clipping_and_pointer();
+  test_tooltip_modal_escape();
   test_tooltip_sizes();
   test_tooltip_empty_sizes();
   test_tooltip_a11y();
@@ -17679,7 +22242,6 @@ int main(int argc, char **argv) {
   test_outlined_button_hit_test();
   test_outlined_button_paint();
   test_outlined_button_paint_not_primary();
-  test_outlined_button_in_taps_dump();
   test_text_button_sizes();
   test_text_button_empty_min_width();
   test_text_button_null_label();
@@ -17694,7 +22256,6 @@ int main(int argc, char **argv) {
   test_text_button_hit_test();
   test_text_button_paint();
   test_text_button_paint_not_filled();
-  test_text_button_in_taps_dump();
   test_placeholder_sizes();
   test_placeholder_empty_sizes();
   test_placeholder_same_origin();
@@ -17754,7 +22315,6 @@ int main(int argc, char **argv) {
   test_ink_well_paint_child();
   test_ink_well_paint_no_mark();
   test_ink_well_paint_empty();
-  test_ink_well_in_taps_dump();
   test_ink_well_child_in_taps_dump();
   test_visibility_sizes_on();
   test_visibility_sizes_off();
@@ -17815,7 +22375,6 @@ int main(int argc, char **argv) {
   test_filter_chip_hit_test();
   test_filter_chip_paint_off_on();
   test_filter_chip_paint_mark_on();
-  test_filter_chip_in_taps_dump();
   test_choice_chip_sizes();
   test_choice_chip_empty_min_width();
   test_choice_chip_null_label();
@@ -17828,7 +22387,6 @@ int main(int argc, char **argv) {
   test_choice_chip_hit_test();
   test_choice_chip_paint_off_on();
   test_choice_chip_group_exclusive();
-  test_choice_chip_in_taps_dump();
   test_action_chip_sizes();
   test_action_chip_empty_min_width();
   test_action_chip_null_label();
@@ -17843,7 +22401,6 @@ int main(int argc, char **argv) {
   test_action_chip_hit_test();
   test_action_chip_paint();
   test_action_chip_paint_not_primary();
-  test_action_chip_in_taps_dump();
   test_input_chip_sizes();
   test_input_chip_empty_min_width();
   test_input_chip_null_label();
@@ -17856,14 +22413,15 @@ int main(int argc, char **argv) {
   test_input_chip_hit_test();
   test_input_chip_paint_off_on();
   test_input_chip_paint_mark_on();
-  test_input_chip_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();
   test_radio_group_exclusive();
   test_radio_hit_test();
   test_radio_paint_off_on();
-  test_radio_in_taps_dump();
+  test_split_keyboard();
+  test_slider_ranges();
+  test_slider_pointer_focus_and_removal();
   test_slider_sizes();
   test_slider_a11y();
   test_slider_clamps_a11y();
@@ -17871,10 +22429,23 @@ int main(int argc, char **argv) {
   test_slider_tap_clamps_edges();
   test_slider_hit_test();
   test_slider_paint_fill();
-  test_slider_in_taps_dump();
   test_slider_pointer_drag();
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
+  test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
+  test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds(); test_scale_wrapping();
+  test_animated_position_steps();
+  test_animated_position_retains_input();
+  test_animated_position_limits();
+  test_animated_content_size_steps();
+  test_animated_content_size_fractional();
+  test_animated_content_size_retains_input();
+  test_animated_content_size_wrapping();
+  test_animated_content_size_constraints();
+  test_animated_size_steps();
+  test_animated_size_retains_input();
+  test_animated_size_unbounded_limits();
+  test_progress_named_range();
   test_progress_sizes();
   test_progress_unbounded_width();
   test_progress_a11y();
@@ -17924,6 +22495,7 @@ int main(int argc, char **argv) {
   test_signal_map_source_free();
   test_signal_mirror_revision();
   test_signal_map_caches_unchanged_source();
+  test_signal_nan_alias();
   test_signal_list_elem_str_flag();
   test_signal_dump_long_name();
   test_signal_list_mixed_kinds();
@@ -17952,6 +22524,54 @@ int main(int argc, char **argv) {
   test_view_show();
   test_pump_motion();
   test_quiesce();
+  test_signal_name_index();
+  test_signal_scope_ownership();
+  test_opacity_transition_frames();
+  test_opacity_session_pause_and_reduction();
+  test_initial_motion_recording();
+  test_opacity_recorded_pumps();
+  test_opacity_utf8_labels();
+  test_inline_text_actions();
+  test_select_keyboard_window();
+  test_select_reactive_options();
+  test_select_pointer_identity();
+  test_select_scope_and_journal();
+  test_shaped_field_marks();
+  test_shaped_field_geometry();
+  test_shaped_text_wrapping();
+  test_font_change_joining();
+  test_font_change_direction();
+  test_wrapped_paragraph_direction();
+  test_rich_paragraph_ellipsis();
+  test_plain_paragraph_direction();
+  test_fallback_text_layout();
+  test_styled_text_values();
+  test_styled_shaping_context();
+  test_styled_text_wrap();
+  test_styled_text_sizes();
+  test_styled_text_long_paint();
+  test_styled_text_clip_and_theme();
+  test_theme_metrics_scope();
+  test_theme_metrics_editor();
+  test_color_theme_scope();
+  test_composite_modal_radios();
+  test_composite_hidden_radios();
+  test_composite_duplicate_focus();
+  test_composite_named_radios();
+  test_composite_panel_stop();
+  test_composite_radio_tab_stop();
+  test_composite_tab_capacity();
+  test_modal_pointer_surface();
+  test_modal_scroll_boundary();
+  test_modal_pointer_capture();
+  test_modal_keyboard_sync();
+  test_modal_lifecycle();
+  test_keyboard_controls();
+  test_keyboard_radio_group();
+  test_keyboard_many_targets();
+  test_keyboard_tab_list();
+  test_keyboard_modal_text();
+  test_keyboard_overlay_and_editor();
   puts("runtime ui tests ok");
   return 0;
 }

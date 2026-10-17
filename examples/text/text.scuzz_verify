@@ -1,0 +1,37 @@
+oracle sourceText(): Bool =
+  Text.plain(Text.concat([Text.bold(Text.span("inter")), Text.italic(Text.span("face λ🙂"))])) == "interface λ🙂"
+
+oracle emptyText(): Bool =
+  Text.plain(Text.concat([])) == ""
+
+oracle manySpans(): Bool =
+  Text.plain(Text.concat(List.map(List.range(0, 512), _ => Text.span("x")))) == Str.repeat("x", 512)
+
+oracle stylesPreserveText(): Bool =
+  for {
+    source = Text.span("source")
+    sized = Text.size(24, source)
+    bold = Text.bold(sized)
+    colored = Text.color(Color.rgb(160, 55, 35), bold)
+    italic = Text.italic(colored)
+    underlined = Text.underline(italic)
+    mono = Text.monospace(underlined)
+  } yield Text.plain(mono) == "source" && Text.plain(source) == "source"
+
+oracle countLabel(n: Int): Bool =
+  Str.startsWith(Text.plain(Main.paragraph(n)), s"Count: $n. ")
+
+def paragraphFollowsCount(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("text:Count: ", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "count")), ". "))))
+
+def incrementChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Increment", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 1
+})
+
+def sourceStaysAvailable(t: Timeline): Verdict =
+  Verdict.and(Verdict.alwaysHas(t, "text:Styled text"), Verdict.alwaysHas(t, "Source text keeps spaces and λ🙂."))
+
+def startsAtZero(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "count") == 0)
+

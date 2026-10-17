@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap textbutton:add one", "tap textbutton:reset", "tap textbutton:open the details dialog across wrapped lines", "tap button:Close", "tap textbutton:Minimum", "tap textbutton:Maximum", "tap textbutton:abcdefghijklmno", "tap textbutton:Named handler", "tap textbutton:Value handler"]

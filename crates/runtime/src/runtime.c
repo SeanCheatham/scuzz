@@ -5,6 +5,7 @@
 #include "rt_util.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <poll.h>
 #include <pthread.h>
@@ -162,7 +163,7 @@ static size_t g_kind_count[SZ_RC_KIND_COUNT];
 static const char *k_kind_names[SZ_RC_KIND_COUNT] = {
     "raw",      "string", "list",     "adt",      "box",  "map",
     "io",       "stream", "resource", "error",    "ref",  "queue",
-    "deferred", "either", "pair", "builder", "netsock", "view", "float-box"};
+    "deferred", "either", "pair", "builder", "netsock", "view", "float-box", "image"};
 
 static uint32_t kind_idx(uint32_t kind) {
   return kind < SZ_RC_KIND_COUNT ? kind : (uint32_t)SZ_RC_RAW;
@@ -560,6 +561,9 @@ void *sz_alloc_zero(size_t size) {
 }
 
 static void (*g_view_drop)(void *);
+static _Atomic(void (*)(void *)) g_image_drop;
+
+void sz_rc_set_image_drop(void (*fn)(void *)) { atomic_store(&g_image_drop, fn); }
 
 void sz_rc_set_view_drop(void (*fn)(void *)) { g_view_drop = fn; }
 
@@ -1091,6 +1095,12 @@ void sz_release(void *ptr) {
   case SZ_RC_NETSOCK:
     sz_net_sock_on_free((SzNetSock *)ptr);
     break;
+  case SZ_RC_IMAGE: {
+    void (*drop)(void *) = atomic_load(&g_image_drop);
+    if (drop)
+      drop(ptr);
+    break;
+  }
   case SZ_RC_VIEW:
     if (g_view_drop)
       g_view_drop(ptr);
@@ -2413,8 +2423,6 @@ static int map_subset_eq(const SzMap *a, SzMap *b) {
 }
 
 static int map_eq(const SzMap *a, const SzMap *b) {
-  if (a == b)
-    return 1;
   if (!a || !b)
     return 0;
   if (a->key_kind != b->key_kind)
@@ -2459,8 +2467,6 @@ int sz_ptr_eq(const void *a, const void *b) {
   ka = sz_rc_hdr(a)->kind;
   if (ka != sz_rc_hdr(b)->kind)
     return 0;
-  if (ka != SZ_RC_FLOAT_BOX && a == b)
-    return 1;
   switch (ka) {
   case SZ_RC_STRING:
     return sz_string_eq((const SzString *)a, (const SzString *)b);
@@ -2485,7 +2491,7 @@ int sz_ptr_eq(const void *a, const void *b) {
   case SZ_RC_ERROR:
     return error_eq((const SzError *)a, (const SzError *)b);
   default:
-    return 0;
+    return a == b;
   }
 }
 
@@ -3048,6 +3054,7 @@ typedef struct Sched {
   Fiber *pollers;
   Fiber *root;
   Fiber *current;
+  Fiber *previous;
   Fiber *forked_live;
   Fiber *all_fibers;
   int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
@@ -3056,6 +3063,8 @@ typedef struct Sched {
   int pct_k;         /* change-points used (0..7) */
   int32_t pct_low;   /* next demotion priority (0, -1, -2, ...) */
   int pct_contention; /* 1-based count of ready_count>1 picks */
+  int preemptions;
+  int preemption_limit;
   int pct_change[SZ_PCT_K_MAX];
   int32_t *replay; /* recorded picks for this run */
   int replay_n;         /* recorded pick count; 0 = no replay */
@@ -3240,6 +3249,7 @@ static void pct_init_changes(Sched *s) {
 
 static void sched_arm_from_env(Sched *s) {
   const char *env = getenv("SCUZZ_SCHED_SEED");
+  const char *limit = getenv("SCUZZ_PREEMPT_LIMIT");
   const char *d_s;
   const char *k_s;
   int d;
@@ -3252,6 +3262,18 @@ static void sched_arm_from_env(Sched *s) {
   s->pct_k = 0;
   s->pct_low = 0;
   s->pct_contention = 0;
+  s->preemption_limit = -1;
+  if (limit && limit[0]) {
+    char *end;
+    long value;
+    errno = 0;
+    value = strtol(limit, &end, 10);
+    if (!s->bounded || errno || end == limit || *end || value < 0 || value > INT_MAX)
+      sz_panic("invalid simulation preemption bound");
+    s->preemption_limit = (int)value;
+    if (!env)
+      env = "0";
+  }
   if (!env)
     return;
   /* Present (including "0") arms PCT; absent keeps FIFO. */
@@ -3482,8 +3504,8 @@ static SzIo *drain_ensure_finalizers(ContFrame *stack) {
   return acc;
 }
 
-/* Steal unstepped ENSURE finalizers from cur (inner-most first). Nested
- * ENSURE nodes fold the same way. */
+/* Transfer unstarted ENSURE finalizers from cur, starting with the innermost.
+ * Nested ENSURE nodes use the same order. */
 static SzIo *take_unstepped_ensure(SzIo *cur) {
   SzIo *inner;
   SzIo *fin;
@@ -3601,6 +3623,14 @@ static Fiber *ready_find_ordinal(Sched *s, int32_t ord) {
   return NULL;
 }
 
+static Fiber *ready_previous(const Sched *s) {
+  Fiber *f;
+  for (f = s->ready_head; f; f = f->ready_next)
+    if (f == s->previous)
+      return f;
+  return NULL;
+}
+
 /* Record every permitted choice before the scheduler removes a fiber. */
 static void sched_choices(const Sched *s, int end, int steps, int ok) {
   const char *path = getenv("SCUZZ_SCHED_CHOICES_DUMP");
@@ -3615,12 +3645,22 @@ static void sched_choices(const Sched *s, int end, int steps, int ok) {
     fprintf(out, "end %s %d %d %d %d %d\n",
             s->pick_name[0] ? s->pick_name : "-", s->pct_contention,
             steps, (int)g_fiber_ordinal, ok, s->bounded);
+    fprintf(out, "preempt-end %s %d %d\n",
+            s->pick_name[0] ? s->pick_name : "-", s->preemptions,
+            s->preemption_limit);
   } else {
+    Fiber *previous = ready_previous(s);
     fprintf(out, "choice %s %d", s->pick_name[0] ? s->pick_name : "-",
             s->pct_contention);
     for (f = s->ready_head; f; f = f->ready_next)
-      fprintf(out, " %d", (int)f->ordinal);
+      if (!previous || s->preemption_limit < 0 ||
+          s->preemptions < s->preemption_limit || f == previous)
+        fprintf(out, " %d", (int)f->ordinal);
     fputc('\n', out);
+    fprintf(out, "preempt %s %d %d %d %d\n",
+            s->pick_name[0] ? s->pick_name : "-", s->pct_contention,
+            previous ? (int)previous->ordinal : 0, s->preemptions,
+            s->preemption_limit);
   }
   if (ferror(out)) {
     fclose(out);
@@ -3636,6 +3676,7 @@ static void sched_choices(const Sched *s, int end, int steps, int ok) {
  * fiber that is not ready marks drift. */
 static Fiber *ready_dequeue(Sched *s) {
   Fiber *f;
+  Fiber *previous;
   int n;
   if (!s->ready_head)
     return NULL;
@@ -3645,6 +3686,7 @@ static Fiber *ready_dequeue(Sched *s) {
   if (n <= 1)
     return ready_dequeue_fifo(s);
   s->pct_contention++;
+  previous = ready_previous(s);
   sched_choices(s, 0, 0, 0);
   if (pct_is_change(s, s->pct_contention)) {
     f = ready_highest(s);
@@ -3656,14 +3698,20 @@ static Fiber *ready_dequeue(Sched *s) {
   if (s->pct_contention <= s->replay_n) {
     int32_t want = s->replay[s->pct_contention - 1];
     f = ready_find_ordinal(s, want);
-    if (!f) {
+    if (!f || (previous && s->preemption_limit >= 0 &&
+               s->preemptions >= s->preemption_limit && f != previous)) {
       s->drift_step = s->pct_contention;
       s->drift_want = want;
       return NULL;
     }
+  } else if (previous && s->preemption_limit >= 0 &&
+             s->preemptions >= s->preemption_limit) {
+    f = previous;
   } else {
     f = ready_highest(s);
   }
+  if (previous && f != previous)
+    s->preemptions++;
   const char *dump = getenv("SCUZZ_SCHED_PICKS_DUMP");
   if (dump && dump[0]) {
     if (s->pick_n == s->pick_cap) {
@@ -4381,9 +4429,9 @@ static int step_node(Sched *s, Fiber *f) {
   case SZ_IO_DELAY: {
     void *env = cur->as.delay.env;
     int steal = 0;
-    /* Thunks borrow env. Unique delay (not BOX) steals so the runner drops
-     * env after the thunk. Shared delay leaves env so a loop can rerun.
-     * BOX packs stay on the node so last-use drops them. */
+    /* The thunk borrows env. A unique delay transfers a non-box environment
+     * to the runner, which releases it after the thunk. Shared delays and
+     * box environments keep it on the node. */
     if (!(sz_is_rc(cur) && sz_rc_hdr(cur)->rc > 1) &&
         !(sz_is_rc(env) && sz_rc_hdr(env)->kind == SZ_RC_BOX)) {
       cur->as.delay.env = NULL;
@@ -4989,6 +5037,7 @@ static SzIoResult run_io(SzIo *root) {
 
   memset(&sched, 0, sizeof(sched));
   snprintf(sched.pick_name, sizeof sched.pick_name, "%s", g_pick_run_name);
+  sched.bounded = bounded;
   sched_arm_from_env(&sched);
   g_sched = &sched;
   sched.bounded = bounded;
@@ -5018,6 +5067,7 @@ static SzIoResult run_io(SzIo *root) {
           sz_panic("simulation exceeds 1000000 scheduler steps");
         sched.current = f;
         step_fiber(&sched, f);
+        sched.previous = f->state == FIB_READY ? f : NULL;
         sched.current = NULL;
         /* Drain ready (including cancel finalizers) before exiting on root done. */
         continue;

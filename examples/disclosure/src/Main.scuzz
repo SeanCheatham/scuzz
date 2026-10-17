@@ -1,0 +1,12 @@
+@main def main: IO[Unit] =
+  for {
+    open = Signal.make(0)
+    nested = Signal.make(0)
+    show = Signal.make(0)
+    conditional = Signal.make(1)
+    name = Signal.make("")
+    note = Signal.make("")
+    count = Signal.make(0)
+    countText = Signal.map(count, n => s"Count: $n")
+    _ <- Ui.run(_ => View.column([View.expansionTile(open, "Details", View.padding(12, View.column([View.text("Select this body text."), View.textField(name, "Name"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1)), View.bindText(countText), View.expansionTile(nested, "More details", View.column([View.textField(note, "Note"), View.button("Close details", _ => Signal.set(open, 0))]))]))), View.expansionTile(conditional, "Conditional", View.showWhen(show, 1, View.text("Conditional body"))), View.checkbox(show, "Show conditional body"), View.button("Open details", _ => Signal.set(open, 2)), View.button("Hide details", _ => Signal.set(open, 0))]))
+  } yield ()

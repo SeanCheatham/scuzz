@@ -12,7 +12,7 @@ Fail on the first missing tool with one install line.
 | `make` | `crates/runtime`, `ffi-skia`, embedders |
 | `curl` | fetch tagged bootstrap `scuzz` (`scripts/bootstrap.sh`; newest GitHub `v*` release) |
 | `zlib` + `bzip2` | Linux Skia CPU prebuilt |
-| OpenSSL | Live `https://` on the blessed HTTP kit |
+| OpenSSL | Live `https://` on the built-in HTTP kit |
 
 ```bash
 # Debian/Ubuntu
@@ -25,7 +25,7 @@ brew install openssl@3
 If `clang` cannot find libstdc++ when it links Skia:
 
 ```bash
-export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13
+export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13${LIBRARY_PATH:+:$LIBRARY_PATH}
 ```
 
 ## Optional CI slices
@@ -35,9 +35,18 @@ export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13
 | ASan (`make -C crates/runtime test-asan`) | `libclang-rt-18-dev` (match host clang) |
 | UBSan (`make -C crates/runtime test-ubsan`) | `libclang-rt-18-dev` (match host clang) |
 | GPU (`SCUZZ_SKIA=gpu`) | `libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri xvfb` |
-| Desktop X11 | `libx11-dev xvfb` |
+| Desktop X11 | `libx11-dev libdbus-1-dev pkg-config dbus-daemon xvfb` |
 
-ASan skips when the ASan runtime cannot link. GPU needs `LIBGL_ALWAYS_SOFTWARE=1` when the host has no GPU.
+ASan skips when the ASan runtime cannot link.
+The target first checks that ASan rejects a known heap buffer overflow.
+It keeps test binaries and file fixtures in `crates/runtime/build/asan-tests/`.
+It preserves the normal build and the `lib-asan` archive.
+C tests disable leak detection. They still check invalid memory access.
+Compiled corpus replay uses `lib-asan` and `scuzz fuzz --asan` with leak detection.
+GPU needs `LIBGL_ALWAYS_SOFTWARE=1` when the host has no GPU.
+Set `LP_NUM_THREADS=0` for software OpenGL checks.
+This disables Mesa worker threads within the Linux probe memory limit.
+See [Mesa LLVMpipe variables](https://docs.mesa3d.org/envvars.html#llvmpipe-driver-environment-variables).
 
 UBSan fails when compile or link support is unavailable.
 The target rejects a known signed overflow before the runtime checks.
@@ -55,7 +64,10 @@ These checks do not establish that all runtime behavior is correct.
 ./scripts/install-githooks.sh
 ```
 
-A pre-commit hook checks conflict markers. When you stage runtime, ffi-skia, or embedder `.c`, it compiles with `-Werror`. Bypass with `git commit --no-verify`.
+The pre-commit hook checks the index snapshot for conflict markers.
+It compiles staged host C sources with `-Werror` against headers from that snapshot.
+An unstaged edit cannot change the result.
+Bypass the hook with `git commit --no-verify`.
 
 ## Prove the host
 
@@ -75,14 +87,108 @@ Same slices as GitHub. List them, then run the required PR path:
 ```
 
 `pr` runs macos-smoke, oracles, kernel, ui, fuzz, and delta. The Darwin smoke includes the relocated UI app bundle and source reload proof. A local run removes example `build/` directories except `examples/cli/build`. This gives the checks a clean start. GitHub sets `CI=true` and skips this removal. Each output directory has its own live and verification cache stamps. Each stamp includes the executing compiler identity. Jobs that fetch the Skia CPU prebuilt restore `third_party/skia/prebuilt` from a cache keyed by OS, arch, and `third_party/skia/PIN`. `scripts/fetch_skia.sh` retries HTTP 502, 503, and 504, and a truncated gzip. The ffi-skia include fetch uses the same download retry.
+The fixed-point check uses one temporary directory per run.
+A successful run removes it. A failed run prints its path and retains its IR and logs.
+Renderer changes select the required archive without deleting the Skia header cache.
 
 Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI builds the product CLI once. Eight check jobs use that artifact in separate checkouts. The `linux-headless` check requires all eight jobs and the build to pass. Each slice prints its elapsed time. A new PR update cancels its older CI run. Apt install and artifact upload stay in `.github/workflows/ci.yml`.
 
-| Env | Paint |
+## Native libraries and paint
+
+`crates/runtime` supplies the C runtime, IO scheduler, simulation, and UI sessions.
+Its public interfaces are `include/scuzz_rt.h` and `include/scuzz_ui.h`.
+`crates/ffi-skia/include/sk_capi.h` defines the paint interface.
+Callers do not need Skia headers.
+The Desktop and Mobile interfaces are in their crate `include/` directories.
+Headless remains a peer runtime.
+
+| Environment | Paint |
 | --- | --- |
-| unset | Skia CPU prebuilt |
-| `SCUZZ_SKIA=sk_sw` | in-tree software |
-| `SCUZZ_SKIA=gpu` | OpenGL raster. No CPU paint pass |
+| unset | Pinned Skia CPU archive |
+| `SCUZZ_SKIA=sk_sw` | In-tree software renderer |
+| `SCUZZ_SKIA=gpu` | OpenGL renderer. Pixel reads use the framebuffer |
+
+```bash
+make -C crates/ffi-skia test
+SCUZZ_SKIA=sk_sw make -C crates/ffi-skia test
+SCUZZ_SKIA=gpu make -C crates/ffi-skia test
+make -C crates/embedder-desktop test
+make -C crates/embedder-mobile test
+```
+
+The GPU and Desktop checks need the host packages in [Optional CI slices](#optional-ci-slices).
+C test builds keep assertions active, including when `CFLAGS` defines `NDEBUG`.
+Runtime tests relink after paint selection. They use the archive selected for that run.
+The test link includes the math library for each renderer.
+The differential CI slice runs `python3 scripts/test_native_text.py`.
+It compares 48 script, size, and style cases across the three native renderers.
+It checks metrics, carets, source clusters, and glyph outlines.
+The pixel reference uses Skia with hinting off and subpixel positions.
+The check permits one pixel for raster coverage and checks ink mass separately.
+It rejects deliberate text advance and glyph placement defects.
+The differential CI slice also runs `python3 scripts/test_png_max_delta.py`.
+It checks all five PNG filters, chunk integrity, incomplete image rejection, and comparator exit codes.
+The comparator reads static RGBA images with eight bits per channel and no interlacing.
+Run normal, ASan, and UBSan runtime tests in sequence.
+Their network checks use the same local ports.
+
+`scripts/fetch_skia.sh` reads `third_party/skia/PIN`.
+The `url` field selects the CPU archive. The `hdr_url` field selects its headers.
+`{triple}` becomes the host triple from `scripts/skia_triple.sh`.
+Use `SCUZZ_SKIA_TRIPLE` to select another triple.
+Use `SCUZZ_SKIA_URL` to select another archive URL.
+The fetch fails if it cannot obtain the archive.
+It installs `third_party/skia/prebuilt/<triple>/libsk_capi.a`.
+The ffi-skia build replaces the archive's interface objects with the local implementation.
+It records the selected renderer in `build/sk_capi_backend`.
+No Skia source tree is stored in the repository.
+
+The CPU archive contains Skia objects and HarfBuzz.
+All native renderers use the verified embedded font files.
+The software and OpenGL builds compile standalone HarfBuzz from its pinned source.
+They use its glyph outlines and the shared native shaper.
+The paint build also fetches pinned SheenBidi source.
+`third_party/skia/PIN` supplies source revisions and SHA-256 values.
+The build verifies each source archive before it extracts files.
+The build keeps these sources under `crates/ffi-skia/build/`.
+`scripts/fetch_fonts.py` fetches the Noto fallback fonts from Google Fonts.
+It also fetches fixed DejaVu files for native Latin and monospace text.
+It verifies these files before use. The native build does not select host fonts.
+`third_party/fonts/PIN` supplies each revision and SHA-256 value.
+Native Skia embeds these files. Web packages supply them as font assets.
+The release includes their SIL Open Font License files.
+Native application packages include the font and text shaper licenses.
+The macOS bundle contains these files before signing.
+Each native renderer needs the C++ library.
+Skia on Linux also links math, zlib, and bzip2 libraries.
+macOS also links CoreFoundation, CoreGraphics, CoreText, Foundation, and Carbon.
+The archive build disables WOFF2 and rejects undefined Brotli symbols.
+`scripts/package_release.sh` includes the pinned host archive unless `SCUZZ_SKIA=sk_sw`.
+
+Desktop uses X11 on Linux and Cocoa on macOS.
+Linux desktop motion preferences use the Settings portal through D-Bus.
+Install its development files before a native UI build:
+
+```bash
+sudo apt-get install -y pkg-config libdbus-1-dev
+```
+AppKit runs on the process main thread. The IO worker sends work to that thread.
+The Mobile host shell writes frame and keyboard records to stderr when `SCUZZ_MOBILE_SHELL=1`.
+It has no input queue and exits after one frame. Pixels remain offscreen.
+Link the Mobile archive with `--whole-archive` on Linux or `-force_load` on macOS.
+These options select its implementation instead of the runtime's weak symbols.
+Android and iOS shells live in `crates/embedder-mobile/shells/`.
+Use a test emulator for the Android motion check:
+
+```bash
+python3 crates/embedder-mobile/shells/android/test_motion.py emulator-5554
+```
+
+The check builds a temporary app from `examples/motion`.
+It checks the initial motion preference, live changes, visible input, resume, and restart.
+It also checks keyboard insets, typing, dismissal, reopening, and retained text.
+It restores the animation setting and removes the temporary app.
+App instructions: run `scuzz docs gui`, `scuzz docs android`, or `scuzz docs ios`.
 
 ## Web build tools
 
@@ -149,16 +255,15 @@ The separate `tyck-replay` and `codegen-replay` slices preserve compiler corpus 
 
 ## Formal verification experiment
 
-`examples/proof` supplies the formal experiment in `vision.md`.
-The example `Proof` module translates checked Int and Bool expressions.
-It uses signed 64-bit comparisons and arithmetic modulo 2^64.
-It rejects effects, recursion, implicit assumptions, and unsupported expressions.
-The same `balance` oracle supplies fuzz checks and solver queries.
-The optional checker report covers this experiment.
-Run the required project checks separately with `./scripts/ci.sh pr`.
+`examples/proof` checks the optional methods in
+[`vision.md`](vision.md#formal-verification-methods).
+The default application check remains `scuzz fuzz`.
+Run required project checks separately with `./scripts/ci.sh pr`.
+Proof scope, measurements, and open limits live in
+[`gaps.md`](gaps.md#formal-verification).
 
-The experiment uses an optional Z3 executable. It does not install a solver.
-For a local isolated installation, use:
+The pure expression check needs an optional Z3 executable.
+The script does not install a solver. For an isolated installation, run:
 
 ```bash
 python3 -m venv /tmp/scuzz-proof-solver
@@ -166,132 +271,47 @@ python3 -m venv /tmp/scuzz-proof-solver
 python3 scripts/proof-experiment.py --solver /tmp/scuzz-proof-solver/bin/z3
 ```
 
-Set `SCUZZ_SOLVER` or pass `--solver` to select the executable.
+Set `SCUZZ_SOLVER` or pass `--solver` to select the solver.
 Set `SCUZZ` or pass `--cli` to select the product compiler.
 Run the script from any directory. It uses the checkout root.
-It writes evidence to `examples/proof/build/experiment/summary.json`.
+The report is `examples/proof/build/experiment/summary.json`.
 Each run replaces the previous result before checks start.
-Missing solver support returns an incomplete result and exit status 2.
-Unknown solver results and deadline failures cannot produce a proof result.
-
-The check covers all signed 64-bit inputs for one pure balance invariant.
-It checks assumption consistency and required trigger reach separately.
-It checks an overflow defect at maximum Int.
-It replays that input and minimum Int through both engines.
-It compares 70 expression results with independent host arithmetic.
-It also checks live input validation in both engines.
-Its ordinary 16-iteration fuzz campaign uses the same author oracle.
-The effect protocol starts two requests in sequence.
-The first request runs in a worker fiber. Its caller can cancel it.
-The second request starts after the first request settles.
-The checker examines every ready fiber choice for inputs 1 and 2.
-It checks no fault, one file failure, or one interrupted write.
-The fault call bound is 1 through 4. Setup does not consume this bound.
-The scheduler bounds are 16 contention choices and 128 steps per driver run.
-The execution budget is 1024. An unmet bound leaves the check incomplete.
-Each request must release its resource once.
-The checker requires one release after the first join and two after both requests.
-A request waits at least one clock unit before its write.
-A failed write must preserve the previous file.
-Each write payload has seven bytes. An interrupted write stages three bytes.
-Cancellation must preserve the first request file.
-The same live assertions and timeline claims run in ordinary fuzzing.
-Recorded scheduler choices replay through both engines.
-The check compares exact picks, timelines, claim records, rejection records,
-and executed property names.
-It also compares permitted scheduler choices and terminal verdicts.
-It checks the scheduler step bound in each engine.
-It rejects a release defect with a concrete replay workload.
-These finite schedules do not prove eventual completion for all executions.
-The report records queries, source identities, tool identities, trust, and cost.
-The checking budget is 60 seconds after the experiment package build.
-One Linux sample uses 468 scheduler executions and 252 distinct replay paths.
-It reaches at most four contention choices per run.
-Native runs reach at most 39 scheduler steps. Evaluator runs reach at most 41.
-Checking takes 17.97 seconds. The cached package build takes 4.58 seconds.
-A cold package build takes 35.91 seconds.
-These measurements apply to this finite experiment on this host.
-These results do not establish an inductive proof or correctness for other programs.
 
 ### Application recovery comparison
 
-Run the application check without a solver:
+The recovery check needs no solver. Run:
 
 ```bash
 python3 scripts/proof-experiment.py --recovery
 ```
 
-The report lives in `examples/proof/build/recovery/summary.json`.
-Each run uses a new scratch directory. It retains logs and replay workloads.
-The script selects exact function bodies from the editor recovery code and its helpers.
-It compiles these bodies with the existing compiler.
-It exports the evaluator graph through the existing compiler verification modules.
-Source selection remains a trusted step. This check does not run the complete IDE.
-The fixture source lives in `examples/proof/recovery.scuzz`.
+The report is `examples/proof/build/recovery/summary.json`.
+Each run uses a new scratch directory and retains logs and replay workloads.
+The fixture is `examples/proof/recovery.scuzz`.
+The script compiles selected production editor functions and their helpers.
+It exports their evaluator graph through the shared compiler modules.
+Source selection remains a trusted step. The check does not run the complete IDE.
 
-The check uses two source files and four journal states.
-They cover interrupted acceptance, interrupted Undo, and an external edit before recovery.
-One pending source write runs before journal recovery.
-Two further recovery attempts check completion and repeated recovery.
-Four more inputs cancel this operation in a worker fiber.
-The caller waits for worker entry before cancellation.
-External edits during recovery and live process termination remain unchecked.
+Each source graph uses one evaluator server at a time.
+Requests run in isolated children. The script stops its servers on exit.
+A closed request stays incomplete. A replacement server keeps earlier evidence
+and uses a separate log. It does not change an incomplete scope to complete.
 
-Faults cover no fault or one file failure or interrupted write at calls 1 through 16.
-Setup does not consume the fault bound.
-The execution limit is 2048. Each driver has a 1000-step limit.
-The replay record retains every contention choice.
-The checker permits up to 1000 contention choices within the driver step limit.
-Replay rejects missing, additional, or unavailable recorded choices.
-The 16-point schedule sampling policy stays separate from replay storage.
-Bounded paths compare exact scheduler choices, timelines, claims, and author rule execution.
-They also compare evaluator and native terminal verdicts.
-The sequential sub-scope covers 132 executions.
-The complete application result stays incomplete when the checking budget ends.
-The report retains the number of pending scheduler prefixes.
+Both reports record source and tool identities, bounds, trust, and command costs.
+They retain scheduler choices, timelines, claims, and author rule execution.
+Repeated paths reuse comparisons only when their complete observations agree.
+Replay rejects missing, additional, or unavailable choices.
+Setup does not consume file fault bounds.
+A recorded file fault uses `fs:fail:N`, `fs:partial:N`, or `fs:after:N`.
+N is an integer from 1 through 2147483647.
 
-Both methods use the same author rules and a 60-second checking limit per source variant.
-Build time stays separate. Ordinary fuzzing uses 64 iterations and seed 42.
-Eight corpus inputs exercise acceptance, Undo, conflict, and cancellation.
-Six more corpus inputs check repeated recovery and conflict preservation.
-The comparisons read two sources, the journal, the operation record, and the Undo state.
-They compare file presence and contents. A missing file differs from an empty file.
-Separate drivers keep observation reads out of the existing recovery fault paths.
-The report requires the added rules to execute on all six relevant fault-free inputs.
-The eight existing fault-free recovery inputs also retain exact replay checks.
-The search continues after a required failure to check both defect controls.
-Setup writes fixed journal inputs without application helpers.
-Unexpected recovery errors reject an author rule. Tool failures stay incomplete.
-Its default search also includes repeated drives and persistent faults.
-The driver retains a pending operation when file access remains unavailable.
-The finite checker requires all six live assertions on each passing bounded path.
-The methods have different search scopes. Their elapsed times do not establish a speed advantage.
+The commands return these statuses:
 
-One Linux sample checks 705 native executions and 705 exact replay paths.
-The 132 sequential paths pass. Cancellation paths reach 144 contention choices.
-The 60-second budget ends with more than 35000 scheduler prefixes pending.
-The 14 fault-free rule checks and exact engine comparisons take 1.21 seconds.
-Ordinary fuzzing takes 6.49 seconds. Its 15 required probes and 40 search probes pass.
-It detects all 24 sampled mutations. No sampled mutation remains incomplete.
-These sampled mutations affect fixture functions.
-Three direct mutation checks exercise application helpers.
-They corrupt field lookup and path guards.
-Their setup passes. Each check rejects the recovery error in both engines.
-These three checks also reproduce through ordinary native replay.
-Two more direct checks alter conflict handling and repeated recovery.
-One writes the second source file before reporting a conflict.
-The endpoint rules pass this defect. The file comparison rejects it in both engines.
-The other clears the Undo state when the journal is empty.
-The repeated recovery rule rejects it in both engines.
-Ordinary native replay reproduces both author rule failures.
-Each direct check reports build, native check, evaluator comparison, and replay time.
-The two added defect builds take 4.34 and 4.38 seconds in this sample.
-Their native checks take less than 0.01 seconds each.
-Their evaluator comparisons take 0.08 seconds each.
-Their ordinary native replays take 0.22 and 0.21 seconds.
-These times exclude human effort to write or understand the rules.
-One host sample does not establish a general cost bound.
-Both methods reject a missing-write defect and an external-overwrite defect.
-Finite counterexamples also reproduce through ordinary native replay.
-The complete comparison returns exit status 2 because finite exploration remains incomplete.
-These controls do not establish a new application defect or a general method advantage.
+| Status | Meaning |
+| --- | --- |
+| 0 | All required checks complete and pass |
+| 1 | A required check fails in the correct program |
+| 2 | No correct scope fails, but required evidence is incomplete |
+
+Missing solver support, unknown solver results, and deadlines remain incomplete.
+Expected rejection of a deliberate defect does not fail the correct program.

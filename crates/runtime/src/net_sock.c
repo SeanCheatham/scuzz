@@ -12,7 +12,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-/* Blessed TCP and UDP. Listen/bind is localhost. Connect takes IPv4/IPv6
+/* Built-in TCP and UDP. Listen/bind is localhost. Connect takes IPv4/IPv6
  * literals or localhost. UDP bind is IPv4 only. No DNS. Fibers park on poll.
  * TestRuntime uses a mailbox. Opaque SzNetSock owns the fds. */
 

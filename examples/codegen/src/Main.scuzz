@@ -265,7 +265,7 @@ def srcCons(): String =
   "enum Tok:\n  case Eof\n  case Ident(s: String)\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(List.len(Tok.Ident(\"x\") :: [Tok.Eof])))\n"
 
 def wantCons(): String =
-  "@.str0 = private unnamed_addr constant [2 x i8] c\"x\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:5:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_arg0_arg0_ap_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_arg0_arg0_arg0_ap_s = call ptr @sz_string_lit(ptr %build_e_arg0_arg0_arg0_ap_gep)\n  %build_e_arg0_arg0_arg0_adt = call ptr @sz_adt_new(i32 17, ptr %build_e_arg0_arg0_arg0_ap_s)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg0_ap_s)\n  %build_e_arg0_arg0_arg1_0 = call ptr @sz_list_nil()\n  %build_e_arg0_arg0_arg1_e0_adt = call ptr @sz_adt_new(i32 16, ptr null)\n  %build_e_arg0_arg0_arg1_1 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg1_e0_adt, ptr %build_e_arg0_arg0_arg1_0)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg1_0)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg1_e0_adt)\n  %build_e_arg0_arg0_v = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg0_adt, ptr %build_e_arg0_arg0_arg1_1)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg0_adt)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg1_1)\n  %build_e_arg0_v = call i64 @sz_list_len(ptr %build_e_arg0_arg0_v)\n  call void @sz_release(ptr %build_e_arg0_arg0_v)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
+  "@.str0 = private unnamed_addr constant [2 x i8] c\"x\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:5:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_arg0_arg0_ap_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_arg0_arg0_arg0_ap_s = call ptr @sz_string_lit(ptr %build_e_arg0_arg0_arg0_ap_gep)\n  %build_e_arg0_arg0_arg0_adt = call ptr @sz_adt_new(i32 17, ptr %build_e_arg0_arg0_arg0_ap_s)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg0_ap_s)\n  %build_e_arg0_arg0_arg1_e0_adt = call ptr @sz_adt_new(i32 16, ptr null)\n  %build_e_arg0_arg0_arg1_0 = call ptr @sz_list_nil()\n  %build_e_arg0_arg0_arg1_1 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg1_e0_adt, ptr %build_e_arg0_arg0_arg1_0)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg1_0)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg1_e0_adt)\n  %build_e_arg0_arg0_v = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg0_adt, ptr %build_e_arg0_arg0_arg1_1)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg0_adt)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg1_1)\n  %build_e_arg0_v = call i64 @sz_list_len(ptr %build_e_arg0_arg0_v)\n  call void @sz_release(ptr %build_e_arg0_arg0_v)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def srcCh(): String =
   "@main def main: IO[Unit] =\n  IO.println(Str.fromInt(Str.charAt(\"ab\", 0)))\n"
@@ -635,7 +635,7 @@ def srcJoin(): String =
   "@main def main: IO[Unit] =\n  IO.println(List.join([\"a\", \"b\"], \",\"))\n"
 
 def wantJoin(): String =
-  "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n@.str2 = private unnamed_addr constant [2 x i8] c\",\\00\", align 1\n@.str3 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str3, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_0 = call ptr @sz_list_nil()\n  %build_e_arg0_e1_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %build_e_arg0_e1_s = call ptr @sz_string_lit(ptr %build_e_arg0_e1_gep)\n  %build_e_arg0_2 = call ptr @sz_list_cons(ptr %build_e_arg0_e1_s, ptr %build_e_arg0_0)\n  call void @sz_release(ptr %build_e_arg0_0)\n  call void @sz_release(ptr %build_e_arg0_e1_s)\n  %build_e_arg0_e0_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_arg0_e0_s = call ptr @sz_string_lit(ptr %build_e_arg0_e0_gep)\n  %build_e_arg0_1 = call ptr @sz_list_cons(ptr %build_e_arg0_e0_s, ptr %build_e_arg0_2)\n  call void @sz_release(ptr %build_e_arg0_2)\n  call void @sz_release(ptr %build_e_arg0_e0_s)\n  %build_e_arg1_gep = getelementptr inbounds [2 x i8], ptr @.str2, i64 0, i64 0\n  %build_e_arg1_s = call ptr @sz_string_lit(ptr %build_e_arg1_gep)\n  %build_e_v = call ptr @sz_list_join(ptr %build_e_arg0_1, ptr %build_e_arg1_s)\n  call void @sz_release(ptr %build_e_arg0_1)\n  call void @sz_release(ptr %build_e_arg1_s)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
+  "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n@.str2 = private unnamed_addr constant [2 x i8] c\",\\00\", align 1\n@.str3 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str3, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_e0_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_arg0_e0_s = call ptr @sz_string_lit(ptr %build_e_arg0_e0_gep)\n  %build_e_arg0_e1_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %build_e_arg0_e1_s = call ptr @sz_string_lit(ptr %build_e_arg0_e1_gep)\n  %build_e_arg0_0 = call ptr @sz_list_nil()\n  %build_e_arg0_2 = call ptr @sz_list_cons(ptr %build_e_arg0_e1_s, ptr %build_e_arg0_0)\n  call void @sz_release(ptr %build_e_arg0_0)\n  call void @sz_release(ptr %build_e_arg0_e1_s)\n  %build_e_arg0_1 = call ptr @sz_list_cons(ptr %build_e_arg0_e0_s, ptr %build_e_arg0_2)\n  call void @sz_release(ptr %build_e_arg0_2)\n  call void @sz_release(ptr %build_e_arg0_e0_s)\n  %build_e_arg1_gep = getelementptr inbounds [2 x i8], ptr @.str2, i64 0, i64 0\n  %build_e_arg1_s = call ptr @sz_string_lit(ptr %build_e_arg1_gep)\n  %build_e_v = call ptr @sz_list_join(ptr %build_e_arg0_1, ptr %build_e_arg1_s)\n  call void @sz_release(ptr %build_e_arg0_1)\n  call void @sz_release(ptr %build_e_arg1_s)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def srcApply(): String =
   """def applyInt(f: Int => Int, n: Int): Int =
@@ -718,7 +718,7 @@ def reloadCaptureType(): Bool =
   Emit.captureSchema([Param("a", "Int", "", "")], []) != Emit.captureSchema([Param("a", "String", "", "")], [])
 
 def reloadRecordLayout(): Bool =
-  Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "Int", "", "")])], "")]) != Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "String", "", "")])], "")])
+  Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "Int", "", "")])], "", false)]) != Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "String", "", "")])], "", false)])
 
 def srcEvMatch(): String =
   "enum Shape:\n  case Circle(r: Int)\n  case Rect(w: Int, h: Int)\n\nrecord Pt(x: Int, y: Int)\n\ndef pick(xs: List[Int], s: Shape, p: Pt, name: String): Int =\n  xs match {\n    case [] => 0\n    case h :: _ if h > 100 => 1\n    case whole @ (h :: t) => h + List.len(t) + area(s) + p.x * p.y + tag(name) + List.len(whole)\n  }\n\ndef area(s: Shape): Int =\n  s match {\n    case Shape.Circle(r) => r * r * 3\n    case Shape.Rect(w = ww, h = hh) => ww * hh\n  }\n\ndef tag(name: String): Int =\n  name match {\n    case \"a\" | \"b\" => 10\n    case \"c\" => 20\n    case _ => 30\n  }\n\ndef opt(o: Option[Int]): Int =\n  o match {\n    case Some(n) => n\n    case None => 0 - 1\n  }\n\ndef pair(t: (Int, String)): String =\n  t match {\n    case (n, s) => s\"$s=${n + 1}\"\n  }\n\ndef lam(): Int =\n  List.len(List.filter(List.map([1, 2, 3], x => x * 2), y => y > 2))\n\ndef divs(): List[Int] =\n  [7 / 2, (0 - 7) / 2, 7 % 3, (0 - 7) % 3, 7 % (0 - 3)]\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(pick([5, 6, 7], Shape.Rect(2, 3), Pt(2, 5), \"b\")))\n"
@@ -864,10 +864,13 @@ def evKitsCovered(): Bool =
   List.isEmpty(evKitsMissing())
 
 def evKitsMissing(): List[String] =
-  List.filter(List.filter(Kits.names(), k => !Eval.isExcludedKit(k)), k => Eval.isUnsupported(Eval.kitProbe(k, List.map(Kits.params(k), ty => evSample(ty)), evProg(srcAdd()))))
+  List.filter(List.filter(Kits.names(), k => !Eval.isExcludedKit(k)), k => Eval.isUnsupported(Eval.kitProbe(k, evKitSamples(k), evProg(srcAdd()))))
+
+def evKitSamples(k: String): List[Value] =
+  if (k == "Theme.metrics") [Value.VTheme(Theme.light()), Value.VInt(14), Value.VInt(6), Value.VInt(8), Value.VInt(8), Value.VInt(40)] else List.map(Kits.params(k), ty => evSample(ty))
 
 def evSample(ty: String): Value =
-  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Eval.sigNew("", Value.VStr("a"), 0, false) else if (Str.startsWith(ty, "Signal")) Eval.sigNew("", Value.VInt(1), 0, false) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap(Eval.emptyMap()) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
+  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Eval.sigNew("", Value.VStr("a"), 0, false) else if (Str.startsWith(ty, "Signal")) Eval.sigNew("", Value.VInt(1), 0, false) else if (ty == "Text") Value.VText(Text.span("a")) else if (ty == "Theme") Value.VTheme(Theme.light()) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap(Eval.emptyMap()) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
 
 def srcLive(): String =
   "def reads(): Int =\n  for {\n    n = Signal.makeN(\"count\", 4)\n    s = Signal.makeN(\"label\", \"hi\")\n    xs = Signal.makeN(\"items\", [\"a\", \"b\"])\n    _ = Signal.set(n, 9)\n    _ = Signal.set(xs, [\"a\", \"b\", \"c\"])\n    _ = Fuzz.hit(\"codegen:readers\")\n  } yield Property.signalInt(\"count\") + Str.len(Signal.get(s)) + Str.len(Property.signalStr(\"label\")) + Property.signalListLen(\"items\") + Str.len(Property.signalListAt(\"items\", 0)) + Str.len(Property.signalListAt(\"items\", 9)) + (if (Property.a11yHas(\"absent\")) 1 else 0)\n\ndef arm(): IO[Unit] =\n  Fuzz.setup(IO.pure(()))\n\ndef reg(): IO[Unit] =\n  Fuzz.driver(\"d\", 1, toks => IO.pure(()))\n\ndef watch(): IO[Unit] =\n  Fuzz.verify(\"c\", _ => Verdict.ok())\n\ndef rel(): IO[Unit] =\n  Fuzz.verifyRel(\"r\", __tup => __tup match {\n    case (_, _) => Verdict.ok()\n  })\n\ndef go(): IO[Unit] =\n  Fuzz.probe(IO.pure(()))\n\n@main def main: IO[Unit] =\n  IO.pure(())\n"
@@ -888,7 +891,7 @@ def evLiveDump(): String =
   if (!evExcluded()) "evExcluded" else if (Check.check(srcLive()) != "[]") Check.check(srcLive()) else if (evCall(srcLive(), "reads", []) != "17") evCall(srcLive(), "reads", []) else if (evCall(srcLive(), "arm", []) != "<io>") "arm" else if (evCall(srcLive(), "reg", []) != "<io>") "reg" else if (evCall(srcLive(), "watch", []) != "<io>") "watch" else if (evCall(srcLive(), "rel", []) != "<io>") "rel" else "go"
 
 def srcCounter(): String =
-  "record CounterState(value: Int)\n\ndef countLabel(n: Int): String =\n  Str.concat(\"Count: \", Str.fromInt(n))\n\n@main def main: IO[Unit] =\n  for {\n    state = Signal.make(CounterState(0))\n    count = Signal.map(state, v => v.value)\n    label = Signal.map(count, n => countLabel(n))\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => IO.pure(Signal.set(state, Signal.get(state).copy(value = Signal.get(count) + 1))))))\n  } yield ()\n"
+  "record CounterState(value: Int)\n\ndef countLabel(n: Int): String =\n  Str.concat(\"Count: \", Str.fromInt(n))\n\n@main def main: IO[Unit] =\n  for {\n    state = Signal.make(CounterState(0))\n    count = Signal.map(state, v => v.value)\n    label = Signal.map(count, n => countLabel(n))\n    _ <- Ui.run(_ => View.column([View.bindText(label), View.button(\"+1\", _ => IO.pure(Signal.set(state, Signal.get(state).copy(value = Signal.get(count) + 1))))]))\n  } yield ()\n"
 
 def evCounterView(): IO[String] =
   Ref.of(Value.VUnit).flatMap(host => IO.pure(Signal.makeN("$mirror", Value.VList([]))).flatMap(pool => evCounterRun(Eval.withHost(evProg(srcCounter()), host, pool), host)))
@@ -902,14 +905,17 @@ def evViewArgs(view: Value): List[Value] =
     case _ => []
   }
 
+def evViewChildren(view: Value): List[Value] =
+  Eval.listOf(List.at(evViewArgs(view), 0))
+
 def evTap(view: Value, p: EvProg): IO[Unit] =
-  evTapButton(List.at(evViewArgs(view), 1), p)
+  evTapButton(List.at(evViewChildren(view), 1), p)
 
 def evTapButton(button: Value, p: EvProg): IO[Unit] =
   Eval.evUnit(Eval.applyValue(List.at(evViewArgs(button), 1), [Value.VUnit], Eval.envOf(p), p, 0))
 
 def evLabel(view: Value): String =
-  evSigStr(List.at(evViewArgs(List.at(evViewArgs(view), 0)), 0))
+  evSigStr(List.at(evViewArgs(List.at(evViewChildren(view), 0)), 0))
 
 def evSigStr(sv: Value): String =
   sv match {
@@ -1098,5 +1104,10 @@ def httpTuplePayload(): IO[Unit] =
 }
   } yield ()
 
+def tabulatedLabelValues(): IO[Unit] =
+  if (List.forall([0, 1, 130], n => for {
+  labels = List.tabulate(n, i => s"Item$i")
+} yield List.len(labels) == n && List.forall(List.zipWithIndex(labels), row => row._2 == Str.concat("Item", Str.fromInt(row._1))))) IO.pure(()) else IO.fail("Tabulated labels differ")
+
 @main def main: IO[Unit] =
-  IO.pure(lexerLarge().require(value => value)).flatMap(_ => IO.pure(pointerArguments("x").require(value => value == "xbxo"))).flatMap(_ => temporaryTupleFields()).flatMap(_ => httpTuplePayload()).flatMap(_ => IO.println(if (allOk()) "ir-ok" else dumpAll())).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => evTraceMain()).flatMap(_ => probeMain())
+  IO.pure(lexerLarge().require(value => value)).flatMap(_ => IO.pure(pointerArguments("x").require(value => value == "xbxo"))).flatMap(_ => tabulatedLabelValues()).flatMap(_ => temporaryTupleFields()).flatMap(_ => httpTuplePayload()).flatMap(_ => IO.println(if (allOk()) "ir-ok" else dumpAll())).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => evTraceMain()).flatMap(_ => probeMain())

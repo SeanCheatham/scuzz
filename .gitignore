@@ -5,6 +5,7 @@
 examples/jump/src/
 .bootstrap/
 build/
+__pycache__/
 **/.scuzz/
 *.png
 .DS_Store

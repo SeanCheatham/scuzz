@@ -15,6 +15,8 @@ enum Value:
   case VSet(xs: List[Value])
   case VBuilder(b: Builder)
   case VBytes(b: Bytes)
+  case VText(text: Text)
+  case VImage(image: Image)
   case VRef(r: Ref[Value])
   case VQueue(q: Queue[Value])
   case VDeferred(d: Deferred[Value])
@@ -27,6 +29,8 @@ enum Value:
   case VVerdict(v: Verdict)
   case VView(kind: String, args: List[Value])
   case VSig(id: Int, name: String, s: Signal[Value], si: Signal[Int], ss: Signal[String])
+  case VLiveSig(s: Signal[Value], si: Signal[Int], ss: Signal[String])
+  case VTheme(theme: Theme)
 
 enum EvMap:
   case MEmpty
@@ -353,6 +357,9 @@ def show(v: Value): String =
     case Value.VSet(xs) => Str.concat("Set(", Str.concat(showAll(xs), ")"))
     case Value.VBuilder(_) => "<builder>"
     case Value.VBytes(_) => "<bytes>"
+    case Value.VText(text) => Text.plain(text)
+    case Value.VImage(_) => "<image>"
+    case Value.VTheme(_) => "<theme>"
     case Value.VRef(_) => "<ref>"
     case Value.VQueue(_) => "<queue>"
     case Value.VDeferred(_) => "<deferred>"
@@ -365,6 +372,7 @@ def show(v: Value): String =
     case Value.VVerdict(_) => "<verdict>"
     case Value.VView(kind, _) => Str.concat("<", Str.concat(kind, ">"))
     case Value.VSig(_, _, _, _, _) => "<signal>"
+    case Value.VLiveSig(_, _, _) => "<signal>"
   }
 
 def fmtFloat(f: Float): String =
@@ -1056,6 +1064,9 @@ def valEq(a: Value, b: Value): Bool =
     case Value.VTuple(xs) => eqTuple(xs, b)
     case Value.VCon(en, tag, fields) => eqCon(en, tag, fields, b)
     case Value.VFloat(x) => eqFloat(x, b)
+    case Value.VText(text) => eqText(text, b)
+    case Value.VImage(image) => eqImage(image, b)
+    case Value.VTheme(theme) => eqTheme(theme, b)
     case Value.VMap(kvs) => eqList(pairsToTuples(mapPairs(kvs, noPairs())), mapTuples(b))
     case Value.VSet(xs) => eqList(xs, setTuples(b))
     case _ => false
@@ -1971,10 +1982,39 @@ def bothIo(a: IO[Value, Value], b: IO[Value, Value]): IO[Value, Value] =
   IO.both(a, b).map(pr => Value.VTuple(pairFst(pr) :: pairSnd(pr) :: noVals()))
 
 def isUiKit(f: String): Bool =
-  Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Icon.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")
+  Str.startsWith(f, "Text.") || Str.startsWith(f, "Image.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Icon.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")
 
 def uiKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (Str.startsWith(f, "View.")) viewValue(f, vals) else if (Str.startsWith(f, "Signal.")) sigKit(f, vals, env, p, off) else if (f == "Ui.run") uiRun(List.at(vals, 0), env, p, off) else if (f == "Ui.setTitle") if (List.isEmpty(p.ui)) Value.VIo(pureIo(Value.VUnit)) else hostUi(f, vals, p) else if (Str.startsWith(f, "Ui.setEditor") || f == "Ui.editorCaret") editorKit(f, vals, env, p, off) else if (Str.startsWith(f, "Icon.")) Value.VInt(iconKit(f)) else if (f == "Color.rgb") Value.VInt(Color.rgb(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Color.rgba") Value.VInt(Color.rgba(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2), intAt(vals, 3))) else if (Str.startsWith(f, "Theme.")) Value.VInt(themeKit(f)) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (Str.startsWith(f, "Text.")) textKit(f, vals, env, p, off) else if (f == "Theme.metrics") themeMetrics(vals, env, p, off) else if (f == "Theme.light") Value.VTheme(Theme.light()) else if (f == "Theme.dark") Value.VTheme(Theme.dark()) else if (f == "Theme.colors") Value.VTheme(Theme.colors(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2), intAt(vals, 3), intAt(vals, 4), intAt(vals, 5), intAt(vals, 6), intAt(vals, 7), intAt(vals, 8))) else if (Str.startsWith(f, "Image.")) imageKit(f, vals) else if (Str.startsWith(f, "View.")) viewValue(f, vals) else if (Str.startsWith(f, "Signal.")) sigKit(f, vals, env, p, off) else if (f == "Ui.run") uiRun(List.at(vals, 0), env, p, off) else if (f == "Ui.setTitle") if (List.isEmpty(p.ui)) Value.VIo(pureIo(Value.VUnit)) else hostUi(f, vals, p) else if (Str.startsWith(f, "Ui.setEditor") || f == "Ui.editorCaret") editorKit(f, vals, env, p, off) else if (Str.startsWith(f, "Icon.")) Value.VInt(iconKit(f)) else if (f == "Color.rgb") Value.VInt(Color.rgb(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Color.rgba") Value.VInt(Color.rgba(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2), intAt(vals, 3))) else if (Str.startsWith(f, "Theme.")) Value.VInt(themeKit(f)) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def textValues(values: List[Value]): List[Text] =
+  values match {
+    case [] => []
+    case head :: tail => head match {
+  case Value.VText(text) => text :: textValues(tail)
+  case _ => textValues(tail)
+}
+  }
+
+def textKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Text.span") Value.VText(Text.span(strAt(vals, 0))) else if (f == "Text.concat") Value.VText(Text.concat(textValues(listOf(List.at(vals, 0))))) else for {
+  value = if (f == "Text.action" || f == "Text.color" || f == "Text.size") List.at(vals, 1) else List.at(vals, 0)
+} yield value match {
+  case Value.VText(text) => if (f == "Text.plain") Value.VStr(Text.plain(text)) else Value.VText(if (f == "Text.action") Text.action(intAt(vals, 0), text) else if (f == "Text.color") Text.color(intAt(vals, 0), text) else if (f == "Text.size") Text.size(intAt(vals, 0), text) else if (f == "Text.bold") Text.bold(text) else if (f == "Text.italic") Text.italic(text) else if (f == "Text.underline") Text.underline(text) else Text.monospace(text))
+  case _ => unsupported(f, env, p, off)
+}
+
+def eqText(text: Text, other: Value): Bool =
+  other match {
+    case Value.VText(value) => text == value
+    case _ => false
+  }
+
+def themeMetrics(vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  List.at(vals, 0) match {
+    case Value.VTheme(theme) => Value.VTheme(Theme.metrics(theme, intAt(vals, 1), intAt(vals, 2), intAt(vals, 3), intAt(vals, 4), intAt(vals, 5)))
+    case _ => unsupported("Theme.metrics", env, p, off)
+  }
 
 def editorKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (List.isEmpty(p.ui)) unsupported(Str.concat("kit ", f), env, p, off) else hostUi(f, vals, p)
@@ -2014,7 +2054,7 @@ def sigBare(name: String, v: Value, id: Int): Value =
   }
 
 def sigMake(name: String, v: Value, p: EvProg): Value =
-  sigTake(name, v, intOf(Signal.get(List.at(p.sig, 1))), listOf(Signal.get(List.at(p.sig, 0))), p)
+  if (List.len(p.sig) > 3 && boolOf(Signal.get(List.at(p.sig, 3)))) sigLiveNew(name, v) else sigTake(name, v, intOf(Signal.get(List.at(p.sig, 1))), listOf(Signal.get(List.at(p.sig, 0))), p)
 
 def sigTake(name: String, v: Value, next: Int, pool: List[Value], p: EvProg): Value =
   if (next < List.len(pool) && sigFits(List.at(pool, next), name, v)) sigBump(sigStore(List.at(pool, next), v), next, p) else sigBump(sigGrow(sigNew(name, v, next, sigHide(p)), List.take(pool, next), p), next, p)
@@ -2074,6 +2114,7 @@ def sigNewHide(name: String, v: Value, id: Int): Value =
 def sigGet(sv: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
     case Value.VSig(_, _, s, si, ss) => sigRead(Signal.get(s), si, ss)
+    case Value.VLiveSig(s, si, ss) => sigRead(Signal.get(s), si, ss)
     case _ => errAt("Signal.get needs a Signal", env, p, off)
   }
 
@@ -2086,43 +2127,71 @@ def sigRead(v: Value, si: Signal[Int], ss: Signal[String]): Value =
 
 def sigSet(sv: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
-    case Value.VSig(id, _, s, si, ss) => if (valEq(Signal.get(s), v)) Value.VUnit else sigPush(id, v, listOf(Signal.get(List.at(p.sig, 2))), sigWrite(Value.VUnit, s, si, ss, v), env, p, off)
+    case Value.VLiveSig(s, si, ss) => sigWrite(Value.VUnit, s, si, ss, v)
+    case Value.VSig(_, _, s, si, ss) => if (valEq(sigRead(Signal.get(s), si, ss), v)) Value.VUnit else sigWrite(Value.VUnit, s, si, ss, v)
     case _ => errAt("Signal.set needs a Signal", env, p, off)
   }
 
-def sigPush(id: Int, v: Value, deps: List[Value], _u: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.isEmpty(deps)) Value.VUnit else sigPushOne(id, v, List.at(deps, 0), List.tail(deps), env, p, off)
-
-def sigPushOne(id: Int, v: Value, dep: Value, rest: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  dep match {
-    case Value.VTuple(xs) => if (intOf(List.at(xs, 0)) == id) sigPushNext(id, v, rest, sigSet(List.at(xs, 2), applyValue(List.at(xs, 1), v :: noVals(), env, p, off), env, p, off), env, p, off) else sigPush(id, v, rest, Value.VUnit, env, p, off)
-    case _ => sigPush(id, v, rest, Value.VUnit, env, p, off)
+def sigSource(s: Signal[Value], si: Signal[Int], ss: Signal[String]): Signal[Value] =
+  Signal.get(s) match {
+    case Value.VInt(_) => Signal.mapN("$mirror", si, n => Value.VInt(n))
+    case Value.VStr(_) => Signal.mapN("$mirror", ss, text => Value.VStr(text))
+    case _ => s
   }
-
-def sigPushNext(id: Int, v: Value, rest: List[Value], r: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  if (isErr(r)) r else sigPush(id, v, rest, Value.VUnit, env, p, off)
 
 def sigMap(name: String, sv: Value, f: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
-    case Value.VSig(id, _, _, _, _) => sigMapDst(id, f, sigMake(name, applyValue(f, sigGet(sv, env, p, off) :: noVals(), env, p, off), p), p)
+    case Value.VLiveSig(s, _, _) => sigLiveMapped(name, Signal.mapN("$mirror", s, v => applyValue(f, v :: noVals(), env, p, off)))
+    case Value.VSig(_, _, s, si, ss) => sigMappedPool(name, sigLiveMapped(name, Signal.mapN("$mirror", sigSource(s, si, ss), v => applyValue(f, v :: noVals(), env, p, off))), p)
     case _ => errAt("Signal.map needs a Signal", env, p, off)
   }
 
-def sigMapDst(id: Int, f: Value, dst: Value, p: EvProg): Value =
-  if (isErr(dst)) dst else sigMapDep(dst, Signal.set(List.at(p.sig, 2), Value.VList(List.append(listOf(Signal.get(List.at(p.sig, 2))), Value.VTuple(Value.VInt(id) :: f :: dst :: noVals())))))
+def sigMappedPool(name: String, mapped: Value, p: EvProg): Value =
+  mapped match {
+    case Value.VLiveSig(s, si, ss) => sigMappedAt(name, s, si, ss, intOf(Signal.get(List.at(p.sig, 1))), p)
+    case _ => mapped
+  }
 
-def sigMapDep(dst: Value, _u: Unit): Value =
-  dst
+def sigMappedAt(name: String, s: Signal[Value], si: Signal[Int], ss: Signal[String], next: Int, p: EvProg): Value =
+  sigBump(sigGrow(Value.VSig(next, name, s, si, ss), List.take(listOf(Signal.get(List.at(p.sig, 0))), next), p), next, p)
+
+def sigLiveNew(name: String, value: Value): Value =
+  value match {
+    case Value.VInt(n) => sigLiveInt(Signal.makeN(name, n))
+    case Value.VStr(text) => sigLiveStr(Signal.makeN(name, text))
+    case _ => Value.VLiveSig(Signal.makeN(name, value), Signal.makeN("$mirror", 0), Signal.makeN("$mirror", ""))
+  }
+
+def sigLiveInt(value: Signal[Int]): Value =
+  Value.VLiveSig(Signal.mapN("$mirror", value, n => Value.VInt(n)), value, Signal.makeN("$mirror", ""))
+
+def sigLiveStr(value: Signal[String]): Value =
+  Value.VLiveSig(Signal.mapN("$mirror", value, text => Value.VStr(text)), Signal.makeN("$mirror", 0), value)
+
+def sigLiveMapped(name: String, value: Signal[Value]): Value =
+  Signal.get(value) match {
+    case Value.VInt(_) => Value.VLiveSig(value, Signal.mapN(name, value, v => intOf(v)), Signal.makeN("$mirror", ""))
+    case Value.VStr(_) => Value.VLiveSig(value, Signal.makeN("$mirror", 0), Signal.mapN(name, value, v => strOf(v)))
+    case _ => Value.VLiveSig(Signal.mapN(name, value, v => v), Signal.makeN("$mirror", 0), Signal.makeN("$mirror", ""))
+  }
+
+def sigLiveInput(value: Signal[Value]): Value =
+  Value.VLiveSig(value, Signal.mapN("$mirror", value, v => intOf(v)), Signal.mapN("$mirror", value, v => strOf(v)))
+
+def withLiveSignals(p: EvProg): EvProg =
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, List.append(List.take(p.sig, 3), Signal.makeN("$mirror", Value.VBool(true))), p.log, p.ui, p.funMods)
 
 def sigInt(sv: Value): Signal[Int] =
   sv match {
     case Value.VSig(_, _, _, si, _) => si
+    case Value.VLiveSig(_, si, _) => si
     case _ => Signal.make(0)
   }
 
 def sigStr(sv: Value): Signal[String] =
   sv match {
     case Value.VSig(_, _, _, _, ss) => ss
+    case Value.VLiveSig(_, _, ss) => ss
     case _ => Signal.make("")
   }
 
@@ -2374,6 +2443,7 @@ def propValKind(v: Value): String =
 def sigLive(sv: Value): Value =
   sv match {
     case Value.VSig(_, _, s, si, ss) => sigRead(Signal.get(s), si, ss)
+    case Value.VLiveSig(s, si, ss) => sigRead(Signal.get(s), si, ss)
     case _ => Value.VUnit
   }
 
@@ -2538,13 +2608,13 @@ def withLog(p: EvProg, log: Ref[Value]): EvProg =
   EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs(), p.ui, p.funMods)
 
 def sigSlots(): List[Signal[Value]] =
-  [Signal.makeN("$mirror", Value.VList(noVals())), Signal.makeN("$mirror", Value.VInt(0)), Signal.makeN("$mirror", Value.VList(noVals())), Signal.makeN("$mirror", Value.VBool(false))]
+  [Signal.makeN("$mirror", Value.VList(noVals())), Signal.makeN("$mirror", Value.VInt(0)), Signal.makeN("$mirror", Value.VBool(false))]
 
 def sigHide(p: EvProg): Bool =
-  boolOf(Signal.get(List.at(p.sig, 3)))
+  boolOf(Signal.get(List.at(p.sig, 2)))
 
 def sigHideOn(p: EvProg): EvProg =
-  sigHidePut(p, Signal.set(List.at(p.sig, 3), Value.VBool(true)))
+  sigHidePut(p, Signal.set(List.at(p.sig, 2), Value.VBool(true)))
 
 def sigHidePut(p: EvProg, _u: Unit): EvProg =
   p
@@ -2606,9 +2676,6 @@ def sigTagsCase(all: List[En], en: String, c: EnCase, rest: List[EnCase], acc: S
     case EnCase(name, _) => sigTagsCases(all, en, rest, Str.concat(acc, Str.concat(en, Str.concat(".", Str.concat(name, Str.concat("=", Str.concat(Str.fromInt(Emit.ctorTag(all, en, name)), """
 """)))))))
   }
-
-def newRef(v: Value): Ref[Value] =
-  Property.force(Ref.of(v))
 
 def probeProg(p: EvProg, ctx: Ref[Value]): IO[Unit] =
   probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Fuzz.probe(IO.pure(()).flatMap(_ => probeMain(p)))))
@@ -2731,5 +2798,32 @@ def joinedValue(result: Result[Value, Value]): IO[Value, Value] =
   result match {
     case Result.Ok(value) => pureIo(value)
     case Result.Err(error) => failWith(error)
+  }
+
+def imageKit(f: String, vals: List[Value]): Value =
+  if (f == "Image.decode") imageDecoded(Image.decode(bytesOf(List.at(vals, 0)))) else imageSize(f, List.at(vals, 0))
+
+def imageDecoded(result: Result[String, Image]): Value =
+  result match {
+    case Result.Ok(image) => okV(Value.VImage(image))
+    case Result.Err(error) => errV(Value.VStr(error))
+  }
+
+def imageSize(f: String, value: Value): Value =
+  value match {
+    case Value.VImage(image) => Value.VInt(if (f == "Image.width") Image.width(image) else Image.height(image))
+    case _ => Value.VErr("Image requires decoded data")
+  }
+
+def eqImage(image: Image, other: Value): Bool =
+  other match {
+    case Value.VImage(value) => image == value
+    case _ => false
+  }
+
+def eqTheme(theme: Theme, other: Value): Bool =
+  other match {
+    case Value.VTheme(value) => theme == value
+    case _ => false
   }
 

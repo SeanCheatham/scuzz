@@ -12,6 +12,7 @@
 #include <openssl/x509v3.h>
 #include "scuzz_rt.h"
 #include "../src/net_transport.h"
+#include "../src/rt_util.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -34,9 +35,63 @@
 #include <time.h>
 #include <unistd.h>
 
-static SzIo *pure_drop(void *value);
 static SzIo *repeat_n_drop(int64_t n, SzIo *inner);
 static SzIo *both_drop(SzIo *left, SzIo *right);
+
+static void complete_deferred(SzDeferred *d, int mode, const char *text) {
+  void *value = mode < 2 ? (void *)sz_string_from_cstr(text)
+                         : (void *)sz_error_new(7, text);
+  SzIo *io = NULL;
+  switch (mode) {
+  case 0:
+    sz_deferred_complete_now(d, value);
+    break;
+  case 1:
+    io = sz_deferred_complete(d, value);
+    break;
+  case 2:
+    sz_deferred_fail_now(d, value);
+    break;
+  case 3:
+    io = sz_deferred_fail(d, value);
+    break;
+  }
+  sz_release(value);
+  if (io) {
+    SzIoResult result = sz_io_unsafe_run(io);
+    assert(result.ok);
+  }
+}
+
+static void test_deferred_completion(void) {
+  size_t base_bytes, base_count, live_bytes, live_count;
+  sz_alloc_stats(&base_bytes, &base_count);
+  /* The first completion wins across immediate and IO operations.
+   * Repeated reads retain the result. Each cell releases its payload. */
+  for (int first = 0; first < 4; first++) {
+    for (int later = 0; later < 4; later++) {
+      SzDeferred *d = sz_deferred_make();
+      complete_deferred(d, first, "first");
+      complete_deferred(d, later, "later");
+      for (int read = 0; read < 2; read++) {
+        SzIo *io = sz_deferred_get(d);
+        SzIoResult result = sz_io_unsafe_run(io);
+        assert(result.ok == (first < 2));
+        if (result.ok) {
+          assert(!strcmp(sz_string_cstr(result.value), "first"));
+          sz_release(result.value);
+        } else {
+          assert(result.error && result.error->code == 7);
+          assert(!strcmp(sz_string_cstr(result.error->message), "first"));
+          sz_release(result.error);
+        }
+      }
+      sz_release(d);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_bytes == base_bytes && live_count == base_count);
+    }
+  }
+}
 
 static void *nested_pick_name(void *env) {
   char name[] = "inner";
@@ -47,7 +102,6 @@ static void *nested_pick_name(void *env) {
   memset(name, 'x', sizeof name - 1);
   io = sz_io_pure(NULL);
   result = sz_io_unsafe_run(io);
-  sz_release(io);
   assert(result.ok);
   return NULL;
 }
@@ -65,7 +119,6 @@ static void test_pick_names(void) {
   memset(name, 'x', sizeof name - 1);
   io = sz_io_delay(nested_pick_name, NULL);
   result = sz_io_unsafe_run(io);
-  sz_release(io);
   assert(result.ok);
   file = fopen(path, "r");
   assert(file);
@@ -488,12 +541,6 @@ static SzIo *ensure_drop(SzIo *inner, SzIo *finalizer) {
   sz_release(finalizer);
   return io;
 }
-static SzIo *race_drop(SzIo *left, SzIo *right) {
-  SzIo *io = sz_io_race(left, right);
-  sz_release(left);
-  sz_release(right);
-  return io;
-}
 static SzIo *both_drop(SzIo *left, SzIo *right) {
   SzIo *io = sz_io_both(left, right);
   sz_release(left);
@@ -514,11 +561,6 @@ static SzIo *handle_drop(SzIo *inner, SzErrorHandler handler, void *env) {
   return io;
 }
 
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
 
 /* A finalizer that takes several scheduler steps. */
 static SzIo *slow_inc(void) {
@@ -527,17 +569,7 @@ static SzIo *slow_inc(void) {
 }
 
 
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
 
-static SzIo *fail_drop(SzError *err) {
-  SzIo *io = sz_io_fail(err);
-  sz_release(err);
-  return io;
-}
 
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
@@ -3230,6 +3262,117 @@ static void check_next_link(const char *base, const char *header, const char *ex
   sz_release(r); sz_release(b); sz_release(h);
 }
 
+static void check_string_bytes(const SzString *got, const char *want, size_t n) {
+  assert(got && got->len == n);
+  assert(memcmp(got->data, want, n) == 0);
+}
+
+static void check_encoding(SzString *(*encode)(const SzString *),
+                           SzString *(*decode)(const SzString *),
+                           const char *raw, size_t n, const char *text) {
+  SzString *input = sz_string_from_bytes(raw, n);
+  SzString *encoded = encode(input);
+  SzString *decoded = decode(encoded);
+  check_string_bytes(encoded, text, strlen(text));
+  check_string_bytes(decoded, raw, n);
+  sz_release(decoded);
+  sz_release(encoded);
+  sz_release(input);
+}
+
+static void test_encodings(void) {
+  static const struct { const char *raw, *text; } base64[] = {
+      {"", ""}, {"f", "Zg=="}, {"fo", "Zm8="}, {"foo", "Zm9v"},
+      {"foob", "Zm9vYg=="}, {"fooba", "Zm9vYmE="}, {"foobar", "Zm9vYmFy"},
+      {"abc", "YWJj"}};
+  static const char *bad_hex[] = {"z0", "0z", "abc", " 0", "00 ", "0x00"};
+  static const char *bad_base64[] = {
+      "Y", "YQ", "YQ=", "!!!!", "=AAA", "A=AA", "AA=A", "====",
+      "Zg==AAAA", "Zm8=AAAA", "Z g=", "Zg==\n", "____", "----"};
+  static const struct { const char *raw, *digest; } sha256[] = {
+      {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+      {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+       "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"}};
+  size_t base_bytes, base_count, live_bytes, live_count;
+  unsigned char bytes[256];
+  char hex[513];
+  sz_alloc_stats(&base_bytes, &base_count);
+
+  /* Fixed vectors check the encoded bytes independently of the decoder. */
+  for (size_t i = 0; i < sizeof base64 / sizeof base64[0]; i++)
+    check_encoding(sz_base64_encode, sz_base64_decode,
+                   base64[i].raw, strlen(base64[i].raw), base64[i].text);
+  check_encoding(sz_base64_encode, sz_base64_decode, "\0\xff", 2, "AP8=");
+  check_encoding(sz_hex_encode, sz_hex_decode, "abc", 3, "616263");
+  check_encoding(sz_hex_encode, sz_hex_decode, "", 0, "");
+  check_encoding(sz_hex_encode, sz_hex_decode, "\0\xff", 2, "00ff");
+  {
+    SzString *input = sz_string_from_cstr("4D616E");
+    SzString *decoded = sz_hex_decode(input);
+    check_string_bytes(decoded, "Man", 3);
+    sz_release(decoded);
+    sz_release(input);
+  }
+
+  /* Each prefix checks binary bytes, embedded NUL, and all padding lengths. */
+  for (size_t i = 0; i < sizeof bytes; i++) {
+    bytes[i] = (unsigned char)i;
+    snprintf(hex + i * 2, 3, "%02x", bytes[i]);
+  }
+  for (size_t n = 0; n <= sizeof bytes; n++) {
+    SzString *input = sz_string_from_bytes((const char *)bytes, n);
+    SzString *encoded = sz_hex_encode(input);
+    SzString *decoded = sz_hex_decode(encoded);
+    SzString *copy = sz_bytes_from_str(input);
+    check_string_bytes(encoded, hex, n * 2);
+    check_string_bytes(decoded, (const char *)bytes, n);
+    check_string_bytes(copy, (const char *)bytes, n);
+    assert(copy != input);
+    sz_release(decoded);
+    sz_release(encoded);
+    encoded = sz_base64_encode(input);
+    decoded = sz_base64_decode(encoded);
+    assert(encoded->len == (n + 2) / 3 * 4);
+    check_string_bytes(decoded, (const char *)bytes, n);
+    sz_release(input);
+    check_string_bytes(copy, (const char *)bytes, n);
+    sz_release(copy);
+    sz_release(decoded);
+    sz_release(encoded);
+  }
+
+  for (int base64_mode = 0; base64_mode < 2; base64_mode++) {
+    const char **invalid = base64_mode ? bad_base64 : bad_hex;
+    size_t count = base64_mode ? sizeof bad_base64 / sizeof bad_base64[0]
+                              : sizeof bad_hex / sizeof bad_hex[0];
+    SzString *(*decode)(const SzString *) = base64_mode ? sz_base64_decode : sz_hex_decode;
+    for (size_t i = 0; i < count; i++) {
+      SzString *input = sz_string_from_cstr(invalid[i]);
+      SzString *decoded = decode(input);
+      check_string_bytes(decoded, "", 0);
+      sz_release(decoded);
+      sz_release(input);
+    }
+    {
+      SzString *input = sz_string_from_bytes("00\0A", 4);
+      SzString *decoded = decode(input);
+      check_string_bytes(decoded, "", 0);
+      sz_release(decoded);
+      sz_release(input);
+    }
+  }
+  for (size_t i = 0; i < sizeof sha256 / sizeof sha256[0]; i++) {
+    SzString *input = sz_string_from_cstr(sha256[i].raw);
+    SzString *digest = sz_hash_sha256(input);
+    check_string_bytes(digest, sha256[i].digest, 64);
+    sz_release(digest);
+    sz_release(input);
+  }
+  sz_alloc_stats(&live_bytes, &live_count);
+  assert(live_bytes == base_bytes && live_count == base_count);
+}
+
 static void test_hmac(void) {
   unsigned char key[255], body[1024], expected[32];
   const size_t keys[] = {0, 1, 20, 64, 65, 131, 255};
@@ -3431,6 +3574,15 @@ static void test_float_box_equality(void) {
   neg_box = sz_box_float_bits(neg_bits);
   int_box = sz_box_i64(pos_bits);
   assert(!sz_ptr_eq(nan_box, nan_box));
+  void *containers[] = {
+    sz_adt_new(7, nan_box), sz_pair_new(nan_box, nan_box),
+    sz_list_cons(nan_box, NULL), sz_either_right(nan_box), sz_error_value(nan_box),
+    sz_map_set(sz_map_empty(), int_box, nan_box, 0)
+  };
+  for (size_t i = 0; i < sizeof containers / sizeof containers[0]; i++) {
+    assert(!sz_ptr_eq(containers[i], containers[i]));
+    sz_release(containers[i]);
+  }
   assert(sz_ptr_eq(pos_box, neg_box));
   assert(!sz_ptr_eq(pos_box, int_box));
   xs = sz_list_cons(neg_box, sz_list_nil());
@@ -7162,93 +7314,6 @@ int main(void) {
                                     sz_string_from_cstr("x"));
       assert(strcmp(sz_string_cstr(rep), "a1b") == 0);
       sz_release(rep);
-    }
-    {
-      SzString *h = sz_hash_sha256(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h),
-                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") ==
-             0);
-      sz_release(h);
-      h = sz_hash_sha256(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h),
-                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") ==
-             0);
-      sz_release(h);
-      h = sz_hash_sha256(sz_string_from_cstr(
-          "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"));
-      assert(strcmp(sz_string_cstr(h),
-                    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1") ==
-             0);
-      sz_release(h);
-    }
-    {
-      SzString *h = sz_hex_encode(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h), "616263") == 0);
-      sz_release(h);
-      h = sz_hex_encode(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("616263"));
-      assert(strcmp(sz_string_cstr(h), "abc") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("4D616E"));
-      assert(strcmp(sz_string_cstr(h), "Man") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("zz"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_hex_decode(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-    }
-    {
-      SzString *h = sz_base64_encode(sz_string_from_cstr("abc"));
-      assert(strcmp(sz_string_cstr(h), "YWJj") == 0);
-      sz_release(h);
-      h = sz_base64_encode(sz_string_from_cstr(""));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_base64_encode(sz_string_from_cstr("f"));
-      assert(strcmp(sz_string_cstr(h), "Zg==") == 0);
-      sz_release(h);
-      h = sz_base64_encode(sz_string_from_cstr("fo"));
-      assert(strcmp(sz_string_cstr(h), "Zm8=") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("YWJj"));
-      assert(strcmp(sz_string_cstr(h), "abc") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("Zg=="));
-      assert(strcmp(sz_string_cstr(h), "f") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("Zm8="));
-      assert(strcmp(sz_string_cstr(h), "fo") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("!!!!"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-      h = sz_base64_decode(sz_string_from_cstr("Y"));
-      assert(strcmp(sz_string_cstr(h), "") == 0);
-      sz_release(h);
-    }
-    {
-      SzString *s = sz_string_from_cstr("abc");
-      SzString *b = sz_bytes_from_str(s);
-      assert(sz_string_len(b) == 3);
-      sz_release(s);
-      sz_release(b);
-      s = sz_string_from_bytes("\xc3\xa9", 2);
-      b = sz_bytes_from_str(s);
-      assert(sz_string_len(b) == 2);
-      sz_release(s);
-      sz_release(b);
-      s = sz_string_from_cstr("");
-      b = sz_bytes_from_str(s);
-      assert(sz_string_len(b) == 0);
-      sz_release(s);
-      sz_release(b);
     }
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
@@ -14439,6 +14504,100 @@ int main(void) {
     sz_testrt_oracles_refresh();
   }
 
+  /* An error after replacement retains complete bytes. */
+  {
+    const int seeds[] = {577, 721};
+    for (int i = 0; i < 3; ++i) {
+      char seed[16];
+      setenv("SCUZZ_TESTRT", "1", 1);
+      sz_testrt_oracles_refresh();
+      if (i == 2) {
+        setenv("SCUZZ_FAULT_KIND", "fs", 1);
+        setenv("SCUZZ_FAULT_N", "1", 1);
+        setenv("SCUZZ_FAULT_AFTER", "1", 1);
+      } else {
+        snprintf(seed, sizeof seed, "%d", seeds[i]);
+        setenv("SCUZZ_FAULT_SEED", seed, 1);
+      }
+      sz_testrt_install();
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("written.txt"),
+                                     sz_string_from_cstr("old")));
+      assert(r.ok);
+      sz_testrt_fault_release();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("written.txt"),
+                                     sz_string_from_cstr("new bytes")));
+      assert(!r.ok && r.error);
+      assert(strcmp(sz_string_cstr(r.error->message),
+                    "Fs: error after replacement") == 0);
+      sz_error_free(r.error);
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("written.txt")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "new bytes") == 0);
+      sz_release(r.value);
+      sz_testrt_fault_release();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("created.txt"),
+                                     sz_string_from_cstr("complete")));
+      assert(r.ok == (i != 1));
+      if (!r.ok)
+        sz_error_free(r.error);
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("created.txt")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "complete") == 0);
+      sz_release(r.value);
+      sz_testrt_fault_release();
+      sz_testrt_reset();
+      unsetenv("SCUZZ_FAULT_SEED");
+      unsetenv("SCUZZ_FAULT_KIND");
+      unsetenv("SCUZZ_FAULT_N");
+      unsetenv("SCUZZ_FAULT_AFTER");
+      sz_testrt_install();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("reset.txt"),
+                                     sz_string_from_cstr("plain")));
+      assert(r.ok);
+      sz_testrt_reset();
+      unsetenv("SCUZZ_TESTRT");
+      sz_testrt_oracles_refresh();
+    }
+  }
+
+  /* A recorded fault plan reaches a later file operation. */
+  {
+    const char *plans[] = {"fs:fail:25", "fs:partial:25", "fs:after:25"};
+    const char *errors[] = {"Fs: injected fault", "Fs: partial write", "Fs: error after replacement"};
+    for (int i = 0; i < 3; ++i) {
+      setenv("SCUZZ_TESTRT", "1", 1);
+      setenv("SCUZZ_FAULT_SEED", plans[i], 1);
+      sz_testrt_oracles_refresh();
+      sz_testrt_install();
+      sz_testrt_fault_hold();
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("late.txt"), sz_string_from_cstr("old")));
+      assert(r.ok);
+      sz_testrt_fault_release();
+      for (int call = 1; call < 25; ++call) {
+        r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("late.txt")));
+        assert(r.ok);
+        sz_release(r.value);
+      }
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("late.txt"), sz_string_from_cstr("new bytes")));
+      assert(!r.ok && r.error);
+      assert(strcmp(sz_string_cstr(r.error->message), errors[i]) == 0);
+      sz_error_free(r.error);
+      r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("late.txt")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), i == 2 ? "new bytes" : "old") == 0);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("late.txt"), sz_string_from_cstr("retry")));
+      assert(r.ok);
+      sz_testrt_reset();
+      unsetenv("SCUZZ_FAULT_SEED");
+      unsetenv("SCUZZ_TESTRT");
+      sz_testrt_oracles_refresh();
+    }
+  }
+
   /* Deadlock oracle: all fibers parked with no timer pending. */
   {
     SzQueue *q = sz_queue_make();
@@ -15116,7 +15275,7 @@ int main(void) {
     remove(path);
   }
 
-  /* Loader parses v=2 signal arrays; bad headers are rejected. */
+  /* The loader reads signal arrays and rejects unsupported timeline headers. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_sig.dump";
     void *tl;
@@ -15313,7 +15472,7 @@ int main(void) {
     remove(b);
   }
 
-  /* Optional effects/fibers/fault sections. Handwritten v=1 without them still loads. */
+  /* Omitted effects, fibers, and fault blocks mean empty observations. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_obs.dump";
     void *tl;
@@ -15508,6 +15667,8 @@ int main(void) {
     free(aliases);
   }
 
+  test_encodings();
+  test_deferred_completion();
   test_pick_names();
   test_long_replay();
   test_long_probe_request();

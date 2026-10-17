@@ -6,17 +6,18 @@ def request(path: String, n: Int, entered: Deferred[Unit], released: Ref[Int], w
   now <- Clock.monotonic()
   _ <- Property.assert("a request waits before its write", now - started >= 1)
   previous <- Fs.read(path)
-  result <- IO.attempt(Fs.write(path, Str.concat("value:", Str.fromInt(n))))
+  payload = Str.concat("value:", Str.fromInt(n))
+  result <- IO.attempt(Fs.write(path, payload))
   _ <- result match {
   case Result.Ok(_) => Ref.update(writes, count => count + 1)
-  case Result.Err(error) => Fs.read(path).flatMap(current => Property.assert("failed write preserves the file", current == previous).flatMap(_ => IO.fail(error)))
+  case Result.Err(error) => Fs.read(path).flatMap(current => Property.assert("write error retains complete bytes", if (error == "Fs: error after replacement") current == payload else current == previous).flatMap(_ => IO.fail(error)))
 }
 } yield ())
 
 def outcome(result: Result[String, Unit]): IO[Unit] =
   result match {
     case Result.Ok(_) => IO.println("request completes")
-    case Result.Err(error) => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "fiber interrupted") IO.println(Str.concat("request stops: ", error)) else IO.fail(error)
+    case Result.Err(error) => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement" || error == "fiber interrupted") IO.println(Str.concat("request stops: ", error)) else IO.fail(error)
   }
 
 def execute(n: Int, cancel: Bool): IO[Unit] =

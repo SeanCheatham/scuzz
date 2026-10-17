@@ -24,6 +24,7 @@ typedef struct SzUiConfig {
   int height;
   double scale; /* Desktop/Mobile backing scale; Headless: SCUZZ_UI_SCALE */
   const char *title; /* Desktop / Mobile; may be NULL */
+  int reduced_motion;
 } SzUiConfig;
 
 typedef enum SzPointerPhase {
@@ -48,7 +49,8 @@ typedef enum SzInputKind {
   SZ_INPUT_KEYBOARD = 7,  /* soft keyboard show (1) / hide (0) */
   SZ_INPUT_TEXT_EDIT = 8, /* append text, or backspace if text NULL/empty */
   SZ_INPUT_KEY = 9,       /* named key + optional UTF-8 insert; not KEYBOARD */
-  SZ_INPUT_COMPOSE = 10   /* IME preedit; empty text commits into the buffer */
+  SZ_INPUT_COMPOSE = 10,  /* IME preedit; empty text commits into the buffer */
+  SZ_INPUT_REDUCED_MOTION = 11
 } SzInputKind;
 
 /* SZ_INPUT_KEY modifier bits (combine with |). */
@@ -74,7 +76,21 @@ typedef struct SzInputEvent {
   int key_mods;                 /* SZ_INPUT_KEY: SZ_KEY_SHIFT / CTRL / CMD / ALT */
   int key_repeat;               /* SZ_INPUT_KEY: 1 = auto-repeat; same path as a discrete key */
   int pointer_button;           /* SZ_INPUT_POINTER: 0 hover, 1 primary, 3 secondary */
+  int reduced_motion;           /* SZ_INPUT_REDUCED_MOTION */
 } SzInputEvent;
+
+/* Styled text. */
+typedef struct SzText SzText;
+SzText *sz_text_span(const SzString *value);
+SzText *sz_text_concat(const SzList *values);
+SzText *sz_text_color(int64_t color, const SzText *source);
+SzText *sz_text_size(int64_t size, const SzText *source);
+SzText *sz_text_action(int64_t key, const SzText *source);
+SzText *sz_text_bold(const SzText *text);
+SzText *sz_text_italic(const SzText *text);
+SzText *sz_text_underline(const SzText *text);
+SzText *sz_text_monospace(const SzText *text);
+SzString *sz_text_plain(const SzText *text);
 
 /* --- theme tokens -------------------------------------------------------- */
 
@@ -92,6 +108,7 @@ typedef struct SzTheme {
   float gap;
   float control_h;
   float font_px; /* paint/measure size (default 14px) */
+  float line_gap; /* Logical pixels between text lines. */
   /* Backing scale for View.fontSize / padding / gap / sized and other
    * author px. 0 or 1 = logical points (hit-test). Paint sets this to
    * the device scale so taps match pixels. */
@@ -99,6 +116,13 @@ typedef struct SzTheme {
 } SzTheme;
 
 const SzTheme *sz_theme_default(void);
+SzTheme *sz_theme_metrics(const SzTheme *source, int64_t font_size, int64_t line_gap,
+                          int64_t padding, int64_t gap, int64_t control_height);
+SzTheme *sz_theme_light(void);
+SzTheme *sz_theme_dark(void);
+SzTheme *sz_theme_colors(int64_t background, int64_t surface, int64_t foreground,
+                        int64_t primary, int64_t on_primary, int64_t border,
+                        int64_t muted, int64_t accent, int64_t selection);
 
 /* Language-facing theme / color ints (ARGB). */
 int64_t sz_theme_accent(void);
@@ -126,6 +150,10 @@ void *sz_signal_read(SzSignal *s);
 void sz_signal_free(SzSignal *s);
 void sz_signal_session_push(void);
 void sz_signal_session_pop(void);
+typedef struct SzSignalScope SzSignalScope;
+SzSignalScope *sz_signal_scope_new(void);
+SzSignalScope *sz_signal_scope_enter(SzSignalScope *scope);
+void sz_signal_scope_free(SzSignalScope *scope);
 void *sz_signal_write(SzSignal *s, void *value);
 SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
                            int64_t kind, SzString *name);
@@ -201,7 +229,7 @@ typedef enum SzViewKind {
   SZ_VIEW_RADIUS, /* pass constraints; clip paint to a rounded rect of n px */
   SZ_VIEW_CHECKBOX, /* Signal[Int] 0/1 box + label; tap flips */
   SZ_VIEW_WRAP,     /* flow children into runs; wrap when remaining width is short */
-  SZ_VIEW_SLIDER,   /* Signal[Int] 0-100 track; tap/drag writes from hit x */
+  SZ_VIEW_SLIDER,   /* Named integer range; input writes an allowed step */
   SZ_VIEW_GRID,     /* n equal columns; new row after n shown children */
   SZ_VIEW_RADIO,    /* Signal[Int] group; tap writes this value */
   SZ_VIEW_PROGRESS, /* Signal[Int] 0-100 bar; display only */
@@ -219,7 +247,7 @@ typedef enum SzViewKind {
   SZ_VIEW_CHECKBOX_LIST_TILE, /* Signal[Int] 0/1 full-width title row; tap flips */
   SZ_VIEW_SWITCH_LIST_TILE,   /* Signal[Int] 0/1 full-width title + trailing switch */
   SZ_VIEW_RADIO_LIST_TILE,    /* Signal[Int] group; full-width title + leading radio */
-  SZ_VIEW_SEGMENTED,          /* Signal[Int] 0/1; two labeled halves; tap writes 0/1 */
+  SZ_VIEW_SEGMENTED,          /* Named radio group with equal-width choices. */
   SZ_VIEW_FAB,                /* circular primary tap; same closure as button */
   SZ_VIEW_OUTLINED_BUTTON,    /* surface + border tap; same closure as button */
   SZ_VIEW_TEXT_BUTTON,        /* foreground label tap; same closure as button */
@@ -247,7 +275,19 @@ typedef enum SzViewKind {
   SZ_VIEW_FOCUS_GROUP,       /* child list of taps; sizes to the child; not a tap */
   SZ_VIEW_LINK,             /* label + route; Index Book section or http(s) URL */
   SZ_VIEW_BREADCRUMB,       /* wrap of trail children; paints > between items */
-  SZ_VIEW_NAV_TILE          /* icon + title + route; tap navigates like a link */
+  SZ_VIEW_ADAPTIVE,
+  SZ_VIEW_NAV_TILE,         /* icon + title + route; tap navigates like a link */
+  SZ_VIEW_VIRTUAL_LIST,
+  SZ_VIEW_THEME,
+  SZ_VIEW_SELECT,
+  SZ_VIEW_ANIMATED_OPACITY,
+  SZ_VIEW_REDUCED_MOTION,
+  SZ_VIEW_SELECT_OPTION,
+  SZ_VIEW_ANIMATED_SIZE,
+  SZ_VIEW_ANIMATED_CONTENT_SIZE,
+  SZ_VIEW_ANIMATED_POSITION,
+  SZ_VIEW_SCALE,
+  SZ_VIEW_ANIMATED_SCALE
 } SzViewKind;
 
 typedef struct SzRect {
@@ -255,14 +295,20 @@ typedef struct SzRect {
 } SzRect;
 
 typedef struct SzView SzView;
+SzView *sz_view_rich_text(const SzText *text);
+int64_t sz_view_text_action_id(const SzView *view);
 typedef struct SzUiSession SzUiSession;
 
 typedef void (*SzViewTapFn)(SzView *self, void *env);
+SzView *sz_view_action_text(const SzText *text, SzViewTapFn tap, void *env);
 /* Mapper must not free `item`. The list owns the string. */
 /* The item is the list element pointer: an SzString for String lists, the
  * element value (for example an SzAdt record) otherwise. */
 typedef SzView *(*SzViewEachFn)(SzString *item, void *env);
+typedef void *(*SzViewKeyFn)(void *item, void *env);
+typedef SzView *(*SzViewRowFn)(SzSignal *item, void *env);
 
+SzView *sz_view_theme(const SzTheme *theme, SzView *child);
 SzView *sz_view_text(const char *text);
 SzView *sz_view_text_signal_int(SzSignalInt *sig, const char *prefix);
 /* bindText: a11y dump uses the live signal string. */
@@ -273,12 +319,17 @@ SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env);
 SzView *sz_view_checkbox(SzSignalInt *sig, const char *label);
 /* Tap writes `value` into `sig`. Radios that share `sig` form a group. */
 SzView *sz_view_radio(SzSignalInt *sig, int64_t value, const char *label);
-/* Tap/drag writes `sig` from hit x, clamped 0-100. */
-SzView *sz_view_slider(SzSignalInt *sig);
-/* Paints a 0-100 bar from `sig`. Not a tap target. */
-SzView *sz_view_progress(SzSignalInt *sig);
-/* Paints a 0-100 square ring from `sig`. Not a tap target. */
-SzView *sz_view_circular_progress(SzSignalInt *sig);
+/* Input writes an allowed step from minimum through maximum. */
+SzView *sz_view_slider(SzSignalInt *sig, const char *label, int64_t minimum, int64_t maximum, int64_t step);
+int64_t sz_view_slider_minimum(const SzView *view);
+int64_t sz_view_slider_maximum(const SzView *view);
+int64_t sz_view_slider_value(const SzView *view);
+/* Paint a named 0-100 bar from `sig`. Keep it outside pointer input. */
+SzView *sz_view_progress(SzSignalInt *sig, const char *label);
+/* Paint a named 0-100 square ring from `sig`. Keep it outside pointer input. */
+SzView *sz_view_circular_progress(SzSignalInt *sig, const char *label);
+/* Current percentage, clamped to 0-100. Other View kinds return 0. */
+int sz_view_progress_value(const SzView *view);
 /* `control_h` disc with `label`. Not a tap target. */
 SzView *sz_view_avatar(const char *label);
 /* Tap flips `sig` between 0 and 1. `label` is a11y + painted text. */
@@ -311,7 +362,21 @@ SzView *sz_view_app_shell(SzView *bar, SzView *body);
 SzView *sz_view_app_bar(SzView *title, SzView *actions);
 /* Fixed local panels. The selection is a zero-based section index. */
 SzView *sz_view_tabs(SzSignalInt *selected, SzView *sections);
-SzView *sz_view_segmented(SzSignalInt *sig, const char *left, const char *right);
+SzView *sz_view_select(SzSignalInt *sig, const char *label, SzSignalList *choices);
+void sz_view_prepare_input(SzView *root);
+void sz_view_input_time(SzView *root, int64_t milliseconds);
+void sz_view_selects_dump_json(SzView *root, FILE *file);
+int sz_view_select_open(const SzView *view);
+int sz_view_select_active(const SzView *view);
+int sz_view_select_count(const SzView *view);
+int64_t sz_view_select_value(const SzView *view);
+const char *sz_view_select_text(const SzView *view);
+SzView *sz_view_select_popup(SzView *view);
+SzView *sz_view_select_active_option(SzView *view);
+int sz_view_select_option_index(const SzView *view);
+int sz_view_select_option_count(const SzView *view);
+SzView *sz_view_segmented(SzSignalInt *sig, const char *label,
+                           const char *const *choices, int count);
 /* Overlay `sig` as a count on `child`. Sizes to the child. Not a tap target. */
 SzView *sz_view_badge(SzSignalInt *sig, SzView *child);
 /* Surface, theme pad, and a 1 px border around `child`. Not a tap target. */
@@ -341,6 +406,7 @@ SzView *sz_view_focus_group(SzView *child);
 SzView *sz_view_placeholder(SzView *child);
 /* Sizes to `child`. `label` is a11y. Not a tap target. */
 SzView *sz_view_semantics(const char *label, SzView *child);
+SzView *sz_view_radio_group(const char *label, SzView *child);
 /* Sizes to `child`. `label` is a11y. Omits the child subtree from a11y. Not a tap. */
 SzView *sz_view_merge_semantics(const char *label, SzView *child);
 /* Sizes to `child`. Tap runs the same closure as button. A11y is `inkwell`. */
@@ -358,36 +424,53 @@ SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 /* Multiline buffer on `text`. Insert includes newline and a two-space soft-tab.
  * Not a TextField: omitted from `[fields]` / field inject indices. */
 SzView *sz_view_editor(SzSignalStr *text);
-/* Row of `start` | handle | `end`. Tap/drag writes `frac` 0-100 from hit x. */
-SzView *sz_view_split(SzSignalInt *frac, SzView *start, SzView *end);
-/* When `open` is not 0, fills the parent (compose on `View.stack`). Escape
- * and a backdrop tap write 0. Closed overlay reports size 0. */
-SzView *sz_view_overlay(SzSignalInt *open, SzView *child);
-/* Drag writes `frac` from hit x, clamped 0-100. 1 if `view` is a split. */
+/* Two panes with a named vertical separator. Input writes a percent from 0 to 100. */
+SzView *sz_view_split(SzSignalInt *frac, const char *label, SzView *start, SzView *end);
+/* Input and focus frame. A split uses its handle. An expansion uses its header. */
+SzRect sz_view_control_frame(const SzView *view);
+/* A nonzero `open` shows a named modal dialog. Use it in View.stack.
+ * Escape and a backdrop tap write 0. Focus returns to the opener on close. */
+SzView *sz_view_overlay(SzSignalInt *open, const char *label, SzView *child);
+/* Drag uses the handle center and clamps the percent from 0 to 100. */
 int sz_view_split_set_at(SzView *view, float x);
 int sz_view_collect_splits(SzView *root, SzView **out, int cap);
 int sz_view_collect_overlays(SzView *root, SzView **out, int cap);
 int sz_view_overlay_is_open(const SzView *view);
 int sz_view_split_frac(const SzView *view);
-/* "editor", "field", "overlay", "button:<label>", or "none" from the live
- * focus / open overlay / focused focus-group row. */
+/* Return editor, field, overlay, none, or role:label for the focused control. */
 const char *sz_view_focus_kind(SzView *root);
+SzView *sz_view_focused(SzView *root);
+int sz_view_tab_stop(SzView *view);
+int sz_view_focus_next(SzView *root, int backwards, int wrap);
+int sz_view_has_open_overlay(SzView *root);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
 SzView *sz_view_wrap(void);
 /* `cols` columns (min 1). Shown children fill row-major. */
 SzView *sz_view_grid(int cols);
+/* Select equal columns from the available width. Use one column without a width limit. */
+SzView *sz_view_auto_grid(int min_width);
+/* Select a branch from the available width in logical pixels. */
+SzView *sz_view_adaptive(int64_t min_width, SzView *compact, SzView *wide);
+SzView *sz_lang_view_adaptive(int64_t min_width, SzView *compact, SzView *wide);
 SzView *sz_view_stack(void);
 SzView *sz_view_list(void);
 /* Reactive list: children rebuilt from Signal[List[T]] at layout (`- item` texts). */
 SzView *sz_view_each(SzSignalList *sig);
+SzView *sz_view_virtual_list(int64_t row_height, SzSignalList *items,
+                             SzViewKeyFn key, void *key_env,
+                             SzViewRowFn render, void *render_env);
+/* Measure mounted rows. Use estimate for rows with no measurement. */
+SzView *sz_view_measured_list(int64_t estimate, SzSignalList *items,
+                             SzViewKeyFn key, void *key_env,
+                             SzViewRowFn render, void *render_env);
 /* Like `sz_view_each`, but `fn` builds each child from the element. */
 SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
 SzView *sz_view_scroll(SzView *child);
 /* Like `sz_view_scroll`, but the pan axis is x (unbounded child width). */
 SzView *sz_view_scroll_h(SzView *child);
-/* Column leftover height or Row leftover width after non-Expanded siblings. */
-SzView *sz_view_expanded(SzView *child);
+/* Divide remaining row or column space by weight. Values below one use one. */
+SzView *sz_view_expanded(int64_t weight, SzView *child);
 /* Tight cross-axis in Column (width) or Row (height). Main axis stays intrinsic. */
 SzView *sz_view_stretch(SzView *child);
 SzView *sz_view_center(SzView *child);
@@ -407,6 +490,26 @@ SzView *sz_view_max_size(int w, int h, SzView *child);
 SzView *sz_view_clip(SzView *child);
 /* Pass constraints through; size to child; scale paint alpha (`pct` 0-100). */
 SzView *sz_view_opacity(int pct, SzView *child);
+/* Scale paint and input about the child center. Keep layout unchanged. */
+SzView *sz_view_scale(int64_t percent, SzView *child);
+SzView *sz_view_animated_scale(SzSignalInt *value, int64_t pumps, SzView *child);
+/* Return the composed scale from layout coordinates to displayed coordinates. */
+float sz_view_paint_scale(const SzView *view);
+SzView *sz_view_animated_opacity(SzSignalInt *value, int64_t pumps, SzView *child);
+/* Animate a clipped size in logical pixels. Both axes use one pump count. */
+SzView *sz_view_animated_size(SzSignalInt *width, SzSignalInt *height, int64_t pumps, SzView *child);
+/* Animate two logical coordinates with the View.positioned layout rules. */
+SzView *sz_view_animated_position(SzSignalInt *x, SzSignalInt *y, int64_t pumps, SzView *child);
+/* Measure the child. Animate the clipped box with the shared pump clock. */
+SzView *sz_view_animated_content_size(int64_t pumps, SzView *child);
+SzView *sz_view_reduced_motion(SzSignalInt *reduced, SzView *child);
+int sz_view_animated_opacity_value(const SzView *view);
+int sz_view_motion_pending(const SzView *root);
+int sz_view_transition_pending(const SzView *root);
+int sz_view_paint_opacity(const SzView *view);
+void sz_view_reduce_motion(SzView *root, int reduced);
+void sz_view_pause_motion(SzView *root, int paused);
+void sz_view_transitions_dump_json(SzView *root, FILE *file);
 /* Cap wrapped text lines; `0` = no cap. Nested caps take the tighter value. */
 SzView *sz_view_max_lines(int n, SzView *child);
 /* Skip hit-test on this subtree; taps pass through to widgets behind. */
@@ -433,7 +536,15 @@ SzView *sz_view_background(uint32_t argb, SzView *child);
 SzView *sz_view_aspect_ratio(int rw, int rh, SzView *child);
 /* Percent of incoming max (1-100); 0 on an axis sizes to the child. */
 SzView *sz_view_fraction(int wpct, int hpct, SzView *child);
-SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
+typedef struct SzImage SzImage;
+/* Decode immutable image data. The caller owns a successful result. */
+SzImage *sz_image_decode(const uint8_t *bytes, size_t len, const char **error);
+void sz_image_free(SzImage *image);
+int64_t sz_image_width(const SzImage *image);
+int64_t sz_image_height(const SzImage *image);
+SzAdt *sz_lang_image_decode(const SzString *bytes);
+/* Retain the image. Use the label for accessibility. */
+SzView *sz_view_image(SzImage *image, const char *label);
 SzView *sz_view_icon(char glyph, uint32_t argb);
 SzView *sz_view_link(const char *label, const char *route);
 SzView *sz_view_breadcrumb(void);
@@ -451,16 +562,25 @@ void sz_view_free(SzView *view);
 SzString *sz_view_show(const SzView *view);
 
 SzViewKind sz_view_kind(const SzView *view);
+/* Return displayed bounds. */
 SzRect sz_view_frame(const SzView *view);
+uintptr_t sz_view_id(const SzView *view);
+SzView *sz_view_find(SzView *root, uintptr_t id);
 /* Button, checkbox, slider, and other `tap N` targets (a11y preorder collect). */
 int sz_view_is_tap_target(const SzView *view);
-/* Write slider `sig` from x (clamped 0-100). 1 if `view` is a slider. */
+/* Write the nearest allowed step from x. Return 1 for a slider. */
 int sz_view_slider_set_at(SzView *view, float x);
 
 /* Layout + hit-test (also run inside pump / inject). */
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme);
+/* The top open dialog, or root when no dialog is open. */
+SzView *sz_view_input_scope(SzView *root);
 SzView *sz_view_hit_test(SzView *root, float x, float y);
-/* Innermost View.tooltip whose frame contains (x, y), or NULL. */
+/* Return the nearest tooltip ancestor with a nonempty message. */
+SzView *sz_view_tooltip_owner(SzView *view);
+int sz_view_tooltip_visible(const SzView *view);
+SzRect sz_view_tooltip_frame(const SzView *view);
+/* Return the tooltip at its trigger or visible popup. */
 SzView *sz_view_tooltip_at(SzView *root, float x, float y);
 /* Run the innermost onSecondary handler at (x, y). 1 if a handler ran. */
 int sz_view_handle_secondary(SzView *root, float x, float y);
@@ -470,7 +590,7 @@ void sz_view_clear_hover(SzView *root);
 /* Mark the primary button under the pointer. Clear all marks when inactive. */
 void sz_view_set_pressed_at(SzView *root, float x, float y, int active);
 int sz_view_handle_tap(SzView *root, float x, float y);
-/* Fire the tap handler on `target` (no hit-test). Slider / segmented use x. */
+/* Fire the tap handler on `target` (no hit-test). Sliders use x. */
 int sz_view_activate(SzView *root, SzView *target, float x, float y);
 /* Layout + activate `target` and mark the session dirty (inject `tap`). */
 int sz_ui_session_activate_view(SzUiSession *session, SzView *target);
@@ -492,9 +612,9 @@ int sz_ui_session_cut(SzUiSession *session);
  * caret) with `text`. NULL `text` uses the session clipboard, after a
  * Desktop/Mobile OS pull. */
 int sz_ui_session_paste(SzUiSession *session, const char *text);
-/* Insert UTF-8 at the caret, or chop one UTF-8 code point before the caret
- * when backspace != 0. A selection is replaced or deleted. Targets the focused
- * TextField or editor (else the first field, else the first editor). */
+/* Insert UTF-8 at the caret. If backspace is nonzero, delete the preceding code point.
+ * Replace or delete an active selection.
+ * Use the focused TextField or editor, then the first field, then the first editor. */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 /* Named key on the focused TextField or editor, or on a focused focus-group
  * row. Backspace / Delete / arrows / Home / End use the caret. Shift+arrows /
@@ -581,7 +701,6 @@ typedef enum SzA11yRole {
   SZ_A11Y_CHECK_TILE = 22,
   SZ_A11Y_SWITCH_TILE = 23,
   SZ_A11Y_RADIO_TILE = 24,
-  SZ_A11Y_SEGMENTED = 25,
   SZ_A11Y_FAB = 26,
   SZ_A11Y_TOOLTIP = 27,
   SZ_A11Y_OUTLINED = 28,
@@ -608,7 +727,12 @@ typedef enum SzA11yRole {
   SZ_A11Y_ICON = 49,
   SZ_A11Y_LINK = 50,
   SZ_A11Y_BREADCRUMB = 51,
-  SZ_A11Y_NAV_TILE = 52
+  SZ_A11Y_NAV_TILE = 52,
+  SZ_A11Y_RADIO_GROUP = 53,
+  SZ_A11Y_REGION = 54,
+  SZ_A11Y_COMBOBOX = 55,
+  SZ_A11Y_LISTBOX = 56,
+  SZ_A11Y_OPTION = 57
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -687,46 +811,13 @@ void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env
  * then replace_root. Missing file snapshots as empty. Headless, Desktop, and
  * Mobile share this path. */
 int sz_ui_session_watch(SzUiSession *session, const char *path);
-/* Live structural dump rewritten on dirty pumps, stamp reload, and
- * IO-bridge flushes. Agents read the file. The document is typed session
- * schema v=2 (`{"v":2,"kind":"dump",...}`) at any path:
- * signals (typed value / list payloads), views (a11y preorder lines), a11y
- * (the same preorder as a JSON forest; toggle kinds carry "on", numeric kinds
- * carry "value"), taps (inject indices for `tap N`, scan order, cap 64),
- * fields (TextFields in a11y order; "target" marks the text/type/backspace/key
- * target, focused else first; caret and sel are byte offsets `[A, C)`),
- * editors (`View.editor` nodes: caret, sel, scroll pan, line count, 1-based
- * line:severity diags, LSP token / inlay / fold counts, preedit, value),
- * splits, overlays ("top" is the topmost open overlay), scrolls (hittable
- * Scrolls in scan order; `scroll N dy` pans index N, `scroll 40` stays the
- * first). `last_hit` / `hover` / `last_secondary` appear after a TAP, a
- * pointer MOVE with no button, or a button-3 click in this session.
- * `text N s` / `type N s` / `backspace N k` / `caret N b` / `select N a c`
- * target dump index N. One-token forms still use the starred field, or the
- * focused editor when that is the edit target.
- * `key <name>[+shift|+ctrl|+cmd|+alt|+repeat] [text]` uses the starred field
- * or focused editor. `+repeat` is a held-key auto-repeat (same insert / move /
- * delete as a discrete key). Shift+arrows extend the selection. Live OS keys
- * record as `key`, not `type`. Desktop maps X11 auto-repeat and Cocoa
- * `isARepeat` into `+repeat`. `compose <text>` sets IME preedit (underlined
- * preview; not in the committed buffer). `compose` with no text, or `commit`,
- * inserts the preedit at the caret. `key Escape` cancels preedit.
- * `caret <n>` sets the starred-field or focused-editor caret. `select <a> <c>`
- * sets that selection. Click-to-caret uses TAP / `xy` on the field or editor.
- * Pointer drag extends the selection. `copy` / `cut` / `paste` / `paste <s>`
- * are the clipboard verbs. Headless `paste` uses the session clipboard.
- * Desktop/Mobile pull the OS pasteboard on paste when present. Live OS
- * copy/cut/paste and Shift+arrows record those verbs. `drag x1 y1 x2 y2` is
- * pointer-drag select. `hover x y` is pointer MOVE with no button.
- * `secondary N` / `secondary x y` is button 3. Live OS hover and right-click
- * record those verbs. Button-3 also runs `View.onSecondary` on that hit.
- * Only the live debug dump includes `session` (runtime, size, title, focus,
- * lifecycle, keyboard, pump count), `heap` (live stats, delta since the last
- * live dump or `resetpeak`, per-kind counts), and `live` (remaining blocks,
- * capped at 32). Fuzz / golden dumps omit them. */
+/* Write schema v=2 at any path. Dirty pumps, reload, and IO bridge work
+ * update the live dump. Only live dumps include session, heap, and live rows.
+ * Live rows have a limit of 32. Fuzz dumps omit these sections.
+ * Read scuzz docs commands for the input and dump schemas. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
-/* Rewrite the live debug dump now, including `session` and `heap`. No path is a no-op. */
+/* Write the live debug dump. Return 0 when no dump path is set. */
 int sz_ui_session_dump_now(SzUiSession *session);
 /* Watch an inject document (schema v=1, kind `inject`).
  * Next pump that sees new contents plays the whole document.
@@ -760,6 +851,7 @@ typedef enum SzQuiesce {
  * (64 pumps); reports which terminal state was reached. */
 SzQuiesce sz_ui_quiesce(SzUiSession *session);
 int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event);
+void sz_ui_session_input_time(SzUiSession *session, int64_t milliseconds);
 int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event);
 int sz_ui_snapshot_png_sync(SzUiSession *session, const char *path);
 int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_len);
@@ -794,9 +886,9 @@ SzView *sz_lang_view_text(SzString *text);
 SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label);
-SzView *sz_lang_view_slider(SzSignalInt *sig);
-SzView *sz_lang_view_progress(SzSignalInt *sig);
-SzView *sz_lang_view_circular_progress(SzSignalInt *sig);
+SzView *sz_lang_view_slider(SzSignalInt *sig, SzString *label, int64_t minimum, int64_t maximum, int64_t step);
+SzView *sz_lang_view_progress(SzSignalInt *sig, SzString *label);
+SzView *sz_lang_view_circular_progress(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_avatar(SzString *label);
 SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);
@@ -809,7 +901,8 @@ SzView *sz_lang_view_checkbox_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_switch_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
                                     SzString *title);
-SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *left, SzString *right);
+SzView *sz_lang_view_select(SzSignalInt *sig, SzString *label, SzSignalList *choices);
+SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *label, SzList *choices);
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child);
 SzView *sz_lang_view_section(SzString *id, SzString *title, SzView *child);
 SzView *sz_lang_view_index_book(SzSignalInt *selected, SzView *sections);
@@ -824,11 +917,13 @@ SzView *sz_lang_view_icon_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_fab(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_outlined_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_text_button(SzString *label, SzViewTapFn tap, void *env);
+SzView *sz_lang_view_action_text(const SzText *text, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_tooltip(SzString *message, SzView *child);
 SzView *sz_lang_view_on_secondary(SzView *child, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_focus_group(SzView *child);
 SzView *sz_lang_view_placeholder(SzView *child);
 SzView *sz_lang_view_semantics(SzString *label, SzView *child);
+SzView *sz_lang_view_radio_group(SzString *label, SzView *child);
 SzView *sz_lang_view_merge_semantics(SzString *label, SzView *child);
 SzView *sz_lang_view_ink_well(SzString *label, SzViewTapFn tap, void *env,
                              SzView *child);
@@ -840,18 +935,26 @@ SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
 SzView *sz_lang_view_wrap(void);
 SzView *sz_lang_view_grid(int64_t cols);
+SzView *sz_lang_view_auto_grid(int64_t min_width);
 SzView *sz_lang_view_stack(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
+SzView *sz_lang_view_virtual_list(int64_t row_height, SzSignalList *items,
+                                  SzViewKeyFn key, void *key_env,
+                                  SzViewRowFn render, void *render_env);
+SzView *sz_lang_view_measured_list(int64_t estimate, SzSignalList *items,
+                                  SzViewKeyFn key, void *key_env,
+                                  SzViewRowFn render, void *render_env);
 SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
 SzView *sz_lang_view_scroll(SzView *child);
 SzView *sz_lang_view_scroll_h(SzView *child);
-SzView *sz_lang_view_expanded(SzView *child);
+SzView *sz_lang_view_expanded(int64_t weight, SzView *child);
 SzView *sz_lang_view_center(SzView *child);
 SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child);
 SzView *sz_lang_view_padding(int64_t pad, SzView *child);
 SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_max_size(int64_t w, int64_t h, SzView *child);
+SzView *sz_lang_view_theme(const SzTheme *theme, SzView *child);
 SzView *sz_lang_view_text_color(int64_t argb, SzView *child);
 SzView *sz_lang_view_font_size(int64_t n, SzView *child);
 SzView *sz_lang_view_background(int64_t argb, SzView *child);
@@ -859,8 +962,8 @@ SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
 SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
 SzView *sz_lang_view_editor(SzSignalStr *text);
-SzView *sz_lang_view_split(SzSignalInt *frac, SzView *start, SzView *end);
-SzView *sz_lang_view_overlay(SzSignalInt *open, SzView *child);
+SzView *sz_lang_view_split(SzSignalInt *frac, SzString *label, SzView *start, SzView *end);
+SzView *sz_lang_view_overlay(SzSignalInt *open, SzString *label, SzView *child);
 SzIo *sz_lang_ui_set_title(SzString *title);
 SzIo *sz_lang_ui_set_editor_caret(int64_t line, int64_t col);
 SzIo *sz_lang_ui_editor_caret(void);
@@ -869,11 +972,11 @@ SzIo *sz_lang_ui_set_editor_tokens(SzList *data);
 SzIo *sz_lang_ui_set_editor_inlays(SzList *hints);
 SzIo *sz_lang_ui_set_editor_folds(SzList *ranges);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
-SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
+SzView *sz_lang_view_image(SzImage *image, SzString *label);
 SzView *sz_lang_view_link(SzString *label, SzString *route);
 SzView *sz_lang_view_breadcrumb(void);
 SzView *sz_lang_view_nav_tile(int64_t glyph, SzString *title, SzString *route);
-void *sz_lang_view_add_child(SzView *parent, SzView *child);
+void *sz_lang_view_add_children(SzView *parent, const SzList *children);
 SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 
 /* Derived Signal[String] from Signal[Int] (recomputed on get / dump). */

@@ -767,6 +767,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"remotePairCallText:${remotePairCallText()}")
     _ <- IO.println(s"remotePairIf:${remotePairIfField(true)}:${remotePairIfField(false)}")
     _ <- IO.println(s"shadowModule:${shadowModuleField(ModuleHolder(7))}")
+    _ <- IO.println(s"textModule:${Text.value()}")
     _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
     _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
   } yield ()

@@ -300,7 +300,8 @@ Usage: scuzz exec [OPTIONS] [PATH] OP [ARGS...]
 Arguments:
   [PATH]       Package path of the running app [default: .]
   OP [ARGS...]  Ops played in order: tap N | tap id:KEY | xy X Y | text S | type S | key K |
-               scroll DY | pump K | backspace K | snapshot PATH | dump | reload | quit
+               scroll DY | pump K | backspace K | snapshot PATH | dump | reload | quit |
+               reduceMotion true|false | lifecycle pause|resume|stop
 
 Options:
       --out-dir <OUT_DIR>
@@ -315,6 +316,7 @@ Writes one inject document (schema v=1) to <out-dir>/inject.json. The live sessi
 Examples:
   scuzz exec examples/counter tap id:button:+1
   scuzz exec . type hello snapshot build/typed.png
+  scuzz exec . reduceMotion true
   scuzz exec . dump
   scuzz exec . quit
 

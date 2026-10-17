@@ -29,6 +29,59 @@ static void proof_check(BOOL ok, NSString *message) {
   }
 }
 
+static BOOL motion_test_value;
+
+/* Supply the system preference to this test executable. */
+BOOL UIAccessibilityIsReduceMotionEnabled(void) { return motion_test_value; }
+void scuzz_ios_push_lifecycle(int phase);
+
+static BOOL motion_test_event(int expected) {
+  NSDate *end = [NSDate dateWithTimeIntervalSinceNow:expected < 0 ? .03 : 1.0];
+  while ([end timeIntervalSinceNow] > 0) {
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
+    SzInputEvent event;
+    while (sz_mobile_poll_event(&event)) {
+      if (event.kind == SZ_INPUT_REDUCED_MOTION)
+        return expected >= 0 && event.reduced_motion == expected;
+    }
+  }
+  return expected < 0;
+}
+
+static void test_motion_preferences(void) {
+  motion_test_value = YES;
+  proof_check(sz_mobile_reduced_motion() == 1, @"initial motion preference");
+  proof_check(motion_test_event(-1), @"initial preference has no duplicate event");
+  motion_test_value = NO;
+  [[NSNotificationCenter new]
+      postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+  proof_check(motion_test_event(-1), @"unrelated notification center has no motion event");
+  [NSNotificationCenter.defaultCenter
+      postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+  proof_check(motion_test_event(0), @"accessibility notification restores normal motion");
+  [NSNotificationCenter.defaultCenter
+      postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+  proof_check(motion_test_event(-1), @"unchanged preference has no duplicate event");
+  motion_test_value = YES;
+  [NSNotificationCenter.defaultCenter
+      postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+  proof_check(motion_test_event(1), @"accessibility notification reduces motion");
+  motion_test_value = NO;
+  scuzz_ios_push_lifecycle(SZ_LIFECYCLE_RESUME);
+  proof_check(motion_test_event(0), @"resume reads the current preference");
+  sz_mobile_shutdown();
+  motion_test_value = YES;
+  [NSNotificationCenter.defaultCenter
+      postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+  proof_check(motion_test_event(-1), @"shutdown removes the preference observer");
+  proof_check(sz_mobile_reduced_motion() == 1, @"new session reads its initial preference");
+  motion_test_value = NO;
+  [NSNotificationCenter.defaultCenter
+      postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+  proof_check(motion_test_event(0), @"new session receives preference changes");
+  sz_mobile_shutdown();
+}
+
 @interface ViewportProof : UIResponder <UIApplicationDelegate>
 @property(nonatomic, strong) UIWindow *window;
 @property(nonatomic, strong) UIViewController *controller;
@@ -126,6 +179,7 @@ static void proof_check(BOOL ok, NSString *message) {
   viewport = scuzz_ios_viewport();
   proof_check(viewport.size.width != _initial.size.width, @"viewport follows container");
   sz_mobile_shutdown();
+  test_motion_preferences();
   proof_report("ios viewport proof ok");
   puts("ios viewport proof ok");
   fflush(stdout);

@@ -160,7 +160,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
     int bi;
     hit_btn = buttons[0];
     for (bi = 1; bi < n_buttons; bi++) {
-      if (sz_view_frame(buttons[bi]).y < sz_view_frame(hit_btn).y)
+      if (sz_view_frame(buttons[bi]).y < sz_view_control_frame(hit_btn).y)
         hit_btn = buttons[bi];
     }
   } else if (n_buttons > 0) {
@@ -170,7 +170,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
   if (!hit_btn)
     sz_panic("Ui.run: button not found for SCUZZ_UI_TAP");
   {
-    SzRect fr = sz_view_frame(hit_btn);
+    SzRect fr = sz_view_control_frame(hit_btn);
     tx = fr.x + fr.w * 0.5f;
     ty = fr.y + fr.h * 0.5f;
   }
@@ -294,67 +294,18 @@ static void script_secondary_n(SzUiSession *session, int n) {
             count);
     return;
   }
-  fr = sz_view_frame(buttons[n]);
+  fr = sz_view_control_frame(buttons[n]);
   script_secondary_xy(session, fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
 }
 
-/* Pump tail after every script event except quit.
- * A transition finishes before this call returns. */
+/* Pump the event. Explicit transitions keep their pending steps. */
 static void script_after_event(SzUiSession *session) {
   sz_ui_pump_after_event(session);
 }
 
 /* --- typed session schema v=1 (JSON inject) ------------------------------ */
-/* Document: {"v":1,"kind":"inject","events":[...]}. One object per event:
-     {"op":"tap","i":N}        activate the nth tap target in a11y preorder; missing target is a no-op
-     {"op":"tap","id":"button:+1"}  activate the tap target whose last_hit key matches; missing target is a no-op
-     {"op":"xy","x":X,"y":Y}  inject TAP at logical point; miss does not panic
-     {"op":"resize","width":W,"height":H,"scale":S}  resize the viewport; optional scale keeps the current scale
-     {"op":"lifecycle","phase":P}  pause, resume, or stop
-     {"op":"keyboard","visible":B}  set soft keyboard visibility
-     {"op":"text","value":S}  replace the [fields] starred TextField with S; no field is a no-op
-     {"op":"text","i":N,"value":S}  replace dump-index N (a11y order)
-     {"op":"type","value":S}  insert S at the caret on the starred TextField; empty is a no-op
-     {"op":"type","i":N,"value":S}  insert at the caret on dump-index N
-     {"op":"key","key":K,"text":T,"mods":[...],"repeat":B}
-                        named key on the starred TextField or focused editor
-                        (`Enter`, `Backspace`, `ArrowLeft`, `a`);
-                        optional UTF-8 insert text; arrows / Home / End / Delete use the caret;
-                        Enter / Tab insert newline / two spaces on an editor;
-                        PageUp / PageDown move by the viewport on an editor;
-                        Ctrl/Cmd+Z undoes, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redoes;
-                        mods are `shift` / `ctrl` / `cmd` / `alt`;
-                        repeat is a held-key auto-repeat (same insert / move / delete)
-     {"op":"compose","value":S}  set IME preedit on the starred field or focused editor
-                     (underlined preview; not in the committed buffer)
-     {"op":"commit"}   commit preedit into the buffer at the caret (replaces a selection)
-     key Escape      cancel preedit when compose is active; else dismiss an overlay
-     {"op":"caret","offset":N}  set the starred TextField or focused-editor caret to byte offset N
-     {"op":"caret","i":I,"offset":N}  set dump-index I caret to byte offset N
-     {"op":"select","start":A,"end":C}  set the starred TextField or focused-editor selection `[A, C)` (caret at C)
-     {"op":"select","i":I,"start":A,"end":C}  set dump-index I selection
-     {"op":"copy"}    copy the starred-field or focused-editor selection into the session clipboard
-     {"op":"cut"}     copy then delete the selection
-     {"op":"paste"}   insert the session clipboard (Headless) or OS pasteboard (Desktop/Mobile)
-     {"op":"paste","value":S}  set the session clipboard to S then paste
-     {"op":"drag","x1":..,"y1":..,"x2":..,"y2":..}  pointer drag (TextField / editor selection)
-     {"op":"hover","x":X,"y":Y}  pointer MOVE with no button (hover); shows View.tooltip
-     {"op":"secondary","i":N}  button-3 click on tap-dump index N; does not fire the primary tap; runs View.onSecondary
-     {"op":"secondary","x":X,"y":Y}  button-3 click at a logical point
-     {"op":"pump","k":K}  pump K extra frames
-     {"op":"scroll","dy":D}  pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
-     {"op":"scroll","i":N,"dy":D}  pan dump-index N ([scrolls] scan order)
-     {"op":"scroll","dx":D}  pan the first Scroll on x (positive = content left); dy defaults to 0 when dx is set
-     {"op":"backspace","count":K}  chop K UTF-8 code points before the caret on the [fields] starred TextField (default 1); no field is a no-op
-     {"op":"backspace","i":N,"count":K}  chop K code points before the caret on dump-index N
-     {"op":"dump"}    rewrite the live debug dump now (includes heap and live rows); no dump path is a no-op
-     {"op":"snapshot","path":P}  write a PNG snapshot to path P now; a missing path panics
-     {"op":"reload"}  rebuild the View factory now; missing factory is a no-op
-     {"op":"quit"}    stop the live session; remaining events do not run
-     {"op":"resetpeak"}  set peak_bytes to live and mark delta; next dump reports growth from here
-     {"op":"drive","name":N,"args":[...]}  run a verify-graph driver (Int/String/Bool args)
-   Pump runs after every event except quit. A bad envelope or an unknown op
-   panics. */
+/* Input operations use schema v=1. Read scuzz docs commands for the fields.
+ * Live journals carry explicit painted pumps. */
 
 /* A script / record / inject path must end in `.json`. */
 static int script_path_is_json(const char *path) {
@@ -388,14 +339,17 @@ static int jev_mods(SzAdt *ev) {
   return mods;
 }
 
-static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
+static void play_script_event_json(SzUiSession *session, SzAdt *ev, int manual) {
   const char *op;
   if (!ev || !sz_json_is_obj(ev))
     sz_panic("Ui.run: inject event must be an object");
   op = sz_jev_str(ev, "op");
   if (!op[0])
     sz_panic("Ui.run: inject event needs op");
-  if (strcmp(op, "tap") == 0)
+  if (strcmp(op, "inputTime") == 0) {
+    if (!sz_jev_has(ev, "ms")) sz_panic("Ui.run: inputTime needs ms");
+    sz_ui_session_input_time(session, sz_jev_int(ev, "ms", -1));
+  } else if (strcmp(op, "tap") == 0)
     script_tap(session, ev);
   else if (strcmp(op, "xy") == 0) {
     if (!sz_jev_has(ev, "x") || !sz_jev_has(ev, "y"))
@@ -423,6 +377,10 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
                   strcmp(phase, "stop") == 0 ? SZ_LIFECYCLE_STOP : 0;
     if (!sz_ui_inject_sync(session, &e))
       sz_panic("Ui.run: inject lifecycle needs pause, resume, or stop");
+  } else if (strcmp(op, "reduceMotion") == 0) {
+    if (!sz_json_is_bool(sz_jev_key(ev, "value"))) sz_panic("Reduced motion input needs a Boolean value");
+    SzInputEvent e = {.kind = SZ_INPUT_REDUCED_MOTION, .reduced_motion = sz_jev_bool(ev, "value")};
+    sz_ui_inject_sync(session, &e);
   } else if (strcmp(op, "keyboard") == 0) {
     SzInputEvent e = {0};
     e.kind = SZ_INPUT_KEYBOARD;
@@ -497,7 +455,7 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
       script_secondary_n(session, (int)sz_jev_int(ev, "i", 0));
   } else if (strcmp(op, "pump") == 0) {
     int k = (int)sz_jev_int(ev, "k", 1);
-    while (k-- > 1) {
+    while (k-- > (manual ? 0 : 1)) {
       if (!sz_ui_pump_sync(session))
         sz_panic("Ui.run: script pump failed");
     }
@@ -534,7 +492,7 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
     sz_script_drive_json(ev);
   else
     sz_panic("Ui.run: unknown inject op");
-  script_after_event(session);
+  if (!manual) script_after_event(session);
 }
 
 void sz_ui_script_play_json(SzUiSession *session, const char *text) {
@@ -561,14 +519,16 @@ void sz_ui_script_play_json(SzUiSession *session, const char *text) {
     sz_panic("Ui.run: inject events must be an array");
   }
   xs = sz_json_arr(events);
+  sz_ui_session_script_begin(session);
   {
     SzList *p;
     for (p = xs; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
       if (!sz_ui_session_alive(session))
         break;
-      play_script_event_json(session, (SzAdt *)sz_list_head(p));
+      play_script_event_json(session, (SzAdt *)sz_list_head(p), sz_jev_bool(json, "manualPumps"));
     }
   }
+  sz_ui_session_script_end(session);
   sz_release(xs);
   sz_release(parsed);
 }

@@ -54,7 +54,7 @@ def repeated(mode: Int): IO[Unit] =
   } yield ()
 
 def repeat(mode: Int): IO[Unit] =
-  Cards.recover(root(mode)).flatMap(_ => repeated(mode)).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+  Cards.recover(root(mode)).flatMap(_ => repeated(mode)).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else IO.fail(error))
 
 def preserve(n: Int): IO[Unit] =
   (for {
@@ -62,17 +62,152 @@ def preserve(n: Int): IO[Unit] =
     _ <- run(n)
     after <- snapshot(n % 4)
     _ <- Property.assert("recovery conflict preserves all operation files", before == after)
-  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else IO.fail(error))
+
+def undo(n: Int): IO[Unit] =
+  (for {
+    mode = n % 4 + 4
+    _ <- if (n < 4) resume(mode) else canceled(mode)
+    _ <- attempt(root(mode))
+    _ <- attempt(root(mode))
+    _ <- settled(mode)
+    unrelated <- Fs.read("unrelated.txt")
+    _ <- repeated(mode)
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("Undo recovery preserves unrelated files", unrelated == "unrelated bytes" && retained == unrelated)
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else if (Str.startsWith(error, "oracle ")) IO.fail(error) else Property.assert("recovery returns an expected error", false))
+
+def duplicate(): IO[Unit] =
+  (for {
+    _ <- Cards.recover(root(0))
+    before <- snapshot(0)
+    unrelated <- Fs.read("unrelated.txt")
+    result <- IO.attempt(Cards.undecided(root(0), Hash.sha256("finite recovery")))
+    _ <- result match { case Result.Err(error) => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.fail(error) else IO.pure(()) case Result.Ok(_) => IO.pure(()) }
+    _ <- Property.assert("completed request rejects a duplicate", result match { case Result.Err(error) => error == "card is already decided" case Result.Ok(_) => false })
+    after <- snapshot(0)
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("duplicate rejection preserves files", before == after && unrelated == retained)
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else if (Str.startsWith(error, "oracle ")) IO.fail(error) else Property.assert("recovery returns an expected error", false))
+
+def requestStart(mode: Int): IO[Unit] =
+  IO.attempt(Cards.undo(root(mode))).flatMap(result => result match {
+    case Result.Ok(_) => Property.assert("Undo request returns an expected error", true)
+    case Result.Err(error) => Property.assert("Undo request returns an expected error", expectedError(error) || error == "no accepted change to undo" || Str.startsWith(error, "undo conflict:")).flatMap(_ => IO.println(error))
+  })
+
+def invalidRecords(): List[String] =
+  for {
+    valid = prepared(0)
+    ws = writes(0)
+    first = List.at(ws, 0)
+    wrongFields = List.map(["path", "before", "after", "before_exists", "after_exists"], field => text(Json.set(valid, "writes", Json.Arr(Json.set(first, field, Json.Int(3)) :: List.tail(ws)))))
+    wrongWrites = List.map([Json.Arr([]), Json.Arr([first, first]), Json.Arr(List.map(["src/A.scuzz", "src/B.scuzz", "src/C.scuzz", "src/D.scuzz"], path => Json.set(first, "path", Json.Str(path)))), Json.Str("writes"), Json.Arr([Json.set(first, "path", Json.Str("../Main.scuzz"))]), Json.Arr([Json.set(first, "before_exists", Json.Bool(false))]), Json.Arr([Json.set(first, "after_exists", Json.Bool(false))])], value => text(Json.set(valid, "writes", value)))
+  } yield List.concat(["{}", "null", "[]", "\"text\"", text(Json.set(valid, "decision", Json.Str("undo"))), text(Json.set(Json.set(valid, "card", Json.Str("bad")), "operation", Json.Str("accept-bad"))), text(Json.set(valid, "operation", Json.Str("accept-bad")))], List.concat(wrongFields, wrongWrites))
+
+def invalidRecord(n: Int): IO[Unit] =
+  (for {
+    _ <- Fs.write("recovery-12/.scuzz/ide/last.json", List.at(invalidRecords(), n))
+    before <- snapshot(12)
+    unrelated <- Fs.read("unrelated.txt")
+    result <- IO.attempt(Cards.undo(root(12)))
+    _ <- result match { case Result.Err(error) => if (expectedError(error)) IO.fail(error) else IO.pure(()) case Result.Ok(_) => IO.pure(()) }
+    after <- snapshot(12)
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("invalid accepted record preserves operation files", before == after && unrelated == retained)
+    _ <- Property.assert("invalid accepted record returns an error", result match { case Result.Err(error) => error == "invalid accepted record" case Result.Ok(_) => false })
+  } yield ()).handleErrorWith(error => if (expectedError(error)) IO.println("recovery remains pending") else IO.fail(error))
+
+def invalidJournals(): List[String] =
+  List.concat(invalidRecords(), [text(Json.set(prepared(0), "card", Json.Str(Hash.sha256("another card")))), text(Json.set(prepared(0), "decision", Json.Str("baseline")))])
+
+def journalSnapshot(): IO[String] =
+  for {
+    entries <- Fs.walk(root(14))
+    paths = List.sort(List.map(List.filter(entries, entry => !entry._2), entry => entry._1))
+    files <- IO.foreach(paths, path => Fs.read(Fs.join(root(14), path)).map(contents => Json.Obj([("path", Json.Str(path)), ("contents", Json.Str(contents))])))
+  } yield text(Json.Arr(files))
+
+def invalidJournal(n: Int): IO[Unit] =
+  (for {
+    _ <- Fs.write("recovery-14/.scuzz/ide/journal.json", List.at(invalidJournals(), n))
+    before <- journalSnapshot()
+    unrelated <- Fs.read("unrelated.txt")
+    result <- IO.attempt(Cards.recover(root(14)))
+    _ <- result match { case Result.Err(error) => if (expectedError(error)) IO.fail(error) else IO.pure(()) case Result.Ok(_) => IO.pure(()) }
+    after <- journalSnapshot()
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("invalid journal preserves operation files", before == after && unrelated == retained)
+    _ <- Property.assert("invalid journal returns an error", result match { case Result.Err(error) => error == "invalid recovery journal" case Result.Ok(_) => false })
+  } yield ()).handleErrorWith(error => if (expectedError(error)) IO.println("recovery remains pending") else IO.fail(error))
+
+def requestCanceled(mode: Int): IO[Unit] =
+  for {
+    entered <- Deferred.empty()
+    worker <- Fiber.fork(Deferred.complete(entered, ()).flatMap(_ => requestStart(mode)))
+    _ <- Deferred.get(entered)
+    _ <- Fiber.interrupt(worker)
+    result <- IO.attempt(Fiber.join(worker))
+    _ <- result match { case Result.Ok(_) => Property.assert("Undo request returns an expected error", true) case Result.Err(error) => Property.assert("Undo request returns an expected error", expectedError(error)).flatMap(_ => IO.println(error)) }
+  } yield ()
+
+def requestState(mode: Int): IO[Unit] =
+  for {
+    path = root(mode)
+    main <- Fs.read(Fs.join(path, "src/Main.scuzz"))
+    otherExists <- Fs.exists(Fs.join(path, "src/Other.scuzz"))
+    other <- if (otherExists == 0) IO.pure("") else Fs.read(Fs.join(path, "src/Other.scuzz"))
+    journal <- Fs.read(Fs.join(Fs.join(path, ".scuzz/ide"), "journal.json"))
+    last <- Fs.read(Fs.join(Fs.join(path, ".scuzz/ide"), "last.json"))
+    completed <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide/records"), Str.concat(Str.concat("undo-", Hash.sha256("finite recovery")), ".json")))
+    op = LspClient.parseJson(completed)
+    conflict = mode == 11
+    _ <- Property.assert("Undo request preserves external bytes", !conflict || main == "external bytes" && otherExists != 0 && other == addition())
+    _ <- Property.assert("Undo request restores accepted files", conflict || main == before() && otherExists == 0)
+    _ <- Property.assert("Undo request clears its journal", journal == "")
+    _ <- Property.assert("Undo request retains the correct state", if (conflict) last == text(prepared(0)) && completed == "" else last == "")
+    _ <- Property.assert("Undo request records reversed writes", conflict || Json.getStr(op, "operation", "") == Str.concat("undo-", Hash.sha256("finite recovery")) && Json.getStr(op, "card", "") == Hash.sha256("finite recovery") && Json.getStr(op, "decision", "") == "undo" && text(Diags.jsonField(op, "writes")) == text(Json.Arr(writes(2))) && Json.isInt(Diags.jsonField(op, "time")) && Json.getInt(op, "time", -1) >= 0)
+  } yield ()
+
+def requestChecks(mode: Int): IO[Unit] =
+  for {
+    _ <- requestState(mode)
+    before <- snapshot(mode)
+    unrelated <- Fs.read("unrelated.txt")
+    result <- IO.attempt(Cards.undo(root(mode)))
+    _ <- result match { case Result.Err(error) => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.fail(error) else IO.pure(()) case Result.Ok(_) => IO.pure(()) }
+    _ <- Property.assert("completed Undo rejects a second request", result match { case Result.Err(error) => if (mode == 11) Str.startsWith(error, "undo conflict:") else error == "no accepted change to undo" case Result.Ok(_) => false })
+    after <- snapshot(mode)
+    retained <- Fs.read("unrelated.txt")
+    _ <- Property.assert("second Undo preserves all files", before == after && unrelated == "unrelated bytes" && retained == unrelated)
+  } yield ()
+
+def requestResume(mode: Int): IO[Unit] =
+  for {
+    _ <- attempt(root(mode))
+    last <- readOptional(Fs.join(Fs.join(root(mode), ".scuzz/ide"), "last.json")).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") readOptional(Fs.join(Fs.join(root(mode), ".scuzz/ide"), "last.json")) else IO.fail(error))
+    _ <- if (Str.isEmpty(last)) IO.pure(()) else requestStart(mode)
+    _ <- attempt(root(mode))
+  } yield ()
+
+def request(n: Int): IO[Unit] =
+  (for {
+    mode = 10 + n % 2
+    _ <- if (n < 2) requestStart(mode) else requestCanceled(mode)
+    _ <- requestResume(mode)
+    _ <- requestResume(mode)
+    _ <- requestChecks(mode).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") requestChecks(mode) else IO.fail(error))
+  } yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("Undo request remains pending") else if (Str.startsWith(error, "oracle ")) IO.fail(error) else Property.assert("Undo request returns an expected error", false))
 
 def expectedError(error: String): Bool =
-  error == "Fs: injected fault" || error == "Fs: partial write" || error == "fiber interrupted" || Str.startsWith(error, "recovery conflict:")
+  error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement" || error == "fiber interrupted" || Str.startsWith(error, "recovery conflict:")
 
 def attempt(path: String): IO[Unit] =
   Cards.recover(path).handleErrorWith(error => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false))
 
 def resume(mode: Int): IO[Unit] =
   for {
-    index = if (mode == 1 || mode == 3) 0 else 1
+    index = if (mode >= 4 || mode == 1 || mode == 3) 0 else 1
     write = List.at(writes(mode), index)
     _ <- Cards.writeOne(root(mode), write).handleErrorWith(error => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false))
     _ <- attempt(root(mode))
@@ -87,7 +222,7 @@ def settled(mode: Int): IO[Unit] =
     journal <- Fs.read(Fs.join(Fs.join(path, ".scuzz/ide"), "journal.json"))
     completed <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide/records"), Str.concat(Json.getStr(prepared(mode), "operation", ""), ".json")))
     last <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide"), "last.json"))
-    conflict = mode == 1 || mode == 3
+    conflict = mode % 4 == 1 || mode % 4 == 3
     _ <- Property.assert("recovery preserves external bytes", !conflict || main == "external bytes")
     _ <- Property.assert("recovery completes both source writes", conflict || (if (mode == 0) main == after() && otherExists != 0 && other == addition() else main == before() && otherExists == 0))
     _ <- Property.assert("recovery retains a conflicting journal", !conflict || journal == text(prepared(mode)))
@@ -103,7 +238,7 @@ def run(n: Int): IO[Unit] =
   _ <- attempt(root(mode))
   _ <- attempt(root(mode))
   _ <- settled(mode)
-} yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write") IO.println("recovery remains pending") else IO.fail(error))
+} yield ()).handleErrorWith(error => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement") IO.println("recovery remains pending") else IO.fail(error))
 
 def canceled(mode: Int): IO[Unit] =
   for {

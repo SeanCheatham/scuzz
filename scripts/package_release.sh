@@ -52,7 +52,7 @@ copy_crate() {
 }
 
 copy_crate runtime include src Makefile
-copy_crate ffi-skia include src Makefile README.md
+copy_crate ffi-skia include src Makefile
 copy_crate embedder-web build.sh sdk.py web.c web.h index.html
 copy_crate embedder-desktop include src Makefile package_macos.py run_watch.sh
 copy_crate embedder-mobile include src Makefile shells
@@ -64,9 +64,28 @@ chmod +x "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh" "$OUT/script
 
 # Skia pin + prebuilt for UI text (default backend). Opt out: SCUZZ_SKIA=sk_sw.
 # fetch_skia.sh substitutes {triple} so Linux/macOS releases get the matching asset.
+cp -f "$ROOT/scripts/fetch_fonts.py" "$OUT/scripts/fetch_fonts.py"
+cp -f "$ROOT/scripts/arabic_joining.py" "$OUT/scripts/arabic_joining.py"
+mkdir -p "$OUT/third_party/fonts"
+cp -f "$ROOT/third_party/fonts/"* "$OUT/third_party/fonts/"
+python3 "$ROOT/scripts/fetch_fonts.py" "$ROOT/crates/ffi-skia/build/fonts"
+cp -f "$ROOT/crates/ffi-skia/build/fonts/"*.ttf "$OUT/third_party/fonts/"
 mkdir -p "$OUT/third_party/skia"
-cp -f "$ROOT/third_party/skia/README.md" "$OUT/third_party/skia/README.md"
 cp -f "$ROOT/third_party/skia/PIN" "$OUT/third_party/skia/PIN"
+cp -f "$ROOT/third_party/skia/SheenBidi-LICENSE" "$OUT/third_party/skia/SheenBidi-LICENSE"
+make -C "$ROOT/crates/ffi-skia" build/sheenbidi/.stamp
+mkdir -p "$OUT/crates/ffi-skia/build/sheenbidi"
+cp -a "$ROOT/crates/ffi-skia/build/sheenbidi/Headers" "$ROOT/crates/ffi-skia/build/sheenbidi/Source" \
+  "$OUT/crates/ffi-skia/build/sheenbidi/"
+cp -f "$ROOT/crates/ffi-skia/build/sheenbidi/.stamp" "$OUT/crates/ffi-skia/build/sheenbidi/.stamp"
+touch "$OUT/crates/ffi-skia/build/sheenbidi/.stamp"
+make -C "$ROOT/crates/ffi-skia" build/harfbuzz/arabic_joining.h build/harfbuzz/HarfBuzz-LICENSE build/harfbuzz/.source-stamp
+mkdir -p "$OUT/crates/ffi-skia/build/harfbuzz"
+cp -a "$ROOT/crates/ffi-skia/build/harfbuzz/"*.h "$ROOT/crates/ffi-skia/build/harfbuzz/Source" "$ROOT/crates/ffi-skia/build/harfbuzz/.source-stamp" "$OUT/crates/ffi-skia/build/harfbuzz/"
+cp -f "$ROOT/crates/ffi-skia/build/harfbuzz/.stamp" "$ROOT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE"   "$OUT/crates/ffi-skia/build/harfbuzz/"
+touch "$OUT/crates/ffi-skia/build/harfbuzz/.stamp"
+touch "$OUT/crates/ffi-skia/build/harfbuzz/.source-stamp"
+touch "$OUT/crates/ffi-skia/build/harfbuzz/arabic_joining.h" "$OUT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE"
 if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
   echo "==> SCUZZ_SKIA=sk_sw - release keeps in-tree sk_sw only"
 else

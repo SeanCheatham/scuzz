@@ -2,7 +2,7 @@ oracle topicsHaveBlocks(): Bool =
   List.forall(Manual.topics(), t => List.nonEmpty(t.blocks))
 
 oracle idsUnique(): Bool =
-  List.len(Manual.topics()) == 15
+  List.forall(Manual.topics(), t => List.len(List.filter(Manual.topics(), other => other.id == t.id)) == 1)
 
 oracle idsStable(): Bool =
   Manual.idsLine() == "start|install|language|gui|signals|packages|verify|commands|manifest|ios|android|web|ide|try|how"

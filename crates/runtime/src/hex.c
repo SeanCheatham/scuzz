@@ -3,8 +3,7 @@
 
 #include <stddef.h>
 
-/* Lowercase hex of UTF-8 bytes, and the reverse. Software so web and mobile
-   compile without OpenSSL. No base64. No UUID. */
+/* Encode and decode hexadecimal bytes without OpenSSL. */
 
 static void hex_lower(const unsigned char *in, size_t n, char *out) {
   static const char lut[] = "0123456789abcdef";

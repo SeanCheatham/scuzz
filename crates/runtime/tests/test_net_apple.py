@@ -129,10 +129,10 @@ def prove_ios(cli, project, temp, env):
         ios = project / "build/ios-sim"
         # Use the same runtime objects as the packaged app.
         sdk = subprocess.check_output(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"], text=True).strip()
-        objects = [str(p) for p in (ios / "obj").glob("*.o") if p.name not in ("app.o", "shell_main.o", "shell_ScuzzShell.o")]
+        objects = [str(p) for p in sorted((ios / "obj").rglob("*.o")) if p.name not in ("app.o", "shell_main.o", "shell_ScuzzShell.o")]
         app = temp / "NetProof.app"
         app.mkdir()
-        subprocess.run(["xcrun", "clang", "-target", "arm64-apple-ios16.0-simulator", "-isysroot", sdk, "-Wall", "-Wextra", "-Werror", "-O2", "-fobjc-arc", "-DSCUZZ_NET_IOS", "-I" + str(root / "crates/runtime/include"), str(root / "crates/runtime/tests/test_net_apple.c"), str(root / "crates/runtime/tests/test_net_apple_ios.m"), *objects, "-framework", "UIKit", "-framework", "Foundation", "-framework", "CoreGraphics", "-o", str(app / "NetProof")], check=True)
+        subprocess.run(["xcrun", "clang", "-target", "arm64-apple-ios16.0-simulator", "-isysroot", sdk, "-Wall", "-Wextra", "-Werror", "-O2", "-fobjc-arc", "-DSCUZZ_NET_IOS", "-I" + str(root / "crates/runtime/include"), str(root / "crates/runtime/tests/test_net_apple.c"), str(root / "crates/runtime/tests/test_net_apple_ios.m"), *objects, "-lc++", "-framework", "UIKit", "-framework", "Foundation", "-framework", "CoreGraphics", "-o", str(app / "NetProof")], check=True)
         info = plistlib.loads((root / "crates/embedder-mobile/shells/ios/Info.plist").read_bytes())
         info.update(CFBundleExecutable="NetProof", CFBundleIdentifier="dev.scuzz.netproof", CFBundleName="NetProof")
         (app / "Info.plist").write_bytes(plistlib.dumps(info))

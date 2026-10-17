@@ -1,0 +1,2 @@
+[fuzz]
+events = ["key Tab", "key ArrowDown", "key ArrowDown", "key Escape", "key End", "key Enter", "key Tab", "key End", "key Enter", "key Tab", "key Tab", "key Enter", "key Tab", "key Enter", "key Tab", "key Space"]

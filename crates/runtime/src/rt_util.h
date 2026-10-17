@@ -24,6 +24,14 @@ static inline SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+/* The IO node retains the pair and both borrowed values. */
+static inline SzIo *delay_pair(SzThunk thunk, void *left, void *right) {
+  SzPair *pair = sz_pair_new(left, right);
+  SzIo *io = sz_io_delay(thunk, pair);
+  sz_release(pair);
+  return io;
+}
+
 static inline SzIo *pure_drop(void *value) {
   SzIo *io = sz_io_pure(value);
   sz_release(value);

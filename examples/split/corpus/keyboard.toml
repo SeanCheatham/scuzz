@@ -1,0 +1,2 @@
+[fuzz]
+events = ["type 0 kept", "key Tab", "key Tab", "key ArrowRight", "key Enter", "key Enter", "key Home", "key Enter", "key End", "key ArrowLeft", "key Enter", "key Enter", "key Tab", "type right", "tap button:Reset panes", "tap button:Add"]

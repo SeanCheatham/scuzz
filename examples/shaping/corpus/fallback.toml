@@ -1,0 +1,2 @@
+[fuzz]
+events = ["text 0 क्षि", "select 0 0 12", "compose ปู่", "commit", "text 0 中文漢字", "key Home", "key ArrowRight", "type 字", "tap button:Set Arabic", "tap button:Set Latin", "tap button:Add"]

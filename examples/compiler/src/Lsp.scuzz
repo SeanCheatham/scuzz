@@ -504,9 +504,6 @@ def didOpen2(root: String, open: List[Open], path: String, src: String): IO[List
 def didOpen3(root: String, open: List[Open], _path: String): IO[List[Open]] =
   Drive.checkOverlay(root, overlayPairs(open)).flatMap(raw => IO.foreachDiscard(open, document => notify(publishDiags(uriOfPath(document.path), raw))).map(_ => open))
 
-def lspNotifyKeep(msg: String, open: List[Open]): IO[List[Open]] =
-  notify(msg).flatMap(_ => IO.pure(open))
-
 def didClose(open: List[Open], j: Json): IO[List[Open]] =
   didClose2(open, uriOf(j))
 

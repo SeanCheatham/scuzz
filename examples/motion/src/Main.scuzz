@@ -1,0 +1,65 @@
+def overlapSample(): View =
+  View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.background(Color.rgb(255, 255, 255), View.semantics("Opacity sample", View.opacity(50, View.sized(120, 80, View.stack([View.sized(100, 80, View.background(Color.rgb(255, 0, 0), View.text(""))), View.positioned(20, 0, View.sized(100, 80, View.background(Color.rgb(0, 0, 255), View.text(""))))]))))))
+
+def changeAxes(width: Signal[Int], height: Signal[Int], w: Int, h: Int): Unit =
+  for {
+    _ = Signal.set(width, w)
+  } yield Signal.set(height, h)
+
+def sizeSample(width: Signal[Int], height: Signal[Int], visible: Signal[Int], name: Signal[String], count: Signal[Int], countText: Signal[String], widthText: Signal[String], heightText: Signal[String]): View =
+  View.column([View.heading(2, View.text("Size transitions")), View.wrap([View.button("Grow size", _ => changeAxes(width, height, 240, 180)), View.button("Shrink size", _ => changeAxes(width, height, 80, 60)), View.button("Narrow size", _ => changeAxes(width, height, 40, 30)), View.button("Collapse size", _ => changeAxes(width, height, 0, 0)), View.button("Wide size", _ => Signal.set(width, 240)), View.button("Tall size", _ => Signal.set(height, 180))]), View.checkbox(visible, "Show size content"), View.bindText(widthText), View.bindText(heightText), View.bindText(countText), View.visibility(visible, View.animatedSize(width, height, 8, View.semantics("Size bounds", View.background(Color.rgb(225, 235, 245), View.column([View.text("Size content"), View.textField(name, "Size name"), View.button("Size add", _ => Signal.set(count, Signal.get(count) + 1))]))))), View.text("After size sample")])
+
+def contentSample(mode: Signal[Int], present: Signal[Int], visible: Signal[Int], name: Signal[String], count: Signal[Int], countText: Signal[String]): View =
+  View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.heading(2, View.text("Content-size transitions")), View.wrap([View.button("Grow content", _ => Signal.set(mode, 1)), View.button("Shrink content", _ => Signal.set(mode, 0)), View.button("Detail content", _ => Signal.set(mode, 2)), View.button("Empty content", _ => Signal.set(mode, 3))]), View.checkbox(visible, "Show measured content"), View.bindText(countText), View.visibility(visible, View.animatedContentSize(8, View.semantics("Content bounds", View.offstage(present, View.background(Color.rgb(225, 235, 245), View.column([View.text("Content summary"), View.textField(name, "Content name"), View.showWhen(mode, 1, View.text("""First detail
+Second detail
+Third detail""")), View.showWhen(mode, 2, View.text("One detail")), View.button("Content add", _ => Signal.set(count, Signal.get(count) + 1))])))))), View.text("After content sample")]))
+
+def positionSample(x: Signal[Int], y: Signal[Int], visible: Signal[Int], name: Signal[String], count: Signal[Int], countText: Signal[String], xText: Signal[String], yText: Signal[String]): View =
+  View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.heading(2, View.text("Position transitions")), View.wrap([View.button("Far position", _ => changeAxes(x, y, 176, 136)), View.button("Near position", _ => changeAxes(x, y, 56, 26)), View.button("Home position", _ => changeAxes(x, y, 0, 0)), View.button("Right position", _ => Signal.set(x, 176)), View.button("Down position", _ => Signal.set(y, 136)), View.button("Outside position", _ => changeAxes(x, y, 330, 250))]), View.checkbox(visible, "Show position content"), View.bindText(xText), View.bindText(yText), View.bindText(countText), View.semantics("Position scene", View.sized(320, 240, View.clip(View.stack([View.sized(320, 240, View.background(Color.rgb(255, 255, 255), View.text(""))), View.visibility(visible, View.animatedPosition(x, y, 8, View.semantics("Position bounds", View.sized(120, 80, View.background(Color.rgb(225, 235, 245), View.column([View.textField(name, "Position name"), View.button("Position add", _ => Signal.set(count, Signal.get(count) + 1))]))))))])))), View.text("After position sample")]))
+
+def scaleSample(value: Signal[Int], visible: Signal[Int], name: Signal[String], count: Signal[Int], countText: Signal[String], targetText: Signal[String]): View =
+  View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40), View.column([View.heading(2, View.text("Scale transitions")), View.wrap([View.button("Grow scale", _ => Signal.set(value, 200)), View.button("Shrink scale", _ => Signal.set(value, 50)), View.button("Reset scale", _ => Signal.set(value, 100)), View.button("Collapse scale", _ => Signal.set(value, 0)), View.button("Small scale", _ => Signal.set(value, 1))]), View.checkbox(visible, "Show scale content"), View.bindText(targetText), View.bindText(countText), View.semantics("Scale scene", View.sized(320, 240, View.clip(View.stack([View.sized(320, 240, View.background(Color.rgb(255, 255, 255), View.text(""))), View.positioned(100, 80, View.visibility(visible, View.scale(200, View.scale(50, View.animatedScale(value, 8, View.semantics("Scale bounds", View.sized(120, 80, View.background(Color.rgb(225, 235, 245), View.column([View.textField(name, "Scale name"), View.button("Scale add", _ => Signal.set(count, Signal.get(count) + 1))])))))))))])))), View.text("After scale sample")]))
+
+@main def main: IO[Unit] =
+  for {
+    opacity = Signal.make(100)
+    reduced = Signal.make(0)
+    visible = Signal.make(1)
+    count = Signal.make(0)
+    name = Signal.make("Retained input")
+    sizeShown = Signal.make(0)
+    sizeVisible = Signal.make(1)
+    boxWidth = Signal.make(80)
+    boxHeight = Signal.make(60)
+    sizeName = Signal.make("Retained size input")
+    sizeCount = Signal.make(0)
+    contentShown = Signal.make(0)
+    contentVisible = Signal.make(1)
+    contentMode = Signal.make(0)
+    contentPresent = Signal.map(contentMode, n => if (n == 3) 0 else 1)
+    contentName = Signal.make("Retained content input")
+    contentCount = Signal.make(0)
+    scaleShown = Signal.make(0)
+    scaleVisible = Signal.make(1)
+    scaleValue = Signal.make(100)
+    scaleName = Signal.make("Retained scale input")
+    scaleCount = Signal.make(0)
+    scaleCountText = Signal.map(scaleCount, n => s"Scale count: $n")
+    scaleTargetText = Signal.map(scaleValue, n => s"Scale target: $n")
+    positionShown = Signal.make(0)
+    positionVisible = Signal.make(1)
+    positionX = Signal.make(16)
+    positionY = Signal.make(16)
+    positionName = Signal.make("Retained position input")
+    positionCount = Signal.make(0)
+    positionCountText = Signal.map(positionCount, n => s"Position count: $n")
+    positionXText = Signal.map(positionX, n => s"X target: $n")
+    positionYText = Signal.map(positionY, n => s"Y target: $n")
+    contentCountText = Signal.map(contentCount, n => s"Content count: $n")
+    sizeCountText = Signal.map(sizeCount, n => s"Size count: $n")
+    sizeWidthText = Signal.map(boxWidth, n => s"Width target: $n")
+    sizeHeightText = Signal.map(boxHeight, n => s"Height target: $n")
+    targetText = Signal.map(opacity, n => s"Target: $n")
+    countText = Signal.map(count, n => s"Count: $n")
+    _ <- Ui.run(_ => View.column([View.text("Opacity transitions"), View.wrap([View.button("Fade out", _ => Signal.set(opacity, 0)), View.button("Fade in", _ => Signal.set(opacity, 100)), View.button("Half", _ => Signal.set(opacity, 50))]), View.checkbox(reduced, "Reduce motion"), View.checkbox(visible, "Show content"), View.bindText(targetText), View.bindText(countText), View.visibility(visible, View.reducedMotion(reduced, View.animatedOpacity(opacity, 8, View.column([View.text("Retained content"), View.textField(name, "Name"), View.button("Add", _ => Signal.set(count, Signal.get(count) + 1))])))), overlapSample(), View.checkbox(sizeShown, "Show size sample"), View.showWhen(sizeShown, 1, View.reducedMotion(reduced, sizeSample(boxWidth, boxHeight, sizeVisible, sizeName, sizeCount, sizeCountText, sizeWidthText, sizeHeightText))), View.checkbox(contentShown, "Show content sample"), View.showWhen(contentShown, 1, View.reducedMotion(reduced, contentSample(contentMode, contentPresent, contentVisible, contentName, contentCount, contentCountText))), View.checkbox(positionShown, "Show position sample"), View.showWhen(positionShown, 1, View.reducedMotion(reduced, positionSample(positionX, positionY, positionVisible, positionName, positionCount, positionCountText, positionXText, positionYText))), View.checkbox(scaleShown, "Show scale sample"), View.showWhen(scaleShown, 1, View.reducedMotion(reduced, scaleSample(scaleValue, scaleVisible, scaleName, scaleCount, scaleCountText, scaleTargetText)))]))
+  } yield ()

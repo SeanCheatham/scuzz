@@ -1,0 +1,2 @@
+[fuzz]
+events = ["type 0 kept", "tap button:Hide tools", "key Tab", "tap button:Reset panes", "tap button:Add", "tap button:Hide preview", "tap button:Reset panes"]

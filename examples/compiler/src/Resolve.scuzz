@@ -103,7 +103,7 @@ def program(p: Prog, index: Index): Prog =
   Prog(p.pkg, sortEnums(List.map(p.enums, en => enumDecl(en, Scope(index, en.mod, en.tparams, [])))), List.map(p.aliases, a => Alias(identity(a.mod, a.name), a.tparams, ty(Scope(index, a.mod, a.tparams, []), a.target), a.mod)), List.map(p.traits, tr => traitDecl(tr, Scope(index, tr.mod, tr.tparams, []))), List.map(p.impls, im => implDecl(im, Scope(index, im.mod, [], ["self"]))), p.imps, List.map(p.defs, fn => fun(fn, Scope(index, fn.mod, fn.tparams, []))), p.main, expr(p.body, Scope(index, p.mod, [], [])), p.mod)
 
 def enumDecl(en: En, scope: Scope): En =
-  En(en.isRec, identity(en.mod, en.name), en.tparams, List.map(en.cases, c => EnCase(if (en.isRec) identity(en.mod, en.name) else c.name, params(c.fields, scope))), en.mod)
+  En(en.isRec, identity(en.mod, en.name), en.tparams, List.map(en.cases, c => EnCase(if (en.isRec) identity(en.mod, en.name) else c.name, params(c.fields, scope))), en.mod, en.privateCtor)
 
 def traitDecl(tr: Tr, scope: Scope): Tr =
   Tr(identity(tr.mod, tr.name), tr.tparams, List.map(tr.methods, method => TrMethod(method.name, params(method.params, scope), ty(scope, method.ret))), tr.mod)

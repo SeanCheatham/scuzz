@@ -31,6 +31,28 @@ oracle cliDiffArgs(): Bool =
 oracle cliFmtSrc(): Bool =
   Main.cliDiff(Cli.fmtSrc(Main.srcHi()), Main.wantHi())
 
+oracle cliInvalidFormatting(): Bool =
+  for {
+    invalid = ["""def broken(): Int = 1
+)
+""", "def f(): Int = for { record = 1 } yield record", "@main def main: IO[Unit] = for { record <- IO.pure(1) } yield ()", "def f(): Int = for { n = } yield n", "def f(): Int = 1 +", "def f(): List[Int] = List.map([1], n => record)", "def f(): Int = n.", "def f(): Int = (1:)", "def f(): Int = ((n:) => n)(1)", "def f(): Int = ((record, n) => n)((1, 2))", "def f(record: Int): Int = 1", "record Item(record: Int)", "record record(value: Int)", """enum record:
+  case Good""", """trait record:
+  def f(): Int""", "type record = Int", "@main def record: IO[Unit] = IO.println(1)", "def f(x: Int = ): Int = 1", "def f(x: Int where ): Int = 1", "def f(): Int = 1 match { case n if => n }", """trait Item:
+  def f(x: Int where ): Int"""]
+  } yield List.forall(invalid, source => Cli.fmtSrc(source) == source && Lsp.formatJson(source) == "[]")
+
+oracle cliValidFormatting(): Bool =
+  for {
+    valid = ["def f(): Int = for { n = 1 } yield n", "def f(): List[Int] = List.map([1], n => n + 1)", "def f(): List[Int] = List.map([1], _ + 1)", "record Item(value: Int)", "def f(): Int = (1: Int)", "def f(): List[Int] = List.map([1], (n: Int) => n)", "@main def main: IO[Unit] = IO.println(1)", "def f(x: Int = 1): Int = x", "def f(x: Int where x > 0): Int = x", "def f(): Int = 1 match { case n if n > 0 => n case _ => 0 }"]
+  } yield List.forall(valid, source => !Parse.hasParseError(Parse.parse(Lexer.lex(source))) && Lsp.formatJson(source) != "[]" && Cli.fmtSrc(Cli.fmtSrc(source)) == Cli.fmtSrc(source))
+
+oracle cliSyntaxDiagnostics(): Bool =
+  for {
+    invalid = ["record record(value: Int)", """enum record:
+  case Good""", """trait record:
+  def f(): Int""", "type record = Int", "def f(x: Int = ): Int = 1", "def f(x: Int where ): Int = 1"]
+  } yield List.forall(invalid, source => Str.contains(Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)]), "\"file\":\"Broken.scuzz\"") && Str.contains(Check.humanFiles([("Good", "def good(): Int = 1"), ("Broken", source)]), "Broken.scuzz:1:1: error:"))
+
 oracle cliIdemFmt(): Bool =
   Main.cliIdem(Main.a1("fmt"))
 

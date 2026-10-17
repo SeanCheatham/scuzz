@@ -3,6 +3,7 @@
 #include "scuzz_embedder.h"
 
 #import <Cocoa/Cocoa.h>
+#import <objc/runtime.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +24,74 @@ static void check(int ok, const char *name) {
   }
   fprintf(stderr, "FAIL: %s\n", name);
   failures++;
+}
+
+static BOOL motion_test_value;
+
+static BOOL motion_test_read(id object, SEL selector) {
+  (void)object;
+  (void)selector;
+  return motion_test_value;
+}
+
+static int motion_test_event(int expected) {
+  NSDate *end = [NSDate dateWithTimeIntervalSinceNow:expected < 0 ? .03 : 1.0];
+  while ([end timeIntervalSinceNow] > 0) {
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
+    SzInputEvent event;
+    while (sz_embedder_poll_event(&event)) {
+      if (event.kind == SZ_INPUT_REDUCED_MOTION)
+        return expected >= 0 && event.reduced_motion == expected;
+    }
+  }
+  return expected < 0;
+}
+
+static void test_motion_preferences(void) {
+  Method method = class_getInstanceMethod(NSWorkspace.class,
+      @selector(accessibilityDisplayShouldReduceMotion));
+  check(method != NULL, "workspace motion preference exists");
+  if (!method) return;
+  IMP original = method_setImplementation(method, (IMP)motion_test_read);
+  NSWorkspace *workspace = NSWorkspace.sharedWorkspace;
+  @try {
+    motion_test_value = YES;
+    check(sz_embedder_reduced_motion() == 1, "initial motion preference");
+    check(motion_test_event(-1), "initial preference has no duplicate event");
+    motion_test_value = NO;
+    [NSNotificationCenter.defaultCenter
+        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+        object:workspace];
+    check(motion_test_event(-1), "unrelated notification center has no motion event");
+    [workspace.notificationCenter
+        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+        object:workspace];
+    check(motion_test_event(0), "workspace notification restores normal motion");
+    [workspace.notificationCenter
+        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+        object:workspace];
+    check(motion_test_event(-1), "unchanged preference has no duplicate event");
+    motion_test_value = YES;
+    [workspace.notificationCenter
+        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+        object:workspace];
+    check(motion_test_event(1), "workspace notification reduces motion");
+    sz_embedder_shutdown();
+    motion_test_value = NO;
+    [workspace.notificationCenter
+        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+        object:workspace];
+    check(motion_test_event(-1), "shutdown removes the preference observer");
+    check(sz_embedder_reduced_motion() == 0, "new session reads its initial preference");
+    motion_test_value = YES;
+    [workspace.notificationCenter
+        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+        object:workspace];
+    check(motion_test_event(1), "new session receives preference changes");
+  } @finally {
+    sz_embedder_shutdown();
+    method_setImplementation(method, original);
+  }
 }
 
 @interface ScuzzLaunchProbe : NSObject
@@ -70,8 +139,9 @@ int main(void) {
   __block int native_down = 0;
 
   if (!sz_embedder_available()) {
-    printf("test_macos_events: skip (no display)\n");
-    return 0;
+    @autoreleasepool { test_motion_preferences(); }
+    printf("test_macos_events: window checks skip (no display)\n");
+    return failures ? 1 : 0;
   }
 
   @autoreleasepool {
@@ -142,6 +212,7 @@ int main(void) {
 
     [[NSNotificationCenter defaultCenter] removeObserver:probe];
     sz_embedder_shutdown();
+    test_motion_preferences();
   }
 
   if (failures) {

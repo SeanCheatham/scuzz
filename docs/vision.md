@@ -4,13 +4,39 @@ Open work and implementation order. Design locks: [`philosophy.md`](philosophy.m
 
 Edit this file when the order changes. Remove completed work. Keep only the next slice in `plans.md`.
 
+## UI framework capability
+
+Improve shared UI capabilities for web, desktop, and mobile applications.
+Headless remains a required peer for layout, input, and verification.
+
+Select work from these application needs:
+
+1. Expose shared semantics to native screen readers.
+   Complete keyboard behavior for remaining composite controls.
+   Add editable option search when an application needs it.
+2. Add wider font coverage, other contextual scripts across font changes, and bidi caret affinity.
+3. Rotation transitions with replay and cancellation.
+
+Use working applications to check each capability.
+Check native and evaluator behavior with the same inputs.
+Keep browser, mobile, and assistive technology proof limits explicit.
+The complete framework goal needs more than one layout constructor.
+
 ## First: language and verification guarantees
 
-Improve the ability to write correct applications before local choice feedback. Keep external input errors explicit with `Result`. Strict integer parsing and required JSON fields supply the first boundary operations. Extend this path only for a demonstrated input need. Keep domain validation active in live applications. Verification assumptions do not validate live input. Result bindings and selected Result fields retain each result for explicit use. Next, improve compiler checks that prevent invalid application states. Improve observable behavior rules and their diagnostics. Check relationships between executions when a rule needs them. Defer reference models. They are optional and are not the default verification path.
+Prioritize application correctness before local choice feedback.
+Select each slice from a demonstrated gap in the seven topics below.
+Use `Result` for external input errors. Keep domain validation active in live code.
+Verification assumptions do not validate live input.
 
-Keep one compiler, one verification command, and the existing simulation runtime. Preserve exact evaluator and native replay. Keep probe deadlines, claims, corpus entries, and search scope. General compiler speed work follows only from a demonstrated application or proof blocker.
+Keep one compiler, one verification command, and the existing simulation runtime.
+Preserve exact evaluator and native replay, probe deadlines, claims, corpus entries, and search scope.
+General compiler speed work needs a demonstrated application or proof blocker.
+Reference models remain optional. They are not the default verification path.
 
-Keep current work on language, standard kits, and verification tooling. Select each next slice from a demonstrated application correctness gap. The decision loop gates below remain later work. Keep useful generation and human review results unproven until a real application session measures them.
+Keep current work on language, standard kits, and verification tooling.
+The decision loop gates below remain later work.
+Generation usefulness and review efficiency need evidence from a real application session.
 
 ### Improvement work order
 
@@ -27,10 +53,11 @@ Complete one slice before starting the next slice.
 
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
 
-Recovery rules compare all five operation files across a conflict and repeated recovery.
-A deliberate conflict write passes the endpoint rules but fails the file comparison.
-Select the next slice from another demonstrated application rule gap.
-Keep formal checking optional until its application benefit and cost meet the stated gate.
+Use the [recovery comparison](gaps.md#formal-verification) to measure author effort.
+Extend checks for external writes during recovery under the stated ownership limits.
+Select further relation checks from demonstrated application gaps.
+Keep wider incomplete scopes explicit.
+Keep formal methods optional until they pass the product method gate.
 
 ## Formal verification methods
 
@@ -52,7 +79,11 @@ Do not silently replace an author claim with a weaker solver claim.
 
 ### Seven proposals
 
-1. **Types that carry proof.** Add refinement types with predicates on values.
+1. **Types that carry proof.** Start with validated domain types.
+   A live constructor checks input and returns Result.
+   Prevent other code from constructing an invalid value.
+   Select one demonstrated application need before adding solver checks.
+   General refinement types with predicates remain later work.
    Examples include positive amounts, valid list indices, and sorted collections.
    Prove that each constructor and function preserves the predicate.
    Check external input in live code before it enters the type.
@@ -107,14 +138,12 @@ Do not silently replace an author claim with a weaker solver claim.
 ### Product method gate
 
 `examples/proof` supplies optional bit-vector and finite protocol checks.
-Run instructions and measured scope live in `developer-environment.md`.
+Run instructions live in
+[`developer-environment.md`](developer-environment.md#formal-verification-experiment).
+Proof scopes, measured results, and open limits live in [`gaps.md`](gaps.md#formal-verification).
 The default app path remains `scuzz fuzz`.
-The application recovery check uses the editor journal functions.
-Long cancellation paths replay exactly in both engines.
-Independent setup and recovery corpus inputs support the mutation checks.
-Ordinary search rejects the deliberate defects.
-The exhaustive application search still exceeds its checking budget.
-Resolve this cost limit before adding a public exhaustive application method.
+The wider recovery scopes still exceed their execution limits.
+Resolve these limits before adding a public exhaustive application method.
 Select a new product method only for a demonstrated application need.
 Keep its supported subset explicit before adding syntax or dependencies.
 Reuse the author rule. Preserve claims, hermetic simulation, and exact replay.
@@ -123,6 +152,12 @@ Check assumptions and required trigger reach separately.
 Keep unsupported operations, unknown results, and unmet limits incomplete.
 Record exact input identities, platform scope, trusted components, and cost.
 Require a measured author workflow and budget.
+Compare methods with equal inputs, schedules, faults, rules, and budgets.
+Measure author work, counterexample latency, completed scope, and edit cost.
+Keep method, verdict, scope, and open obligations separate for each rule.
+A completed finite scope can add value when both methods detect the same defect.
+Use small optional reference models when they make an application rule clearer.
+Keep reductions out of the search until they preserve all claim observations.
 A finite check cannot produce an unbounded proof label.
 Do not add a general proof language, a second compiler, or a mandatory app model.
 

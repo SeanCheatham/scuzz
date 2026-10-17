@@ -1,0 +1,22 @@
+record Choice(title: String, action: String, value: Int)
+
+def choiceView(selected: Signal[Int], choice: Choice): View =
+  View.column([View.text(choice.title), View.button(choice.action, _ => Signal.set(selected, choice.value))])
+
+def imageView(result: Result[String, Image]): View =
+  result match {
+    case Result.Ok(image) => View.sized(48, 32, View.image(image, "Color sample")).require(Image.width(image) == 2).require(Image.height(image) == 2)
+    case Result.Err(error) => View.text(error)
+  }
+
+def header(picture: Result[String, Image], label: Signal[String]): View =
+  View.adaptive(360, View.maxSize(0, 100, View.column([imageView(picture), View.bindText(label)])), View.maxSize(0, 80, View.row([View.expanded(1, imageView(picture)), View.expanded(2, View.bindText(label))])))
+
+@main def main: IO[Unit] =
+  for {
+    picture = Image.decode(Bytes.fromStr(Hex.decode("89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d240000001449444154789c63f8cfc0f01f081b1820e0ff7f0032e4057c296d13bb0000000049454e44ae426082")))
+    selected = Signal.make(0)
+    label = Signal.map(selected, n => s"Selected: $n")
+    choices = [Choice("First card", "First", 1), Choice("Second card", "Second", 2), Choice("Third card", "Third", 3)]
+    _ <- Ui.run(_ => View.expanded(1, View.scroll(View.column([header(picture, label), View.autoGrid(100, List.map(choices, choice => choiceView(selected, choice)))]))))
+  } yield ()

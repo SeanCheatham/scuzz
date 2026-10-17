@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap expansion:Details", "tap button:Add", "tap expansion:More details", "tap button:Close details", "tap button:Open details", "tap button:Hide details", "tap checkbox:Show conditional body", "tap expansion:Conditional", "tap expansion:Conditional"]

@@ -3,8 +3,8 @@
 #
 # Installs a self-contained release tree under $PREFIX/share/scuzz and a
 # wrapper at $PREFIX/bin/scuzz that sets SCUZZ_HOME. App builds need
-# clang/make. Linux [ui] linking against the packaged Skia CPU prebuilt also
-# needs zlib/bzip2. From a checkout, `package_release.sh` compiles
+# clang and make. Linux UI builds also need pkg-config and development files
+# for X11, D-Bus, zlib, and bzip2. From a checkout, `package_release.sh` compiles
 # `examples/cli` with tagged bootstrap.
 #
 # Sources (first match):
@@ -356,8 +356,10 @@ echo "  SCUZZ_HOME=$SHARE"
 if [ -f "$SHARE/VERSION" ]; then
   echo "  $(tr '\n' ' ' <"$SHARE/VERSION")"
 fi
-echo "Put $BIN on PATH (clang + make required to build apps;"
-echo "  Linux [ui] also needs zlib/bzip2: zlib1g-dev libbz2-dev), then:"
+echo "Put $BIN on PATH. App builds need clang and make."
+echo "Linux UI builds also need pkg-config and these development packages:"
+echo "  libx11-dev libdbus-1-dev zlib1g-dev libbz2-dev"
+echo "Then run:"
 echo "  scuzz new myapp --ui"
 echo "  cd myapp && scuzz fuzz --iterations 0 && scuzz run --target headless --exec \"\""
 echo "  scuzz ide --target headless ."

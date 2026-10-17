@@ -1,5 +1,5 @@
-# make has a built-in CC=cc default, so ?= never fires. Plain = keeps
-# clang the default while `make CC=gcc` on the command line still wins.
+# Use clang by default. A command-line CC value takes precedence.
+# The built-in CC=cc prevents the use of ?= here.
 CC = clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
@@ -7,7 +7,7 @@ FFI_SKIA := $(ROOT)/crates/ffi-skia
 EMBEDDER := $(ROOT)/crates/embedder-desktop
 MOBILE := $(ROOT)/crates/embedder-mobile
 UNAME_S := $(shell uname -s)
-# OpenSSL (net.c https). macOS keeps OpenSSL keg-only under Homebrew.
+# HTTPS uses OpenSSL. Homebrew supplies its macOS prefix.
 ifeq ($(UNAME_S),Darwin)
 SSL_PREFIX := $(shell brew --prefix openssl@3 2>/dev/null)
 ifneq ($(SSL_PREFIX),)
@@ -23,12 +23,12 @@ SSL_LINK := -lssl -lcrypto
 endif
 INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include -I$(MOBILE)/include $(SSL_INCLUDES)
 SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/stream.c \
-	src/theme.c src/signal.c src/view.c src/ui.c \
+	src/theme.c src/signal.c src/image.c src/text.c src/text_layout.c src/view.c src/ui.c \
 	src/ui_script.c src/lang_ui.c \
 	src/list.c src/map.c src/fs.c src/sys.c src/clock.c src/hash.c src/hex.c src/base64.c src/bytes.c src/random.c src/uuid.c src/net.c \
 	src/net_http.c src/net_request.c src/net_sock.c src/json.c src/testrt.c src/impurity.c
 BUILDDIR ?= build
-OBJ := $(SRC:src/%.c=$(BUILDDIR)/%.o)
+OBJ := $(SRC:src/%.c=$(BUILDDIR)/%.o) $(BUILDDIR)/image_dec.o
 
 .PHONY: all clean test test-asan test-ubsan lib lib-asan ffi-skia
 
@@ -39,26 +39,31 @@ $(BUILDDIR):
 
 FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 
-# Keep ffi-skia on its own CFLAGS so optional ASan runs do not leave
-# instrumented objects for later non-ASan `make -C ffi-skia test`.
-# `lib` does not need the Skia archive (headers live in ffi-skia/include).
+# Use separate paint flags to keep sanitizer builds independent.
+# The runtime archive needs paint headers, but no paint archive.
 ffi-skia:
 	@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
-$(BUILDDIR)/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h | $(BUILDDIR)
+$(BUILDDIR)/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h src/image.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILDDIR)/text.o $(BUILDDIR)/text_layout.o $(BUILDDIR)/view.o $(BUILDDIR)/test_ui: src/text.h $(FFI_SKIA)/include/sk_text.h
+
+$(BUILDDIR)/image_dec.o: $(FFI_SKIA)/src/image_dec.c $(FFI_SKIA)/src/image_dec.h $(FFI_SKIA)/src/stb_image.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -I$(FFI_SKIA)/src -c $< -o $@
 
 lib: $(BUILDDIR)/libscuzz_rt.a
 
 $(BUILDDIR)/libscuzz_rt.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-# Skia CPU prebuilt: C++ + zlib/bz2 (+ Darwin text frameworks).
-# CoreFoundation: macOS runtime parks main in CFRunLoop for AppKit hops.
-SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_SKIA)/build/sk_capi_backend && \
+# Native text needs C++. Skia also needs zlib, bzip2, and macOS text frameworks.
+# CoreFoundation runs AppKit work on the macOS main thread.
+TEXT_LINK := $(if $(filter Darwin,$(UNAME_S)),-lc++,-lstdc++)
+SKIA_LINK = $(TEXT_LINK) $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_SKIA)/build/sk_capi_backend && \
 	if [ "$$(uname -s)" = Darwin ]; then \
-	  echo -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
-	else echo -lstdc++ -lm -lz -lbz2; fi)
+	  echo -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
+	else echo -lm -lz -lbz2; fi)
 GPU_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx gpu $(FFI_SKIA)/build/sk_capi_backend && \
 	if [ "$$(uname -s)" = Darwin ]; then echo -framework OpenGL; else echo -lEGL -lGLESv2; fi)
 ifeq ($(UNAME_S),Darwin)
@@ -82,27 +87,31 @@ $(BUILDDIR)/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | $(BUIL
 $(BUILDDIR)/reload_bad.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -DRELOAD_SCHEMA='"counter:string"' -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
 
-$(BUILDDIR)/test_io: tests/test_io.c $(BUILDDIR)/libscuzz_rt.a | $(BUILDDIR) ffi-skia
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+# Relink tests after paint selection so they use the selected archive.
+$(BUILDDIR)/test_io: tests/test_io.c src/rt_util.h $(BUILDDIR)/libscuzz_rt.a ffi-skia | $(BUILDDIR)
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) tests/test_io.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
+		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
-$(BUILDDIR)/test_ui: tests/test_ui.c $(BUILDDIR)/libscuzz_rt.a $(BUILDDIR)/reload_a.$(RELOAD_EXT) $(BUILDDIR)/reload_b.$(RELOAD_EXT) $(BUILDDIR)/reload_bad.$(RELOAD_EXT) | $(BUILDDIR) ffi-skia
-	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+$(BUILDDIR)/test_ui: tests/test_ui.c $(BUILDDIR)/libscuzz_rt.a $(BUILDDIR)/reload_a.$(RELOAD_EXT) $(BUILDDIR)/reload_b.$(RELOAD_EXT) $(BUILDDIR)/reload_bad.$(RELOAD_EXT) ffi-skia | $(BUILDDIR)
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
+		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
-test: $(BUILDDIR)/test_io $(BUILDDIR)/test_ui
+$(BUILDDIR)/test_native_motion: tests/test_native_motion.c $(BUILDDIR)/libscuzz_rt.a ffi-skia | $(BUILDDIR)
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) tests/test_native_motion.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
+		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+
+test: $(BUILDDIR)/test_io $(BUILDDIR)/test_ui $(BUILDDIR)/test_native_motion
 	"$(abspath $(BUILDDIR))/test_io"
 	"$(abspath $(BUILDDIR))/test_ui"
+	"$(abspath $(BUILDDIR))/test_native_motion"
 
-# Optional ASan. Not part of default `make test` (slow / host-dependent).
-# Skip if -fsanitize=address cannot link. Exit-time leaks in the C tests
-# stay known. LSan stays off so ASan still catches UAF/OOB without failing
-# the optional CI step on leftover allocs. Compiled corpus replay uses
-# `lib-asan` and `scuzz fuzz --asan`, which keep leak detection on.
+# ASan C tests keep leak detection off. Compiled corpus replay uses
+# lib-asan with leak detection on. Keep each build separate.
 ASAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address -fno-omit-frame-pointer
 lib-asan:
-	@if echo 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o /tmp/scuzz_asan_probe 2>/dev/null; then \
-		rm -f /tmp/scuzz_asan_probe; \
+	@asan_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/scuzz-asan.XXXXXX") || exit 1; \
+	trap 'rm -rf "$$asan_dir"' 0; \
+	if printf '%s\n' 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o "$$asan_dir/probe" 2>/dev/null; then \
 		$(MAKE) lib BUILDDIR=build/asan CFLAGS='$(ASAN_CFLAGS)'; \
 	else \
 		echo "lib-asan: AddressSanitizer not supported by $(CC) on this host" >&2; \
@@ -110,14 +119,21 @@ lib-asan:
 	fi
 
 test-asan:
-	@if echo 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o /tmp/scuzz_asan_probe 2>/dev/null; then \
-		rm -f /tmp/scuzz_asan_probe; \
-		$(MAKE) clean && \
-		ASAN_OPTIONS=detect_leaks=0 $(MAKE) test CFLAGS='$(ASAN_CFLAGS)' && \
-		$(MAKE) clean; \
-	else \
-		echo "test-asan: AddressSanitizer not supported by $(CC) on this host; skipping"; \
-	fi
+	@asan_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/scuzz-asan.XXXXXX") || exit 1; \
+	trap 'rm -rf "$$asan_dir"' 0; \
+	if ! printf '%s\n' '#include <stdlib.h>' 'int main(void){volatile char *p=malloc(1);p[1]=0;free((void *)p);return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o "$$asan_dir/probe" 2>/dev/null; then \
+		echo "test-asan: AddressSanitizer not supported by $(CC) on this host; skipping"; exit 0; \
+	fi; \
+	if ASAN_OPTIONS=detect_leaks=0:symbolize=0 "$$asan_dir/probe" >"$$asan_dir/output" 2>&1; then \
+		echo "test-asan: the known buffer overflow does not fail" >&2; exit 1; \
+	fi; \
+	if ! grep -q 'AddressSanitizer: heap-buffer-overflow' "$$asan_dir/output"; then \
+		cat "$$asan_dir/output" >&2; \
+		echo "test-asan: the buffer overflow probe has no ASan evidence" >&2; exit 1; \
+	fi; \
+	echo "ASan rejects the known buffer overflow."; \
+	$(MAKE) BUILDDIR=build/asan-tests/build CFLAGS='$(ASAN_CFLAGS)' build/asan-tests/build/test_io build/asan-tests/build/test_ui build/asan-tests/build/test_native_motion && \
+	(cd build/asan-tests && ASAN_OPTIONS=detect_leaks=0 ./build/test_io && ASAN_OPTIONS=detect_leaks=0 ./build/test_ui && ASAN_OPTIONS=detect_leaks=0 ./build/test_native_motion)
 
 # Keep UBSan binaries and file fixtures separate from the normal build.
 UBSAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
@@ -136,8 +152,8 @@ test-ubsan:
 		echo "test-ubsan: the overflow probe has no UBSan evidence" >&2; exit 1; \
 	fi; \
 	echo "UBSan rejects the known signed overflow."; \
-	$(MAKE) BUILDDIR=build/ubsan/build CFLAGS='$(UBSAN_CFLAGS)' build/ubsan/build/test_io build/ubsan/build/test_ui && \
-	(cd build/ubsan && ./build/test_io && ./build/test_ui)
+	$(MAKE) BUILDDIR=build/ubsan/build CFLAGS='$(UBSAN_CFLAGS)' build/ubsan/build/test_io build/ubsan/build/test_ui build/ubsan/build/test_native_motion && \
+	(cd build/ubsan && ./build/test_io && ./build/test_ui && ./build/test_native_motion)
 
 clean:
 	rm -rf build

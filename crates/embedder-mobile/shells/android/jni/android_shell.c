@@ -21,10 +21,11 @@ static int g_q_tail;
 static pthread_mutex_t g_q_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_frame_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic int g_alive;
+static int g_motion_value, g_motion_reported;
 static int g_frames;
 static int g_w;
 static int g_h;
-static _Atomic int g_keyboard;
+static _Atomic uint32_t g_keyboard_request;
 static uint8_t *g_rgba;
 static size_t g_rgba_cap;
 static char *g_text_bufs[TEXT_RING];
@@ -37,6 +38,20 @@ void scuzz_android_set_vm(JavaVM *vm) { (void)vm; }
 int sz_mobile_available(void) { return 1; }
 
 int sz_mobile_alive(void) { return atomic_load(&g_alive); }
+
+int sz_mobile_reduced_motion(void) {
+  pthread_mutex_lock(&g_q_lock);
+  int reduced = g_motion_value;
+  g_motion_reported = reduced;
+  pthread_mutex_unlock(&g_q_lock);
+  return reduced;
+}
+
+void scuzz_android_set_reduced_motion(int reduced) {
+  pthread_mutex_lock(&g_q_lock);
+  g_motion_value = reduced != 0;
+  pthread_mutex_unlock(&g_q_lock);
+}
 
 void scuzz_android_set_alive(int alive) { atomic_store(&g_alive, alive ? 1 : 0); }
 
@@ -55,6 +70,7 @@ void sz_mobile_shutdown(void) {
   }
   free(g_poll_text);
   g_poll_text = NULL;
+  g_motion_reported = g_motion_value;
   pthread_mutex_unlock(&g_q_lock);
   free(g_clip);
   g_clip = NULL;
@@ -136,6 +152,13 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   if (!out)
     return 0;
   pthread_mutex_lock(&g_q_lock);
+  if (g_motion_reported != g_motion_value) {
+    g_motion_reported = g_motion_value;
+    *out = (SzInputEvent){.kind = SZ_INPUT_REDUCED_MOTION,
+                         .reduced_motion = g_motion_value};
+    pthread_mutex_unlock(&g_q_lock);
+    return 1;
+  }
   if (g_q_head == g_q_tail) {
     pthread_mutex_unlock(&g_q_lock);
     return 0;
@@ -247,10 +270,14 @@ int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
 }
 
 void sz_mobile_set_keyboard(int visible) {
-  atomic_store(&g_keyboard, visible ? 1 : 0);
+  uint32_t previous = atomic_load(&g_keyboard_request), next;
+  /* Bit zero gives visibility. Other bits identify each request. */
+  do {
+    next = ((previous + 2u) & ~UINT32_C(1)) | (visible != 0);
+  } while (!atomic_compare_exchange_weak(&g_keyboard_request, &previous, next));
 }
 
-int scuzz_android_keyboard_visible(void) { return atomic_load(&g_keyboard); }
+int scuzz_android_keyboard_request(void) { return (int)atomic_load(&g_keyboard_request); }
 
 static int frame_int(const int *p) {
   int v;

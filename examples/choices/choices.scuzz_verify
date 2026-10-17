@@ -1,0 +1,23 @@
+def indicesStayValid(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "layout") >= 0 && Timeline.signalInt(t, i, "layout") < 3 && Timeline.signalInt(t, i, "density") >= 0 && Timeline.signalInt(t, i, "density") < 4 && Timeline.signalInt(t, i, "repeated") >= 0 && Timeline.signalInt(t, i, "repeated") < 3)
+
+def layoutSelectionMatches(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "layout") == 0 == Timeline.a11yHas(t, i, "choicechip:List=1") && Timeline.signalInt(t, i, "layout") == 1 == Timeline.a11yHas(t, i, "choicechip:Grid=1") && Timeline.signalInt(t, i, "layout") == 2 == Timeline.a11yHas(t, i, "choicechip:Columns=1"))
+
+def densitySelectionMatches(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "density") == 0 == Timeline.a11yHas(t, i, "choicechip:Compact=1") && Timeline.signalInt(t, i, "density") == 1 == Timeline.a11yHas(t, i, "choicechip:Normal=1") && Timeline.signalInt(t, i, "density") == 2 == Timeline.a11yHas(t, i, "choicechip:Roomy=1") && Timeline.signalInt(t, i, "density") == 3 == Timeline.a11yHas(t, i, "choicechip:Wide=1"))
+
+def labelsMatchValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("text:Layout: ", Str.fromInt(Timeline.signalInt(t, i, "layout")))) && Timeline.a11yHas(t, i, Str.concat("text:Density: ", Str.fromInt(Timeline.signalInt(t, i, "density")))) && Timeline.a11yHas(t, i, Str.concat("text:Repeated: ", Str.fromInt(Timeline.signalInt(t, i, "repeated")))))
+
+def startsWithNamedChoices(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "layout") == 1 && Timeline.signalInt(t, i, "density") == 0 && Timeline.signalInt(t, i, "repeated") == 2 && Timeline.signalInt(t, i, "single") == 99 && Timeline.signalInt(t, i, "empty") == 99 && Timeline.a11yHas(t, i, "radiogroup:Layout") && Timeline.a11yHas(t, i, "radiogroup:Density"))
+
+def resetRestoresIndices(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Reset", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "layout") == 1 && Timeline.signalInt(t, after, "density") == 0 && Timeline.signalInt(t, after, "repeated") == 2
+})
+
+def emptyHasNoSelection(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "empty") == 99)
+

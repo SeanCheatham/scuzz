@@ -1,0 +1,2 @@
+[fuzz]
+events = ["type 0 Ada", "tap button:Apply"]

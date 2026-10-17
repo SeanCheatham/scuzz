@@ -1,0 +1,253 @@
+def targetLabelFollowsValue(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("text:Target: ", Str.fromInt(Timeline.signalInt(t, i, "opacity")))))
+
+def countLabelFollowsValue(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("text:Count: ", Str.fromInt(Timeline.signalInt(t, i, "count")))))
+
+def fadeOutSetsTarget(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Fade out", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "opacity") == 0 && Timeline.lastHitHas(t, after, "button:Fade out")
+})
+
+def fadeInSetsTarget(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Fade in", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "opacity") == 100
+})
+
+def halfSetsTarget(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Half", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "opacity") == 50
+})
+
+def addChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 1
+})
+
+def visibleContentKeepsInput(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "visible") != 0 == Timeline.a11yHas(t, i, "textfield:Name"))
+
+def startsVisible(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "opacity") == 100 && Timeline.signalInt(t, i, "visible") == 1 && Timeline.signalInt(t, i, "reduced") == 0 && Timeline.signalInt(t, i, "count") == 0 && Timeline.signalStrHas(t, i, "name", "Retained input"))
+
+def transitionUsesSignalTarget(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "visible") == 0 || Timeline.a11yHas(t, i, Str.concat("target:opacity:Retained content=", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "opacity")), """
+"""))))
+
+def reducedContentHasNoPendingPumps(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "visible") == 0 || Timeline.signalInt(t, i, "reduced") == 0 || Timeline.a11yHas(t, i, """pumps:opacity:Retained content=0
+""") && Timeline.a11yHas(t, i, Str.concat("opacity:Retained content=", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "opacity")), """
+"""))))
+
+private def sizeTargets(t: Timeline, i: Int, width: Int, height: Int): Bool =
+  Timeline.signalInt(t, i, "boxWidth") == width && Timeline.signalInt(t, i, "boxHeight") == height
+
+def sizeStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || sizeTargets(t, i, 80, 60) && Timeline.signalInt(t, i, "sizeShown") == 0 && Timeline.signalInt(t, i, "sizeVisible") == 1 && Timeline.signalInt(t, i, "sizeCount") == 0 && Timeline.signalStrHas(t, i, "sizeName", "Retained size input"))
+
+def growSetsSize(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Grow size", pair => pair match {
+  case (before, after) => sizeTargets(t, after, 240, 180)
+})
+
+def shrinkSetsSize(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Shrink size", pair => pair match {
+  case (before, after) => sizeTargets(t, after, 80, 60)
+})
+
+def narrowSetsSize(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Narrow size", pair => pair match {
+  case (before, after) => sizeTargets(t, after, 40, 30)
+})
+
+def collapseSetsSize(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Collapse size", pair => pair match {
+  case (before, after) => sizeTargets(t, after, 0, 0)
+})
+
+def wideKeepsHeight(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Wide size", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "boxWidth") == 240 && Timeline.signalInt(t, before, "boxHeight") == Timeline.signalInt(t, after, "boxHeight")
+})
+
+def tallKeepsWidth(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Tall size", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "boxHeight") == 180 && Timeline.signalInt(t, before, "boxWidth") == Timeline.signalInt(t, after, "boxWidth")
+})
+
+def sizeAddChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Size add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "sizeCount") == Timeline.signalInt(t, before, "sizeCount") + 1
+})
+
+def sizeLabelsFollowValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "sizeShown") == 0 || Timeline.a11yHas(t, i, Str.concat("text:Width target: ", Str.fromInt(Timeline.signalInt(t, i, "boxWidth")))) && Timeline.a11yHas(t, i, Str.concat("text:Height target: ", Str.fromInt(Timeline.signalInt(t, i, "boxHeight")))) && Timeline.a11yHas(t, i, Str.concat("text:Size count: ", Str.fromInt(Timeline.signalInt(t, i, "sizeCount")))))
+
+def sizeTargetFollowsSignals(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "sizeShown") == 0 || Timeline.signalInt(t, i, "sizeVisible") == 0 || Timeline.a11yHas(t, i, Str.concat("target:size:Size bounds=", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "boxWidth")), Str.concat(",", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "boxHeight")), """
+"""))))))
+
+def reducedSizeHasNoPendingPumps(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "sizeShown") == 0 || Timeline.signalInt(t, i, "sizeVisible") == 0 || Timeline.signalInt(t, i, "reduced") == 0 || Timeline.a11yHas(t, i, """pumps:size:Size bounds=0
+"""))
+
+def settledSizeKeepsInputScope(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "sizeShown") == 0 || Timeline.signalInt(t, i, "sizeVisible") == 0 || !Timeline.a11yHas(t, i, """pumps:size:Size bounds=0
+""") || (Timeline.signalInt(t, i, "boxWidth") > 0 && Timeline.signalInt(t, i, "boxHeight") > 0) == Timeline.a11yHas(t, i, "textfield:Size name"))
+
+def contentStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "contentShown") == 0 && Timeline.signalInt(t, i, "contentVisible") == 1 && Timeline.signalInt(t, i, "contentMode") == 0 && Timeline.signalInt(t, i, "contentPresent") == 1 && Timeline.signalInt(t, i, "contentCount") == 0 && Timeline.signalStrHas(t, i, "contentName", "Retained content input"))
+
+def growChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Grow content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 1
+})
+
+def shrinkChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Shrink content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 0
+})
+
+def detailChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Detail content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 2
+})
+
+def emptyChangesContent(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Empty content", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentMode") == 3
+})
+
+def contentAddChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Content add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "contentCount") == Timeline.signalInt(t, before, "contentCount") + 1
+})
+
+def contentPresenceFollowsMode(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentMode") == 3 == (Timeline.signalInt(t, i, "contentPresent") == 0))
+
+def contentLabelsFollowValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.a11yHas(t, i, Str.concat("text:Content count: ", Str.fromInt(Timeline.signalInt(t, i, "contentCount")))))
+
+def reducedContentSizeHasNoPendingPumps(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.signalInt(t, i, "contentVisible") == 0 || Timeline.signalInt(t, i, "reduced") == 0 || Timeline.a11yHas(t, i, """pumps:contentSize:Content bounds=0
+"""))
+
+def measuredContentKeepsInputScope(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.signalInt(t, i, "contentVisible") == 0 || Timeline.a11yHas(t, i, """contentSize:Content bounds=0.000,0.000
+""") || Timeline.signalInt(t, i, "contentMode") != 3 == Timeline.a11yHas(t, i, "textfield:Content name"))
+
+private def contentHeightEnd(mode: Int): String =
+  if (mode == 1) """,160.000
+""" else if (mode == 2) """,120.000
+""" else if (mode == 3) """,0.000
+""" else """,100.000
+"""
+
+def contentUsesMeasuredHeight(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "contentShown") == 0 || Timeline.signalInt(t, i, "contentVisible") == 0 || Timeline.a11yHas(t, i, "target:contentSize:Content bounds=") && Timeline.a11yHas(t, i, contentHeightEnd(Timeline.signalInt(t, i, "contentMode"))))
+
+private def positionTargets(t: Timeline, i: Int, x: Int, y: Int): Bool =
+  Timeline.signalInt(t, i, "positionX") == x && Timeline.signalInt(t, i, "positionY") == y
+
+def positionStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || positionTargets(t, i, 16, 16) && Timeline.signalInt(t, i, "positionShown") == 0 && Timeline.signalInt(t, i, "positionVisible") == 1 && Timeline.signalInt(t, i, "positionCount") == 0 && Timeline.signalStrHas(t, i, "positionName", "Retained position input"))
+
+def farSetsPosition(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Far position", pair => pair match {
+  case (before, after) => positionTargets(t, after, 176, 136)
+})
+
+def nearSetsPosition(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Near position", pair => pair match {
+  case (before, after) => positionTargets(t, after, 56, 26)
+})
+
+def homeSetsPosition(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Home position", pair => pair match {
+  case (before, after) => positionTargets(t, after, 0, 0)
+})
+
+def rightKeepsY(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Right position", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "positionX") == 176 && Timeline.signalInt(t, after, "positionY") == Timeline.signalInt(t, before, "positionY")
+})
+
+def downKeepsX(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Down position", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "positionY") == 136 && Timeline.signalInt(t, after, "positionX") == Timeline.signalInt(t, before, "positionX")
+})
+
+def outsideSetsPosition(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Outside position", pair => pair match {
+  case (before, after) => positionTargets(t, after, 330, 250)
+})
+
+def positionAddChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Position add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "positionCount") == Timeline.signalInt(t, before, "positionCount") + 1
+})
+
+def positionLabelsFollowValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "positionShown") == 0 || Timeline.a11yHas(t, i, Str.concat("text:X target: ", Str.fromInt(Timeline.signalInt(t, i, "positionX")))) && Timeline.a11yHas(t, i, Str.concat("text:Y target: ", Str.fromInt(Timeline.signalInt(t, i, "positionY")))) && Timeline.a11yHas(t, i, Str.concat("text:Position count: ", Str.fromInt(Timeline.signalInt(t, i, "positionCount")))))
+
+def positionTargetFollowsSignals(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "positionShown") == 0 || Timeline.signalInt(t, i, "positionVisible") == 0 || Timeline.a11yHas(t, i, Str.concat("target:position:Position bounds=", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "positionX")), Str.concat(",", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "positionY")), """
+"""))))))
+
+def reducedPositionHasNoPendingPumps(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "positionShown") == 0 || Timeline.signalInt(t, i, "positionVisible") == 0 || Timeline.signalInt(t, i, "reduced") == 0 || Timeline.a11yHas(t, i, """pumps:position:Position bounds=0
+"""))
+
+def settledPositionKeepsInput(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "positionShown") == 0 || Timeline.signalInt(t, i, "positionVisible") == 0 || !Timeline.a11yHas(t, i, """pumps:position:Position bounds=0
+""") || Timeline.signalInt(t, i, "positionX") > 200 || Timeline.signalInt(t, i, "positionY") > 160 || Timeline.a11yHas(t, i, "textfield:Position name"))
+
+def scaleStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "scaleValue") == 100 && Timeline.signalInt(t, i, "scaleShown") == 0 && Timeline.signalInt(t, i, "scaleVisible") == 1 && Timeline.signalInt(t, i, "scaleCount") == 0 && Timeline.signalStrHas(t, i, "scaleName", "Retained scale input"))
+
+def growSetsScale(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Grow scale", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "scaleValue") == 200
+})
+
+def shrinkSetsScale(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Shrink scale", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "scaleValue") == 50
+})
+
+def resetSetsScale(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Reset scale", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "scaleValue") == 100
+})
+
+def collapseSetsScale(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Collapse scale", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "scaleValue") == 0
+})
+
+def smallSetsScale(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Small scale", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "scaleValue") == 1
+})
+
+def scaleAddChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Scale add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "scaleCount") == Timeline.signalInt(t, before, "scaleCount") + 1
+})
+
+def scaleLabelsFollowValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "scaleShown") == 0 || Timeline.a11yHas(t, i, s"text:Scale target: ${Timeline.signalInt(t, i, "scaleValue")}") && Timeline.a11yHas(t, i, s"text:Scale count: ${Timeline.signalInt(t, i, "scaleCount")}"))
+
+def scaleTargetFollowsSignal(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "scaleShown") == 0 || Timeline.signalInt(t, i, "scaleVisible") == 0 || Timeline.a11yHas(t, i, Str.concat("target:scale:Scale bounds=", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "scaleValue")), """
+"""))))
+
+def reducedScaleHasNoPendingPumps(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "scaleShown") == 0 || Timeline.signalInt(t, i, "scaleVisible") == 0 || Timeline.signalInt(t, i, "reduced") == 0 || Timeline.a11yHas(t, i, """pumps:scale:Scale bounds=0
+"""))
+
+def settledScaleKeepsInputScope(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "scaleShown") == 0 || Timeline.signalInt(t, i, "scaleVisible") == 0 || !Timeline.a11yHas(t, i, """pumps:scale:Scale bounds=0
+""") || Timeline.signalInt(t, i, "scaleValue") > 0 == Timeline.a11yHas(t, i, "textfield:Scale name"))
+

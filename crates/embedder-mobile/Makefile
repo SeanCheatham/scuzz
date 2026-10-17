@@ -22,9 +22,11 @@ lib: build/libscuzz_mobile.a
 build/libscuzz_mobile.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-# Host shell is gated by SCUZZ_MOBILE_SHELL; available() is 0 without it.
-test: lib
-	@echo "embedder-mobile: lib ok (host shell requires SCUZZ_MOBILE_SHELL=1)"
+build/test_host: tests/test_host.c build/libscuzz_mobile.a | build
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) $< -Lbuild -lscuzz_mobile -o $@
+
+test: build/test_host
+	./build/test_host
 
 clean:
 	rm -rf build

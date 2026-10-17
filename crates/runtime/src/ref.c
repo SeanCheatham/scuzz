@@ -1,4 +1,4 @@
-#include "scuzz_rt.h"
+#include "rt_util.h"
 
 SzRef *sz_ref_make(void *initial) {
   SzRef *r = (SzRef *)sz_rc_alloc(sizeof(SzRef), SZ_RC_REF);
@@ -41,12 +41,7 @@ static void *ref_get_thunk(void *env) {
 SzIo *sz_ref_get(SzRef *ref) {
   if (!ref)
     sz_panic("sz_ref_get(null)");
-  sz_retain(ref);
-  {
-    SzIo *io = sz_io_delay(ref_get_thunk, ref);
-    sz_release(ref);
-    return io;
-  }
+  return sz_io_delay(ref_get_thunk, ref);
 }
 
 static void *ref_set_thunk(void *env) {
@@ -63,12 +58,7 @@ static void *ref_set_thunk(void *env) {
 SzIo *sz_ref_set(SzRef *ref, void *value) {
   if (!ref)
     sz_panic("sz_ref_set(null)");
-  {
-    SzPair *p = sz_pair_new(ref, value);
-    SzIo *io = sz_io_delay(ref_set_thunk, p);
-    sz_release(p);
-    return io;
-  }
+  return delay_pair(ref_set_thunk, ref, value);
 }
 
 static SzIo *ref_set_drop(SzRef *ref, void *value) {

@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 static void enqueue_compose(const char *text);
 static void enqueue_text_edit(const char *text);
@@ -243,6 +244,8 @@ static int g_ready;
 static int g_app_ready;
 static int g_user_quit;
 static int g_became_visible;
+static id g_motion_observer;
+static _Atomic int g_motion_active, g_motion_current, g_motion_reported;
 
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
@@ -287,6 +290,31 @@ static int on_main_soon(void (^block)(void)) {
   return dispatch_semaphore_wait(
              done, dispatch_time(DISPATCH_TIME_NOW,
                                  (int64_t)NSEC_PER_SEC / 4)) == 0;
+}
+
+int sz_embedder_reduced_motion(void) {
+  __block int reduced = 0;
+  on_main(^{
+    NSWorkspace *workspace = NSWorkspace.sharedWorkspace;
+    if (!g_motion_observer) {
+      g_motion_observer = [workspace.notificationCenter
+          addObserverForName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+          object:workspace queue:NSOperationQueue.mainQueue
+          usingBlock:^(NSNotification *notification) {
+            (void)notification;
+            if (atomic_load(&g_motion_active))
+              atomic_store(&g_motion_current,
+                           workspace.accessibilityDisplayShouldReduceMotion != NO);
+          }];
+      reduced = workspace.accessibilityDisplayShouldReduceMotion != NO;
+      atomic_store(&g_motion_current, reduced);
+      atomic_store(&g_motion_reported, reduced);
+      atomic_store(&g_motion_active, 1);
+    } else {
+      reduced = atomic_load(&g_motion_current);
+    }
+  });
+  return reduced;
 }
 
 double sz_embedder_display_scale(void) {
@@ -411,6 +439,7 @@ static int cocoa_drain_events(void) {
 }
 
 int sz_embedder_poll_event(SzInputEvent *out) {
+  if (!out) return 0;
   if (g_ready && !g_user_quit) {
     on_main_soon(^{
       @autoreleasepool {
@@ -419,7 +448,13 @@ int sz_embedder_poll_event(SzInputEvent *out) {
       }
     });
   }
-  if (!out || g_q_head == g_q_tail)
+  int reduced = atomic_load(&g_motion_current);
+  if (atomic_load(&g_motion_active) && reduced != atomic_load(&g_motion_reported)) {
+    atomic_store(&g_motion_reported, reduced);
+    *out = (SzInputEvent){.kind = SZ_INPUT_REDUCED_MOTION, .reduced_motion = reduced};
+    return 1;
+  }
+  if (g_q_head == g_q_tail)
     return 0;
   *out = g_queue[g_q_head];
   g_q_head = (g_q_head + 1) % EVENT_CAP;
@@ -537,6 +572,13 @@ static void ensure_app(void) {
 }
 
 static void shutdown_on_main(void) {
+  atomic_store(&g_motion_active, 0);
+  if (g_motion_observer) {
+    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:g_motion_observer];
+    g_motion_observer = nil;
+  }
+  atomic_store(&g_motion_current, 0);
+  atomic_store(&g_motion_reported, 0);
   if (g_win) {
     [g_win setDelegate:nil];
     [g_win orderOut:nil];

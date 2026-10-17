@@ -2,12 +2,16 @@ package dev.scuzz.app;
 
 import android.app.Activity;
 import android.content.Context;
+import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Insets;
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
@@ -16,6 +20,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -41,12 +46,19 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   private Bitmap bitmap;
   private int[] pixels;
   private int dumped;
-  private int keyboard;
+  private int keyboardRequest;
   private int watchLock;
   private float density = 1f;
   private int pointW;
   private int pointH;
   private final Handler tick = new Handler(Looper.getMainLooper());
+  private boolean motionWatching;
+  private final ContentObserver motionObserver = new ContentObserver(tick) {
+    @Override
+    public void onChange(boolean selfChange) {
+      if (motionWatching) syncMotionPreference();
+    }
+  };
   private final Runnable blit =
       new Runnable() {
         @Override
@@ -73,14 +85,38 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
   public native void nativeLifecycle(int phase);
 
+  public native void nativeMotionPreference(boolean reduced);
+
   public native void nativeSetAlive(int alive);
 
-  public native int nativeKeyboardVisible();
+  public native int nativeKeyboardRequest();
+
+  private void syncMotionPreference() {
+    float scale = Settings.Global.getFloat(
+        getContentResolver(), Settings.Global.ANIMATOR_DURATION_SCALE, 1f);
+    nativeMotionPreference(scale == 0f);
+  }
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     FrameLayout root = new FrameLayout(this);
+    root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+      @Override
+      @SuppressWarnings("deprecation")
+      public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
+        if (Build.VERSION.SDK_INT >= 30) {
+          Insets safe = insets.getInsets(WindowInsets.Type.systemBars()
+              | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+          view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+        } else {
+          view.setPadding(insets.getSystemWindowInsetLeft(),
+              insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetRight(),
+              insets.getSystemWindowInsetBottom());
+        }
+        return insets;
+      }
+    });
     surface = new SurfaceView(this);
     holder = surface.getHolder();
     holder.addCallback(this);
@@ -113,11 +149,17 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
     root.addView(hidden, new FrameLayout.LayoutParams(1, 1));
     setContentView(root);
+    root.requestApplyInsets();
     DisplayMetrics dm = getResources().getDisplayMetrics();
     density = dm.density > 0f ? dm.density : 1f;
     pointW = Math.max(1, (int) (dm.widthPixels / density));
     pointH = Math.max(1, (int) (dm.heightPixels / density));
     File dump = new File(getFilesDir(), "scuzz_android.debug.dump");
+    getContentResolver().registerContentObserver(
+        Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+        false, motionObserver);
+    motionWatching = true;
+    syncMotionPreference();
     nativeStart(dump.getAbsolutePath(), pointW, pointH, density);
     scheduleInject();
   }
@@ -131,11 +173,14 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   @Override
   protected void onResume() {
     super.onResume();
+    if (motionWatching) syncMotionPreference();
     nativeLifecycle(LIFECYCLE_RESUME);
   }
 
   @Override
   protected void onDestroy() {
+    motionWatching = false;
+    getContentResolver().unregisterContentObserver(motionObserver);
     nativeLifecycle(LIFECYCLE_STOP);
     nativeSetAlive(0);
     super.onDestroy();
@@ -260,12 +305,13 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   }
 
   private void syncKeyboard() {
-    int want = nativeKeyboardVisible();
+    int request = nativeKeyboardRequest();
     InputMethodManager imm;
-    if (want == keyboard) {
+    if (request == keyboardRequest) {
       return;
     }
-    keyboard = want;
+    keyboardRequest = request;
+    int want = request & 1;
     imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
     if (imm == null) {
       return;

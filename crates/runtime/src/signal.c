@@ -11,12 +11,19 @@
 static uint64_t g_signal_revision;
 uint64_t sz_signal_revision(void) { return g_signal_revision; }
 
+typedef struct SigReg SigReg;
+
+struct SzSignalScope { SigReg *head; };
+static _Thread_local SzSignalScope *g_signal_scope;
+
 struct SzSignal {
   void *value;
   int elem_str;
   int hidden;
   uint64_t version;
+  SigReg *registry;
   SzSignal *map_src;
+  SzSignal *map_children, *map_last_child, *map_prev, *map_next;
   SzSignalMapFn map_fn;
   void *map_env;
   uint64_t map_seen;
@@ -29,15 +36,18 @@ struct SzSignal {
 
 typedef enum { SIG_INT = 1, SIG_STR = 2, SIG_LIST = 3, SIG_VALUE = 4 } SigKind;
 
-typedef struct SigReg {
+struct SigReg {
   SigKind kind;
   int id;
   uint64_t serial;
   char *name;
   const void *sig;
-  struct SigReg *next;
-} SigReg;
+  SigReg *next, *prev;
+  SzSignalScope *scope;
+  SigReg *scope_next, *scope_prev;
+};
 
+static SzMap *g_signal_names;
 static SigReg *g_sig_head = NULL;
 static SigReg *g_sig_tail = NULL;
 static int g_sig_next_id = 0;
@@ -50,6 +60,14 @@ static void sig_register(SigKind kind, const void *sig, int hidden) {
   r->serial = g_sig_next_serial++;
   r->name = sz_strdup("");
   r->sig = sig;
+  ((SzSignal *)sig)->registry = r;
+  r->prev = g_sig_tail;
+  r->scope = g_signal_scope;
+  if (r->scope) {
+    r->scope_next = r->scope->head;
+    if (r->scope_next) r->scope_next->scope_prev = r;
+    r->scope->head = r;
+  }
   if (g_sig_tail)
     g_sig_tail->next = r;
   else
@@ -57,63 +75,76 @@ static void sig_register(SigKind kind, const void *sig, int hidden) {
   g_sig_tail = r;
 }
 
-/* Publish the author-facing name of a signal (its `for` binder name).
- * Last non-empty name wins: a later bind clears the same name on other
- * signals of the same kind. An unregistered signal clears nothing. */
-void sz_signal_name(const void *sig, const char *name) {
-  SigReg *r;
-  SigReg *mine = NULL;
+static SzPair *signal_name_key(SigKind kind, const char *name) {
+  void *tag = sz_box_i64(kind);
+  SzString *text = sz_string_from_cstr(name);
+  SzPair *key = sz_pair_new(tag, text);
+  sz_release(tag);
+  sz_release(text);
+  return key;
+}
+
+static void signal_remove_name(SigReg *r) {
+  if (!r->name[0]) return;
+  SzPair *key = signal_name_key(r->kind, r->name);
+  SzMap *next = sz_map_remove(g_signal_names, key);
+  sz_release(g_signal_names);
+  g_signal_names = next;
+  sz_release(key);
+}
+
+/* The index borrows registry entries. Remove each entry before release. */
+static void signal_set_name(SigReg *mine, const char *name) {
   const char *n = name ? name : "";
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->sig == sig) {
-      mine = r;
-      break;
-    }
-  }
-  if (!mine || mine->id < 0)
-    return;
-  if (strcmp(mine->name, n) == 0)
-    return;
+  if (mine->id < 0 || !strcmp(mine->name, n)) return;
+  SzPair *key = signal_name_key(mine->kind, n);
+  signal_remove_name(mine);
   if (n[0]) {
-    for (r = g_sig_head; r; r = r->next) {
-      if (r != mine && r->kind == mine->kind && r->name &&
-          strcmp(r->name, n) == 0) {
-        sz_free(r->name);
-        r->name = sz_strdup("");
-      }
+    SigReg *other = sz_map_get_or(g_signal_names, key, NULL);
+    if (other && other != mine) {
+      sz_free(other->name);
+      other->name = sz_strdup("");
     }
+    SzMap *next = sz_map_set(g_signal_names, key, mine, 1);
+    sz_release(g_signal_names);
+    g_signal_names = next;
   }
   sz_free(mine->name);
   mine->name = sz_strdup(n);
+  sz_release(key);
+}
+
+void sz_signal_name(const void *sig, const char *name) {
+  for (SigReg *r = g_sig_head; r; r = r->next) {
+    if (r->sig == sig) {
+      signal_set_name(r, name);
+      return;
+    }
+  }
 }
 
 static void sig_unregister(const void *sig) {
-  SigReg **p = &g_sig_head;
-  SigReg *prev = NULL;
-  while (*p) {
-    if ((*p)->sig == sig) {
-      SigReg *dead = *p;
-      *p = dead->next;
-      if (g_sig_tail == dead)
-        g_sig_tail = prev;
-      sz_free(dead->name);
-      sz_free(dead);
-      return;
-    }
-    prev = *p;
-    p = &(*p)->next;
+  SigReg *r = ((const SzSignal *)sig)->registry;
+  signal_remove_name(r);
+  if (r->prev) r->prev->next = r->next;
+  else g_sig_head = r->next;
+  if (r->next) r->next->prev = r->prev;
+  else g_sig_tail = r->prev;
+  if (r->scope) {
+    if (r->scope_prev) r->scope_prev->scope_next = r->scope_next;
+    else r->scope->head = r->scope_next;
+    if (r->scope_next) r->scope_next->scope_prev = r->scope_prev;
   }
+  sz_free(r->name);
+  sz_free(r);
 }
 
 static SigReg *sig_find(SigKind kind, const char *name) {
-  SigReg *r;
-  if (!name || !name[0])
-    return NULL;
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->id >= 0 && r->kind == kind && strcmp(r->name, name) == 0)
-      return r;
-  }
-  return NULL;
+  if (!name || !name[0]) return NULL;
+  SzPair *key = signal_name_key(kind, name);
+  SigReg *r = sz_map_get_or(g_signal_names, key, NULL);
+  sz_release(key);
+  return r;
 }
 
 static void sig_missing(const char *name) {
@@ -186,8 +217,10 @@ static void fputs_json_value(FILE *f, const void *value) {
  * compiled ADT shape. SCUZZ_EVAL_TAGS is `En.Case=tag` lines. */
 /* The runtime uses -1 when the evaluator is absent.
  * The compiler sets the tag of Eval.Value.VUnit when it is present.
- * Other Value tags follow the source order. */
+ * The compiler also sets the exact VView tag.
+ * Scalar and container Value tags follow the source order. */
 __attribute__((weak)) const int32_t sz_eval_value_tag_base = -1;
+__attribute__((weak)) const int32_t sz_eval_view_tag = -1;
 
 static int eval_value_base(void) {
   return sz_eval_value_tag_base;
@@ -368,6 +401,10 @@ static void fputs_mirror_value(FILE *f, const void *value) {
     fputs_json_value(f, value);
     return;
   }
+  if (sz_adt_tag((const SzAdt *)value) == sz_eval_view_tag) {
+    fputs("\"<handle>\"", f);
+    return;
+  }
   tag = sz_adt_tag((const SzAdt *)value) - eval_value_base();
   pay = sz_adt_payload((const SzAdt *)value);
   if (tag == 0) {
@@ -388,10 +425,6 @@ static void fputs_mirror_value(FILE *f, const void *value) {
   }
   if (tag == 6) {
     fputs_mirror_con(f, value, pay);
-    return;
-  }
-  if (tag == 26) {
-    fputs("\"<handle>\"", f);
     return;
   }
   fputs_json_value(f, value);
@@ -566,7 +599,9 @@ static void *signal_value(SzSignal *s) {
   if (!s->map_src) return s->value;
   (void)signal_value(s->map_src);
   if (s->map_valid && s->map_seen == s->map_src->version) return s->value;
+  SzSignalScope *previous = sz_signal_scope_enter(s->registry->scope);
   out = s->map_fn(s->map_src->value, s->map_env);
+  sz_signal_scope_enter(previous);
   drop_value(s, s->value);
   s->value = out;
   s->map_seen = s->map_src->version;
@@ -592,7 +627,7 @@ SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name) {
   s->elem_str = kind == 3;
   s->hidden = sig_is_mirror(name);
   sig_register((SigKind)(kind == 5 ? 3 : kind), s, s->hidden);
-  if (name) sz_signal_name(s, sz_string_cstr(name));
+  if (name) signal_set_name(s->registry, sz_string_cstr(name));
   return s;
 }
 
@@ -604,7 +639,7 @@ void *sz_signal_read(SzSignal *s) {
 
 void *sz_signal_write(SzSignal *s, void *value) {
   if (!s || s->map_fn) return NULL;
-  if (s->value == value || sz_ptr_eq(s->value, value)) return NULL;
+  if (sz_ptr_eq(s->value, value)) return NULL;
   sz_retain(value);
   drop_value(s, s->value);
   s->value = value;
@@ -617,6 +652,12 @@ SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
                            int64_t kind, SzString *name) {
   SzSignal *s = sz_signal_new(NULL, kind, name);
   s->map_src = src;
+  if (src) {
+    s->map_prev = src->map_last_child;
+    if (s->map_prev) s->map_prev->map_next = s;
+    else src->map_children = s;
+    src->map_last_child = s;
+  }
   s->map_fn = fn;
   sz_retain(env);
   s->map_env = env;
@@ -624,16 +665,24 @@ SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
   return s;
 }
 
+static void signal_unlink_source(SzSignal *s) {
+  if (!s->map_src) return;
+  if (s->map_prev) s->map_prev->map_next = s->map_next;
+  else s->map_src->map_children = s->map_next;
+  if (s->map_next) s->map_next->map_prev = s->map_prev;
+  else s->map_src->map_last_child = s->map_prev;
+  s->map_src = NULL;
+  s->map_prev = s->map_next = NULL;
+}
+
 void sz_signal_free(SzSignal *s) {
-  SigReg *r;
   if (!s) return;
-  for (r = g_sig_head; r; r = r->next) {
-    SzSignal *child = (SzSignal *)r->sig;
-    if (child->map_src == s) {
-      (void)signal_value(child);
-      child->map_src = NULL;
-    }
+  while (s->map_children) {
+    SzSignal *child = s->map_children;
+    (void)signal_value(child);
+    signal_unlink_source(child);
   }
+  signal_unlink_source(s);
   sig_unregister(s);
   drop_value(s, s->value);
   sz_release(s->map_env);
@@ -665,17 +714,26 @@ static int sig_registered(const SzSignal *s) {
   return 0;
 }
 
+SzSignalScope *sz_signal_scope_new(void) {
+  return sz_alloc_zero(sizeof(SzSignalScope));
+}
+
+SzSignalScope *sz_signal_scope_enter(SzSignalScope *scope) {
+  SzSignalScope *previous = g_signal_scope;
+  g_signal_scope = scope;
+  return previous;
+}
+
+void sz_signal_scope_free(SzSignalScope *scope) {
+  if (!scope) return;
+  if (g_signal_scope == scope) sz_panic("Signal scope is active during release");
+  while (scope->head) sz_signal_free((SzSignal *)scope->head->sig);
+  sz_free(scope);
+}
+
 static void free_signals_from(uint64_t mark) {
-  for (;;) {
-    SigReg *r;
-    SigReg *best = NULL;
-    for (r = g_sig_head; r; r = r->next)
-      if (r->serial >= mark && (!best || r->serial > best->serial))
-        best = r;
-    if (!best)
-      return;
-    sz_signal_free((SzSignal *)best->sig);
-  }
+  while (g_sig_tail && g_sig_tail->serial >= mark)
+    sz_signal_free((SzSignal *)g_sig_tail->sig);
 }
 
 static void restore_holds(SigHold *h) {

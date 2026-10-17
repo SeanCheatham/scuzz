@@ -32,5 +32,5 @@ def endpoint(): IO[String] =
     state = Signal.make(Screen("Ready", 0))
     status = Signal.map(state, value => value.status)
     taps = Signal.map(state, value => Str.concat("Taps: ", Str.fromInt(value.taps)))
-    _ <- Ui.run(_ => View.center(View.column(View.text("Network"), View.bindText(status), View.bindText(taps), View.button("Load", _ => load(state, url)), View.button("Tap", _ => Signal.set(state, Signal.get(state).copy(taps = Signal.get(state).taps + 1))))).require(Signal.get(state).taps >= 0))
+    _ <- Ui.run(_ => View.center(View.column([View.text("Network"), View.bindText(status), View.bindText(taps), View.button("Load", _ => load(state, url)), View.button("Tap", _ => Signal.set(state, Signal.get(state).copy(taps = Signal.get(state).taps + 1)))])).require(Signal.get(state).taps >= 0))
   } yield ()

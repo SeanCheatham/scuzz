@@ -1,0 +1,13 @@
+def itemRow(item: Signal[Int]): View =
+  for {
+    label = Signal.map(item, id => s"Item $id")
+    draft = Signal.make("")
+  } yield View.column([View.bindText(label), View.textField(draft, "Draft")])
+
+@main def main: IO[Unit] =
+  for {
+    items = Signal.make(List.range(0, 10000))
+    first = Signal.map(items, xs => List.getOrElse(xs, 0, -1)): Signal[Int]
+    last = Signal.map(items, xs => List.getOrElse(xs, List.len(xs) - 1, -1)): Signal[Int]
+    _ <- Ui.run(_ => View.column([View.wrap([View.button("Reverse", _ => Signal.set(items, List.reverse(Signal.get(items)))), View.button("Remove first", _ => Signal.set(items, List.tail(Signal.get(items)))), View.bindText(Signal.map(first, n => s"First: $n")), View.bindText(Signal.map(last, n => s"Last: $n"))]), View.expanded(1, View.virtualList(120, items, id => id, item => itemRow(item)))]))
+  } yield ()

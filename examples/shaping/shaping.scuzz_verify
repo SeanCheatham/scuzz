@@ -1,0 +1,44 @@
+def countLabelFollowsValue(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("text:Count: ", Str.fromInt(Timeline.signalInt(t, i, "count")))))
+
+def addChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 1
+})
+
+def actionKeepsKey(t: Timeline): Verdict =
+  Verdict.onHit(t, "textbutton:تفاصيل", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 11
+})
+
+def arabicKeepsSource(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Set Arabic", pair => pair match {
+  case (before, after) => Timeline.signalStrHas(t, after, "name", "لا") && Timeline.a11yHas(t, after, "text:Value: لا")
+})
+
+def latinKeepsSource(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Set Latin", pair => pair match {
+  case (before, after) => Timeline.signalStrHas(t, after, "name", "AV fi é") && Timeline.a11yHas(t, after, "text:Value: AV fi é")
+})
+
+def startsWithHebrew(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalStrHas(t, i, "name", "אב") && Timeline.a11yHas(t, i, "text:Value: אב") && Timeline.signalInt(t, i, "count") == 0 && Timeline.signalInt(t, i, "showParagraphs") == 0 && Timeline.signalInt(t, i, "showFonts") == 0 && Timeline.signalInt(t, i, "showJoining") == 0)
+
+def fallbackKeepsSource(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "text:नमस्ते สวัสดี 中文漢字") && Timeline.a11yHas(t, i, "text:क्षि ปู่ 中文"))
+
+def paragraphActionKeepsKey(t: Timeline): Verdict =
+  Verdict.onHit(t, "textbutton:שלום ABCDEF אב", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 17
+})
+
+def fontActionKeepsKey(t: Timeline): Verdict =
+  Verdict.onHit(t, "textbutton:קר AB CD", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 23
+})
+
+def joiningActionKeepsKey(t: Timeline): Verdict =
+  Verdict.onHit(t, "textbutton:محمد", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 31
+})
+

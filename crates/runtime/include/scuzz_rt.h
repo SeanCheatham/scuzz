@@ -11,29 +11,28 @@ extern "C" {
 /* --- panic / alloc ------------------------------------------------------- */
 
 void sz_panic(const char *msg) __attribute__((noreturn));
-/* Panic exits 134 instead of abort. A forked probe child sets this: the
- * abort signal path invokes the host core handler, which costs a second. */
+/* Set panic exit status to 134. Forked probes use this to avoid the host
+ * core handler. */
 void sz_panic_exit(void);
 void sz_panic_push_src(const char *loc);
 void sz_panic_pop_src(void);
 /* Integer division rounds toward zero. Zero divisors panic. */
 int64_t sz_int_div(int64_t a, int64_t b);
 int64_t sz_int_rem(int64_t a, int64_t b);
-/* Record one coverage hit (def entry or branch arm) when SCUZZ_COVERAGE_DUMP
- * is set. Cheap no-op otherwise. The path is read once; tests call
- * sz_coverage_env_refresh after a setenv. */
+/* Record a function entry or branch when SCUZZ_COVERAGE_DUMP is set.
+ * Read the path once. Call sz_coverage_env_refresh after an environment change. */
 void sz_coverage_hit(const char *loc);
 void sz_coverage_env_refresh(void);
-/* Stop this binary's own def and branch hits. The evaluator probe sets this
- * so only `sz_fuzz_hit` keys of the evaluated program reach the dump. */
+/* Disable native program coverage. Evaluator probes use sz_fuzz_hit keys
+ * for the evaluated program. */
 void sz_coverage_own_off(void);
-void sz_coverage_hit_key(const char *loc); /* records under own_off */
+void sz_coverage_hit_key(const char *loc); /* Key hits stay active after sz_coverage_own_off. */
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
 /* Free every remaining live block. Panic uses this before abort. */
 void sz_alloc_sweep(void);
-/* Visit each live block. The callback must not alloc or free. */
+/* Visit each live block. The callback must not allocate or free tracked blocks. */
 void sz_alloc_walk(void (*fn)(void *ptr, uint32_t kind, size_t bytes,
                               uint32_t rc, void *ctx),
                    void *ctx);
@@ -48,11 +47,9 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg);
 void sz_alloc_set_panic_dump(const char *path);
 /* Registered path, or `SCUZZ_PANIC_DUMP`, or NULL. */
 const char *sz_alloc_panic_dump_path(void);
-/* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
- * streams, resources, errors, Ref / Queue / Deferred, Either, pair,
- * Builder, Net sockets, views). List cells retain heads and shared tails.
- * IO constructors take child IO nodes. A view starts at one. Non-RC
- * sz_alloc pointers no-op. */
+/* Reference-counted objects retain owned fields. List cells retain heads
+ * and shared tails. IO constructors retain child IO nodes. A new View has
+ * reference count one. Retain and release ignore raw sz_alloc pointers. */
 enum {
   SZ_RC_RAW = 0,
   SZ_RC_STRING = 1,
@@ -73,12 +70,14 @@ enum {
   SZ_RC_NETSOCK = 16,
   SZ_RC_VIEW = 17,
   SZ_RC_FLOAT_BOX = 18,
-  SZ_RC_KIND_COUNT = 19
+  SZ_RC_IMAGE = 19,
+  SZ_RC_KIND_COUNT = 20
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
-/* view.c installs this on the first view. A program with no views links
- * no view code. The last release of a view calls `fn`, then retires the block. */
+/* view.c registers this callback on the first View. A program without Views
+ * does not link View code. The last release calls fn, then frees the block. */
 void sz_rc_set_view_drop(void (*fn)(void *ptr));
+void sz_rc_set_image_drop(void (*fn)(void *ptr));
 void sz_retain(void *ptr);
 void sz_release(void *ptr);
 /* RC kind of `ptr`. A non-RC pointer is `SZ_RC_KIND_COUNT`. */
@@ -187,7 +186,7 @@ int64_t sz_string_contains(const SzString *s, const SzString *needle);
 /* POSIX ERE. Full-string match on UTF-8 bytes. 1 or 0. A bad pattern is 0.
  * Empty pattern matches only the empty string. */
 int64_t sz_string_matches(const SzString *s, const SzString *pat);
-/* Whole-string base-10 parse. Leading space is allowed. Junk or overflow uses `dflt`. */
+/* Whole-string base-10 parse. Leading space is allowed. Invalid text or overflow returns `dflt`. */
 int64_t sz_string_to_int(const SzString *s, int64_t dflt);
 /* Strict decimal input returns Result[String, Int]. */
 struct SzAdt *sz_string_parse_int(const SzString *s);
@@ -285,7 +284,7 @@ SzAdt *sz_adt_new(int32_t tag, void *payload);
 int32_t sz_adt_tag(const SzAdt *adt);
 void *sz_adt_payload(const SzAdt *adt);
 
-/* --- IO fiber skeleton + blessed kit ------------------------------------ */
+/* --- IO scheduler and standard kits ------------------------------------- */
 
 typedef struct SzIo SzIo;
 typedef struct SzLangResource SzLangResource;
@@ -383,10 +382,11 @@ struct SzIo {
  * takes ok/err and drops the box. Run retains so last-use of the result does
  * not free the node slot. */
 SzIo *sz_io_pure(void *value);
-/* Callee retains a RC env. Caller drops after the call. Last sz_release of
- * the delay node drops leftover RC env or a leftover sz_alloc env. It does
- * not load an RC header from a string literal or a small integer. Run steals
- * env so the thunk owns it. */
+/* Retain an RC environment. The caller releases its reference after the call.
+ * The node owns a raw sz_alloc environment. It does not own literals or integers.
+ * The thunk borrows the environment. A unique delay releases it after the thunk,
+ * except for an SZ_RC_BOX environment. Shared delays and boxes keep it on the node.
+ * The final node release calls sz_release or sz_free for any remaining environment. */
 SzIo *sz_io_delay(SzThunk thunk, void *env);
 SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env);
 /* Callee retains the error. Caller drops after the call. Last sz_release of
@@ -488,6 +488,7 @@ struct SzRef {
 SzRef *sz_ref_make(void *initial);
 /* Release the current value, then free the cell. */
 void sz_ref_free(SzRef *r);
+/* Consume the initial value. The IO result owns the cell. */
 SzIo *sz_ref_of(void *initial);          /* IO[Ref] */
 SzIo *sz_ref_of_cstr(const char *initial);
 /* Get retains the current value. Caller drops the run result. */
@@ -922,7 +923,7 @@ int64_t sz_set_is_subset(SzMap *a, SzMap *b);
 /* 1 when `a` and `b` share no key. Empty is disjoint. */
 int64_t sz_set_is_disjoint(SzMap *a, SzMap *b);
 
-/* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */
+/* Filesystem IO selects the live or simulated implementation when it runs. */
 SzIo *sz_fs_read(SzString *path);
 SzIo *sz_fs_write(SzString *path, SzString *contents);
 SzIo *sz_fs_list(SzString *path);
@@ -1002,7 +1003,7 @@ SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running; spawn pids tracked, 
 SzIo *sz_sys_kill(int64_t pid);    /* IO[Unit] SIGTERM; waitpid WNOHANG; slot stays until reaped */
 SzIo *sz_sys_getenv(SzString *key);
 
-/* Blessed Clock / Random / Net (impurity boundary) */
+/* Standard Clock, Random, and Net effects. */
 SzIo *sz_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, UI); TestRuntime fake clock */
@@ -1022,8 +1023,8 @@ SzString *sz_base64_decode(const SzString *s); /* Bytes from Base64. Bad length,
 SzString *sz_bytes_from_str(const SzString *s); /* Copy UTF-8 / raw bytes. Caller owns. `Bytes.len` is `sz_string_len`. */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
-void sz_random_fill(unsigned char *buf, size_t n); /* Blessed Random bytes. Live or TestRuntime. */
-SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Uses blessed Random. */
+void sz_random_fill(unsigned char *buf, size_t n); /* Built-in Random bytes. Use live or TestRuntime state. */
+SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Use built-in Random. */
 
 SzIo *sz_net_http_get(SzString *url, SzMap *headers); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
 SzIo *sz_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path); /* IO[(Int, Map, Int)]; stream response body to file */
@@ -1049,7 +1050,7 @@ typedef struct SzNetSock {
   int fake_id;
   int64_t port;
 } SzNetSock;
-/* Blessed TCP. Listen is localhost. Connect takes IPv4/IPv6 literals or localhost. */
+/* TCP listens on localhost. Connect accepts IPv4, IPv6, or localhost. */
 SzIo *sz_net_tcp_connect(SzString *host, int64_t port); /* IO[SzNetSock] */
 SzIo *sz_net_tcp_listen(int64_t port);                  /* IO[SzNetSock] */
 SzIo *sz_net_tcp_accept(SzNetSock *listener);           /* IO[SzNetSock] */
@@ -1057,8 +1058,8 @@ SzIo *sz_net_tcp_accept(SzNetSock *listener);           /* IO[SzNetSock] */
 SzIo *sz_net_tcp_read(SzNetSock *conn, int64_t n); /* IO[String] */
 SzIo *sz_net_tcp_write(SzNetSock *conn, SzString *s);   /* IO[Unit] */
 SzIo *sz_net_tcp_close(SzNetSock *sock);                /* IO[Unit] */
-/* Blessed UDP. Bind is IPv4 localhost. Bind 0 picks an ephemeral port.
- * Recv is (host, port, data). An IPv6 send host fails. */
+/* UDP binds on IPv4 localhost. Port 0 selects an available port.
+ * Receive returns (host, port, data). An IPv6 destination fails. */
 SzIo *sz_net_udp_bind(int64_t port); /* IO[SzNetSock] */
 SzIo *sz_net_udp_send(SzNetSock *sock, SzString *host, int64_t port,
                      SzString *data);
@@ -1243,11 +1244,11 @@ SzVerdict *sz_verdict_step_every(void *tl, void *fnp, void *envp);
 void sz_verify_register(const char *name, SzVerdict *(*fn)(void *));
 /* Relation claim: (Timeline, Timeline) => Verdict over a pair of dumps. */
 void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *));
-/* Parse a v1 or v2 timeline dump (SCUZZ_TIMELINE_DUMP output). NULL on error.
- * Writer emits v=2 (effects / fibers / fault). v=1 loads with those empty. */
+/* Load the current SCUZZ_TIMELINE_DUMP format. Return NULL on a parse error.
+ * Omitted observation blocks are empty. */
 void *sz_timeline_load(const char *path);
 void sz_timeline_free(void *tl);
-/* Record a blessed kit op. Never stores a payload: size plus FNV-1a hash. */
+/* Record a standard kit operation. Store its size and FNV-1a hash, not its payload. */
 void sz_timeline_log_bytes(const char *op, const void *p, size_t n);
 void sz_timeline_log_cstr(const char *op, const char *s);
 /* Judge mode: spec is "<a.txt>,<b.txt>"; runs every registered relation

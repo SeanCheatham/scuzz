@@ -559,7 +559,7 @@ def parseIdeMsg(p: (String, Int), args: List[String], path: String, outDir: Stri
   }
 
 def isExecOp(s: String): Bool =
-  s == "tap" || s == "xy" || s == "text" || s == "type" || s == "key" || s == "scroll" || s == "pump" || s == "backspace" || s == "snapshot" || s == "dump" || s == "reload" || s == "quit"
+  s == "reduceMotion" || s == "lifecycle" || s == "tap" || s == "xy" || s == "text" || s == "type" || s == "key" || s == "scroll" || s == "pump" || s == "backspace" || s == "snapshot" || s == "dump" || s == "reload" || s == "quit"
 
 def parseExec(args: List[String], i: Int, json: Bool, path: String, outDir: String, ops: List[String]): Cmd =
   if (i >= List.len(args)) execDone(json, path, outDir, List.reverse(ops)) else parseExecTok(args, i, json, path, outDir, ops, arg(args, i))
@@ -605,7 +605,13 @@ def execEv(acc: String, ev: String, rest: List[String]): (Bool, String) =
   execOpsGo(rest, if (acc == "") ev else Str.concat(acc, Str.concat(",", ev)))
 
 def execOpAt(op: String, rest: List[String], acc: String): (Bool, String) =
-  if (op == "tap") execTap(rest, acc) else if (op == "xy") execXy(rest, acc) else if (op == "text") execStr1(op, "value", rest, acc) else if (op == "type") execStr1(op, "value", rest, acc) else if (op == "key") execStr1(op, "key", rest, acc) else if (op == "scroll") execNum1(op, "dy", rest, acc) else if (op == "pump") execNum1(op, "k", rest, acc) else if (op == "backspace") execNum1(op, "count", rest, acc) else if (op == "snapshot") execStr1(op, "path", rest, acc) else if (op == "dump") execEv(acc, "{\"op\":\"dump\"}", rest) else if (op == "reload") execEv(acc, "{\"op\":\"reload\"}", rest) else if (op == "quit") execEv(acc, "{\"op\":\"quit\"}", rest) else (false, Str.concat("scuzz exec: unknown op '", Str.concat(op, "'")))
+  if (op == "reduceMotion") execReducedMotion(rest, acc) else if (op == "lifecycle") execLifecycle(rest, acc) else if (op == "tap") execTap(rest, acc) else if (op == "xy") execXy(rest, acc) else if (op == "text") execStr1(op, "value", rest, acc) else if (op == "type") execStr1(op, "value", rest, acc) else if (op == "key") execStr1(op, "key", rest, acc) else if (op == "scroll") execNum1(op, "dy", rest, acc) else if (op == "pump") execNum1(op, "k", rest, acc) else if (op == "backspace") execNum1(op, "count", rest, acc) else if (op == "snapshot") execStr1(op, "path", rest, acc) else if (op == "dump") execEv(acc, "{\"op\":\"dump\"}", rest) else if (op == "reload") execEv(acc, "{\"op\":\"reload\"}", rest) else if (op == "quit") execEv(acc, "{\"op\":\"quit\"}", rest) else (false, Str.concat("scuzz exec: unknown op '", Str.concat(op, "'")))
+
+def execReducedMotion(rest: List[String], acc: String): (Bool, String) =
+  if (List.isEmpty(rest) || List.at(rest, 0) != "true" && List.at(rest, 0) != "false") execArgErr("reduceMotion") else execEv(acc, Str.concat("{\"op\":\"reduceMotion\",\"value\":", Str.concat(List.at(rest, 0), "}")), List.tail(rest))
+
+def execLifecycle(rest: List[String], acc: String): (Bool, String) =
+  if (List.isEmpty(rest) || List.at(rest, 0) != "pause" && List.at(rest, 0) != "resume" && List.at(rest, 0) != "stop") execArgErr("lifecycle") else execStr1("lifecycle", "phase", rest, acc)
 
 def execTap(rest: List[String], acc: String): (Bool, String) =
   if (List.isEmpty(rest)) execArgErr("tap") else execTapGot(List.at(rest, 0), List.tail(rest), acc)
@@ -939,7 +945,7 @@ def newTomlIo(name: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, "\"\nversion = \"0.1.0\"\n"))
 
 def newMainUi(): String =
-  "def bump(n: Int): Int =\n  n + 1\n\n@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(View.text(\"Counter\"), View.bindText(label), View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))))\n  } yield ()\n"
+  "def bump(n: Int): Int =\n  n + 1\n\n@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column([View.text(\"Counter\"), View.bindText(label), View.row([View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1))])]))\n  } yield ()\n"
 
 def newMainIo(): String =
   "def greet(): String =\n  \"Hello, Scuzz!\"\n\n@main def main: IO[Unit] =\n  IO.println(greet()).flatMap(_ => IO.println(\"ready.\"))\n"

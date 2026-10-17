@@ -109,3 +109,32 @@ oracle boundCallback(): Bool =
 oracle pointerArguments(raw: String): Bool =
   Main.pointerArguments(raw) == Str.concat(Str.concat(raw, "b"), Str.concat(raw, "o"))
 
+oracle workloadClockOrder(): Bool =
+  Verify.varyWorkload("""inputTime 0
+key B
+inputTime 1001
+key r
+""", 0) == """key r
+inputTime 1001
+key B
+inputTime 1001
+""" && Verify.varyWorkload("""inputTime 0
+key B
+inputTime 1001
+""", 1) == """key B
+inputTime 1001
+inputTime 1001
+""" && Verify.varyWorkload("""inputTime 1001
+inputTime 0
+""", 2) == """inputTime 1001
+inputTime 1001
+inputTime 1001
+"""
+
+oracle workloadClockErrorsStayVisible(): Bool =
+  Verify.varyWorkload("""inputTime -1
+inputTime invalid
+""", 0) == """inputTime invalid
+inputTime -1
+"""
+

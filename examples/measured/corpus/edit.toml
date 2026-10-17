@@ -1,0 +1,2 @@
+[fuzz]
+events=["type 0 kept", "tap button:Reverse", "tap button:Remove first"]

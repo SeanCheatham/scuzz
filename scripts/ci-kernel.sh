@@ -237,6 +237,68 @@ oracle boundaries(): Bool =
 print('input validation and native parity ok')
 PY_INPUT
 
+# Validated paths retain live checks and constructor access.
+python3 - <<'PY_PATH'
+import os
+from pathlib import Path
+import random
+import re
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+proposal = Path('examples/editor/generation/src/Proposal.scuzz').read_text()
+names = ('relativePath', 'pathChars')
+starts = list(re.finditer(r'^(?:private )?def ([A-Za-z_][A-Za-z0-9_]*)\(', proposal, re.M))
+bodies = {match[1]: proposal[match.start():starts[i + 1].start() if i + 1 < len(starts) else len(proposal)]
+          for i, match in enumerate(starts)}
+declaration = re.search(r'^record RelativePath private\(value: String\)\n', proposal, re.M)
+assert declaration is not None and all(name in bodies for name in names)
+source = declaration[0] + '\n' + ''.join(bodies[name] for name in names)
+inputs = ['', '/', '/tmp/file', '../file', 'src/../Main.scuzz', './src/Main.scuzz',
+          'src//Main.scuzz', 'src/Main.scuzz/', 'C:/file', 'src\\Main.scuzz',
+          'src/Main.scuzz\0other', 'src/\nMain.scuzz', 'src/Main.scuzz',
+          '.scuzz/ide/journal.json', 'build/cards/one.toml', 'folder with space/é']
+rng = random.Random(42)
+inputs += [''.join(rng.choice('ab./\\:\0\n é') for _ in range(rng.randrange(32))) for _ in range(64)]
+def valid(path):
+    return bool(path) and all(ord(c) >= 32 and ord(c) != 127 and c not in '\\:' for c in path) and all(part not in ('', '.', '..') for part in path.split('/'))
+expected = ['true' if valid(path) else 'false' for path in inputs]
+with tempfile.TemporaryDirectory(prefix='scuzz-validated-path-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="validated-path"\n')
+    (root / 'src/Proposal.scuzz').write_text(source)
+    values = '[' + ', '.join(f'Hex.decode("{path.encode().hex()}")' for path in inputs) + ']'
+    (root / 'src/Main.scuzz').write_text('''def accepted(text: String): Bool =
+  Proposal.relativePath(text) match {
+    case Result.Ok(path) => path.value == text
+    case Result.Err(_) => false
+  }
+@main def main: IO[Unit] =
+  IO.foreachDiscard(VALUES, text => IO.println(Str.fromBool(accepted(text))))
+'''.replace('VALUES', values))
+    run = subprocess.run([str(cli), 'fmt', str(root)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    for engine in ('eval', 'run'):
+        run = subprocess.run([str(cli), engine, str(root)], capture_output=True, text=True, timeout=180)
+        lines = run.stdout.splitlines()
+        if engine == 'run' and lines[0] == 'ok':
+            lines = lines[1:]
+        assert run.returncode == 0 and lines == expected, (engine, run.stdout, run.stderr)
+    for bad in ('def bad(): Proposal.RelativePath = Proposal.RelativePath("../file")',
+                'def bad(path: Proposal.RelativePath): Proposal.RelativePath = path.copy(value = "../file")',
+                '@main def main: IO[Unit] = Proposal.relativePath("../file") match { case Result.Ok(_) => IO.pure(()) case Result.Err(error) => IO.fail(error) }'):
+        (root / 'src/Main.scuzz').write_text(bad + '\n')
+        run = subprocess.run([str(cli), 'fmt', str(root)], capture_output=True, text=True)
+        assert run.returncode == 0, run.stdout + run.stderr
+        command = 'run' if 'IO[Unit]' in bad else 'check'
+        run = subprocess.run([str(cli), command, str(root)], capture_output=True, text=True, timeout=180)
+        assert run.returncode != 0, (bad, run.stdout, run.stderr)
+        assert ('invalid relative path' if command == 'run' else 'private record') in run.stdout + run.stderr, (bad, run.stdout, run.stderr)
+print('Validated paths: both engines match the independent input model; construction and copy cannot bypass validation')
+PY_PATH
+
 # Integer operations use an independent model on both engines.
 python3 - <<'PY_ARITHMETIC'
 import os
@@ -649,6 +711,7 @@ grep -Fxq 'remotePairCallField:3' /tmp/kernel.out
 grep -Fxq 'remotePairCallText:b' /tmp/kernel.out
 grep -Fxq 'remotePairIf:3:8' /tmp/kernel.out
 grep -Fxq 'shadowModule:7' /tmp/kernel.out
+grep -Fxq 'textModule:module-text' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
 diff <(grep -vx ok /tmp/kernel.out) /tmp/kernel-eval.out

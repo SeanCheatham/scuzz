@@ -1,0 +1,22 @@
+def namedAction(key: Int): IO[Unit] =
+  for {
+    _ = key.require("namedKey", key == 7)
+    _ <- Ui.setTitle("Named action")
+  } yield ()
+
+@main def main: IO[Unit] =
+  for {
+    count = Signal.make(0)
+    last = Signal.make(0)
+    open = Signal.make(0)
+    name = Signal.make("")
+    handle = (key: Int) => Signal.set(last, key)
+    countText = Signal.map(count, n => s"Count: $n")
+    lastText = Signal.map(last, n => s"Last action: $n")
+    paragraph = Text.concat([Text.span("You can "), Text.action(1, Text.bold(Text.span("add one"))), Text.span(", "), Text.action(2, Text.span("reset")), Text.span(", or "), Text.action(3, Text.concat([Text.span("open the "), Text.size(20, Text.span("details")), Text.span(" dialog across wrapped lines")])), Text.span(". "), Text.action(1, Text.span("add one")), Text.span(" again.")])
+    _ <- Ui.run(_ => View.stack([View.column([View.maxSize(280, 0, View.actionText(paragraph, key => for {
+  _ = Signal.set(last, key)
+  _ = if (key == 1) Signal.set(count, Signal.get(count) + 1) else if (key == 2) Signal.set(count, 0) else Signal.set(open, 1)
+  _ <- Ui.setTitle(s"Action $key")
+} yield ())), View.bindText(countText), View.bindText(lastText), View.actionText(Text.action(-9223372036854775808, Text.span("Minimum")), key => Signal.set(last, key)), View.actionText(Text.action(9223372036854775807, Text.span("Maximum")), key => Signal.set(last, key)), View.maxSize(110, 0, View.maxLines(1, View.ellipsis(View.actionText(Text.action(5, Text.span("abcdefghijklmno")), key => Signal.set(last, key))))), View.maxSize(110, 0, View.maxLines(1, View.ellipsis(View.actionText(Text.concat([Text.span("Long leading content before an action "), Text.action(99, Text.span("Hidden action"))]), key => Signal.set(last, key))))), View.actionText(Text.action(8, Text.span("")), key => Signal.set(last, key)), View.actionText(Text.action(7, Text.span("Named handler")), namedAction), View.actionText(Text.action(6, Text.span("Value handler")), handle), View.textField(name, "Name")]), View.overlay(open, "Inline details", View.center(View.card(View.column([View.text("Details opened from styled text."), View.button("Close", _ => Signal.set(open, 0))]))))]))
+  } yield ()

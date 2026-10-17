@@ -1,4 +1,4 @@
-// The browser has no HTTP client sockets and no listener. These Net effects fail loud at the call.
+/* The browser has no HTTP sockets or listener. Net calls return an error. */
 #include "scuzz_rt.h"
 
 static SzIo *no_net(void) { return sz_io_fail_cstr("Net: not available on web"); }

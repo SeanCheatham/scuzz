@@ -419,7 +419,7 @@ def tyEqEn(a: String, b: String, ens: List[En]): Bool =
   tyEq(Type.parse(a), Type.parse(b), ens)
 
 def pinEns(ens: List[En], ts: List[String]): List[En] =
-  if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase(), "") :: ens
+  if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase(), "", false) :: ens
 
 def noCase(): List[EnCase] =
   []
@@ -501,7 +501,7 @@ def orderedListElem(f: String, ty: Ty): String =
   Type.show(if (f == "List.sort") Type.elem(ty) else ty)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.")) resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, kitOf(funs, f))
+  if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.")) resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.virtualList" || f == "View.measuredList") resolveVirtualList(args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, kitOf(funs, f))
 
 def resolveScenarioCtx(funs: Ftab, span: (String, Int)): Out =
   resolveScenarioCtx2(ftabGet(funs.tab, "setup"), span)
@@ -513,7 +513,35 @@ def resolveScenarioCtx3(d: Fun, span: (String, Int)): Out =
   if (!isIo(d.ret)) bad("setup must return IO", span) else ok(ioOk(d.ret))
 
 def resolveKnownKit(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), kit: KitSig): Out =
-  if (List.isEmpty(args) && !List.isEmpty(kit.params)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (!Kits.arityOf(kit.kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit.kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownTy(f, Kits.wantOfSig(kit, List.len(args)), kit.ret, args, env, funs, ens, span)
+  if (List.isEmpty(args) && !List.isEmpty(kit.params)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (!Kits.arityOf(kit.kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit.kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkViewLiteral(f, args, checkKnownTy(f, Kits.wantOfSig(kit, List.len(args)), kit.ret, args, env, funs, ens, span), span)
+
+def checkViewLiteral(f: String, args: List[Expr], out: Out, span: (String, Int)): Out =
+  if (hasErr(out)) out else if (f == "View.slider") checkSliderLiteral(args, out, span) else if (f != "View.heading") out else stripNamed(List.at(args, 0)) match {
+  case Expr.EInt(level, offset) => if (level < 1 || level > 6) bad("View.heading level must be 1 through 6", (span._1, offset)) else out
+  case _ => out
+}
+
+def viewIntLiteral(e: Expr): Option[(Int, Int)] =
+  stripNamed(e) match {
+    case Expr.EInt(value, offset) => Option.Some((value, offset))
+    case Expr.EUn(op, inner, offset) => if (op != "-") Option.None else viewIntLiteral(inner) match {
+  case Option.Some((value, _)) => Option.Some((0 - value, offset))
+  case Option.None => Option.None
+}
+    case _ => Option.None
+  }
+
+def checkSliderLiteral(args: List[Expr], out: Out, span: (String, Int)): Out =
+  viewIntLiteral(List.at(args, 4)) match {
+    case Option.Some((step, offset)) => if (step <= 0) bad("View.slider step must be positive", (span._1, offset)) else checkSliderBounds(args, out, span)
+    case Option.None => checkSliderBounds(args, out, span)
+  }
+
+def checkSliderBounds(args: List[Expr], out: Out, span: (String, Int)): Out =
+  (viewIntLiteral(List.at(args, 2)), viewIntLiteral(List.at(args, 3))) match {
+    case (Option.Some((minimum, _)), Option.Some((maximum, offset))) => if (minimum > maximum) bad("View.slider minimum must not exceed maximum", (span._1, offset)) else out
+    case _ => out
+  }
 
 def enOfCase(ens: List[En], ctor: String): String =
   ens match {
@@ -552,7 +580,36 @@ def resolveInstKit2(f: String, ty: Ty, args: List[Expr], env: List[(String, Ty)]
   if (isKit(q, funs)) resolveKit(q, args, env, funs, ens, span) else resolveInstCopy(f, ty, args, env, funs, ens, span)
 
 def resolveInstCopy(f: String, ty: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (f == ".copy") resolveInstArgs(List.tail(args), env, funs, ens, ok(Type.show(ty))) else resolveInstNamed(f, Type.show(ty), args, env, funs, ens, span, ftabGet(funs.tab, Str.slice(f, 1, Str.len(f))))
+  if (f == ".copy" && privateCtorOutside(tyHead(ty), env, ens)) bad(Str.concat("private record copy: ", tyHead(ty)), span) else if (f == ".copy") checkCopy(ty, List.tail(args), env, funs, ens, span) else resolveInstNamed(f, Type.show(ty), args, env, funs, ens, span, ftabGet(funs.tab, Str.slice(f, 1, Str.len(f))))
+
+def privateCtorOutside(name: String, env: List[(String, Ty)], ens: List[En]): Bool =
+  List.exists(ens, en => en.name == name && en.privateCtor && en.mod != modFile(env))
+
+def checkCopy(ty: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (!recordNamed(ens, tyHead(ty))) bad("copy needs a record", span) else checkCopySplit(ty, constructorFields(specializeEnums(ens, Type.show(ty)), tyHead(ty)), alignSplit(args, [], [], false), env, funs, ens, span)
+
+def checkCopySplit(ty: Ty, ps: List[Param], split: (List[Expr], List[Expr], String), env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  split match {
+    case (pos, named, error) => if (error != "") bad(error, span) else if (List.len(pos) > List.len(ps)) bad("too many copy arguments", span) else checkCopyNames(ty, ps, pos, named, alignUnknown(named, ps), env, funs, ens, span)
+  }
+
+def checkCopyNames(ty: Ty, ps: List[Param], pos: List[Expr], named: List[Expr], error: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (error != "") bad(error, span) else for {
+  names = List.map(named, expr => expr match {
+  case Expr.ENamed(name, _) => name
+  case _ => ""
+})
+} yield if (List.len(List.distinct(names)) != List.len(names)) bad("duplicate copy argument", span) else checkCopyFields(ty, ps, pos, named, env, funs, ens, span)
+
+def checkCopyFields(ty: Ty, ps: List[Param], pos: List[Expr], named: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(ps)) okTy(ty) else for {
+  p = List.at(ps, 0)
+} yield if (!List.isEmpty(pos) && namedHas(p.name, named)) bad(Str.concat("duplicate argument ", p.name), span) else if (!List.isEmpty(pos)) checkCopyNext(ty, p, List.at(pos, 0), List.tail(ps), List.tail(pos), named, env, funs, ens, span) else if (namedHas(p.name, named)) checkCopyNext(ty, p, namedLookup(p.name, named), List.tail(ps), pos, named, env, funs, ens, span) else checkCopyFields(ty, List.tail(ps), pos, named, env, funs, ens, span)
+
+def checkCopyNext(ty: Ty, p: Param, arg: Expr, ps: List[Param], pos: List[Expr], named: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  for {
+    result = zipCheck("copy", [Type.parse(p.ty)], [arg], env, funs, ens, spanPick(exprSpan(env, arg), span), Type.tNamed(""))
+  } yield if (hasErr(result)) result else andBinds(result, checkCopyFields(ty, ps, pos, named, env, funs, ens, span))
 
 def resolveInstNamed(f: String, ty: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), hit: List[Fun]): Out =
   if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveInstHit(f, ty, args, env, funs, ens, span, List.at(hit, 0))
@@ -686,6 +743,21 @@ def isSigList(t: Ty): Bool =
 
 def eachElemOf(t: Ty): String =
   Type.show(Type.elem(Type.elem(t)))
+
+def resolveVirtualList(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.len(args) != 4) bad("View.virtualList needs height, items, key, and renderer", span) else resolveVirtualHeight(infer(stripNamed(List.at(args, 0)), env, funs, ens), args, env, funs, ens, span)
+
+def resolveVirtualHeight(height: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(height)) height else if (!tyEqEn(tyStr(height), "Int", ens)) argMismatch("View.virtualList", "Int", tyStr(height), span) else resolveVirtualItems(infer(stripNamed(List.at(args, 1)), env, funs, ens), args, env, funs, ens, span)
+
+def resolveVirtualItems(items: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(items)) items else if (!isSigList(items.ty)) argMismatch("View.virtualList", "Signal[List[A]]", tyStr(items), span) else resolveVirtualKey(inferExpected(stripNamed(List.at(args, 2)), Str.concat(eachElemOf(items.ty), " => Int"), env, funs, ens), eachElemOf(items.ty), args, env, funs, ens, span)
+
+def resolveVirtualKey(key: Out, elem: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(key)) key else if (!tyEqEn(tyStr(key), Str.concat(elem, " => Int"), ens)) argMismatch("View.virtualList key", Str.concat(elem, " => Int"), tyStr(key), span) else resolveVirtualRow(inferExpected(stripNamed(List.at(args, 3)), Str.concat("Signal[", Str.concat(elem, "] => View")), env, funs, ens), elem, ens, span)
+
+def resolveVirtualRow(row: Out, elem: String, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(row)) row else if (tyEqEn(tyStr(row), Str.concat("Signal[", Str.concat(elem, "] => View")), ens)) ok("View") else argMismatch("View.virtualList renderer", Str.concat("Signal[", Str.concat(elem, "] => View")), tyStr(row), span)
 
 def resolveViewEach(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(args)) ok(funTyFrom(kitParams("View.each", funs), kitRet("View.each", funs))) else resolveViewEach2(infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens, span)
@@ -2527,12 +2599,6 @@ def paramTyOf(p: Param): String =
 def hasComma(s: String): Bool =
   commaAt(s, 0) >= 0
 
-def recFieldTys(ens: List[En], core: String): List[String] =
-  recFieldTys2(dotAt(core, 0), core, ens)
-
-def recFieldTys2(dot: Int, core: String, ens: List[En]): List[String] =
-  if (dot < 0) enFieldTys(ens, core) else caseFieldTys(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
-
 def enFieldTys(ens: List[En], name: String): List[String] =
   if (List.isEmpty(ens)) noStr() else enFieldTys1(List.at(ens, 0), List.tail(ens), name)
 
@@ -2813,7 +2879,7 @@ def knownTys(ts0: List[Ty], ens: List[En], ts: List[String]): Bool =
   if (List.isEmpty(ts0)) true else knownTy(List.at(ts0, 0), ens, ts) && knownTys(List.tail(ts0), ens, ts)
 
 def builtinTyName(n: String): Bool =
-  n == "Any" || n == "Bool" || n == "Builder" || n == "Bytes" || n == "Deferred" || n == "Fiber" || n == "Float" || n == "IO" || n == "Int" || n == "Json" || n == "List" || n == "Map" || n == "Option" || n == "Queue" || n == "Ref" || n == "Resource" || n == "Result" || n == "Set" || n == "Signal" || n == "Stream" || n == "String" || n == "Tcp" || n == "Timeline" || n == "Udp" || n == "Unit" || n == "Verdict" || n == "View"
+  n == "Any" || n == "Bool" || n == "Builder" || n == "Bytes" || n == "Deferred" || n == "Fiber" || n == "Float" || n == "IO" || n == "Image" || n == "Int" || n == "Json" || n == "List" || n == "Map" || n == "Option" || n == "Queue" || n == "Ref" || n == "Resource" || n == "Result" || n == "Set" || n == "Signal" || n == "Stream" || n == "String" || n == "Tcp" || n == "Text" || n == "Theme" || n == "Timeline" || n == "Udp" || n == "Unit" || n == "Verdict" || n == "View"
 
 def builtinTyArity(n: String): Int =
   if (n == "Map" || n == "Result") 2 else if (n == "List" || n == "Option" || n == "Set" || n == "Ref" || n == "Queue" || n == "Deferred" || n == "Fiber" || n == "Stream" || n == "Resource" || n == "Signal") 1 else 0
@@ -2932,7 +2998,10 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   }
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
-  checkSourceProg(p, stems, Resolve.sourceError(p))
+  checkParsedProg(p, checkSourceProg(p, stems, Resolve.sourceError(p)))
+
+def checkParsedProg(p: Prog, checked: Out): Out =
+  if (hasErr(checked) || !Parse.hasParseError(p)) checked else bad("unexpected token", noSpan())
 
 def checkSourceProg(p: Prog, stems: List[String], err: String): Out =
   if (err != "") bad(err, noSpan()) else checkResolvedProg(Resolve.prog(p), stems)
@@ -3335,7 +3404,7 @@ def expandEnums(ens: List[En], als: List[Alias]): List[En] =
   if (List.isEmpty(als)) ens else List.map(ens, en => expandEnum(en, List.filter(als, a => !List.contains(en.tparams, a.name))))
 
 def expandEnum(en: En, als: List[Alias]): En =
-  En(en.isRec, en.name, en.tparams, List.map(en.cases, c => EnCase(c.name, expandParams(c.fields, als))), en.mod)
+  En(en.isRec, en.name, en.tparams, List.map(en.cases, c => EnCase(c.name, expandParams(c.fields, als))), en.mod, en.privateCtor)
 
 def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
   if (List.isEmpty(als)) defs else List.reverse(expandDefsGo(defs, als, []))
@@ -3609,7 +3678,15 @@ def srcOfStemHd(h: (String, String), rest: List[(String, String)], stem: String)
   }
 
 def diagJson(files: List[(String, String)], o: Out): String =
-  diagJsonSp(files, o, o.span)
+  diagJsonSp(files, o, parseErrorSourceSpan(files, o))
+
+def parseErrorSourceSpan(files: List[(String, String)], o: Out): (String, Int) =
+  if (o.err == "unexpected token" && o.span == noSpan()) parseErrorFileSpan(files) else o.span
+
+def parseErrorFileSpan(files: List[(String, String)]): (String, Int) =
+  if (List.isEmpty(files)) noSpan() else List.at(files, 0) match {
+  case (stem, source) => if (Parse.hasParseError(Parse.parse(Lexer.lex(source)))) (stem, 0) else parseErrorFileSpan(List.tail(files))
+}
 
 def diagJsonSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
   sp match {
@@ -3720,7 +3797,7 @@ def afterKind(item: String): String =
   if (Str.startsWith(item, "def ")) Str.slice(item, 4, Str.len(item)) else if (Str.startsWith(item, "signal ")) Str.slice(item, 7, Str.len(item)) else if (Str.startsWith(item, "control ")) Str.slice(item, 8, Str.len(item)) else item
 
 def humanLine(files: List[(String, String)], o: Out): String =
-  humanLineSp(files, o, o.span)
+  humanLineSp(files, o, parseErrorSourceSpan(files, o))
 
 def humanLineSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
   sp match {
@@ -3758,7 +3835,7 @@ def specializeEnumsGo(ens: List[En], ty: String): List[En] =
 
 def specializeEnum(en: En, ty: String): En =
   en match {
-    case En(priv, name, tps, cases) => if (!List.isEmpty(tps) && Str.startsWith(ty, Str.concat(name, "["))) En(priv, name, tps, specializeCases(cases, tps, Type.appArgs(Type.parse(ty))), en.mod) else en
+    case En(priv, name, tps, cases) => if (!List.isEmpty(tps) && Str.startsWith(ty, Str.concat(name, "["))) En(priv, name, tps, specializeCases(cases, tps, Type.appArgs(Type.parse(ty))), en.mod, en.privateCtor) else en
   }
 
 def specializeCases(cs: List[EnCase], tps: List[String], args: List[Ty]): List[EnCase] =
@@ -3781,7 +3858,7 @@ def specializeType(ty: String, tps: List[String], args: List[Ty]): String =
   if (List.isEmpty(tps) || List.isEmpty(args)) ty else specializeType(substTy(ty, List.at(tps, 0), Type.show(List.at(args, 0))), List.tail(tps), List.tail(args))
 
 def inferBareCtor(en: String, ctor: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  inferBareCtorFields(en, ctor, env, funs, ens, span, bareCtorFields(ens, en, ctor))
+  if (privateCtorOutside(en, env, ens)) bad(Str.concat("private record constructor: ", en), span) else inferBareCtorFields(en, ctor, env, funs, ens, span, bareCtorFields(ens, en, ctor))
 
 def inferBareCtorFields(en: String, ctor: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), count: Int): Out =
   if (count < 0) bad(Str.concat("unknown constructor ", ctor), span) else if (count > 0) bad(Str.concat(ctor, Str.concat(" expects ", Str.concat(Str.fromInt(count), " args, got 0"))), span) else inferNamedCtor(en, ctor, [], env, funs, ens, span, ens)
@@ -3803,7 +3880,7 @@ def inferNamedCtor(en: String, ctor: String, args: List[Expr], env: List[(String
 
 def inferNamedCtorEn(head: En, rest: List[En], en: String, ctor: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   head match {
-    case En(_, name, tps, cases) => if (name != en) inferNamedCtor(en, ctor, args, env, funs, ens, span, rest) else if (List.isEmpty(tps)) inferPlainCtor(en, ctor, cases, args, env, funs, ens, span) else inferGenericCtor(en, ctor, tps, cases, args, env, funs, ens, span)
+    case En(_, name, tps, cases) => if (name != en) inferNamedCtor(en, ctor, args, env, funs, ens, span, rest) else if (privateCtorOutside(name, env, ens)) bad(Str.concat("private record constructor: ", name), span) else if (List.isEmpty(tps)) inferPlainCtor(en, ctor, cases, args, env, funs, ens, span) else inferGenericCtor(en, ctor, tps, cases, args, env, funs, ens, span)
   }
 
 def inferPlainCtor(en: String, ctor: String, cases: List[EnCase], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =

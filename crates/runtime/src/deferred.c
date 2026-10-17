@@ -1,4 +1,4 @@
-#include "scuzz_rt.h"
+#include "rt_util.h"
 
 SzDeferred *sz_deferred_make(void) {
   SzDeferred *d = (SzDeferred *)sz_rc_alloc(sizeof(SzDeferred), SZ_RC_DEFERRED);
@@ -21,27 +21,14 @@ SzIo *sz_deferred_empty(void) { return sz_io_delay(deferred_empty_thunk, NULL); 
 
 static void *deferred_complete_thunk(void *env) {
   SzPair *p = (SzPair *)env;
-  SzDeferred *d = (SzDeferred *)p->left;
-  void *value = p->right;
-  if (!d->completed) {
-    d->completed = 1;
-    d->ok = 1;
-    sz_retain(value);
-    d->value = value;
-    sz_fiber_wake_deferred(d);
-  }
+  sz_deferred_complete_now((SzDeferred *)p->left, p->right);
   return NULL;
 }
 
 SzIo *sz_deferred_complete(SzDeferred *d, void *value) {
   if (!d)
     sz_panic("sz_deferred_complete(null)");
-  {
-    SzPair *p = sz_pair_new(d, value);
-    SzIo *io = sz_io_delay(deferred_complete_thunk, p);
-    sz_release(p);
-    return io;
-  }
+  return delay_pair(deferred_complete_thunk, d, value);
 }
 
 static SzIo *deferred_complete_drop(SzDeferred *d, void *value) {
@@ -94,12 +81,7 @@ static void *deferred_fail_thunk(void *env) {
 SzIo *sz_deferred_fail(SzDeferred *d, SzError *err) {
   if (!d)
     sz_panic("sz_deferred_fail(null)");
-  {
-    SzPair *p = sz_pair_new(d, err);
-    SzIo *io = sz_io_delay(deferred_fail_thunk, p);
-    sz_release(p);
-    return io;
-  }
+  return delay_pair(deferred_fail_thunk, d, err);
 }
 
 SzIo *sz_deferred_get(SzDeferred *d) {

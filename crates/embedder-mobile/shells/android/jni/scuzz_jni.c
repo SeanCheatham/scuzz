@@ -11,6 +11,7 @@
 
 extern int scuzz_app_main(int argc, char **argv);
 void scuzz_android_set_alive(int alive);
+void scuzz_android_set_reduced_motion(int reduced);
 void sz_mobile_shutdown(void);
 int scuzz_android_frame_width(void);
 int scuzz_android_frame_height(void);
@@ -19,7 +20,7 @@ int scuzz_android_push_pointer(float x, float y, int phase);
 int scuzz_android_push_text_edit(const char *text);
 int scuzz_android_push_resize(int w, int h);
 int scuzz_android_push_lifecycle(int phase);
-int scuzz_android_keyboard_visible(void);
+int scuzz_android_keyboard_request(void);
 
 static int g_started;
 static int g_joinable;
@@ -156,6 +157,13 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeResize(
   (void)scuzz_android_push_resize((int)width, (int)height);
 }
 
+JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeMotionPreference(
+    JNIEnv *env, jobject thiz, jboolean reduced) {
+  (void)env;
+  (void)thiz;
+  scuzz_android_set_reduced_motion(reduced != JNI_FALSE);
+}
+
 JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeLifecycle(
     JNIEnv *env, jobject thiz, jint phase) {
   (void)env;
@@ -173,9 +181,9 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeSetAlive(
     scuzz_android_join_worker();
 }
 
-JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeKeyboardVisible(
+JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeKeyboardRequest(
     JNIEnv *env, jobject thiz) {
   (void)env;
   (void)thiz;
-  return scuzz_android_keyboard_visible();
+  return scuzz_android_keyboard_request();
 }

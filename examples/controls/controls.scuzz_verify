@@ -1,0 +1,74 @@
+def controlsStayAvailable(t: Timeline): Verdict =
+  Verdict.and(Verdict.alwaysHas(t, "button:Submit"), Verdict.alwaysHas(t, "button:Open"))
+
+def submitChangesStatus(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Submit", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "submitted") == 1 && Timeline.a11yHas(t, after, "text:Submitted")
+})
+
+def dialogFollowsState(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "dialog") != 0 == Timeline.a11yHas(t, i, "button:Close"))
+
+def statusMatchesSubmission(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "submitted") == 0 == Timeline.a11yHas(t, i, "text:Ready"))
+
+def submittedHitChangesState(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Submit") || Timeline.signalInt(t, i, "submitted") == 1)
+
+def openShowsDialog(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Open", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "dialog") == 1
+})
+
+def closeHidesDialog(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Close", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "dialog") == 0
+})
+
+def volumeLabelFollowsValue(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("text:Volume: ", Str.fromInt(Timeline.signalInt(t, i, "volume")))))
+
+def formStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "updates") == 0 && Timeline.signalInt(t, i, "volume") == 50 && Timeline.signalInt(t, i, "temperature") == -15 && Timeline.signalInt(t, i, "precise") == 9223372036854775806 && Timeline.signalInt(t, i, "plan") == 1 && Timeline.signalInt(t, i, "submitted") == 0 && Timeline.signalInt(t, i, "dialog") == 0 && Timeline.signalInt(t, i, "confirm") == 0 && Timeline.a11yHas(t, i, "text:Name: "))
+
+def radioSelectionMatchesPlan(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "plan") == 1 == Timeline.a11yHas(t, i, "radio:Basic=1") && Timeline.signalInt(t, i, "plan") == 2 == Timeline.a11yHas(t, i, "radio:Pro=1"))
+
+def nestedDialogFollowsState(t: Timeline): Verdict =
+  Verdict.every(t, i => (Timeline.signalInt(t, i, "dialog") != 0 && Timeline.signalInt(t, i, "confirm") != 0) == Timeline.a11yHas(t, i, "button:Back"))
+
+def dialogNamesStayAvailable(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "dialog") == 0 || Timeline.a11yHas(t, i, "overlay:Edit details=1"))
+
+def reviewShowsConfirmation(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Review details", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "confirm") == 1
+})
+
+def backClosesConfirmation(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Back", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "confirm") == 0
+})
+
+def temperatureStaysInRange(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  value = Timeline.signalInt(t, i, "temperature")
+} yield value >= -60 && value <= 120 && (value + 60) % 3 == 0)
+
+def preciseStaysInRange(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "precise") >= 9223372036854775797)
+
+def slidersKeepTheirNamesAndValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("slider:Volume=", Str.fromInt(Timeline.signalInt(t, i, "volume")))) && Timeline.a11yHas(t, i, Str.concat("slider:Temperature (°C)=", Str.fromInt(Timeline.signalInt(t, i, "temperature")))) && Timeline.a11yHas(t, i, Str.concat("slider:Precise count=", Str.fromInt(Timeline.signalInt(t, i, "precise")))))
+
+def progressKeepsNamesAndClampedValues(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  raw = Timeline.signalInt(t, i, "volume") * 2 - 50
+  value = if (raw < 0) 0 else if (raw > 100) 100 else raw
+} yield Timeline.a11yHas(t, i, Str.concat("progress:Linear completion=", Str.fromInt(value))) && Timeline.a11yHas(t, i, Str.concat("circular:Circular completion=", Str.fromInt(value))) && !Timeline.a11yHas(t, i, "Private completion"))
+
+def muteSetsZero(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Mute", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "volume") == 0 && Timeline.a11yHas(t, after, "slider:Volume=0")
+})
+

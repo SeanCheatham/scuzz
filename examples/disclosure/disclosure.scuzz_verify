@@ -1,0 +1,38 @@
+def bodyFollowsState(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "open") != 0 == Timeline.a11yHas(t, i, "text:Select this body text.") && Timeline.signalInt(t, i, "open") != 0 == Timeline.a11yHas(t, i, "button:Add"))
+
+def nestedFollowsState(t: Timeline): Verdict =
+  Verdict.every(t, i => (Timeline.signalInt(t, i, "open") != 0 && Timeline.signalInt(t, i, "nested") != 0) == Timeline.a11yHas(t, i, "button:Close details"))
+
+def conditionalKeepsItsGate(t: Timeline): Verdict =
+  Verdict.every(t, i => (Timeline.signalInt(t, i, "conditional") != 0 && Timeline.signalInt(t, i, "show") != 0) == Timeline.a11yHas(t, i, "text:Conditional body"))
+
+def headersFollowState(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "open") != 0 == Timeline.a11yHas(t, i, "expansion:Details=1") && Timeline.signalInt(t, i, "conditional") != 0 == Timeline.a11yHas(t, i, "expansion:Conditional=1"))
+
+def countLabelMatches(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "open") == 0 || Timeline.a11yHas(t, i, Str.concat("text:Count: ", Str.fromInt(Timeline.signalInt(t, i, "count")))))
+
+def addChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 1 && Timeline.signalInt(t, after, "open") == Timeline.signalInt(t, before, "open")
+})
+
+def closeHidesDetails(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Close details", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "open") == 0
+})
+
+def openUsesNonzeroState(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Open details", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "open") == 2
+})
+
+def hideClosesDetails(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Hide details", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "open") == 0
+})
+
+def startsWithClosedDetails(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "open") == 0 && Timeline.signalInt(t, i, "nested") == 0 && Timeline.signalInt(t, i, "show") == 0 && Timeline.signalInt(t, i, "conditional") == 1 && Timeline.signalInt(t, i, "count") == 0)
+

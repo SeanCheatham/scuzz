@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Build a sk_capi-shaped Skia CPU prebuilt tarball (as-needed; not every Scuzz release).
-#
-# Produces: dist/skia-<triple>-cpu.tar.gz containing libsk_capi.a (+ fonts/ copy).
-# Also: dist/skia-include.tar.gz, the Skia include/ tree of the branch. The
-# ffi-skia shim relink needs those headers; the release carries them so app
-# builds never fetch from skia.googlesource (the +archive endpoint 503s).
+# Build the Skia CPU archive and its matching headers.
+# Write dist/skia-<triple>-cpu.tar.gz with libsk_capi.a and fonts.
+# Write dist/skia-include.tar.gz with the selected branch's include tree.
+# The ffi-skia build uses these headers from the release asset.
 #
 # Env:
 #   SCUZZ_SKIA_BRANCH   Skia git branch/tag (default chrome/m131)
@@ -37,24 +35,6 @@ echo "==> sync deps"
 # Skip emsdk - CPU sk_capi prebuilt does not need WASM toolchains.
 GIT_SYNC_DEPS_SKIP_EMSDK=1 python3 tools/git-sync-deps
 
-FONT_DIR="${WORK}/fonts"
-mkdir -p "${FONT_DIR}"
-FONT_TTF="${FONT_DIR}/DejaVuSans.ttf"
-if [[ ! -f "${FONT_TTF}" ]]; then
-  echo "==> fetching DejaVuSans.ttf"
-  if [[ -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ]]; then
-    cp -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "${FONT_TTF}"
-  else
-    curl -fsSL -o "${FONT_TTF}" \
-      "https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf"
-  fi
-fi
-test -s "${FONT_TTF}"
-
-# Generate embedded font bytes for deterministic Headless text.
-FONT_INC="${WORK}/scuzz_embedded_font.c"
-xxd -i -n scuzz_embedded_font "${FONT_TTF}" >"${FONT_INC}"
-
 # Hermetic CPU build. Force FreeType + custom fontmgr on all hosts (including
 # Darwin, where Skia defaults to CoreText and omits the freetype2 ninja target)
 # so the SkFontMgr_New_Custom_* path in sk_capi_skia.cpp links.
@@ -70,7 +50,7 @@ GN_ARGS=(
   'skia_use_system_harfbuzz=false'
   'skia_use_freetype=true'
   'skia_use_system_freetype2=false'
-  # DejaVu TTF only. WOFF2 would need Brotli on the app link.
+  # The native fonts use TrueType data. WOFF2 needs Brotli.
   'skia_use_freetype_woff2=false'
   'skia_enable_fontmgr_custom_embedded=true'
   'skia_enable_fontmgr_custom_empty=true'
@@ -97,18 +77,20 @@ ninja -C out/Static skia freetype2 harfbuzz
 PKG="${WORK}/pkg"
 rm -rf "${PKG}"
 mkdir -p "${PKG}/fonts" "${PKG}/obj"
-cp -f "${FONT_TTF}" "${PKG}/fonts/DejaVuSans.ttf"
+cp -f "${ROOT}/third_party/skia/SheenBidi-LICENSE" "${PKG}/SheenBidi-LICENSE"
+cp -f "${ROOT}/third_party/fonts/"* "${PKG}/fonts/"
 
-echo "==> compile sk_capi shim + bridge + embedded font"
+make -C "${ROOT}/crates/ffi-skia" build/sheenbidi.o build/fonts.o
+
+echo "==> compile paint interface, bridge, and embedded font"
 c++ -std=c++17 -O2 -fPIC -c "${SHIM}" -o "${PKG}/obj/sk_capi_skia.o" \
-  -I"${SKIA}" \
-  -DSK_RELEASE \
-  -DSCUZZ_SKIA_EMBEDDED_FONT
+  -I"${SKIA}" -I"${SKIA}/third_party/externals/harfbuzz/src" \
+  -I"${ROOT}/crates/ffi-skia/build/sheenbidi/Headers" \
+  -DSK_RELEASE
 
 cc -O2 -fPIC -c "${BRIDGE}" -o "${PKG}/obj/sk_capi_skia_bridge.o" \
   -I"${ROOT}/crates/ffi-skia/include"
 
-cc -O2 -fPIC -c "${FONT_INC}" -o "${PKG}/obj/scuzz_embedded_font.o"
 
 echo "==> pack libsk_capi.a"
 cp -f "${SKIA}/out/Static/libskia.a" "${PKG}/libskia.a"
@@ -121,9 +103,10 @@ for dep in "${SKIA_STATIC_LIBS[@]}"; do
 done
 
 SHIM_OBJS=(
+  "${ROOT}/crates/ffi-skia/build/fonts.o"
+  "${ROOT}/crates/ffi-skia/build/sheenbidi.o"
   "${PKG}/obj/sk_capi_skia.o"
   "${PKG}/obj/sk_capi_skia_bridge.o"
-  "${PKG}/obj/scuzz_embedded_font.o"
 )
 ARCHIVES=( "${PKG}/libskia.a" )
 for dep in "${SKIA_STATIC_LIBS[@]}"; do
@@ -181,11 +164,10 @@ fi
   echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"${PKG}/VERSION"
 
-tar -C "${PKG}" -czf "${OUT_DIR}/${ASSET}" libsk_capi.a fonts VERSION
+tar -C "${PKG}" -czf "${OUT_DIR}/${ASSET}" libsk_capi.a fonts VERSION SheenBidi-LICENSE
 echo "build_skia_prebuilt: wrote ${OUT_DIR}/${ASSET}"
 ls -lh "${OUT_DIR}/${ASSET}"
 
-# Headers for the ffi-skia shim relink. Same shape as the gitiles
-# +archive/<branch>/include.tar.gz: paths rooted at include/.
+# Store header paths relative to the Skia include directory.
 tar -C "${SKIA}/include" -czf "${OUT_DIR}/skia-include.tar.gz" .
 echo "build_skia_prebuilt: wrote ${OUT_DIR}/skia-include.tar.gz"

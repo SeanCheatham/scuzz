@@ -109,6 +109,14 @@ cp "$STAGE/base.apk" "$STAGE/unaligned.apk"
   fi
 )
 
+mkdir -p "$STAGE/assets/licenses"
+cp "$ROOT/third_party/fonts/"*-LICENSE "$ROOT/third_party/skia/SheenBidi-LICENSE" \
+  "$ROOT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE" "$OUT/licenses/LLVM-LICENSE" "$STAGE/assets/licenses/"
+(
+  cd "$STAGE"
+  zip -q -X "$STAGE/unaligned.apk" assets/licenses/*
+)
+
 "$BT/zipalign" -f -p 4 "$STAGE/unaligned.apk" "$STAGE/aligned.apk"
 
 KS="$PROJ/build/android-debug.keystore"

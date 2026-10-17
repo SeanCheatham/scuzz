@@ -179,6 +179,10 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
     io_exe = io_source / "native output" / "package" / "host" / io_name
     subprocess.run([str(io_exe)], capture_output=True, check=True, timeout=30)
     packaged = source / "native output" / "package" / "host" / (name + ".app")
+    licenses = packaged / "Contents/Resources/licenses"
+    for font in ("devanagari", "thai", "sc", "arabic"):
+        assert (licenses / (font + "-LICENSE")).read_bytes() == (toolchain / "third_party/fonts" / (font + "-LICENSE")).read_bytes()
+    assert (licenses / "SheenBidi-LICENSE").read_bytes() == (toolchain / "third_party/skia/SheenBidi-LICENSE").read_bytes()
     packager = Path(__file__).resolve().parents[1] / "package_macos.py"
     failed = subprocess.run([sys.executable, str(packager), str(root / "missing"),
                              str(packaged.parent), name, "1.2.3", "dev.scuzz." + name,

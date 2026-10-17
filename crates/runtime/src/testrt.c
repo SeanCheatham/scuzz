@@ -2,10 +2,12 @@
 #include "scuzz_rt.h"
 #include "scuzz_ui.h"
 #include "rt_util.h"
+#include "net_transport.h"
 #include "ui_script.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,8 +71,6 @@ static void sz_testrt_fs_install(void) {
 int sz_testrt_fs_is_fake(void) { return g_fs_fake; }
 
 static char *canon_path(const char *p);
-
-static char *norm_path(const char *p) { return canon_path(p); }
 
 static MemNode *fs_find(const char *path) {
   MemNode *n;
@@ -146,15 +146,16 @@ static SzIo *unwrap_box(void *value, void *env) {
  * phase=(k-1)/144, base=(k-1)%144, kind=(base%3)+1,
  * mode=((base/3)%3), n=(((base/3)/3)%16)+1.
  * Phase bit 0 faults every later call. Phase bit 1 discards an Fs.write
- * and keeps the previous file. Seeds 1..144 stay one call.
- * SCUZZ_FAULT_STORM=1 and SCUZZ_FAULT_PARTIAL=1 set those bits when
- * SCUZZ_FAULT_KIND is set. */
+ * and keeps the previous file. Phase bit 2 reports an error after replacement.
+ * Seeds 1..144 stay one call. SCUZZ_FAULT_STORM, SCUZZ_FAULT_PARTIAL,
+ * and SCUZZ_FAULT_AFTER set these bits for an explicit fault kind. */
 static int g_fault_kind;
 static int g_fault_mode;
 static int g_fault_n;
 static int g_fault_seed;
 static int g_fault_storm;
 static int g_fault_partial;
+static int g_fault_after;
 static int g_fault_count_fs;
 static int g_fault_count_net;
 static int g_fault_count_queue;
@@ -207,6 +208,7 @@ static void fault_decode_seed(int seed) {
   int phase;
   g_fault_storm = 0;
   g_fault_partial = 0;
+  g_fault_after = 0;
   if (seed <= 0) {
     g_fault_kind = 0;
     g_fault_mode = SZ_FAULT_FAIL;
@@ -224,6 +226,7 @@ static void fault_decode_seed(int seed) {
   g_fault_n = (rest / 3) % 16 + 1;
   g_fault_storm = (phase % 2) == 1;
   g_fault_partial = ((phase / 2) % 2) == 1;
+  g_fault_after = ((phase / 4) % 2) == 1;
 }
 
 static void fault_arm_from_env(void) {
@@ -236,6 +239,7 @@ static void fault_arm_from_env(void) {
   g_fault_seed = 0;
   g_fault_storm = 0;
   g_fault_partial = 0;
+  g_fault_after = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -254,11 +258,35 @@ static void fault_arm_from_env(void) {
     g_fault_mode = fault_mode_from_name(getenv("SCUZZ_FAULT_MODE"));
     g_fault_storm = env_is_1("SCUZZ_FAULT_STORM");
     g_fault_partial = env_is_1("SCUZZ_FAULT_PARTIAL");
+    g_fault_after = env_is_1("SCUZZ_FAULT_AFTER");
     g_fault_seed = 0;
     return;
   }
-  if (seed_s && seed_s[0])
+  if (seed_s && strncmp(seed_s, "fs:", 3) == 0) {
+    const char *plan = seed_s + 3;
+    char *end;
+    long call;
+    if (strncmp(plan, "fail:", 5) == 0) {
+      plan += 5;
+    } else if (strncmp(plan, "partial:", 8) == 0) {
+      g_fault_partial = 1;
+      plan += 8;
+    } else if (strncmp(plan, "after:", 6) == 0) {
+      g_fault_after = 1;
+      plan += 6;
+    } else {
+      sz_panic("invalid filesystem fault plan mode");
+    }
+    errno = 0;
+    call = strtol(plan, &end, 10);
+    if (errno || end == plan || *end || plan[0] < '0' || plan[0] > '9' || call < 1 || call > INT_MAX)
+      sz_panic("invalid filesystem fault plan call");
+    g_fault_kind = SZ_FAULT_FS;
+    g_fault_mode = SZ_FAULT_FAIL;
+    g_fault_n = (int)call;
+  } else if (seed_s && seed_s[0]) {
     fault_decode_seed(atoi(seed_s));
+  }
 }
 
 static int g_fault_hold;
@@ -490,10 +518,7 @@ static int fs_fault(BoxResult *r) {
 }
 
 static SzIo *testrt_fs_bind(SzString *path, SzThunk thunk) {
-  SzPair *pack = sz_pair_new(path, NULL);
-  SzIo *io = fm_drop(sz_io_delay(thunk, pack), unwrap_box, NULL);
-  sz_release(pack);
-  return io;
+  return fm_drop(delay_pair(thunk, path, NULL), unwrap_box, NULL);
 }
 
 static void *mem_read(void *env) {
@@ -505,7 +530,7 @@ static void *mem_read(void *env) {
   sz_timeline_log_cstr("Fs.read", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
-  path = norm_path(sz_string_cstr(path_s));
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.read: path too deep (mem)");
@@ -537,9 +562,12 @@ static void *mem_write(void *env) {
   char parent[1024];
   MemNode *n;
   SzString *c = contents ? contents : NULL;
+  int after = 0;
   sz_timeline_log_cstr("Fs.write", path_s ? sz_string_cstr(path_s) : "");
   if (sz_testrt_fault_tick(SZ_FAULT_FS)) {
-    if (g_fault_partial) {
+    if (g_fault_after) {
+      after = 1;
+    } else if (g_fault_partial) {
       size_t full = contents && contents->len > 0 ? contents->len : 0;
       size_t keep = full / 2;
       char *prefix = (char *)sz_alloc(keep + 1);
@@ -551,12 +579,13 @@ static void *mem_write(void *env) {
       r->is_err = 1;
       r->as.err = sz_error_new(2, "Fs: partial write");
       return r;
+    } else {
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, "Fs: injected fault");
+      return r;
     }
-    r->is_err = 1;
-    r->as.err = sz_error_new(2, "Fs: injected fault");
-    return r;
   }
-  path = norm_path(sz_string_cstr(path_s));
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.write: path too deep (mem)");
@@ -614,6 +643,12 @@ static void *mem_write(void *env) {
   if (c->len)
     memcpy(n->data, c->data, c->len);
   n->data[c->len] = '\0';
+  if (after) {
+    sz_timeline_log_cstr("Fs.after", sz_string_cstr(path_s));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs: error after replacement");
+    goto done;
+  }
   r->is_err = 0;
   r->as.ok = NULL;
 done:
@@ -623,10 +658,7 @@ done:
 }
 
 SzIo *sz_testrt_fs_write(SzString *path, SzString *contents) {
-  SzPair *pack = sz_pair_new(path, contents);
-  SzIo *io = fm_drop(sz_io_delay(mem_write, pack), unwrap_box, NULL);
-  sz_release(pack);
-  return io;
+  return fm_drop(delay_pair(mem_write, path, contents), unwrap_box, NULL);
 }
 
 static int is_direct_child(const char *dir, const char *child) {
@@ -653,7 +685,7 @@ static void *mem_list(void *env) {
   fs_log("list", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
-  path = norm_path(sz_string_cstr(path_s));
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.list: path too deep (mem)");
@@ -711,7 +743,7 @@ static void *mem_exists(void *env) {
   fs_log("exists", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
-  path = norm_path(sz_string_cstr(path_s));
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.exists: path too deep (mem)");
@@ -761,7 +793,7 @@ static void *mem_delete(void *env) {
   fs_log("delete", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
-  path = norm_path(sz_string_cstr(path_s));
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.delete: path too deep (mem)");
@@ -815,8 +847,8 @@ static void *mem_rename(void *env) {
   fs_log("rename", from_s ? sz_string_cstr(from_s) : "");
   if (fs_fault(r))
     return r;
-  from = norm_path(sz_string_cstr(from_s));
-  to = norm_path(sz_string_cstr(to_s));
+  from = canon_path(sz_string_cstr(from_s));
+  to = canon_path(sz_string_cstr(to_s));
   if (!from || !to) {
     sz_free(from);
     sz_free(to);
@@ -893,10 +925,7 @@ done:
 }
 
 SzIo *sz_testrt_fs_rename(SzString *from, SzString *to) {
-  SzPair *pack = sz_pair_new(from, to);
-  SzIo *io = fm_drop(sz_io_delay(mem_rename, pack), unwrap_box, NULL);
-  sz_release(pack);
-  return io;
+  return fm_drop(delay_pair(mem_rename, from, to), unwrap_box, NULL);
 }
 
 static void *mem_walk(void *env) {
@@ -911,7 +940,7 @@ static void *mem_walk(void *env) {
   fs_log("walk", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
-  path = norm_path(sz_string_cstr(path_s));
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.walk: path too deep (mem)");
@@ -971,7 +1000,7 @@ static void *mem_mkdirs(void *env) {
   fs_log("mkdirs", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
-  path = norm_path(sz_string_cstr(path_s));
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.mkdirs: path too deep (mem)");
@@ -1145,17 +1174,6 @@ static InjReq g_req[NET_REQ_CAP];
 static int g_req_n = 0;
 static char *g_last_serve_body = NULL;
 
-static char *dup_cstr(const char *s) {
-  size_t n;
-  char *o;
-  if (!s)
-    s = "";
-  n = strlen(s);
-  o = (char *)sz_alloc(n + 1);
-  memcpy(o, s, n + 1);
-  return o;
-}
-
 static void net_req_clear(void) {
   int i;
   for (i = 0; i < g_req_n; i++) {
@@ -1178,9 +1196,9 @@ static void net_req_push3(const char *method, const char *path, const char *body
     path = "/";
   if (!body)
     body = "";
-  g_req[g_req_n].method = dup_cstr(method);
-  g_req[g_req_n].path = dup_cstr(path);
-  g_req[g_req_n].body = dup_cstr(body);
+  g_req[g_req_n].method = sz_strdup(method);
+  g_req[g_req_n].path = sz_strdup(path);
+  g_req[g_req_n].body = sz_strdup(body);
   g_req_n++;
 }
 
@@ -1496,32 +1514,15 @@ void sz_testrt_net_stub(const char *url, const char *body) {
   for (s = g_stubs; s; s = s->next) {
     if (strcmp(s->url, u) == 0) {
       sz_free(s->body);
-      s->body = (char *)sz_alloc(strlen(b) + 1);
-      memcpy(s->body, b, strlen(b) + 1);
+      s->body = sz_strdup(b);
       return;
     }
   }
   s = (NetStub *)sz_alloc(sizeof(NetStub));
-  s->url = (char *)sz_alloc(strlen(u) + 1);
-  memcpy(s->url, u, strlen(u) + 1);
-  s->body = (char *)sz_alloc(strlen(b) + 1);
-  memcpy(s->body, b, strlen(b) + 1);
+  s->url = sz_strdup(u);
+  s->body = sz_strdup(b);
   s->next = g_stubs;
   g_stubs = s;
-}
-
-static const char *http_op(const char *method) {
-  if (method && strcmp(method, "POST") == 0)
-    return "Net.httpPost";
-  if (method && strcmp(method, "PUT") == 0)
-    return "Net.httpPut";
-  if (method && strcmp(method, "PATCH") == 0)
-    return "Net.httpPatch";
-  if (method && strcmp(method, "DELETE") == 0)
-    return "Net.httpDelete";
-  if (method && strcmp(method, "HEAD") == 0)
-    return "Net.httpHead";
-  return "Net.httpGet";
 }
 
 static void *stub_http_req(void *env) {
@@ -1530,7 +1531,7 @@ static void *stub_http_req(void *env) {
   SzPair *inner = pack ? (SzPair *)pack->right : NULL;
   const char *method =
       inner && inner->left ? sz_string_cstr((SzString *)inner->left) : "GET";
-  const char *op = http_op(method);
+  const char *op = sz_net_http_op(method);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   const char *url = sz_string_cstr(url_s);
   NetStub *s;
@@ -2378,7 +2379,7 @@ static void *udp_send_now(void *env) {
   n = p->data ? (size_t)sz_string_len(p->data) : 0;
   d = (FakeDgram *)sz_alloc(sizeof(FakeDgram));
   memset(d, 0, sizeof(FakeDgram));
-  d->host = dup_cstr(canon[0] ? canon : "127.0.0.1");
+  d->host = sz_strdup(canon[0] ? canon : "127.0.0.1");
   d->port = src->port;
   d->data = (char *)sz_alloc(n + 1);
   if (n)
@@ -2550,17 +2551,6 @@ static void env_free_all(void) {
   g_env_n = 0;
 }
 
-static char *env_dup(const char *s) {
-  size_t n;
-  char *d;
-  if (!s)
-    s = "";
-  n = strlen(s);
-  d = (char *)sz_alloc(n + 1);
-  memcpy(d, s, n + 1);
-  return d;
-}
-
 void sz_testrt_env_set(const char *key, const char *val) {
   int i;
   if (!key || !key[0])
@@ -2570,14 +2560,14 @@ void sz_testrt_env_set(const char *key, const char *val) {
   for (i = 0; i < g_env_n; i++) {
     if (strcmp(g_env_keys[i], key) == 0) {
       sz_free(g_env_vals[i]);
-      g_env_vals[i] = env_dup(val);
+      g_env_vals[i] = sz_strdup(val);
       return;
     }
   }
   if (g_env_n >= ENV_CAP)
     return;
-  g_env_keys[g_env_n] = env_dup(key);
-  g_env_vals[g_env_n] = env_dup(val);
+  g_env_keys[g_env_n] = sz_strdup(key);
+  g_env_vals[g_env_n] = sz_strdup(val);
   g_env_n++;
 }
 
@@ -2849,6 +2839,7 @@ void sz_testrt_reset(void) {
   g_fault_seed = 0;
   g_fault_storm = 0;
   g_fault_partial = 0;
+  g_fault_after = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -3537,10 +3528,10 @@ static void tl_fmt_fibers(char *buf, size_t cap) {
 }
 
 static void tl_fmt_fault(char *buf, size_t cap) {
-  snprintf(buf, cap, "kind=%s n=%d mode=%s seed=%d storm=%d partial=%d",
+  snprintf(buf, cap, "kind=%s n=%d mode=%s seed=%d storm=%d partial=%d after=%d",
            tl_fault_kind_name(g_fault_kind), g_fault_n,
            tl_fault_mode_name(g_fault_mode), g_fault_seed, g_fault_storm ? 1 : 0,
-           g_fault_partial ? 1 : 0);
+           g_fault_partial ? 1 : 0, g_fault_after ? 1 : 0);
 }
 
 static int tl_checkpoint_interval(void) {
@@ -3857,7 +3848,7 @@ int64_t sz_timeline_file_text_is(void *tl, int64_t i, SzString *path,
   if (!state || !state->files || !path || !text ||
       strlen(sz_string_cstr(path)) != (size_t)sz_string_len(path))
     return 0;
-  normalized = norm_path(sz_string_cstr(path));
+  normalized = canon_path(sz_string_cstr(path));
   if (!normalized)
     return 0;
   wanted = tl_file_line(normalized, sz_string_cstr(text),
@@ -3910,7 +3901,7 @@ int64_t sz_timeline_file_same(void *tl, int64_t a, int64_t b,
   if (!before || !after || !path ||
       strlen(sz_string_cstr(path)) != (size_t)sz_string_len(path))
     return 0;
-  normalized = norm_path(sz_string_cstr(path));
+  normalized = canon_path(sz_string_cstr(path));
   if (!normalized)
     return 0;
   prefix = tl_file_line(normalized, "", 0);
@@ -4867,7 +4858,7 @@ SzIo *sz_fuzz_verify(SzString *name, void *fn, void *env) {
   if (fn && s[0]) {
     if (g_verify_n >= SZ_VERIFY_MAX)
       sz_panic("sz_property session: too many verify predicates");
-    g_verify[g_verify_n].name = dup_cstr(s);
+    g_verify[g_verify_n].name = sz_strdup(s);
     g_verify[g_verify_n].fn = NULL;
     g_verify[g_verify_n].cfn = (SzVerdict * (*)(void *, void *)) fn;
     sz_retain(env);
@@ -4882,7 +4873,7 @@ SzIo *sz_fuzz_verify_rel(SzString *name, void *fn, void *env) {
   if (fn && s[0]) {
     if (g_verify_rel_n >= SZ_VERIFY_MAX)
       sz_panic("sz_property session: too many verify relations");
-    g_verify_rel[g_verify_rel_n].name = dup_cstr(s);
+    g_verify_rel[g_verify_rel_n].name = sz_strdup(s);
     g_verify_rel[g_verify_rel_n].fn = NULL;
     g_verify_rel[g_verify_rel_n].cfn = (SzVerdict * (*)(void *, void *)) fn;
     sz_retain(env);
@@ -5025,7 +5016,7 @@ void sz_fuzz_hit(SzString *key) {
     g_fuzz_wait = next;
     g_fuzz_wait_cap = cap;
   }
-  g_fuzz_wait[g_fuzz_wait_n++] = dup_cstr(s);
+  g_fuzz_wait[g_fuzz_wait_n++] = sz_strdup(s);
 }
 
 static void fuzz_arm_coverage(void) {
@@ -5060,7 +5051,7 @@ static void fuzz_probe_env(void) {
   i = 0;
   for (e = environ; e && *e; e++)
     if (strncmp(*e, "SCUZZ_EV_", 9) == 0)
-      names[i++] = dup_cstr(*e);
+      names[i++] = sz_strdup(*e);
   for (i = 0; i < n; i++) {
     char *eq = strchr(names[i], '=');
     if (eq) {

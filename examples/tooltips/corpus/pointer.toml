@@ -1,0 +1,2 @@
+[fuzz]
+events = ["hover 30 30", "key Escape", "hover 600 450", "hover 30 30", "tap button:Save", "tap button:Next", "tap button:Open details", "key Escape", "tap button:Close", "tap button:Nested", "tap checkbox:Show help", "tap checkbox:Show help"]

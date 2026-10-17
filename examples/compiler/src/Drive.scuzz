@@ -94,7 +94,7 @@ def uiFlags1(mac: Bool): String =
   if (mac) " -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon " else " -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive "
 
 def uiFlags2(mac: Bool): String =
-  if (mac) " -framework Cocoa -lobjc " else " -Wl,--no-whole-archive -lX11 -Wl,--whole-archive "
+  if (mac) " -framework Cocoa -lobjc " else " -Wl,--no-whole-archive -lX11 -ldbus-1 -Wl,--whole-archive "
 
 def uiFlags3(gpu: Bool, mac: Bool): String =
   if (mac) Str.concat(if (gpu) gpuLibs(mac) else "", " -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o ") else Str.concat(" -Wl,--no-whole-archive", Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -lssl -lcrypto -rdynamic -o "))
@@ -364,7 +364,7 @@ def emitDirStored(outDir: String, fp: String, ok: Bool): IO[Unit] =
   if (!ok) IO.fail("check") else Fs.mkdirs(outDir).flatMap(_ => Fs.write(fpPath(outDir), fp).flatMap(_ => Fs.delete(fpVerifyPath(outDir)).handleErrorWith(_ => IO.pure(()))))
 
 def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir).flatMap(_ => emitVerifyStamp(outDir, toml, own)))
+  Fs.delete(fpVerifyPath(outDir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.delete(fpPath(outDir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir))))
 
 def emitDirVerifyLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => ensureNative(Manifest.parse(toml).hasUi).flatMap(_ => fpVerifyText(toml, files).flatMap(fp => emitDirVerifyHit(dir, outDir, files, toml, fp))))
@@ -1142,7 +1142,10 @@ def pkgMacGot(result: (Int, String, String)): IO[Unit] =
   }
 
 def pkgHostCopy(name: String, exe: String, dest: String, id: String): IO[Unit] =
-  Fs.mkdirs(dest).flatMap(_ => pkgHostCp(name, exe, dest, id))
+  Fs.mkdirs(dest).flatMap(_ => crateHome().flatMap(h => runLine(pkgHostLicenseCmd(h, joinSlash(dest, "licenses"))).flatMap(r => linkOnlyGot(r).flatMap(_ => pkgHostCp(name, exe, dest, id)))))
+
+def pkgHostLicenseCmd(h: String, dest: String): String =
+  Str.concat("mkdir -p ", Str.concat(shQuote(dest), Str.concat(" && cp ", Str.concat(List.join(List.map(["third_party/fonts/devanagari-LICENSE", "third_party/fonts/thai-LICENSE", "third_party/fonts/sc-LICENSE", "third_party/fonts/arabic-LICENSE", "third_party/fonts/latin-LICENSE", "third_party/fonts/mono-LICENSE", "third_party/skia/SheenBidi-LICENSE", "crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE"], file => shQuote(crateAt(h, file))), " "), Str.concat(" ", shQuote(dest))))))
 
 def pkgHostCp(name: String, exe: String, dest: String, id: String): IO[Unit] =
   runLine(Str.concat("cp ", Str.concat(shQuote(exe), Str.concat(" ", shQuote(joinSlash(dest, name)))))).flatMap(r => pkgHostChmod(r, name, dest, id))
@@ -1776,7 +1779,7 @@ def fuzzFaultOf(job: FuzzJob, i: Int): String =
   if (i <= 0 || List.isEmpty(job.faults)) "" else fuzzFaultAt(job, i)
 
 def fuzzFaultAt(job: FuzzJob, i: Int): String =
-  Verify.faultSeedPhase(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1, (i - 1) / (List.len(job.faults) * 16) % 4)
+  Verify.faultSeedPhase(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1, (i - 1) / (List.len(job.faults) * 16) % 6)
 
 def fuzzSearch(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc): IO[FuzzAcc] =
   fuzzJobEngine(job).flatMap(current => fuzzSearchCurrent(current, script, runs, defs, acc))
@@ -2176,11 +2179,6 @@ def fuzzClaimPath(outDir: String): String =
 
 def fuzzSchedPicksPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "schedule.picks")
-
-def fuzzProbeCode(r: (Int, String, String)): Int =
-  r match {
-    case (code, _out, _err) => if (code == 0) 0 else 1
-  }
 
 def fuzzProbeCodeIo(r: (Int, String, String)): IO[Int] =
   r match {

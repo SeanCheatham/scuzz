@@ -154,7 +154,7 @@ def a11yTileRole(role: String, label: String, raw: String): View =
   if (role == "button" || role == "outlined" || role == "textbutton" || role == "choicechip" || role == "chip") View.card(View.text(label)) else if (role == "text") View.text(label) else if (role == "icon" || role == "image") View.card(View.fontSize(12, View.text(label))) else View.fontSize(12, View.textColor(Theme.muted(), View.text(raw)))
 
 def viewCard(lines: Signal[List[String]]): View =
-  View.card(View.column(View.text("Recorded structure"), View.each(lines, l => a11yTile(l))))
+  View.card(View.column([View.text("Recorded structure"), View.each(lines, l => a11yTile(l))]))
 
 def srcWindow(a: String, b: String, ctx: Int): (String, String) =
   srcWinCut(Str.split(a, nl()), Str.split(b, nl()), sharedPrefix(Str.split(a, nl()), Str.split(b, nl()), 0), sharedSuffix(Str.split(a, nl()), Str.split(b, nl()), 0, 0), ctx)
@@ -181,10 +181,10 @@ def srcWin(f: (String, String, String), flip: Int, lane1: Bool): String =
   if (lane1) if (flip == 1) srcWindow(f._2, f._3, 2)._2 else srcWindow(f._2, f._3, 2)._1 else if (flip == 1) srcWindow(f._2, f._3, 2)._1 else srcWindow(f._2, f._3, 2)._2
 
 def srcFileCard(f: (String, String, String), flip: Int): View =
-  View.card(View.column(View.text(f._1), View.row(View.expanded(View.code(srcWin(f, flip, true))), View.expanded(View.code(srcWin(f, flip, false))))))
+  View.card(View.column([View.text(f._1), View.row([View.expanded(1, View.code(srcWin(f, flip, true))), View.expanded(1, View.code(srcWin(f, flip, false)))])]))
 
 def srcSection(files: Signal[List[(String, String, String)]], flip: Signal[Int]): View =
-  View.each(Signal.map(flip, n => [n]), n => View.column(View.each(files, f => srcFileCard(f, n))))
+  View.each(Signal.map(flip, n => [n]), n => View.column([View.each(files, f => srcFileCard(f, n))]))
 
 def rowsOf(xa: List[(String, String)], xb: List[(String, String)], sideA: Bool): List[String] =
   List.map(List.concat(List.filter(shownNames(xa, xb), n => secBody(xa, n) != secBody(xb, n)), List.filter(shownNames(xa, xb), n => secBody(xa, n) == secBody(xb, n))), n => rowText(n, secBody(xa, n), secBody(xb, n), sideA))
