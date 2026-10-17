@@ -2,10 +2,10 @@
 
 Land PR #172 before new UI work.
 
-- The portable text build passes with repeated warning flags. Hosted iOS proof remains required.
-- View replay exposes an old enum offset. The compiler supplies the exact tag. Runtime checks and rebuilt replay remain required.
-- The compiler cache identity and output directory checks pass. The check uses unlinked IR without a cache stamp.
-- Run affected local checks. Rebuild the CLI when product source changes.
-- Require successful hosted CI. Merge the PR and check main.
+The portable text build, compiler cache checks, C runtime suite, and exact View signal replay pass locally.
+The product CLI rebuild passes.
 
-The current hosted run has three failed checks. Its application check remains active.
+- Complete the full local kernel slice.
+- Require successful hosted CI, including iOS and all Linux check jobs.
+- Remove this plan when validation is complete.
+- Merge the PR and check main.
