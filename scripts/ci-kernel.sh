@@ -711,6 +711,7 @@ grep -Fxq 'remotePairCallField:3' /tmp/kernel.out
 grep -Fxq 'remotePairCallText:b' /tmp/kernel.out
 grep -Fxq 'remotePairIf:3:8' /tmp/kernel.out
 grep -Fxq 'shadowModule:7' /tmp/kernel.out
+grep -Fxq 'textModule:module-text' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
 diff <(grep -vx ok /tmp/kernel.out) /tmp/kernel-eval.out
