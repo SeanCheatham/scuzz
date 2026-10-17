@@ -129,7 +129,7 @@ $(SB_DIR)/.stamp: $(PIN) | build
 
 $(TEXT_DIR)/sheenbidi.o: $(SB_DIR)/.stamp
 	@mkdir -p "$(@D)"
-	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function $(TEXT_FLAGS) -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o $@
+	$(CC) $(CFLAGS) $(TEXT_FLAGS) -Wno-unused-parameter -Wno-unused-function -fPIC -DSB_CONFIG_UNITY -I$(SB_DIR)/Headers -I$(SB_DIR)/Source -c $(SB_DIR)/Source/SheenBidi.c -o $@
 
 build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h src/sk_text_shape.h include/sk_text.h build/skia-src/.stamp $(HB_DIR)/.stamp $(SB_DIR)/.stamp
 	$(CXX) -std=c++17 -O2 -fPIC -c src/sk_capi_skia.cpp -o $@ \

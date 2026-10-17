@@ -2362,11 +2362,15 @@ with tempfile.TemporaryDirectory(prefix="scuzz-compiler-cache-") as tmp:
     assert "LIVE" in command("run", "--out-dir", "alternate")
     command("build", "--verify")
     live = mode / "alternate/fingerprint"
-    verify = mode / "build/fingerprint.verify"
-    stamps = [p.stat().st_mtime_ns for p in (live, verify)]
+    verify_ir = mode / "build/output-mode.ll"
+    verify_stamp = mode / "build/fingerprint.verify"
+    assert not verify_stamp.exists() and not (mode / "build/fingerprint").exists()
+    assert "VERIFY" in verify_ir.read_text()
+    assert "LIVE" in (mode / "alternate/output-mode.ll").read_text()
+    stamps = [p.stat().st_mtime_ns for p in (live, verify_ir)]
     assert "LIVE" in command("run", "--out-dir", "alternate")
-    assert stamps == [p.stat().st_mtime_ns for p in (live, verify)]
+    assert stamps == [p.stat().st_mtime_ns for p in (live, verify_ir)]
     assert "LIVE" in command("run")
-    assert (mode / "build/fingerprint").is_file() and not verify.exists()
+    assert (mode / "build/fingerprint").is_file() and not verify_stamp.exists()
 print("compiler cache identity and output mode ok")
 PY_COMPILER_CACHE
