@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 const int32_t sz_eval_value_tag_base = 42;
+const int32_t sz_eval_view_tag = 70;
 
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
@@ -19300,7 +19301,7 @@ static void test_mirror_signal_session(void) {
   sz_release(dump);
   sz_signal_int_free(visible);
   void *view = getenv("SCUZZ_EVAL_MIRROR")
-                   ? (void *)sz_adt_new(sz_eval_value_tag_base + 26, NULL)
+                   ? (void *)sz_adt_new(sz_eval_view_tag, NULL)
                    : (void *)sz_view_text("value");
   SzString *view_name = sz_string_from_cstr("view");
   SzSignal *view_signal = sz_signal_new(view, 4, view_name);

@@ -2,9 +2,9 @@
 
 Land PR #172 before new UI work.
 
-- Fix the iOS third-party text build flags. Check the affected compile command.
-- Reproduce and fix exact View signal replay. Preserve timeline and claim checks.
-- Reproduce and fix the compiler cache check. Preserve output directory ownership.
+- The portable text build passes with repeated warning flags. Hosted iOS proof remains required.
+- View replay exposes an old enum offset. The compiler supplies the exact tag. Runtime checks and rebuilt replay remain required.
+- The compiler cache identity and output directory checks pass. The check uses unlinked IR without a cache stamp.
 - Run affected local checks. Rebuild the CLI when product source changes.
 - Require successful hosted CI. Merge the PR and check main.
 

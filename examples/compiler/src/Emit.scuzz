@@ -6129,10 +6129,10 @@ def emitProg(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[Strin
   emitProgEns(p, strs, files, lidx, Parse.builtins(Check.expandEnums(p.enums, p.aliases)))
 
 def emitProgEns(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex], ens: List[En]): String =
-  Str.concat(emitEvalValueBase(ens), emitBits(Check.expandExpr(p.body, p.aliases), emitFtab(prepDefs(p), ens), internReady(strs), ens, files, lidx))
+  Str.concat(emitEvalValueTags(ens), emitBits(Check.expandExpr(p.body, p.aliases), emitFtab(prepDefs(p), ens), internReady(strs), ens, files, lidx))
 
-def emitEvalValueBase(ens: List[En]): String =
-  if (!hasEn(ens, Resolve.identity("Eval", "Value"))) "" else Str.concat("@sz_eval_value_tag_base = constant i32 ", Str.concat(Str.fromInt(ctorTag(ens, Resolve.identity("Eval", "Value"), "VUnit")), nl()))
+def emitEvalValueTags(ens: List[En]): String =
+  if (!hasEn(ens, Resolve.identity("Eval", "Value"))) "" else s"@sz_eval_value_tag_base = constant i32 ${ctorTag(ens, Resolve.identity("Eval", "Value"), "VUnit")}\n@sz_eval_view_tag = constant i32 ${ctorTag(ens, Resolve.identity("Eval", "Value"), "VView")}\n"
 
 def emitFtab(ds: List[Fun], ens: List[En]): Ftab =
   emitFtabGot(Check.ftabOfList(ds), ens)

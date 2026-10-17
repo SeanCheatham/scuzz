@@ -217,8 +217,10 @@ static void fputs_json_value(FILE *f, const void *value) {
  * compiled ADT shape. SCUZZ_EVAL_TAGS is `En.Case=tag` lines. */
 /* The runtime uses -1 when the evaluator is absent.
  * The compiler sets the tag of Eval.Value.VUnit when it is present.
- * Other Value tags follow the source order. */
+ * The compiler also sets the exact VView tag.
+ * Scalar and container Value tags follow the source order. */
 __attribute__((weak)) const int32_t sz_eval_value_tag_base = -1;
+__attribute__((weak)) const int32_t sz_eval_view_tag = -1;
 
 static int eval_value_base(void) {
   return sz_eval_value_tag_base;
@@ -399,6 +401,10 @@ static void fputs_mirror_value(FILE *f, const void *value) {
     fputs_json_value(f, value);
     return;
   }
+  if (sz_adt_tag((const SzAdt *)value) == sz_eval_view_tag) {
+    fputs("\"<handle>\"", f);
+    return;
+  }
   tag = sz_adt_tag((const SzAdt *)value) - eval_value_base();
   pay = sz_adt_payload((const SzAdt *)value);
   if (tag == 0) {
@@ -419,10 +425,6 @@ static void fputs_mirror_value(FILE *f, const void *value) {
   }
   if (tag == 6) {
     fputs_mirror_con(f, value, pay);
-    return;
-  }
-  if (tag == 26) {
-    fputs("\"<handle>\"", f);
     return;
   }
   fputs_json_value(f, value);
