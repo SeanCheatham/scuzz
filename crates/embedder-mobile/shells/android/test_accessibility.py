@@ -66,7 +66,19 @@ with tempfile.TemporaryDirectory(prefix="scuzz-android-a11y-") as temporary:
       ]),
       View.overlay(dialog, "Test dialog", View.center(View.card(View.column([
         View.text("Dialog content"),
-        View.button("Close dialog", _ => Signal.set(dialog, 0))
+        View.button("Close dialog", _ => Signal.set(dialog, 0)),
+        View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40),
+          View.semantics("Transform scene", View.sized(200, 100, View.clip(View.stack([
+            View.positioned(50, 40, View.scale(50, View.sized(100, 40,
+              View.background(Color.rgb(241, 17, 221), View.semantics("Scaled paint", View.text("")))))),
+            View.positioned(170, 80, View.unconstrainedBox(View.scale(50, View.sized(100, 40,
+              View.background(Color.rgb(17, 229, 241), View.semantics("Clipped paint", View.text("")))))))
+          ]))))),
+        View.theme(Theme.metrics(Theme.light(), 14, 6, 0, 0, 40),
+          View.semantics("Scaled clip scene", View.scale(50, View.sized(200, 100, View.clip(View.stack([
+            View.positioned(170, 80, View.unconstrainedBox(View.sized(100, 40,
+              View.background(Color.rgb(113, 241, 17), View.semantics("Scaled clip paint", View.text(""))))))
+          ]))))))
       ]))))
     ]))
   } yield ()
@@ -104,6 +116,14 @@ android:targetPackage="''' + bundle + '''" /></manifest>''')
         device("install", "-r", str(proof))
         output = device("shell", "am", "instrument", "-w", "-e", "target", bundle,
                         proof_bundle + "/dev.scuzz.proof.AccessibilityProof", timeout=180)
+        if "INSTRUMENTATION_RESULT: result=pass" not in output:
+            image = subprocess.run([adb, "-s", serial, "exec-out", "run-as", bundle, "cat",
+                                    "files/scuzz_android.bounds.png"], capture_output=True, timeout=30)
+            if image.returncode == 0 and image.stdout.startswith(b"\x89PNG"):
+                artifact = root / "crates/embedder-mobile/build/accessibility-bounds.png"
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_bytes(image.stdout)
+                print("Bounds proof image: " + str(artifact), flush=True)
         assert "INSTRUMENTATION_RESULT: result=pass" in output, output
         record = json.loads(device("shell", "run-as", bundle, "cat", "files/scuzz_android.record.json"))
         assert record["manualPumps"] is True, record

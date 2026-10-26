@@ -1,16 +1,25 @@
 package dev.scuzz.proof;
 
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.app.UiAutomation;
 import android.content.ComponentName;
+import android.content.Context;
+import android.graphics.Rect;
+import android.graphics.Bitmap;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 import java.io.PrintWriter;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
@@ -105,9 +114,131 @@ public final class AccessibilityProof extends Instrumentation {
     require(one(label).performAction(AccessibilityNodeInfo.ACTION_CLICK), "Cannot activate " + label);
   }
 
+  private void hover(int action, float x, float y) {
+    long now = android.os.SystemClock.uptimeMillis();
+    MotionEvent event = MotionEvent.obtain(now, now, action, x, y, 0);
+    event.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+    try { require(automation.injectInputEvent(event, true), "Cannot inject exploration hover input"); }
+    finally { event.recycle(); }
+  }
+
+  private void proveHoverExploration() throws Exception {
+    AccessibilityServiceInfo service = automation.getServiceInfo();
+    int flags = service.flags;
+    service.flags |= AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE;
+    automation.setServiceInfo(service);
+    AccessibilityManager manager = (AccessibilityManager)getTargetContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
+    boolean[] hovering = {false};
+    Rect bounds = new Rect();
+    one("Draft").getBoundsInScreen(bounds);
+    float x = bounds.exactCenterX(), y = bounds.exactCenterY();
+    try {
+      await(() -> manager.isTouchExplorationEnabled(), "Touch exploration does not start");
+      // Input injection starts after the Android exploration filter.
+      automation.executeAndWaitForEvent(() -> {
+        hover(MotionEvent.ACTION_HOVER_ENTER, x, y);
+        hovering[0] = true;
+        hover(MotionEvent.ACTION_HOVER_MOVE, x + 1, y);
+      }, event -> {
+        AccessibilityNodeInfo source = event.getSource();
+        return event.getEventType() == AccessibilityEvent.TYPE_VIEW_HOVER_ENTER
+            && source != null && matches("Draft", source.getContentDescription());
+      }, 10000);
+      require(!one("Draft").isFocused(), "Hover exploration changes text input focus");
+      automation.executeAndWaitForEvent(() -> {
+        hover(MotionEvent.ACTION_HOVER_EXIT, x + 1, y);
+        hovering[0] = false;
+      }, event -> {
+        AccessibilityNodeInfo source = event.getSource();
+        return event.getEventType() == AccessibilityEvent.TYPE_VIEW_HOVER_EXIT
+            && source != null && matches("Draft", source.getContentDescription());
+      }, 10000);
+    } finally {
+      try { if (hovering[0]) hover(MotionEvent.ACTION_HOVER_EXIT, x, y); }
+      finally { service.flags = flags; automation.setServiceInfo(service); }
+    }
+  }
+
+  private Rect screenBounds(String label) {
+    Rect result = new Rect();
+    one(label).getBoundsInScreen(result);
+    require(!result.isEmpty(), "Empty bounds: " + label);
+    return result;
+  }
+
+  private void near(int actual, float expected, String label) {
+    require(Math.abs(actual - expected) <= 2f, label + ": " + actual + " != " + expected);
+  }
+
+  private void expectedBounds(String scene, String child, float x, float y, float width, float height) {
+    Rect parent = screenBounds(scene), box = screenBounds(child);
+    float sx = parent.width() / 200f, sy = parent.height() / 100f;
+    near(box.left, parent.left + x * sx, child + " left");
+    near(box.top, parent.top + y * sy, child + " top");
+    near(box.right, parent.left + (x + width) * sx, child + " right");
+    near(box.bottom, parent.top + (y + height) * sy, child + " bottom");
+  }
+
+  private Rect ink(Bitmap image, int color) {
+    int width = image.getWidth(), height = image.getHeight();
+    int[] pixels = new int[width * height];
+    image.getPixels(pixels, 0, width, 0, 0, width, height);
+    // Surface screenshots can use RGB565 channel values. Match each exact format.
+    int r = Math.round(((color >> 16) & 255) * 31f / 255f);
+    int g = Math.round(((color >> 8) & 255) * 63f / 255f);
+    int b = Math.round((color & 255) * 31f / 255f);
+    int rgb565 = (((r << 3) | (r >> 2)) << 16) | (((g << 2) | (g >> 4)) << 8) | (b << 3) | (b >> 2);
+    int left = width, top = height, right = 0, bottom = 0;
+    for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+      int pixel = pixels[y * width + x] & 0xffffff;
+      if (pixel == color || pixel == rgb565) {
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x + 1);
+        bottom = Math.max(bottom, y + 1);
+      }
+    }
+    return right > left && bottom > top ? new Rect(left, top, right, bottom) : new Rect();
+  }
+
+  private boolean near(Rect first, Rect second) {
+    return !first.isEmpty() && !second.isEmpty()
+        && Math.abs(first.left - second.left) <= 2 && Math.abs(first.right - second.right) <= 2
+        && Math.abs(first.top - second.top) <= 2 && Math.abs(first.bottom - second.bottom) <= 2;
+  }
+
+  private void proveBounds() throws Exception {
+    expectedBounds("Transform scene", "Scaled paint", 75, 50, 50, 20);
+    expectedBounds("Transform scene", "Clipped paint", 195, 90, 5, 10);
+    expectedBounds("Scaled clip scene", "Scaled clip paint", 135, 65, 15, 10);
+    String[] measured = {"No screenshot"};
+    try {
+      await(() -> {
+        Bitmap image = automation.takeScreenshot();
+        if (image == null) return false;
+        try {
+          Rect scaled = ink(image, 0xf111dd), clipped = ink(image, 0x11e5f1), nested = ink(image, 0x71f111);
+          Rect first = screenBounds("Scaled paint"), second = screenBounds("Clipped paint"), third = screenBounds("Scaled clip paint");
+          measured[0] = "Scaled " + first + "/" + scaled + "; clipped " + second + "/" + clipped
+              + "; nested " + third + "/" + nested;
+          return near(first, scaled) && near(second, clipped) && near(third, nested);
+        } finally { image.recycle(); }
+      }, "Accessibility bounds differ from the visible paint");
+    } catch (AssertionError error) {
+      Bitmap image = automation.takeScreenshot();
+      if (image != null) {
+        try (FileOutputStream output = new FileOutputStream(new File(getTargetContext().getFilesDir(), "scuzz_android.bounds.png"))) {
+          image.compress(Bitmap.CompressFormat.PNG, 100, output);
+        } finally { image.recycle(); }
+      }
+      throw new AssertionError(error.getMessage() + "\n" + measured[0]);
+    }
+  }
+
   @SuppressWarnings("deprecation")
   private void prove() throws Exception {
     await(() -> named("Same").size() == 100, "The tree needs 100 repeated-label controls");
+    proveHoverExploration();
     AccessibilityNodeInfo stale = named("Same").get(99);
     require(stale.performAction(AccessibilityNodeInfo.ACTION_CLICK), "Cannot activate the last repeated control");
     await(() -> named("Chosen 99").size() == 1, "The last repeated control selects the wrong item");
@@ -164,10 +295,15 @@ public final class AccessibilityProof extends Instrumentation {
     require(one("Amount").performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD), "Cannot decrement range");
     await(() -> one("Amount").getRangeInfo().getCurrent() == 41f, "The range decrement is incorrect");
 
-    click("Open dialog");
+    automation.executeAndWaitForEvent(() -> click("Open dialog"), event -> {
+      AccessibilityNodeInfo source = event.getSource();
+      return event.getEventType() == AccessibilityEvent.TYPE_VIEW_FOCUSED
+          && source != null && matches("Close dialog", source.getText());
+    }, 10000);
     await(() -> named("Close dialog").size() == 1 && named("Same").isEmpty(),
         "The dialog exposes background controls");
     require(!stale.performAction(AccessibilityNodeInfo.ACTION_CLICK), "A background control accepts input");
+    proveBounds();
     AccessibilityNodeInfo close = one("Close dialog");
     require(close.performAction(AccessibilityNodeInfo.ACTION_CLICK), "Cannot close the dialog");
     await(() -> named("Same").size() == 100, "The background tree does not return");

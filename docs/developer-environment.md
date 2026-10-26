@@ -191,6 +191,10 @@ It also checks keyboard insets, exact text and caret offsets, Backspace, dismiss
 It restores the animation setting and removes the temporary app.
 The accessibility check uses a temporary app and Android UI automation.
 It checks 100 repeated-label controls, Unicode editing, UTF-16 selection, ranges, dialogs, and stale actions.
+It checks input focus, dialog focus events, and hover events in exploration mode.
+It compares scaled and clipped semantic bounds with screenshot pixels.
+The pixel check accepts exact RGB888 and RGB565 colors.
+Input injection does not prove raw touchscreen conversion.
 It copies the Android input record and replays it in Headless.
 Named Signals, field text, byte selection offsets, and the semantic tree must agree.
 It removes both test packages. It does not prove TalkBack or physical-device behavior.

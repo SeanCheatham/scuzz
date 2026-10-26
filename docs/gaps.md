@@ -89,7 +89,9 @@ Headless records and replays accessibility actions by semantic position.
 A finite Android emulator proof checks 100 repeated-label controls, text editing, UTF-16 selection, range actions, modal exclusion, and stale actions after replacement.
 Android service checks cover virtual input focus, cleared focus, and native Backspace over a selected emoji.
 Android emulator checks cover initial focus events for new dialog controls.
-Android painted bounds, raw touch exploration, and real screen-reader checks need platform proof.
+Android emulator checks compare scaled and clipped semantic bounds with visible screenshot pixels.
+Hover-event routing passes with Android exploration mode enabled.
+Raw touchscreen conversion and real screen-reader checks remain open.
 Android records accessibility actions, viewport changes, and lifecycle input.
 A finite emulator proof replays that record in Headless.
 Named Signals, field text, byte selection offsets, and the semantic tree agree.
