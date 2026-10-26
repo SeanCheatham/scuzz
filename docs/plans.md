@@ -9,9 +9,9 @@ The focused ASan check includes leak detection.
 The Android provider and JNI compile. The product CLI rebuild and manual checks pass.
 The Android package, motion preference, keyboard, resume, and restart checks pass.
 A finite Android UI automation proof passes for virtual nodes and control actions.
+Its captured Android record replays in Headless with equal state, text, selection, and semantics.
 
 - Check touch exploration, transformed bounds, and native input-focus lookup at the platform boundary.
-- Capture Android accessibility input and check its Headless replay.
 - Check native input focus through the Android service API.
 - Update current gaps and app instructions. Keep real screen-reader and hardware limits explicit.
 

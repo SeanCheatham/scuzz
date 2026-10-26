@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check Android virtual controls through UI automation on an owned test app."""
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -104,7 +105,33 @@ android:targetPackage="''' + bundle + '''" /></manifest>''')
         output = device("shell", "am", "instrument", "-w", "-e", "target", bundle,
                         proof_bundle + "/dev.scuzz.proof.AccessibilityProof", timeout=180)
         assert "INSTRUMENTATION_RESULT: result=pass" in output, output
-        print("Android accessibility proof passes")
+        record = json.loads(device("shell", "run-as", bundle, "cat", "files/scuzz_android.record.json"))
+        assert record["manualPumps"] is True, record
+        events = record["events"]
+        actions = [event for event in events if event["op"] == "accessibility"]
+        assert {event["action"] for event in actions} >= {
+            "activate", "focus", "setText", "setSelection", "clearFocus", "setValue", "decrement"}, actions
+        assert any(event["op"] == "resize" for event in events), events
+        assert any(event["i"] > 64 for event in actions), actions
+        assert all("id" not in event for event in actions), actions
+        assert any(event.get("text") == "é😀z" for event in actions), actions
+        assert any(event.get("start") == 2 and event.get("end") == 6 for event in actions), actions
+        native = json.loads(device("shell", "run-as", bundle, "cat", "files/scuzz_android.debug.dump"))
+        script = app / "android-record.json"
+        script.write_text(json.dumps(record, ensure_ascii=False))
+        replay_dump = app / "replay.json"
+        run([str(cli), "run", "--target", "headless", "--out-dir", "replay", "--exec", str(script),
+             "--dump", str(replay_dump), str(app)], 180)
+        replayed = json.loads(replay_dump.read_text())
+        expected = {"chosen": 199, "draft": "é😀z", "enabled": 1, "amount": 41, "dialog": 0, "rows": [1]}
+        for dump in (native, replayed):
+            values = {item["name"]: item["value"] for item in dump["signals"] if item["name"]}
+            assert values == expected, values
+            assert len(dump["fields"]) == 1, dump["fields"]
+            field = dump["fields"][0]
+            assert (field["value"], field["sel_start"], field["sel_end"]) == ("é😀z", 2, 6), field
+        assert native["a11y"] == replayed["a11y"], (native["a11y"], replayed["a11y"])
+        print("Android accessibility actions and recorded Headless replay pass")
     finally:
         subprocess.run([adb, "-s", serial, "shell", "am", "force-stop", bundle],
                        capture_output=True, timeout=30)

@@ -83,7 +83,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         }
       };
 
-  public native void nativeStart(String dumpPath, int width, int height, float scale);
+  public native void nativeStart(String dumpPath, String recordPath, int width, int height, float scale);
 
   public native int nativeFrameWidth();
 
@@ -175,12 +175,13 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     pointW = Math.max(1, (int) (dm.widthPixels / density));
     pointH = Math.max(1, (int) (dm.heightPixels / density));
     File dump = new File(getFilesDir(), "scuzz_android.debug.dump");
+    File record = new File(getFilesDir(), "scuzz_android.record.json");
     getContentResolver().registerContentObserver(
         Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
         false, motionObserver);
     motionWatching = true;
     syncMotionPreference();
-    nativeStart(dump.getAbsolutePath(), pointW, pointH, density);
+    nativeStart(dump.getAbsolutePath(), record.getAbsolutePath(), pointW, pointH, density);
     scheduleInject();
   }
 

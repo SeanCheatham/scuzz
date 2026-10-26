@@ -88,7 +88,9 @@ The shared runtime supplies owned semantic snapshots and validates actions again
 Headless records and replays accessibility actions by semantic position.
 A finite Android emulator proof checks 100 repeated-label controls, text editing, UTF-16 selection, range actions, modal exclusion, and stale actions after replacement.
 Android bounds, touch exploration, native input-focus lookup, and real screen-reader checks need platform proof.
-Automatic Android record capture and its Headless replay need an end-to-end check.
+Android records accessibility actions, viewport changes, and lifecycle input.
+A finite emulator proof replays that record in Headless.
+Named Signals, field text, byte selection offsets, and the semantic tree agree.
 iOS and Desktop screen-reader bridges remain open.
 Keyboard checks cover a form, named radio groups, manual tabs, nested dialogs, named range sliders, and editors.
 Range checks cover signed 64-bit bounds, stepped values, pointer input, and browser accessibility data.

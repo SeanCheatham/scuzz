@@ -60,9 +60,10 @@ JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
 }
 
 JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeStart(
-    JNIEnv *env, jobject thiz, jstring dump_path, jint width, jint height,
+    JNIEnv *env, jobject thiz, jstring dump_path, jstring record_path, jint width, jint height,
     jfloat scale) {
   const char *dump;
+  const char *record;
   char wbuf[16];
   char hbuf[16];
   char sbuf[32];
@@ -88,6 +89,11 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeStart(
     setenv("SCUZZ_UI_DEBUG_DUMP", dump, 1);
   if (dump_path && dump)
     (*env)->ReleaseStringUTFChars(env, dump_path, dump);
+  record = record_path ? (*env)->GetStringUTFChars(env, record_path, NULL) : NULL;
+  if (record && record[0])
+    setenv("SCUZZ_UI_RECORD", record, 1);
+  if (record_path && record)
+    (*env)->ReleaseStringUTFChars(env, record_path, record);
   scuzz_android_set_alive(1);
   if (pthread_create(&g_tid, NULL, scuzz_app_thread, NULL) != 0) {
     scuzz_android_set_alive(0);

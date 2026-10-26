@@ -191,6 +191,8 @@ It also checks keyboard insets, typing, dismissal, reopening, and retained text.
 It restores the animation setting and removes the temporary app.
 The accessibility check uses a temporary app and Android UI automation.
 It checks 100 repeated-label controls, Unicode editing, UTF-16 selection, ranges, dialogs, and stale actions.
+It copies the Android input record and replays it in Headless.
+Named Signals, field text, byte selection offsets, and the semantic tree must agree.
 It removes both test packages. It does not prove TalkBack or physical-device behavior.
 App instructions: run `scuzz docs gui`, `scuzz docs android`, or `scuzz docs ios`.
 
