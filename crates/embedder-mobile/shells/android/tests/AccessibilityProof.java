@@ -6,6 +6,7 @@ import android.app.UiAutomation;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
@@ -111,6 +112,7 @@ public final class AccessibilityProof extends Instrumentation {
     require(stale.performAction(AccessibilityNodeInfo.ACTION_CLICK), "Cannot activate the last repeated control");
     await(() -> named("Chosen 99").size() == 1, "The last repeated control selects the wrong item");
 
+    require(!one("Chosen 99").isFocusable(), "Static text reports input focus support");
     AccessibilityNodeInfo field = one("Draft");
     require(field.isEditable(), "The field is not editable");
     automation.executeAndWaitForEvent(() -> require(field.performAction(
@@ -119,6 +121,10 @@ public final class AccessibilityProof extends Instrumentation {
     require(field.refresh() && field.isAccessibilityFocused() && !field.isFocused(),
         "Accessibility focus changes input focus");
     require(field.performAction(AccessibilityNodeInfo.ACTION_FOCUS), "Cannot focus the field");
+    await(() -> {
+      AccessibilityNodeInfo focused = automation.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+      return focused != null && matches("Draft", focused.getContentDescription()) && focused.isEditable();
+    }, "Android input focus does not identify the virtual field");
     Bundle edit = new Bundle();
     edit.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "é😀z");
     require(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, edit), "Cannot set Unicode text");
@@ -132,8 +138,21 @@ public final class AccessibilityProof extends Instrumentation {
             && event.getFromIndex() == 1 && event.getToIndex() == 3, 10000);
     await(() -> one("Draft").getTextSelectionStart() == 1 && one("Draft").getTextSelectionEnd() == 3,
         "Selection does not use UTF-16 offsets");
+    sendKeyDownUpSync(KeyEvent.KEYCODE_DEL);
+    await(() -> matches("éz", one("Draft").getText()), "A native Backspace does not remove the selected emoji");
+    await(() -> one("Draft").getTextSelectionStart() == 1 && one("Draft").getTextSelectionEnd() == 1,
+        "Backspace does not collapse the selection");
+    require(one("Draft").performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, edit), "Cannot restore Unicode text");
+    await(() -> matches("é😀z", one("Draft").getText()), "Unicode text does not return");
+    require(one("Draft").performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selection), "Cannot restore the selection");
+    await(() -> one("Draft").getTextSelectionStart() == 1 && one("Draft").getTextSelectionEnd() == 3,
+        "The Unicode selection does not return");
     require(one("Draft").performAction(AccessibilityNodeInfo.ACTION_CLEAR_FOCUS), "Cannot clear input focus");
     await(() -> named("Same").size() == 100, "The keyboard hides the control tree after focus clears");
+    require(!one("Draft").isFocused(), "The virtual field keeps input focus after clear");
+    AccessibilityNodeInfo focused = automation.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+    require(focused == null || !matches("Draft", focused.getContentDescription()),
+        "The service keeps the cleared input-focus target");
     require(!one("Enabled").isChecked(), "Unexpected initial checkbox state");
     click("Enabled");
     await(() -> one("Enabled").isChecked(), "The checkbox state does not update");

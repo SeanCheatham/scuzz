@@ -112,6 +112,7 @@ android:targetPackage="''' + bundle + '''" /></manifest>''')
         assert {event["action"] for event in actions} >= {
             "activate", "focus", "setText", "setSelection", "clearFocus", "setValue", "decrement"}, actions
         assert any(event["op"] == "resize" for event in events), events
+        assert any(event["op"] == "backspace" for event in events), events
         assert any(event["i"] > 64 for event in actions), actions
         assert all("id" not in event for event in actions), actions
         assert any(event.get("text") == "é😀z" for event in actions), actions

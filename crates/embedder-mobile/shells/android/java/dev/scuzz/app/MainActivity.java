@@ -14,14 +14,18 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.text.Selection;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.MotionEvent;
+import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import java.io.File;
@@ -151,6 +155,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     hidden.setBackground(null);
     hidden.setAlpha(0f);
     hidden.setText(ZWSP);
+    hidden.setSelection(hidden.length());
+    hidden.setFocusable(false);
+    hidden.setFocusableInTouchMode(false);
     hidden.addTextChangedListener(
         new TextWatcher() {
           @Override
@@ -274,6 +281,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     }
     watchLock = 1;
     s.replace(0, s.length(), ZWSP);
+    Selection.setSelection(s, s.length());
     watchLock = 0;
   }
 
@@ -338,10 +346,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
       return;
     }
     if (want != 0) {
-      hidden.requestFocus();
-      imm.showSoftInput(hidden, 0);
+      surface.requestFocus();
+      imm.showSoftInput(surface, 0);
     } else {
-      imm.hideSoftInputFromWindow(hidden.getWindowToken(), 0);
+      imm.hideSoftInputFromWindow(surface.getWindowToken(), 0);
     }
   }
 
@@ -544,6 +552,28 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
       super(context);
       manager = (AccessibilityManager)context.getSystemService(Context.ACCESSIBILITY_SERVICE);
       setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+      setFocusable(true);
+      setFocusableInTouchMode(true);
+    }
+
+    @Override
+    public boolean onKeyDown(int code, KeyEvent event) {
+      if ((nativeKeyboardRequest() & 1) != 0 && hidden != null && hidden.onKeyDown(code, event)) return true;
+      return super.onKeyDown(code, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int code, KeyEvent event) {
+      if ((nativeKeyboardRequest() & 1) != 0 && hidden != null && hidden.onKeyUp(code, event)) return true;
+      return super.onKeyUp(code, event);
+    }
+
+    @Override
+    public boolean onCheckIsTextEditor() { return true; }
+
+    @Override
+    public InputConnection onCreateInputConnection(EditorInfo attributes) {
+      return hidden == null ? null : hidden.onCreateInputConnection(attributes);
     }
 
     @Override
@@ -676,7 +706,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
       info.setBoundsInScreen(local);
       info.setVisibleToUser(shown);
       info.setEnabled(true);
-      info.setFocusable(node.focusable());
+      info.setFocusable(node.has(FOCUS));
       info.setFocused(node.focused);
       info.setAccessibilityFocused(accessibilityFocus == id);
       info.setEditable(node.editable);

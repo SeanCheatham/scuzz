@@ -187,7 +187,7 @@ python3 crates/embedder-mobile/shells/android/test_accessibility.py emulator-555
 
 The check builds a temporary app from `examples/motion`.
 It checks the initial motion preference, live changes, visible input, resume, and restart.
-It also checks keyboard insets, typing, dismissal, reopening, and retained text.
+It also checks keyboard insets, exact text and caret offsets, Backspace, dismissal, reopening, and retained text.
 It restores the animation setting and removes the temporary app.
 The accessibility check uses a temporary app and Android UI automation.
 It checks 100 repeated-label controls, Unicode editing, UTF-16 selection, ranges, dialogs, and stale actions.
