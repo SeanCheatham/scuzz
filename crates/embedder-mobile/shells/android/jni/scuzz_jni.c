@@ -3,6 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <jni.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +19,9 @@ int scuzz_android_frame_height(void);
 int scuzz_android_copy_argb(int32_t *dst, int cap);
 int scuzz_android_push_pointer(float x, float y, int phase);
 int scuzz_android_push_text_edit(const char *text);
+int scuzz_android_push_accessibility(uintptr_t id, int action, const char *text,
+                                      int start, int end, int64_t value);
+char *scuzz_android_accessibility_snapshot(uint64_t previous);
 int scuzz_android_push_resize(int w, int h);
 int scuzz_android_push_lifecycle(int phase);
 int scuzz_android_keyboard_request(void);
@@ -42,11 +46,9 @@ static void scuzz_android_join_worker(void) {
   g_started = 0;
 }
 
-void scuzz_android_set_vm(JavaVM *vm);
-
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
   (void)reserved;
-  scuzz_android_set_vm(vm);
+  (void)vm;
   return JNI_VERSION_1_6;
 }
 
@@ -133,21 +135,49 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativePointer(
   (void)scuzz_android_push_pointer((float)x, (float)y, (int)phase);
 }
 
+static char *utf8_bytes(JNIEnv *env, jbyteArray bytes) {
+  jsize length = bytes ? (*env)->GetArrayLength(env, bytes) : 0;
+  char *text = malloc((size_t)length + 1);
+  if (!text) return NULL;
+  if (length) (*env)->GetByteArrayRegion(env, bytes, 0, length, (jbyte *)text);
+  if ((*env)->ExceptionCheck(env) || memchr(text, 0, (size_t)length)) {
+    free(text);
+    return NULL;
+  }
+  text[length] = 0;
+  return text;
+}
+
 JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeTextEdit(
-    JNIEnv *env, jobject thiz, jstring text) {
-  const char *utf;
+    JNIEnv *env, jobject thiz, jbyteArray bytes) {
   (void)thiz;
-  if (!text) {
-    (void)scuzz_android_push_text_edit("");
-    return;
-  }
-  utf = (*env)->GetStringUTFChars(env, text, NULL);
-  if (!utf) {
-    (void)scuzz_android_push_text_edit("");
-    return;
-  }
-  (void)scuzz_android_push_text_edit(utf);
-  (*env)->ReleaseStringUTFChars(env, text, utf);
+  char *text = utf8_bytes(env, bytes);
+  if (!text) return;
+  (void)scuzz_android_push_text_edit(text);
+  free(text);
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_scuzz_app_MainActivity_nativeAccessibilityAction(
+    JNIEnv *env, jobject thiz, jlong id, jint action, jbyteArray bytes,
+    jint start, jint end, jlong value) {
+  (void)thiz;
+  char *text = utf8_bytes(env, bytes);
+  if (!text) return JNI_FALSE;
+  int queued = scuzz_android_push_accessibility((uintptr_t)id, action, text, start, end, value);
+  free(text);
+  return queued ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_dev_scuzz_app_MainActivity_nativeAccessibilitySnapshot(
+    JNIEnv *env, jobject thiz, jlong previous) {
+  (void)thiz;
+  char *json = scuzz_android_accessibility_snapshot((uint64_t)previous);
+  if (!json) return NULL;
+  size_t length = strlen(json);
+  jbyteArray result = length <= INT_MAX ? (*env)->NewByteArray(env, (jsize)length) : NULL;
+  if (result) (*env)->SetByteArrayRegion(env, result, 0, (jsize)length, (const jbyte *)json);
+  free(json);
+  return result;
 }
 
 JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeResize(

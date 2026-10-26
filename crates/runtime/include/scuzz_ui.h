@@ -679,7 +679,7 @@ int sz_view_focus_edit_target(SzView *root);
  * font_px (default theme OK). */
 SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme);
 
-/* Accessibility hooks (Headless-dumpable; no OS AT bridge yet). */
+/* Shared accessibility roles, state, snapshots, and actions. */
 typedef enum SzA11yRole {
   SZ_A11Y_NONE = 0,
   SZ_A11Y_BUTTON = 1,

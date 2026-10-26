@@ -37,6 +37,11 @@ int sz_mobile_alive(void);
 /* Read the initial system motion preference. Start change delivery. */
 int sz_mobile_reduced_motion(void);
 
+/* Nonzero if the shell reads shared control semantics. */
+int sz_mobile_accessibility_available(void);
+/* Transfer snapshot ownership to the shell. Use logical viewport dimensions. */
+void sz_mobile_publish_accessibility(SzA11ySnapshot *snapshot, int width, int height);
+
 /* Enqueue an OS event. Returns 1 if stored. */
 int sz_mobile_push_event(const SzInputEvent *event);
 

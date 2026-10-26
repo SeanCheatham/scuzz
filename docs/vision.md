@@ -12,6 +12,8 @@ Headless remains a required peer for layout, input, and verification.
 Select work from these application needs:
 
 1. Expose shared semantics to native screen readers.
+   Complete Android touch exploration and native input-focus checks.
+   Add iOS and Desktop screen-reader bridges.
    Complete keyboard behavior for remaining composite controls.
    Add editable option search when an application needs it.
 2. Add wider font coverage, other contextual scripts across font changes, and bidi caret affinity.

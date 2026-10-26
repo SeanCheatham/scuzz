@@ -99,6 +99,13 @@ __attribute__((weak)) int sz_mobile_poll_event(SzInputEvent *out) {
 }
 __attribute__((weak)) int sz_mobile_alive(void) { return 0; }
 __attribute__((weak)) int sz_mobile_reduced_motion(void) { return 0; }
+__attribute__((weak)) int sz_mobile_accessibility_available(void) { return 0; }
+__attribute__((weak)) void sz_mobile_publish_accessibility(SzA11ySnapshot *snapshot,
+                                                           int width, int height) {
+  (void)width;
+  (void)height;
+  sz_a11y_snapshot_free(snapshot);
+}
 __attribute__((weak)) int sz_mobile_clipboard_set(const char *text) {
   (void)text;
   return 0;
@@ -1763,6 +1770,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
   /* Mobile peer: present when resumed and shell is available. */
   if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE &&
       session->lifecycle == SZ_LIFECYCLE_RESUME && sz_mobile_available()) {
+    if (sz_mobile_accessibility_available())
+      sz_mobile_publish_accessibility(sz_ui_session_a11y_snapshot(session),
+        session->cfg.width, session->cfg.height);
     rgba = sk_surface_peek_pixels(session->surface, &nbytes);
     if (rgba) {
       sz_mobile_present(session->cfg.title, session->cfg.width,

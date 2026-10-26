@@ -3,19 +3,16 @@
 Expose shared control semantics to Android accessibility services.
 Keep Headless and native input on the same action path.
 
-The shared snapshot and action layer passes the runtime, ASan, and UBSan checks.
-The focused ASan check also passes with leak detection enabled.
-Shared session input records semantic positions and replays control actions.
-Android publication and platform input remain open.
+Shared snapshots, action validation, and recorded input pass the runtime checks.
+The Android transport passes the full runtime suite and focused ASan and UBSan checks.
+The focused ASan check includes leak detection.
+The Android provider and JNI compile. The product CLI rebuild passes.
+A finite Android UI automation proof passes for virtual nodes and control actions.
 
-- Add owned semantic snapshots with View identities, parent links, clipped bounds, live values, state, and available actions.
-- Validate actions against the current visible semantic tree. Reject removed, hidden, excluded, and background dialog targets.
-- Queue Android actions to the runtime worker. Publish copied snapshots for platform reads.
-- Add Android virtual nodes, focus, hover exploration, control actions, and change events. Preserve UTF-8 text and UTF-16 selection at the platform boundary.
-- Record and replay accessibility input through the shared session path.
-- Prove repeated labels, more than 64 controls, modal scope, transforms, clipping, reactive replacement, Unicode editing, and stale actions in Headless.
-- Run a finite Android UI automation proof with real virtual-node actions. Keep real screen-reader and hardware checks explicit.
-- Run affected runtime, sanitizer, replay, package, and Android checks. Rebuild the CLI and update the manual and current gaps.
+- Check touch exploration, transformed bounds, and native input-focus lookup at the platform boundary.
+- Preserve shared record and replay behavior. Run affected package and motion checks.
+- Update current gaps and app instructions. Keep real screen-reader and hardware limits explicit.
 
-The Android drawing surface has no virtual control children.
-The shared runtime already supplies labels, state, geometry, focus, and stable View identities.
+The Android worker publishes copied semantics after layout.
+The platform thread reads copied data and queues actions to the runtime worker.
+The shared runtime validates each action against the current visible tree.

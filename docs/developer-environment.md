@@ -182,12 +182,16 @@ Use a test emulator for the Android motion check:
 
 ```bash
 python3 crates/embedder-mobile/shells/android/test_motion.py emulator-5554
+python3 crates/embedder-mobile/shells/android/test_accessibility.py emulator-5554
 ```
 
 The check builds a temporary app from `examples/motion`.
 It checks the initial motion preference, live changes, visible input, resume, and restart.
 It also checks keyboard insets, typing, dismissal, reopening, and retained text.
 It restores the animation setting and removes the temporary app.
+The accessibility check uses a temporary app and Android UI automation.
+It checks 100 repeated-label controls, Unicode editing, UTF-16 selection, ranges, dialogs, and stale actions.
+It removes both test packages. It does not prove TalkBack or physical-device behavior.
 App instructions: run `scuzz docs gui`, `scuzz docs android`, or `scuzz docs ios`.
 
 ## Web build tools
