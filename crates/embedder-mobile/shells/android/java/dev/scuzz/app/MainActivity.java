@@ -625,7 +625,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         }
         for (SemanticNode node : nodes.values()) {
           SemanticNode prior = old.get(node.virtualId);
-          if (prior == null) continue;
+          if (prior == null) {
+            if (node.focused) sendNodeEvent(node.virtualId, AccessibilityEvent.TYPE_VIEW_FOCUSED);
+            continue;
+          }
           if (node.editable && !node.value.equals(prior.value)) {
             AccessibilityEvent event = event(node.virtualId, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
             event.setBeforeText(prior.value);

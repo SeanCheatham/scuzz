@@ -16,8 +16,12 @@ A finite Android UI automation proof passes for virtual nodes and control action
 Its captured Android record replays in Headless with equal state, text, selection, and semantics.
 
 - Check touch exploration and transformed bounds at the platform boundary.
-- Check focus events when a dialog creates controls.
+- Compare transformed and clipped semantic bounds with Android screenshots.
 - Update current gaps and app instructions. Keep real screen-reader and hardware limits explicit.
+
+New dialog controls send their initial focus event.
+Hover-event routing passes in Android exploration mode.
+Raw touchscreen conversion and real screen-reader gestures remain unproven.
 
 The Android worker publishes copied semantics after layout.
 The platform thread reads copied data and queues actions to the runtime worker.
