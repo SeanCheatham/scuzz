@@ -83,10 +83,19 @@ Real device checks for virtual lists remain open.
 Real mobile device bitmap checks remain open.
 Image color profiles, orientation metadata, and animated formats remain open.
 Browser accessibility and real screen-reader checks remain incomplete.
-Android exposes its drawing surface without child controls to platform accessibility tools.
+Android exposes virtual controls to platform accessibility tools.
 The shared runtime supplies owned semantic snapshots and validates actions against current visible controls.
 Headless records and replays accessibility actions by semantic position.
-Android publication, virtual nodes, and platform action input remain open.
+A finite Android emulator proof checks 100 repeated-label controls, text editing, UTF-16 selection, range actions, modal exclusion, and stale actions after replacement.
+Android service checks cover virtual input focus, cleared focus, and native Backspace over a selected emoji.
+Android emulator checks cover initial focus events for new dialog controls.
+Android emulator checks compare scaled and clipped semantic bounds with visible screenshot pixels.
+Hover-event routing passes with Android exploration mode enabled.
+Raw touchscreen conversion and real screen-reader checks remain open.
+Android records accessibility actions, viewport changes, and lifecycle input.
+A finite emulator proof replays that record in Headless.
+Named Signals, field text, byte selection offsets, and the semantic tree agree.
+iOS and Desktop screen-reader bridges remain open.
 Keyboard checks cover a form, named radio groups, manual tabs, nested dialogs, named range sliders, and editors.
 Range checks cover signed 64-bit bounds, stepped values, pointer input, and browser accessibility data.
 Physical-device and real screen-reader checks for sliders remain open.

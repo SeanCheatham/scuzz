@@ -39,22 +39,26 @@ def stop():
     run(["shell", "am", "force-stop", bundle])
 
 
-def wait_dump(reduced, target, contains=None):
+def wait_dump(reduced, target, contains=None, exact=None):
+    last_fields = []
     end = time.monotonic() + 30
     while time.monotonic() < end:
         try:
             data = json.loads(run(["shell", "run-as", bundle, "cat",
                                    "files/scuzz_android.debug.dump"]).stdout)
+            last_fields = data.get("fields", [])
             motion = next(row for row in data["transitions"] if row["kind"] == "opacity")
             if (data["reducedMotion"] is reduced and motion["target"] == target
                     and motion["value"] == target and motion["remaining"] == 0):
                 assert motion["suppressed"] is reduced
                 if contains is None or any(contains in field["value"] for field in data["fields"]):
-                    return data
+                    if exact is None or any(field["value"] == exact for field in data["fields"]):
+                        return data
         except (subprocess.CalledProcessError, json.JSONDecodeError):
             pass
         time.sleep(.2)
-    raise AssertionError("The Android motion dump does not reach its expected state.")
+    raise AssertionError("The Android motion dump does not reach its expected state. "
+                         + f"Expected text: {exact!r}; fields: {last_fields!r}")
 
 
 def geometry():
@@ -129,23 +133,36 @@ try:
         # The field is above Add. The sample has a gap of eight pixels.
         tap(add["x"] + add["w"] / 2, add["y"] - 8 - add["h"] / 2)
         wait_viewport(full_height, True)
+        before = next(field for field in wait_dump(False, 100)["fields"] if field["target"])
+        raw = before["value"].encode("utf-8")
+        start, end = sorted((before["sel_start"], before["sel_end"]))
+        original = (raw[:start] + b"Kept" + raw[end:]).decode("utf-8")
+        deleted = (raw[:start] + b"Kep" + raw[end:]).decode("utf-8")
         run(["shell", "input", "text", "Kept"])
-        wait_dump(False, 100, "Kept")
+        typed = wait_dump(False, 100, exact=original)
+        assert next(field for field in typed["fields"] if field["target"])["caret"] == start + 4
+        for _ in range(5):
+            run(["shell", "input", "keyevent", "KEYCODE_DEL"])
+            erased = wait_dump(False, 100, exact=deleted)
+            assert next(field for field in erased["fields"] if field["target"])["caret"] == start + 3
+            run(["shell", "input", "text", "t"])
+            restored = wait_dump(False, 100, exact=original)
+            assert next(field for field in restored["fields"] if field["target"])["caret"] == start + 4
         setting("0")
-        wait_dump(True, 100, "Kept")
+        wait_dump(True, 100, exact=original)
         run(["shell", "input", "keyevent", "KEYCODE_BACK"])
         wait_viewport(full_height, False)
         tap(add["x"] + add["w"] / 2, add["y"] - 8 - add["h"] / 2)
         wait_viewport(full_height, True)
-        wait_dump(True, 100, "Kept")
+        wait_dump(True, 100, exact=original)
         run(["shell", "input", "keyevent", "KEYCODE_BACK"])
         wait_viewport(full_height, False)
         setting("1")
-        wait_dump(False, 100, "Kept")
+        wait_dump(False, 100, exact=original)
         stop()
         run(["shell", "run-as", bundle, "rm", "-f", "files/scuzz_android.debug.dump"])
         launch()
-        wait_dump(False, 100)
+        wait_dump(False, 100, exact=before["value"])
         print("Android motion: initial preference, live changes, input, keyboard insets, resume, and restart pass.")
 finally:
     if installed:

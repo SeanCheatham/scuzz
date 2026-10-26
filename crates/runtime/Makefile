@@ -100,10 +100,15 @@ $(BUILDDIR)/test_native_motion: tests/test_native_motion.c $(BUILDDIR)/libscuzz_
 	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) tests/test_native_motion.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
-test: $(BUILDDIR)/test_io $(BUILDDIR)/test_ui $(BUILDDIR)/test_native_motion
+$(BUILDDIR)/test_android_accessibility: tests/test_android_accessibility.c $(MOBILE)/shells/android/jni/android_shell.c $(MOBILE)/include/scuzz_mobile.h $(BUILDDIR)/libscuzz_rt.a ffi-skia | $(BUILDDIR)
+	$(CC) $(CFLAGS) -UNDEBUG $(INCLUDES) tests/test_android_accessibility.c $(MOBILE)/shells/android/jni/android_shell.c -L$(BUILDDIR) -L$(FFI_SKIA)/build \
+		-lscuzz_rt -lsk_capi -lpthread -lm $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+
+test: $(BUILDDIR)/test_io $(BUILDDIR)/test_ui $(BUILDDIR)/test_native_motion $(BUILDDIR)/test_android_accessibility
 	"$(abspath $(BUILDDIR))/test_io"
 	"$(abspath $(BUILDDIR))/test_ui"
 	"$(abspath $(BUILDDIR))/test_native_motion"
+	"$(abspath $(BUILDDIR))/test_android_accessibility"
 
 # ASan C tests keep leak detection off. Compiled corpus replay uses
 # lib-asan with leak detection on. Keep each build separate.
@@ -132,8 +137,8 @@ test-asan:
 		echo "test-asan: the buffer overflow probe has no ASan evidence" >&2; exit 1; \
 	fi; \
 	echo "ASan rejects the known buffer overflow."; \
-	$(MAKE) BUILDDIR=build/asan-tests/build CFLAGS='$(ASAN_CFLAGS)' build/asan-tests/build/test_io build/asan-tests/build/test_ui build/asan-tests/build/test_native_motion && \
-	(cd build/asan-tests && ASAN_OPTIONS=detect_leaks=0 ./build/test_io && ASAN_OPTIONS=detect_leaks=0 ./build/test_ui && ASAN_OPTIONS=detect_leaks=0 ./build/test_native_motion)
+	$(MAKE) BUILDDIR=build/asan-tests/build CFLAGS='$(ASAN_CFLAGS)' build/asan-tests/build/test_io build/asan-tests/build/test_ui build/asan-tests/build/test_native_motion build/asan-tests/build/test_android_accessibility && \
+	(cd build/asan-tests && ASAN_OPTIONS=detect_leaks=0 ./build/test_io && ASAN_OPTIONS=detect_leaks=0 ./build/test_ui && ASAN_OPTIONS=detect_leaks=0 ./build/test_native_motion && ASAN_OPTIONS=detect_leaks=0 ./build/test_android_accessibility)
 
 # Keep UBSan binaries and file fixtures separate from the normal build.
 UBSAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
@@ -152,8 +157,8 @@ test-ubsan:
 		echo "test-ubsan: the overflow probe has no UBSan evidence" >&2; exit 1; \
 	fi; \
 	echo "UBSan rejects the known signed overflow."; \
-	$(MAKE) BUILDDIR=build/ubsan/build CFLAGS='$(UBSAN_CFLAGS)' build/ubsan/build/test_io build/ubsan/build/test_ui build/ubsan/build/test_native_motion && \
-	(cd build/ubsan && ./build/test_io && ./build/test_ui && ./build/test_native_motion)
+	$(MAKE) BUILDDIR=build/ubsan/build CFLAGS='$(UBSAN_CFLAGS)' build/ubsan/build/test_io build/ubsan/build/test_ui build/ubsan/build/test_native_motion build/ubsan/build/test_android_accessibility && \
+	(cd build/ubsan && ./build/test_io && ./build/test_ui && ./build/test_native_motion && ./build/test_android_accessibility)
 
 clean:
 	rm -rf build
