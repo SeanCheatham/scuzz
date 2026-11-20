@@ -85,6 +85,9 @@ oracle evConstructors(): Bool =
 oracle evModules(seed: Int where seed >= 0 && seed < 6): Bool =
   Main.evModules(seed)
 
+oracle evModuleOrder(seed: Int where seed >= 0 && seed < 6, rev: Int where rev >= 0 && rev <= 1): Bool =
+  Main.evModuleOrder(seed, rev)
+
 oracle evModule0(): Bool =
   Main.evModules(0)
 

@@ -285,8 +285,9 @@ Persistent HTTP servers wait for requests until cancellation in both runtimes.
 Use one Net API with shared request checks, timeline events, and simulation dispatch.
 CLI and server HTTP use HTTP/1.0 with OpenSSL.
 iOS and macOS GUI clients use URLSession and platform certificate trust.
-Android GUI clients use the platform HTTP client and platform certificate trust without NDK OpenSSL.
+Android GUI clients use HttpURLConnection and platform certificate trust without NDK OpenSSL.
 GUI clients verify loopback certificates, preserve status responses, and do not follow redirects.
+Mobile shells permit local-network HTTP and require HTTPS for remote services.
 Requests park fibers. IO finalizers cancel them.
 Responses contain status, headers, and body: `(Int, Map[String, String], String)`.
 Servers bind `0.0.0.0` and `::`.

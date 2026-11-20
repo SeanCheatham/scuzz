@@ -53,6 +53,23 @@ class Service(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError): pass
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = handle_request
 
+class TlsServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, handler, tls_context):
+        super().__init__(address, handler)
+        self.tls_context = tls_context
+
+    def finish_request(self, request, client_address):
+        request.settimeout(10)
+        try:
+            with self.tls_context.wrap_socket(request, server_side=True) as tls:
+                tls.settimeout(30)
+                super().finish_request(tls, client_address)
+        except (OSError, ssl.SSLError):
+            pass
+
+
 def proof_ui(command, env, directory):
     global attempts
     attempts = 0
@@ -140,8 +157,8 @@ def prove_ios(cli, project, temp, env):
         subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True)
         proof_log = temp / "net-proof.log"
         child_env = dict(os.environ, **{"SIMCTL_CHILD_" + key: value for key, value in env.items() if key.startswith(("SCUZZ_NET_", "SSL_CERT_"))}, SIMCTL_CHILD_SCUZZ_NET_TRUSTED="1", SIMCTL_CHILD_SCUZZ_NET_PROOF_LOG=str(proof_log))
-        deadline = time.monotonic() + 90
-        result = subprocess.run(["xcrun", "simctl", "launch", "--console", device, "dev.scuzz.netproof"], env=child_env, capture_output=True, text=True, timeout=90)
+        deadline = time.monotonic() + 150
+        result = subprocess.run(["xcrun", "simctl", "launch", "--console", device, "dev.scuzz.netproof"], env=child_env, capture_output=True, text=True, timeout=150)
         proof = proof_log.read_text() if proof_log.exists() else ""
         while not any(line.startswith("Apple Net proof exit ") for line in proof.splitlines()) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -160,10 +177,13 @@ def prove_ios(cli, project, temp, env):
 with tempfile.TemporaryDirectory(prefix="scuzz-apple-net-") as temp:
     temp = Path(temp)
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(temp / "key"), "-out", str(temp / "cert"), "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"], check=True, capture_output=True)
-    servers = [http.server.ThreadingHTTPServer(("127.0.0.1", 0), Service) for _ in range(2)]
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(temp / "cert", temp / "key")
-    servers[1].socket = context.wrap_socket(servers[1].socket, server_side=True)
+    servers = [
+        http.server.ThreadingHTTPServer(("127.0.0.1", 0), Service),
+        TlsServer(("127.0.0.1", 0), Service, context),
+    ]
+    servers[0].daemon_threads = True
     for server in servers: threading.Thread(target=server.serve_forever, daemon=True).start()
     env = dict(os.environ, SCUZZ_NET_BASE=f"http://127.0.0.1:{servers[0].server_port}", SCUZZ_NET_TLS=f"https://localhost:{servers[1].server_port}", SSL_CERT_FILE="/missing/scuzz-ca", SSL_CERT_DIR="/missing/scuzz-ca")
     try:

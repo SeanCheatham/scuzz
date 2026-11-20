@@ -72,7 +72,7 @@ Allocation counts do not measure CPU time. These samples do not establish a gene
 
 **Proof.** Run Counter on one device with `scuzz package` and the platform toolchain. Physical-device work is outside the review arc.
 
-The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Hosted simulator checks cover HTTP requests, streamed downloads, cancellation, certificate trust, and reactive network UI. Net HTTP servers remain host-only. Android packages reject Net calls until the platform HTTP client bridge lands.
+The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS and Android support Net HTTP clients with platform certificate trust and permit local-network HTTP. Hosted iOS simulator checks cover HTTP requests, streamed downloads, cancellation, certificate trust, and reactive network UI. Native JNI HttpURLConnection checks cover Android HTTP requests, streamed downloads, headers, redirect refusal, cancellation, certificate trust, and local-network manifest rules; physical-device HTTP checks remain open. Net HTTP servers remain host-only.
 
 ## Known gaps
 
@@ -216,23 +216,22 @@ Keep these gaps open until the corresponding runtime behavior and platform check
 
 `scuzz ide serve` serves the workspace card feed, idempotent decisions, and steer queue over local Wi-Fi HTTP with a bearer pairing token. Hermetic `TestRuntime` claims and live loopback replay check unauthorized request rejection, duplicate action IDs, stale-base `accept` refusal, ordered batch replay, and crash-safe `.scuzz/ide/` journal and steer persistence across `fs` and `net` faults.
 
-Three slices remain open before the mobile loop works end to end:
+Two slices remain open before the mobile loop works end to end:
 
-- **Android native HTTP.** Android packages still reject `Net` client calls. Gate 1 adds the Android `HttpURLConnection` bridge with platform certificate trust and no NDK OpenSSL dependency.
-- **Native mobile swipe and steer client.** No phone client UI or persistent offline outbox exists yet. Gate 2 builds the shared Headless, iOS, and Android deck that prefetches cards on local Wi-Fi, records offline swipe accept, swipe reject, skip, and steer actions, and flushes them on reconnect.
-- **Unattended laptop generation loop.** Local generation still runs one explicit request or bounded IDE session at a time. Gate 3 runs continuous unattended local GGUF rounds gated by `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks while consuming `.scuzz/ide/steer.json` prompts and preferences.
+- **Native mobile swipe and steer client.** No phone client UI or persistent offline outbox exists yet. Gate 1 builds the shared Headless, iOS, and Android deck that prefetches cards on local Wi-Fi, records offline swipe accept, swipe reject, skip, and steer actions, and flushes them on reconnect.
+- **Unattended laptop generation loop.** Local generation still runs one explicit request or bounded IDE session at a time. Gate 2 runs continuous unattended local GGUF rounds gated by `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks while consuming `.scuzz/ide/steer.json` prompts and preferences.
 
 ### Local choice feedback
 
 The desktop IDE Can't decide control does not select a reason yet, although `scuzz ide serve` records optional skip reasons on synced mobile abstentions. Local model requests and exported producer requests do not consume preferences or queued steer prompts yet. There is no retained-acceptance measure or local session summary. Region focus needs controls to retain or select a region after a result.
 
-**Proof:** Gate 4. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
+**Proof:** Gate 3. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
 
 ### Rule review
 
 There is no explicit claim suggestion or installation path from a preference. A finite witness cannot establish a universal rule. Rule installation needs protection against weakening existing claims and against stale source.
 
-**Proof:** Gate 5. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
+**Proof:** Gate 4. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
 
 ### Verification scope and application correctness
 

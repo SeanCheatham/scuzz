@@ -3046,8 +3046,8 @@ cases = {
         ('lookup', [{'op': 'drive', 'name': 'evLookup', 'args': []}]),
         ('constructors', [{'op': 'drive', 'name': 'evConstructors', 'args': []}]),
         ('maps', [{'op': 'drive', 'name': 'evMaps', 'args': []}])] + [
-        (f'module-{seed}', [{'op': 'drive', 'name': 'evModules', 'args': [seed]}])
-        for seed in range(6)],
+        (f'module-{seed}-{rev}', [{'op': 'drive', 'name': 'evModuleOrder', 'args': [seed, rev]}])
+        for seed in range(6) for rev in range(2)],
     'editor': [('idle', None), ('queue-cache', [
         {'op': 'drive', 'name': 'queueCacheFlow', 'args': [3]}]),
         ('protocol', [
@@ -3064,6 +3064,37 @@ def limit():
     if sys.platform.startswith('linux'):
         resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
 
+eval_servers = {}
+
+def read_server_line(proc, wait_seconds):
+    import selectors
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    deadline = time.monotonic() + wait_seconds
+    try:
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if not selector.select(remaining if remaining > 0 else 0):
+                break
+            return proc.stdout.readline()
+    finally:
+        selector.close()
+    raise TimeoutError('evaluator probe server timed out')
+
+def stop_eval_servers():
+    for proc, _, _ in list(eval_servers.values()):
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+            proc.wait(timeout=5)
+    eval_servers.clear()
+
+import atexit
+atexit.register(stop_eval_servers)
+
 def replay(package, executable, label, events, ui=False, auto_tap=True, expected_error=None):
     build = package / 'build'
     source = build / 'fuzz/ev'
@@ -3079,6 +3110,7 @@ def replay(package, executable, label, events, ui=False, auto_tap=True, expected
         request.update(UI_RUNTIME='headless', UI_WIDTH='960', UI_HEIGHT='560', UI_SCALE='1.0')
         if auto_tap:
             request['UI_TAP'] = '1'
+    reuse_eval = not ui and name in ('tyck', 'codegen') and package == repo / 'examples' / name
     for engine in ['eval', 'native']:
         work = out / 'work'
         shutil.rmtree(work, ignore_errors=True)
@@ -3089,6 +3121,42 @@ def replay(package, executable, label, events, ui=False, auto_tap=True, expected
         if ui:
             req['FUZZ_DUMP'] = str(out / f'{engine}.json')
             if name == 'controls': env['SCUZZ_UI_DEBUG_DUMP'] = req['FUZZ_DUMP']
+        if engine == 'eval' and reuse_eval:
+            req['PROBE_LOG'] = str(out / 'probe.log')
+            key = str(source)
+            if key not in eval_servers or eval_servers[key][0].poll() is not None:
+                shared_dir = build / 'fuzz/parity/eval-server'
+                shared_dir.mkdir(parents=True, exist_ok=True)
+                shared_req = shared_dir / 'request.txt'
+                srv_env = dict(env, SCUZZ_EV_REQUEST=str(shared_req))
+                boot_started = time.monotonic()
+                proc = subprocess.Popen([str(cli), 'eval', '--probe', str(source)],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, text=True, env=srv_env,
+                                        cwd=shared_dir)
+                ready = read_server_line(proc, 30)
+                assert ready == 'ready\n', (name, label, ready, proc.stderr.read() if proc.poll() is not None else '')
+                print(f'{name} eval-server ready: {time.monotonic() - boot_started:.2f} s', flush=True)
+                eval_servers[key] = (proc, shared_req, shared_dir)
+            proc, shared_req, _ = eval_servers[key]
+            shared_req.write_text(''.join(f'{k}={v}\n' for k, v in req.items()))
+            started = time.monotonic()
+            proc.stdin.write('probe\n')
+            proc.stdin.flush()
+            status_line = read_server_line(proc, 30)
+            stdout_text = 'ready\n' + status_line
+            returncode = 0 if status_line else (proc.poll() or 1)
+            (out / f'{engine}.log').write_text(stdout_text)
+            detail = stdout_text
+            if (out / 'probe.log').exists():
+                detail += (out / 'probe.log').read_text()
+            if expected_error is not None:
+                assert expected_error in detail, (name, label, engine, detail)
+                assert returncode == 0 and stdout_text == 'ready\n1\n', (name, label, detail)
+            else:
+                assert returncode == 0 and stdout_text == 'ready\n0\n', (name, label, detail)
+            print(f'{name} {label} {engine}: {time.monotonic() - started:.2f} s', flush=True)
+            continue
         if engine == 'eval':
             req['PROBE_LOG'] = str(out / 'probe.log')
             path = out / 'request.txt'

@@ -83,6 +83,23 @@ class Service(http.server.BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = handle_request
 
 
+class TlsServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, handler, tls_context):
+        super().__init__(address, handler)
+        self.tls_context = tls_context
+
+    def finish_request(self, request, client_address):
+        request.settimeout(10)
+        try:
+            with self.tls_context.wrap_socket(request, server_side=True) as tls:
+                tls.settimeout(30)
+                super().finish_request(tls, client_address)
+        except (OSError, ssl.SSLError):
+            pass
+
+
 def find_jdk():
     candidates = []
     if os.environ.get("JAVA_HOME"):
@@ -302,10 +319,13 @@ def main():
             check=True,
         )
 
-        servers = [http.server.ThreadingHTTPServer(("127.0.0.1", 0), Service) for _ in range(2)]
         tls_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls_ctx.load_cert_chain(temp / "cert.pem", temp / "key.pem")
-        servers[1].socket = tls_ctx.wrap_socket(servers[1].socket, server_side=True)
+        servers = [
+            http.server.ThreadingHTTPServer(("127.0.0.1", 0), Service),
+            TlsServer(("127.0.0.1", 0), Service, tls_ctx),
+        ]
+        servers[0].daemon_threads = True
         for srv in servers:
             threading.Thread(target=srv.serve_forever, daemon=True).start()
 
