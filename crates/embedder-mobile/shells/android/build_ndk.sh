@@ -67,14 +67,15 @@ if ! grep -q 'define i32 @scuzz_app_main(' "$OUT/app.android.ll"; then
   echo "missing scuzz_app_main - IR main rename failed" >&2
   exit 1
 fi
-# net.c needs OpenSSL. This target does not ship it. Fail if the app calls Net.
-if grep -E 'call [^@]*@sz_net_' "$OUT/app.android.ll" >/dev/null; then
-  echo "mobile package cannot link Net - this target has no OpenSSL" >&2
+# This target supplies HTTP clients. HTTP servers need the host transport.
+if grep -E 'call [^@]*@sz_net_serve' "$OUT/app.android.ll" >/dev/null; then
+  echo "Android package cannot link Net HTTP servers; use a host target" >&2
   exit 1
 fi
 
-INCLUDES=(-I"$ROOT"/crates/runtime/include -I"$ROOT"/crates/ffi-skia/include
-          -I"$ROOT"/crates/embedder-desktop/include -I"$ROOT"/crates/embedder-mobile/include)
+INCLUDES=(-I"$ROOT"/crates/runtime/include -I"$ROOT"/crates/runtime/src
+          -I"$ROOT"/crates/ffi-skia/include -I"$ROOT"/crates/embedder-desktop/include
+          -I"$ROOT"/crates/embedder-mobile/include)
 
 build_abi() {
   local abi="$1"
@@ -91,8 +92,8 @@ build_abi() {
   "$clang" "${cflags[@]}" -c "$OUT/app.android.ll" -o "$obj/app.o"
   for src in "$ROOT"/crates/runtime/src/*.c; do
     base="$(basename "$src")"
-    # The target has no live HTTP transport.
-    if [ "$base" = "net.c" ] || [ "$base" = "net_request.c" ] || [ "$base" = "impurity.c" ]; then
+    # The Android JNI client replaces net.c (OpenSSL).
+    if [ "$base" = "net.c" ]; then
       continue
     fi
     "$clang" "${cflags[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" \
@@ -105,7 +106,8 @@ build_abi() {
       -o "$obj/sk_$(basename "${src%.c}").o"
   done
   for src in "$ROOT"/crates/embedder-mobile/shells/android/jni/android_shell.c \
-             "$ROOT"/crates/embedder-mobile/shells/android/jni/scuzz_jni.c; do
+             "$ROOT"/crates/embedder-mobile/shells/android/jni/scuzz_jni.c \
+             "$ROOT"/crates/embedder-mobile/shells/android/jni/net_android.c; do
     "$clang" "${cflags[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" \
       -o "$obj/jni_$(basename "${src%.c}").o"
   done

@@ -25,6 +25,8 @@ char *scuzz_android_accessibility_snapshot(uint64_t previous);
 int scuzz_android_push_resize(int w, int h);
 int scuzz_android_push_lifecycle(int phase);
 int scuzz_android_keyboard_request(void);
+int scuzz_android_http_init(JavaVM *vm);
+void scuzz_android_http_shutdown(JavaVM *vm);
 
 static int g_started;
 static int g_joinable;
@@ -48,14 +50,15 @@ static void scuzz_android_join_worker(void) {
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
   (void)reserved;
-  (void)vm;
+  if (!scuzz_android_http_init(vm))
+    return JNI_ERR;
   return JNI_VERSION_1_6;
 }
 
 JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
-  (void)vm;
   (void)reserved;
   scuzz_android_join_worker();
+  scuzz_android_http_shutdown(vm);
   sz_mobile_shutdown();
 }
 

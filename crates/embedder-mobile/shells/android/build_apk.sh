@@ -89,7 +89,7 @@ sed "s/package=\"dev.scuzz.app\"/package=\"$BUNDLE_ID\"/" \
 
 javac -source 8 -target 8 -bootclasspath "$ANDROID_JAR" \
   -classpath "$ANDROID_JAR" -d "$STAGE/classes" \
-  "$SHELL_DIR/java/dev/scuzz/app/MainActivity.java"
+  "$SHELL_DIR/java/dev/scuzz/app/"*.java
 
 "$BT/d8" --lib "$ANDROID_JAR" --min-api 24 --output "$STAGE/dex" \
   "$STAGE/classes/dev/scuzz/app/"*.class

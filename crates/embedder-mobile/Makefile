@@ -27,6 +27,7 @@ build/test_host: tests/test_host.c build/libscuzz_mobile.a | build
 
 test: build/test_host
 	./build/test_host
+	python3 shells/android/test_net.py
 
 clean:
 	rm -rf build
