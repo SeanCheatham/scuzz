@@ -1,0 +1,4 @@
+[fuzz]
+schedule_seed = "16"
+fault_seed = "64"
+events = ["drive recoverAcceptJournal"]

@@ -31,9 +31,12 @@ Examples in `examples/` check language behavior.
 The compiler and CLI are Scuzz source.
 
 The target development loop uses proposal review.
-A developer sets an objective. A generator proposes one small change.
-Scuzz checks its observable effects. The IDE shows a blind comparison.
-The developer chooses a lane. Each choice guides the next proposal.
+A developer sets an objective.
+The laptop runs unattended local generation and checks observable effects.
+It buffers verified proposal cards and serves a local HTTP sync API.
+The IDE or a native mobile client reviews the cards.
+The developer accepts a change, rejects a change, skips a card, or sends a steer prompt.
+Each choice and steer prompt guides the next generation round.
 See [Proposal review](#proposal-review) for the design and `vision.md` for remaining gates.
 
 ## Defaults
@@ -207,6 +210,16 @@ These are the target design locks. Missing behavior stays in [`gaps.md`](gaps.md
 
   Use cache by default; downloads need an explicit command flag. Publish a complete candidate directory and report a structured result. Do not write package source, launch the UI, or leave owned inference running. Publication is not behavioral approval or acceptance. Keep acceptance and rule installation behind explicit review actions.
 
+- **Unattended laptop buffer.** The laptop runs unattended local GGUF generation (`scuzz models`) against the workspace. Every candidate must pass `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks before it enters the ready card buffer. Failed candidates record diagnostics and stay out of the feed.
+
+- **Laptop sync server.** `scuzz ide serve` exposes the workspace card feed, decisions, and steer prompts over local Wi-Fi HTTP. Do not require Tailscale, a relay, or an external tunnel. Protect sync endpoints with a bearer pairing token stored under `.scuzz/ide/sync-token.txt` or supplied on startup. Print the pairing token on startup. Reject unauthorized requests before reading or changing workspace state.
+
+  `GET /v1/ide/sync` runs journal recovery and returns the workspace baseline hash, snapshot cursor, ready verified proposal cards, and queued steer prompts. `POST /v1/ide/sync` accepts one action or an ordered batch of client actions (`accept`, `reject`, `skip`, `steer`). Each action has a unique client action ID. Store action receipts under `.scuzz/ide/sync/actions/` so retried or duplicate requests stay idempotent.
+
+  An `accept` action names its expected baseline hash and writes proposed files through `.scuzz/ide/journal.json`. If an earlier acceptance or edit changed the workspace baseline, a later `accept` for the old baseline returns `stale` without changing files. `reject` records a baseline preference in `.scuzz/ide/records/`. `skip` records an abstention and optional reason without a preference label or file write. `steer` appends a bounded prompt to `.scuzz/ide/steer.json` in replay order for later generation rounds.
+
+- **Synced native mobile client.** A native mobile client runs on Headless, iOS, and Android as peers. The phone prefetches verified proposal cards while on local Wi-Fi. It supports swipe accept, swipe reject, skip, and a short steer prompt while offline. A persistent local outbox stores pending actions and flushes them in order on the next Wi-Fi connection.
+
 - **External proposals.** External tools publish complete candidate directories under `build/proposals/`. The IDE does not launch or authenticate these tools. Export a bounded generation request with its baseline identity for a producer to read. Require complete-publication metadata and validate every candidate through the same importer and review path. Source scope, stale-input checks, claim gates, and human choices apply to both inputs.
 
   Directory import works without a local model or inference backend.
@@ -272,6 +285,7 @@ Persistent HTTP servers wait for requests until cancellation in both runtimes.
 Use one Net API with shared request checks, timeline events, and simulation dispatch.
 CLI and server HTTP use HTTP/1.0 with OpenSSL.
 iOS and macOS GUI clients use URLSession and platform certificate trust.
+Android GUI clients use the platform HTTP client and platform certificate trust without NDK OpenSSL.
 GUI clients verify loopback certificates, preserve status responses, and do not follow redirects.
 Requests park fibers. IO finalizers cancel them.
 Responses contain status, headers, and body: `(Int, Map[String, String], String)`.

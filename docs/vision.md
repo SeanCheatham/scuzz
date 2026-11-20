@@ -35,9 +35,6 @@ Keep one compiler, one verification command, and the existing simulation runtime
 Preserve exact evaluator and native replay, probe deadlines, claims, corpus entries, and search scope.
 General compiler speed work needs a demonstrated application or proof blocker.
 Reference models remain optional. They are not the default verification path.
-
-Keep current work on language, standard kits, and verification tooling.
-The decision loop gates below remain later work.
 Generation usefulness and review efficiency need evidence from a real application session.
 
 ### Improvement work order
@@ -163,15 +160,50 @@ Keep reductions out of the search until they preserve all claim observations.
 A finite check cannot produce an unbounded proof label.
 Do not add a general proof language, a second compiler, or a mandatory app model.
 
-## Later arc: development through decisions
+## Active arc: split laptop daemon and native mobile review
 
-A developer sets one objective and reviews a stream of small changes. Each card compares one proposal with the current working tree. Scuzz finds a recorded execution that shows the difference. The developer chooses a blind lane. Accepted changes become the baseline for the next request. Claims constrain the choices. Locks: [`philosophy.md`](philosophy.md#proposal-review).
+The laptop runs unattended local GGUF generation (`scuzz models`) against the workspace.
+Every candidate passes `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks before it enters the ready card buffer.
+`scuzz ide serve` exposes the card feed, idempotent decisions, and steer prompts over local Wi-Fi HTTP with a bearer pairing token.
+A native mobile client runs on Headless, iOS, and Android as peers.
+The phone prefetches verified cards on local Wi-Fi, records swipe accept, swipe reject, skip, and short steer prompts in an offline outbox, and flushes that outbox on the next Wi-Fi connection.
+Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
-The first complete feature needs the remaining gates below. Implement them in order. A generator transport proof does not prove useful generation. A deterministic session does not prove human preference or speed. Keep those unknowns explicit in `gaps.md`.
+Implement the remaining slices in order.
+A transport proof does not prove useful generation.
+A deterministic session does not prove human preference or speed.
+Keep those unknowns explicit in `gaps.md`.
 
 ## Implementation gates
 
-### 5. Learn from local choices
+### 1. Android native HTTP
+
+Add the Android platform HTTP client bridge (`HttpURLConnection`) in `crates/embedder-mobile` with platform certificate trust.
+Use the shared `Net` request validation, status handling, redirect refusal, cancellation, and hermetic `TestRuntime` dispatch.
+Do not link NDK OpenSSL into Android packages.
+
+**Gate:** Android UI packages execute `Net` HTTP client requests with platform trust on the emulator. Hermetic simulation stays socket-free. Invalid headers, control bytes, and error responses match host and iOS client behavior.
+
+### 2. Native mobile swipe and steer client
+
+Build the phone-first review client for Headless, iOS, and Android.
+Pair with `scuzz ide serve` with its bearer token over local Wi-Fi.
+Prefetch ready verified cards for offline review.
+Support swipe accept, swipe reject, skip with optional reason, and a short steer prompt.
+Persist pending actions in a local offline outbox and flush them in order when Wi-Fi returns.
+
+**Gate:** Headless, iOS simulator, and Android emulator run the same deck and outbox code. Duplicate flushes stay idempotent. Stale-base acceptances surface cleanly without corrupting local state or laptop files. Offline swipe and steer actions survive app restart before sync.
+
+### 3. Unattended laptop generation loop
+
+Run unattended local GGUF generation rounds (`scuzz models`) against the workspace.
+Gate every candidate with `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks before publishing a ready card.
+Consume queued `.scuzz/ide/steer.json` prompts and recorded preferences in order.
+Rebase generation onto the new workspace baseline after an accepted card.
+
+**Gate:** Failed static, fuzz, diff, or mutation candidates never enter the ready feed. Consumed steer prompts advance cleanly without loss under restart or file faults. Work limits and cancellation stop owned inference cleanly.
+
+### 4. Learn from local choices
 
 Send bounded recent preferences, abstention reasons, and Undo results with local model requests and exported generation requests. Keep candidate rationale hidden before a blind choice. Show the reveal and a short result after the choice. Let the developer retain region focus or select another region.
 
@@ -179,7 +211,7 @@ Add a local session summary. Report accepted choices, baseline choices, abstenti
 
 **Gate:** Skip does not become a negative preference. Automatic exclusions do not count as human choices. Undo and later replacement change the retention result. The next request reflects the current baseline and bounded feedback. Session records reproduce the displayed totals. A reveal cannot expose the next card's lane mapping.
 
-### 6. Offer a rule from a preference
+### 5. Offer a rule from a preference
 
 Add an explicit Suggest rule action for a recorded choice. Use the same local model path or external import with a rule request kind. External mode exports the rule request and waits for a matching published draft. A rule response contains added claim source and the supporting witness identity. It can add a root `*.scuzz_verify` file or add claims to one existing verify file. It cannot alter existing definitions or the scenario.
 
@@ -187,7 +219,7 @@ Show rule source and the witness in a separate rule review. Check and replay all
 
 **Gate:** A behavior choice never writes verification source. Rule installation needs its own action. A rejected rule changes no file. A weakened existing claim is rejected. An untriggered new claim cannot be offered as verified. Installation and Undo preserve existing claims and recover after interruption. The installed rule constrains a later behavior proposal. Finite evidence does not become a universal proof label.
 
-### 7. Prove and refine the complete session
+### 6. Prove and refine the complete session
 
 Use existing examples for the proof. Exercise one UI objective and one IO objective in scratch workspaces. Include generation, candidate checks, a short witness, each lane choice, abstention, next-baseline generation, Undo, rule review, restart, and a session summary. Include invalid, stale, and interrupted operations. Keep the simulation proof hermetic. Add live finite Headless proofs for the real local process, private HTTP, and filesystem paths.
 
@@ -197,7 +229,7 @@ Run the required checks in `plans.md` for each slice. Update `scuzz docs ide` wh
 
 ## Execution boundary
 
-Use `plans.md` for the next language or tooling slice. Complete its software proofs before advancing. The decision loop gates remain later work. Keep unavailable external and human checks explicit. They do not prevent independent later implementation work. Remove the completed slice from this file and from `gaps.md`. Delete its `plans.md`. If arc work remains, create the next slice from this order and continue. Do not wait for a new instruction between authorized slices.
+Use `plans.md` for the next slice. Complete its software proofs before advancing. Keep unavailable external and human checks explicit. They do not prevent independent implementation work. Remove the completed slice from this file and from `gaps.md`. Delete its `plans.md`. If arc work remains, create the next slice from this order and continue. Do not wait for a new instruction between authorized slices.
 
 Change compiler or runtime code for a language guarantee, a demonstrated application blocker, or a required shared review operation. Keep one clear implementation. Do not rewrite the compiler or editor for architecture alone. Preserve the newest-release bootstrap constraints. Do not reduce probe limits, skip claims, remove corpus entries, or bypass replay failures to finish.
 
@@ -207,7 +239,7 @@ Unavailable local model resources or human availability do not prevent determini
 
 Compile time and evaluator parity support this arc. Measure changes that affect them. Standard kits follow when an ordinary program or this review loop needs them. Ranked work: [`gaps.md`](gaps.md).
 
-Do not start FFI, a registry, plugins, provider SDKs, a remote generator service, model training, physical-device packaging, or `*.scuzz_tune`. Keep one pinned llama.cpp release and one model format. Use Metal on Apple Silicon and Vulkan on Linux when a supported GPU is available. Fall back to CPU inference when the platform backend or GPU is unavailable. General Hub browsing, gated-model login, model conversion, and training stay later. Do not add pixel preview infrastructure, semantic timeline alignment, social accounts, public feeds, ranking algorithms, or swipe animation frameworks. Keep keyboard and shared Headless input as peers. Native file dialogs, menus, multi-window, debugger, and general editor expansion stay later.
+Do not start FFI, a registry, plugins, provider SDKs, a remote generator service, Tailscale or external relay tunnels, model training, physical-device packaging, or `*.scuzz_tune`. Keep one pinned llama.cpp release and one model format. Use Metal on Apple Silicon and Vulkan on Linux when a supported GPU is available. Fall back to CPU inference when the platform backend or GPU is unavailable. General Hub browsing, gated-model login, model conversion, and training stay later. Do not add pixel preview infrastructure, semantic timeline alignment, social accounts, public feeds, ranking algorithms, or third-party gesture frameworks. Keep keyboard and shared Headless input as peers. Native file dialogs, menus, multi-window, debugger, and general editor expansion stay later.
 
 ## Risks
 
@@ -215,6 +247,9 @@ Do not start FFI, a registry, plugins, provider SDKs, a remote generator service
 | --- | --- |
 | A blind control selects an unseen state | Select a lane by fixed card identity |
 | Acceptance writes bytes other than those reviewed | Freeze inputs and revalidate before writing |
+| An offline mobile acceptance targets an outdated baseline | Require the expected baseline hash on `accept` and return `stale` without changing files |
+| A retried mobile outbox flushes an action twice | Key every sync action by client ID and return stored receipts idempotently |
+| An unauthenticated peer on shared Wi-Fi calls the sync server | Require a bearer pairing token and reject unauthorized requests before workspace access |
 | A multi-file write stops halfway | Journal, restart recovery, and conditional Undo |
 | A proposal passes because both sides fail | Check absolute candidate verdicts |
 | A narrow workload misses a consequence | Corpus, bounded search, and visible evidence scope |

@@ -1,0 +1,265 @@
+private def token(): String =
+  "pairing-token-1234"
+
+private def cardAlpha(): String =
+  Str.repeat("a", 64)
+
+private def cardBeta(): String =
+  Str.repeat("b", 64)
+
+private def cardGamma(): String =
+  Str.repeat("c", 64)
+
+private def cardNext(): String =
+  Str.repeat("d", 64)
+
+private def cardMissing(): String =
+  Str.repeat("e", 64)
+
+private def rawJson(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(s) => s
+    case Result.Err(e) => e
+  }
+
+private def rawPairsJson(files: List[(String, String)]): Json =
+  Json.Arr(List.map(List.sort(List.map(files, f => f._1)), p => Json.Obj([("path", Json.Str(p)), ("content", Json.Str(List.getOrElse(List.map(files, f => f._2), List.indexOf(List.map(files, f => f._1), p), "")))])))
+
+private def rawSetHash(files: List[(String, String)]): String =
+  Hash.sha256(rawJson(rawPairsJson(files)))
+
+private def rawApplyPaths(disk: List[(String, String)], props: List[(String, String)]): List[(String, String)] =
+  List.concat(List.map(disk, d => (d._1, List.getOrElse(List.map(props, p => p._2), List.indexOf(List.map(props, p => p._1), d._1), d._2))), List.filter(props, p => !List.contains(List.map(disk, d => d._1), p._1)))
+
+private def baseZero(): String =
+  rawSetHash([("src/Main.scuzz", "v0")])
+
+private def baseAlpha(): String =
+  rawSetHash([("src/Main.scuzz", "alpha")])
+
+private def baseBeta(): String =
+  rawSetHash([("src/Extra.scuzz", "extra"), ("src/Main.scuzz", "beta")])
+
+private def makeCard(id: String, name: String, flip: Int, baseFiles: List[(String, String)], propFiles: List[(String, String)]): String =
+  for {
+    a = rawSetHash(baseFiles)
+    b = rawSetHash(rawApplyPaths(baseFiles, propFiles))
+    work = Json.Obj([("label", Json.Str("idle")), ("delta", Json.Obj([("changes", Json.Arr([Json.Obj([("section", Json.Str("signals"))])]))]))])
+    doc = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("proposal", Json.Str(name)), ("publication", Json.Str("{\"generator\":\"local\"}")), ("objective", Json.Str("ship sync")), ("baseline", rawPairsJson(baseFiles)), ("proposed", rawPairsJson(propFiles)), ("a", Json.Str(a)), ("b", Json.Str(b)), ("flip", Json.Int(flip)), ("started", Json.Int(1)), ("ready", Json.Int(2)), ("status", Json.Str("ready")), ("question", Json.Obj([("workload", Json.Str("idle")), ("step", Json.Int(0))])), ("evidence", Json.Obj([("workloads", Json.Arr([work]))]))])
+  } yield rawJson(doc)
+
+private def writeCard(root: String, id: String, body: String): IO[Unit] =
+  for {
+    dir = Fs.join(Fs.join(root, ".scuzz/ide/cards"), id)
+    _ <- Fs.mkdirs(dir)
+    _ <- Fs.write(Fs.join(dir, "card.json"), body)
+  } yield ()
+
+private def initWorkspace(root: String, src: String, tok: String): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs(Fs.join(root, "src"))
+    _ <- Fs.mkdirs(Fs.join(root, ".scuzz/ide/cards"))
+    _ <- Fs.mkdirs(Fs.join(root, ".scuzz/ide/records"))
+    _ <- Fs.mkdirs(Fs.join(root, ".scuzz/ide/sync/actions"))
+    _ <- Fs.write(Fs.join(root, "scuzz.toml"), "[package]\nname = \"demo\"\n")
+    _ <- Fs.write(Fs.join(root, "src/Main.scuzz"), src)
+    _ <- Fs.write(Fs.join(root, ".scuzz/ide/session.json"), "{\"objective\":\"ship sync\"}")
+    _ <- Fs.write(Fs.join(root, ".scuzz/ide/journal.json"), "")
+    _ <- Fs.write(Fs.join(root, ".scuzz/ide/last.json"), "")
+    _ <- Fs.write(Fs.join(root, ".scuzz/ide/steer.json"), "")
+    _ <- Fs.write(Fs.join(root, ".scuzz/ide/dirty.json"), "")
+    _ <- Fs.write(Fs.join(root, ".scuzz/ide/sync-token.txt"), tok)
+  } yield ()
+
+def setup(): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs("obs")
+    baseFiles = [("src/Main.scuzz", "v0")]
+    alphaFiles = [("src/Main.scuzz", "alpha")]
+    betaProps = [("src/Main.scuzz", "beta"), ("src/Extra.scuzz", "extra")]
+    _ <- initWorkspace("ws", "v0", token())
+    _ <- writeCard("ws", cardAlpha(), makeCard(cardAlpha(), "p-alpha", 0, baseFiles, alphaFiles))
+    _ <- writeCard("ws", cardBeta(), makeCard(cardBeta(), "p-beta", 1, baseFiles, betaProps))
+    _ <- writeCard("ws", cardGamma(), makeCard(cardGamma(), "p-gamma", 0, baseFiles, [("src/Main.scuzz", "gamma")]))
+    _ <- writeCard("ws", cardNext(), makeCard(cardNext(), "p-next", 0, alphaFiles, [("src/Main.scuzz", "alpha-next")]))
+    _ <- initWorkspace("ws-dirty", "v0", token())
+    _ <- Fs.write("ws-dirty/.scuzz/ide/dirty.json", "[\"src/Main.scuzz\"]")
+    _ <- writeCard("ws-dirty", cardAlpha(), makeCard(cardAlpha(), "p-alpha", 0, baseFiles, alphaFiles))
+    _ <- initWorkspace("ws-rec", "beta", token())
+    _ <- writeCard("ws-rec", cardBeta(), makeCard(cardBeta(), "p-beta", 1, baseFiles, betaProps))
+    _ <- writeCard("ws-rec", cardGamma(), makeCard(cardGamma(), "p-gamma", 0, baseFiles, [("src/Main.scuzz", "gamma")]))
+    _ <- Fs.write(Str.concat("ws-rec/.scuzz/ide/records/", Str.concat(cardGamma(), ".json")), Str.concat("{\"v\":1,\"action_id\":\"rec-gamma\",\"decision\":\"baseline\",\"card\":\"", Str.concat(cardGamma(), "\"}")))
+    _ <- Fs.write("ws-rec/.scuzz/ide/steer.json", Str.concat("{\"v\":1,\"items\":[{\"seq\":1,\"id\":\"rec-steer\",\"prompt\":\"saved steer\",\"baseline\":\"", Str.concat(baseBeta(), "\",\"status\":\"queued\",\"time\":1}]}")))
+    recWs = [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("v0")), ("before_exists", Json.Bool(true)), ("after", Json.Str("beta")), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Extra.scuzz")), ("before", Json.Str("")), ("before_exists", Json.Bool(false)), ("after", Json.Str("extra")), ("after_exists", Json.Bool(true))])]
+    recOp = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(Str.concat("accept-", cardBeta()))), ("action_id", Json.Str("rec-beta")), ("card", Json.Str(cardBeta())), ("decision", Json.Str("accept")), ("b", Json.Str(baseBeta())), ("writes", Json.Arr(recWs))])
+    _ <- Fs.write("ws-rec/.scuzz/ide/journal.json", rawJson(recOp))
+    _ <- initWorkspace("ws-undo", "beta", token())
+    _ <- Fs.write("ws-undo/src/Extra.scuzz", "extra")
+    _ <- Fs.write("ws-undo/.scuzz/ide/last.json", "{\"prior\":true}")
+    undoWs = [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("beta")), ("before_exists", Json.Bool(true)), ("after", Json.Str("v0")), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Extra.scuzz")), ("before", Json.Str("extra")), ("before_exists", Json.Bool(true)), ("after", Json.Str("")), ("after_exists", Json.Bool(false))])]
+    undoOp = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(Str.concat("undo-", cardBeta()))), ("card", Json.Str(cardBeta())), ("decision", Json.Str("undo")), ("writes", Json.Arr(undoWs))])
+    _ <- Fs.write("ws-undo/.scuzz/ide/journal.json", rawJson(undoOp))
+    _ <- initWorkspace("ws-conflict", "external-edit", token())
+    confWs = [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("v0")), ("before_exists", Json.Bool(true)), ("after", Json.Str("alpha")), ("after_exists", Json.Bool(true))])]
+    confOp = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(Str.concat("accept-", cardAlpha()))), ("card", Json.Str(cardAlpha())), ("decision", Json.Str("accept")), ("b", Json.Str(baseAlpha())), ("writes", Json.Arr(confWs))])
+    _ <- Fs.write("ws-conflict/.scuzz/ide/journal.json", rawJson(confOp))
+    _ <- initWorkspace("ws-token", "v0", "")
+    _ <- Fs.write("obs/status.txt", "")
+    _ <- Fs.write("obs/summary.txt", "")
+    _ <- Fs.write("obs/gamma-decision.txt", "")
+    _ <- Fs.write("obs/race-a.txt", "")
+    _ <- Fs.write("obs/race-b.txt", "")
+  } yield ()
+
+def faults(): List[String] =
+  ["net", "fs"]
+
+private def summarizeFeed(body: String): String =
+  Json.parse(body) match {
+    case Result.Err(_) => "bad-json"
+    case Result.Ok(doc) => for {
+  cards = List.map(Json.arr(IdeSync.field(doc, "cards")), c => Str.take(IdeSync.str(c, "id"), 4))
+  steers = List.map(Json.arr(IdeSync.field(doc, "steer")), s => IdeSync.str(s, "prompt"))
+  rev = Json.getInt(doc, "revision", -1)
+  obj = IdeSync.str(doc, "objective")
+  curOk = Json.getInt(doc, "v", 0) == 1 && IdeSync.validHex(IdeSync.str(doc, "cursor"))
+} yield if (!curOk) "bad-cursor" else Str.concat("rev=", Str.concat(Str.fromInt(rev), Str.concat(";obj=", Str.concat(obj, Str.concat(";cards=", Str.concat(List.join(cards, ","), Str.concat(";steer=", List.join(steers, "|"))))))))
+  }
+
+private def summarizeRow(r: Json): String =
+  for {
+    kind = IdeSync.str(r, "kind")
+    base = IdeSync.str(r, "baseline")
+    baseTag = if (base == baseAlpha()) "@a" else if (base == baseBeta()) "@b" else if (base == baseZero()) "@0" else "@?"
+    extra = if (kind == "skip") Str.concat("#", IdeSync.str(r, "reason")) else if (kind == "steer") Str.concat(Str.concat("#", Str.fromInt(Json.getInt(r, "seq", -1))), baseTag) else if (Json.has(r, "reason")) "#unexpected-reason" else ""
+    ok = Json.getInt(r, "v", 0) == 1 && IdeSync.validHex(base)
+  } yield if (!ok) "bad-row" else Str.concat(IdeSync.str(r, "id"), Str.concat(":", Str.concat(IdeSync.str(r, "status"), Str.concat(":", Str.concat(if (Json.getBool(r, "replayed", false)) "true" else "false", extra)))))
+
+private def summarizePost(body: String): String =
+  Json.parse(body) match {
+    case Result.Err(_) => "bad-json"
+    case Result.Ok(doc) => if (Json.getInt(doc, "v", 0) != 1) "bad-v" else List.join(List.map(Json.arr(IdeSync.field(doc, "results")), r => summarizeRow(r)), ",")
+  }
+
+private def callOnceAt(root: String, port: Int, serverToken: String, method: String, path: String, headers: Map[String, String], body: String): IO[Unit] =
+  IO.attempt(for {
+  server <- Fiber.fork(Net.serveOnce(port, req => IdeSync.handle(root, serverToken, req)))
+  _ <- IO.ensure(for {
+  url = Str.concat("http://127.0.0.1:", Str.concat(Str.fromInt(port), path))
+  resp <- if (method == "GET") Net.httpGet(url, headers) else if (method == "DELETE") Net.httpDelete(url, headers) else Net.httpPost(url, headers, body)
+  _ <- Fs.write("obs/status.txt", Str.fromInt(resp._1))
+  _ <- if (resp._1 == 200) Fs.write("obs/summary.txt", if (method == "GET") summarizeFeed(resp._3) else summarizePost(resp._3)) else IO.pure(())
+} yield (), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+def fetchFeed(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "GET", "/v1/ide/sync", IdeSync.authHeaders(token()), "")
+
+def unauthorizedMissing(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "GET", "/v1/ide/sync", Map.empty(), "")
+
+def unauthorizedWrongToken(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "POST", "/v1/ide/sync", IdeSync.authHeaders("wrong-token-value-9999"), "{\"v\":1,\"id\":\"u1\",\"kind\":\"steer\",\"prompt\":\"ignored\"}")
+
+def unauthorizedScheme(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "POST", "/v1/ide/sync", Map.set(Map.empty(), "Authorization", Str.concat("Basic ", token())), "{\"v\":1,\"id\":\"u2\",\"kind\":\"steer\",\"prompt\":\"ignored\"}")
+
+def invalidServerToken(): IO[Unit] =
+  callOnceAt("ws", 18787, "short", "GET", "/v1/ide/sync", IdeSync.authHeaders("short"), "")
+
+def wrongRoute(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "GET", "/other", IdeSync.authHeaders(token()), "")
+
+def wrongMethod(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "DELETE", "/v1/ide/sync", IdeSync.authHeaders(token()), "")
+
+def malformedRequest(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "POST", "/v1/ide/sync", IdeSync.authHeaders(token()), "{\"v\":1,\"actions\":[]}")
+
+def acceptAlpha(): IO[Unit] =
+  callOnceAt("ws", 18787, token(), "POST", "/v1/ide/sync", IdeSync.authHeaders(token()), Str.concat("{\"v\":1,\"id\":\"act-alpha\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardAlpha(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}")))))
+
+def staleBetaAfterAlpha(): IO[Unit] =
+  IO.attempt(for {
+  server <- Fiber.fork(IdeSync.run("ws", 18787, token()))
+  _ <- IO.ensure(for {
+  b1 = Str.concat("{\"v\":1,\"id\":\"act-alpha\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardAlpha(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}"))))
+  b2 = Str.concat("{\"v\":1,\"id\":\"act-beta-stale\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardBeta(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}"))))
+  r1 <- Net.httpPost("http://127.0.0.1:18787/v1/ide/sync", IdeSync.authHeaders(token()), b1)
+  r2 <- Net.httpPost("http://127.0.0.1:18787/v1/ide/sync", IdeSync.authHeaders(token()), b2)
+  _ <- Fs.write("obs/status.txt", Str.concat(Str.fromInt(r1._1), Str.concat(",", Str.fromInt(r2._1))))
+  _ <- if (r1._1 == 200 && r2._1 == 200) Fs.write("obs/summary.txt", Str.concat(summarizePost(r1._3), Str.concat(";", summarizePost(r2._3)))) else IO.pure(())
+} yield (), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+private def racePost(id: String, card: String, base: String, outPath: String): IO[Unit] =
+  IO.attempt(for {
+  body = Str.concat("{\"v\":1,\"id\":\"", Str.concat(id, Str.concat("\",\"kind\":\"accept\",\"card\":\"", Str.concat(card, Str.concat("\",\"baseline\":\"", Str.concat(base, "\"}"))))))
+  resp <- Net.httpPost("http://127.0.0.1:18787/v1/ide/sync", IdeSync.authHeaders(token()), body)
+  _ <- Fs.write(outPath, if (resp._1 == 200) summarizePost(resp._3) else Str.fromInt(resp._1))
+} yield ()).map(_ => ())
+
+def competingAcceptRace(): IO[Unit] =
+  IO.attempt(for {
+  tok <- IdeSync.ensureToken("ws", "")
+  server <- Fiber.fork(IdeSync.run("ws", 18787, tok))
+  _ <- IO.ensure(IO.both(racePost("race-alpha", cardAlpha(), baseZero(), "obs/race-a.txt"), racePost("race-beta", cardBeta(), baseZero(), "obs/race-b.txt")).map(_ => ()), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+def offlineBatchReplay(): IO[Unit] =
+  IO.attempt(for {
+  a0 = Str.concat("{\"id\":\"b-missing\",\"kind\":\"reject\",\"card\":\"", Str.concat(cardMissing(), "\"}"))
+  a1 = Str.concat("{\"id\":\"b-reject\",\"kind\":\"reject\",\"card\":\"", Str.concat(cardGamma(), "\"}"))
+  a1dup = Str.concat("{\"id\":\"b-reject-other\",\"kind\":\"skip\",\"card\":\"", Str.concat(cardGamma(), "\"}"))
+  a2 = Str.concat("{\"id\":\"b-skip\",\"kind\":\"skip\",\"card\":\"", Str.concat(cardBeta(), "\",\"reason\":\"need-another-scenario\"}"))
+  a3 = "{\"id\":\"b-steer-1\",\"kind\":\"steer\",\"prompt\":\"  keep layout compact  \"}"
+  a4 = Str.concat("{\"id\":\"b-accept\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardAlpha(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}"))))
+  a5 = Str.concat("{\"id\":\"b-steer-2\",\"kind\":\"steer\",\"prompt\":\"add dark contrast\",\"baseline\":\"", Str.concat(baseAlpha(), "\"}"))
+  batch = Str.concat("{\"v\":1,\"actions\":[", Str.concat(List.join([a0, a1, a1dup, a2, a3, a4, a5], ","), "]}"))
+  _ <- callOnceAt("ws", 18787, token(), "POST", "/v1/ide/sync", IdeSync.authHeaders(token()), batch)
+  recPath = Str.concat("ws/.scuzz/ide/records/", Str.concat(cardGamma(), ".json"))
+  hit <- Fs.exists(recPath)
+  _ <- if (hit == 0) IO.pure(()) else Fs.read(recPath).flatMap(raw => Json.parse(raw) match {
+  case Result.Ok(j) => Fs.write("obs/gamma-decision.txt", Json.getStr(j, "decision", ""))
+  case Result.Err(_) => Fs.write("obs/gamma-decision.txt", "bad")
+})
+} yield ()).map(_ => ())
+
+def dirtyAccept(): IO[Unit] =
+  callOnceAt("ws-dirty", 18788, token(), "POST", "/v1/ide/sync", IdeSync.authHeaders(token()), Str.concat("{\"v\":1,\"id\":\"act-dirty\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardAlpha(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}")))))
+
+def recoverAcceptJournal(): IO[Unit] =
+  IO.attempt(for {
+  server <- Fiber.fork(IdeSync.run("ws-rec", 18789, token()))
+  _ <- IO.ensure(for {
+  _ <- Net.httpGet("http://127.0.0.1:18789/v1/ide/sync", IdeSync.authHeaders(token()))
+  r1 = Str.concat("{\"id\":\"rec-beta\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardBeta(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}"))))
+  r2 = Str.concat("{\"id\":\"rec-gamma\",\"kind\":\"reject\",\"card\":\"", Str.concat(cardGamma(), "\"}"))
+  r3 = "{\"id\":\"rec-steer\",\"kind\":\"steer\",\"prompt\":\"saved steer\"}"
+  retryBody = Str.concat("{\"v\":1,\"actions\":[", Str.concat(List.join([r1, r2, r3], ","), "]}"))
+  resp <- Net.httpPost("http://127.0.0.1:18789/v1/ide/sync", IdeSync.authHeaders(token()), retryBody)
+  _ <- Fs.write("obs/status.txt", Str.fromInt(resp._1))
+  _ <- if (resp._1 == 200) Fs.write("obs/summary.txt", summarizePost(resp._3)) else IO.pure(())
+} yield (), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+def recoverUndoJournal(): IO[Unit] =
+  callOnceAt("ws-undo", 18790, token(), "GET", "/v1/ide/sync", IdeSync.authHeaders(token()), "")
+
+def conflictJournal(): IO[Unit] =
+  callOnceAt("ws-conflict", 18791, token(), "GET", "/v1/ide/sync", IdeSync.authHeaders(token()), "")
+
+def mintFreshToken(): IO[Unit] =
+  IO.attempt(for {
+  minted <- IdeSync.ensureToken("ws-token", "")
+  reused <- IdeSync.ensureToken("ws-token", "")
+  explicit <- IdeSync.ensureToken("ws-token", "explicit-token-123456")
+  reusedExplicit <- IdeSync.ensureToken("ws-token", "")
+  bad <- IO.attempt(IdeSync.ensureToken("ws-token", "short"))
+  badRejected = bad match {
+  case Result.Ok(_) => false
+  case Result.Err(_) => true
+}
+  _ <- Fs.write("obs/summary.txt", if (minted == reused && IdeSync.validToken(minted) && explicit == "explicit-token-123456" && reusedExplicit == "explicit-token-123456" && badRejected) "token-minted-and-reused" else "token-mismatch")
+} yield ()).map(_ => ())
+

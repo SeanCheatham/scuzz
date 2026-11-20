@@ -12,7 +12,7 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Proof.** Complete the session gates in `vision.md`. Run a human session on one small app and one objective. Measure retained acceptances per review minute, abstention reasons, Undo, and readiness latency. Record workload scope and the generator used. Controlled generator output proves the transport, not usefulness. Automated choices do not count as human evidence.
 
-**Priority.** Keep current work on the language and verification guarantees in `vision.md`. Local choice feedback, rule review, and the complete session proof remain later work. General compiler idle cost work needs a demonstrated application or proof blocker.
+**Priority.** Build the split laptop daemon and native mobile review slices in `vision.md`. Local choice feedback, rule review, and a measured human session remain open gates. General compiler idle cost work needs a demonstrated application or proof blocker.
 
 ### 2. Review latency and evaluator parity
 
@@ -68,11 +68,11 @@ Allocation counts do not measure CPU time. These samples do not establish a gene
 
 ### 3. Mobile on real devices
 
-**Unproven.** JNI/ObjC embedding, touch, soft-keyboard text input, and Android OpenSSL on hardware. Hardware runs need provisioning. Simulator proofs do not close this gap.
+**Unproven.** JNI/ObjC embedding, touch, soft-keyboard text input, and platform HTTP on hardware. Hardware runs need provisioning. Simulator and emulator proofs do not close this gap.
 
 **Proof.** Run Counter on one device with `scuzz package` and the platform toolchain. Physical-device work is outside the review arc.
 
-The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Hosted simulator checks cover HTTP requests, streamed downloads, cancellation, certificate trust, and reactive network UI. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
+The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Hosted simulator checks cover HTTP requests, streamed downloads, cancellation, certificate trust, and reactive network UI. Net HTTP servers remain host-only. Android packages reject Net calls until the platform HTTP client bridge lands.
 
 ## Known gaps
 
@@ -212,17 +212,27 @@ Use the UI work order in `vision.md`.
 Prove each capability with an application, shared input, and exact native and evaluator replay.
 Keep these gaps open until the corresponding runtime behavior and platform checks pass.
 
+### Split laptop and mobile review
+
+`scuzz ide serve` serves the workspace card feed, idempotent decisions, and steer queue over local Wi-Fi HTTP with a bearer pairing token. Hermetic `TestRuntime` claims and live loopback replay check unauthorized request rejection, duplicate action IDs, stale-base `accept` refusal, ordered batch replay, and crash-safe `.scuzz/ide/` journal and steer persistence across `fs` and `net` faults.
+
+Three slices remain open before the mobile loop works end to end:
+
+- **Android native HTTP.** Android packages still reject `Net` client calls. Gate 1 adds the Android `HttpURLConnection` bridge with platform certificate trust and no NDK OpenSSL dependency.
+- **Native mobile swipe and steer client.** No phone client UI or persistent offline outbox exists yet. Gate 2 builds the shared Headless, iOS, and Android deck that prefetches cards on local Wi-Fi, records offline swipe accept, swipe reject, skip, and steer actions, and flushes them on reconnect.
+- **Unattended laptop generation loop.** Local generation still runs one explicit request or bounded IDE session at a time. Gate 3 runs continuous unattended local GGUF rounds gated by `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks while consuming `.scuzz/ide/steer.json` prompts and preferences.
+
 ### Local choice feedback
 
-Can't decide has no reason. Local model requests and exported producer requests do not consume preferences. There is no retained-acceptance measure or local session summary. Region focus needs controls to retain or select a region after a result.
+The desktop IDE Can't decide control does not select a reason yet, although `scuzz ide serve` records optional skip reasons on synced mobile abstentions. Local model requests and exported producer requests do not consume preferences or queued steer prompts yet. There is no retained-acceptance measure or local session summary. Region focus needs controls to retain or select a region after a result.
 
-**Proof:** Gate 5. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
+**Proof:** Gate 4. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
 
 ### Rule review
 
 There is no explicit claim suggestion or installation path from a preference. A finite witness cannot establish a universal rule. Rule installation needs protection against weakening existing claims and against stale source.
 
-**Proof:** Gate 6. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
+**Proof:** Gate 5. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
 
 ### Verification scope and application correctness
 

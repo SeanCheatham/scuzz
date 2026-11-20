@@ -1,0 +1,2 @@
+@main def main: IO[Unit] =
+  IO.println("Use scuzz ide serve [OPTIONS] [PATH] to serve /v1/ide/sync.")

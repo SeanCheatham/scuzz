@@ -830,6 +830,7 @@ grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/tyck
 "$SCUZZ" check examples/codegen
 "$SCUZZ" check examples/cli
+"$SCUZZ" check examples/ide-sync
 "$SCUZZ" check examples/counter
 "$SCUZZ" check examples/studio
 "$SCUZZ" check examples/editor

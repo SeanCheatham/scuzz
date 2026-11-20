@@ -173,6 +173,9 @@ def real(): Int = ()
 oracle generationReviewCli(): Bool =
   Cli.show(Cli.parse(["ide", "export-request", "app", "--objective", "Add an input", "--out", "request.json"])) == "ide export-request app" && Cli.show(Cli.parse(["ide", "review-suggestion", "app", "--request=request.json", "--candidate=proposal"])) == "ide review-suggestion app" && Str.startsWith(Cli.show(Cli.parse(["ide", "export-request", "app", "--objective", "Add an input"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "export-request", "app", "--objective", "a", "--objective", "b", "--out", "r"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "review-suggestion", "app", "--request", "r", "--out", "p"])), "fail:")
 
+oracle ideServeCli(): Bool =
+  Cli.show(Cli.parse(["ide", "serve"])) == "ide serve path=. port=8787 token=false once=false" && Cli.show(Cli.parse(["ide", "serve", "myapp", "--port", "9001", "--token=pairing-token-1234", "--once"])) == "ide serve path=myapp port=9001 token=true once=true" && Cli.render(Cli.parse(["ide", "serve", "--help"])) == Help.helpIde() && Str.startsWith(Cli.show(Cli.parse(["ide", "serve", "--port", "0"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "serve", "--port", "70000"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "serve", "--token", "short"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "serve", "a", "b"])), "fail:")
+
 oracle generationAnchors(): Bool =
   for {
     request = Json.Obj([("sources", Proposal.pairsJson([("src/Main.scuzz", """same
