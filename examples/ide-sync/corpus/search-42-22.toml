@@ -1,0 +1,4 @@
+[fuzz]
+schedule_seed = "22"
+fault_seed = "91"
+events = ["drive unauthorizedWrongToken", "drive unauthorizedScheme", "drive invalidServerToken", "drive wrongRoute", "drive wrongMethod", "drive malformedRequest", "drive acceptAlpha", "drive acceptAlpha"]

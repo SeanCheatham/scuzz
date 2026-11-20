@@ -818,11 +818,19 @@ def srcBoundCallback(): List[(String, String)] =
 def irBoundCallback(): Bool =
   Check.checkFiles(srcBoundCallback()) == "[]" && irCheckedFiles(srcBoundCallback()) && !Str.contains(Emit.emitFiles(srcBoundCallback()), "call ptr @sz_user_Other_call(")
 
+def evConstructorOrder(reverse: Bool): Bool =
+  for {
+    p = Eval.load(Cases.moduleFiles(0, reverse))
+  } yield Emit.ctorTag(p.ens, Resolve.identity("A", "Choice"), "End") != Emit.ctorTag(p.ens, Resolve.identity("B", "Choice"), "End") && Eval.show(Eval.callPure(p, "Main", "result", [])) == "21" && Eval.show(Eval.callPure(p, "A", "read", [Eval.drvArg(p, Str.concat(Resolve.identity("A", "Choice"), "[String]"), "Wrap(Box(\"abc\"))")])) == "3" && Eval.show(Eval.callPure(p, "B", "read", [Eval.drvArg(p, Str.concat(Resolve.identity("B", "Choice"), "[Int]"), "Wrap(4,Box(\"marker\",6))")])) == "10"
+
 def evConstructors(): Bool =
-  evModules(0) && !Eval.valEq(Value.VCon(Resolve.identity("A", "Choice"), "End", []), Value.VCon(Resolve.identity("B", "Choice"), "End", []))
+  evConstructorOrder(false) && evConstructorOrder(true) && !Eval.valEq(Value.VCon(Resolve.identity("A", "Choice"), "End", []), Value.VCon(Resolve.identity("B", "Choice"), "End", []))
 
 def evModules(seed: Int where seed >= 0 && seed < 6): Bool =
   evModuleIdentity(seed, false) && evModuleIdentity(seed, true)
+
+def evModuleOrder(seed: Int where seed >= 0 && seed < 6, rev: Int where rev >= 0 && rev <= 1): Bool =
+  evModuleIdentity(seed, rev == 1)
 
 def evAllModules(): Bool =
   List.forall(List.range(0, 6), seed => evModules(seed))
@@ -831,8 +839,7 @@ def evModuleIdentity(seed: Int, reverse: Bool): Bool =
   for {
     files = Cases.moduleFiles(seed, reverse)
     p = Eval.load(files)
-    ens = Resolve.prog(Parse.parseFiles(files)).enums
-  } yield Emit.ctorTag(ens, Resolve.identity("A", "Choice"), "End") != Emit.ctorTag(ens, Resolve.identity("B", "Choice"), "End") && Check.checkFiles(files) == "[]" && Eval.show(Eval.callPure(p, "Main", "result", [])) == Str.fromInt(21 + 2 * seed) && Eval.show(Eval.callPure(p, "A", "read", [Eval.drvArg(p, Str.concat(Resolve.identity("A", "Choice"), "[String]"), "Wrap(Box(\"abc\"))")])) == "3" && Eval.show(Eval.callPure(p, "B", "read", [Eval.drvArg(p, Str.concat(Resolve.identity("B", "Choice"), "[Int]"), "Wrap(4,Box(\"marker\",6))")])) == "10"
+  } yield Emit.ctorTag(p.ens, Resolve.identity("A", "Choice"), "End") != Emit.ctorTag(p.ens, Resolve.identity("B", "Choice"), "End") && Check.checkFiles(files) == "[]" && Eval.show(Eval.callPure(p, "Main", "result", [])) == Str.fromInt(21 + 2 * seed) && Eval.show(Eval.callPure(p, "A", "read", [Eval.drvArg(p, Str.concat(Resolve.identity("A", "Choice"), "[String]"), "Wrap(Box(\"abc\"))")])) == "3" && Eval.show(Eval.callPure(p, "B", "read", [Eval.drvArg(p, Str.concat(Resolve.identity("B", "Choice"), "[Int]"), "Wrap(4,Box(\"marker\",6))")])) == "10"
 
 def evMapModelPairs(m: Map[Int, Int]): List[(Value, Value)] =
   List.map(Map.toList(m), pr => (Value.VInt(pr._1), Value.VInt(pr._2)))
@@ -848,17 +855,17 @@ def evMapModelGo(i: Int, seed: Int, m: EvMap, model: Map[Int, Int]): Bool =
   next = if (remove) Eval.mapDel(m, Value.VInt(key), []) else Eval.mapPut(m, Value.VInt(key), Value.VInt(value), [])
   expected = if (remove) Map.remove(model, key) else Map.set(model, key, value)
   found = Value.VInt(Map.getOrElse(expected, key, 0 - 1))
-} yield evMapState(m, model) && evMapState(next, expected) && Eval.optOr(Eval.mapFind(next, Value.VInt(key), []), Value.VInt(0 - 1)) == found && evMapModelGo(i + 1, seed, next, expected)
+} yield evMapState(next, expected) && Eval.optOr(Eval.mapFind(next, Value.VInt(key), []), Value.VInt(0 - 1)) == found && evMapModelGo(i + 1, seed, next, expected)
 
 def evMapDrain(keys: List[Int], m: EvMap, model: Map[Int, Int]): Bool =
   if (List.isEmpty(keys)) evMapState(m, model) && Eval.mapSize(m) == 0 else for {
   key = List.at(keys, 0)
   next = Eval.mapDel(m, Value.VInt(key), [])
   expected = Map.remove(model, key)
-} yield evMapState(m, model) && evMapState(next, expected) && evMapDrain(List.tail(keys), next, expected)
+} yield evMapState(next, expected) && evMapDrain(List.tail(keys), next, expected)
 
 def evMapModel(seed: Int): Bool =
-  evMapModelGo(0, seed, Eval.emptyMap(), Map.empty())
+  evMapState(Eval.emptyMap(), Map.empty()) && evMapModelGo(0, seed, Eval.emptyMap(), Map.empty())
 
 def evKitsCovered(): Bool =
   List.isEmpty(evKitsMissing())

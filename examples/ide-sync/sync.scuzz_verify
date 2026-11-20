@@ -1,0 +1,153 @@
+oracle authChecks(): Bool =
+  for {
+    tok = "pairing-token-1234"
+    good = IdeSync.authHeaders(tok)
+    upper = Map.set(Map.empty(), "AUTHORIZATION", Str.concat("Bearer ", tok))
+    dup = Map.set(good, "authorization", Str.concat("Bearer ", tok))
+    wrong = IdeSync.authHeaders("pairing-token-9999")
+  } yield IdeSync.authorized(tok, good) && IdeSync.authorized(tok, upper) && !IdeSync.authorized(tok, dup) && !IdeSync.authorized(tok, wrong) && !IdeSync.authorized(tok, Map.empty()) && !IdeSync.authorized("short", IdeSync.authHeaders("short")) && IdeSync.validToken(Str.repeat("x", 16)) && IdeSync.validToken(Str.repeat("x", 128)) && !IdeSync.validToken(Str.repeat("x", 15)) && !IdeSync.validToken(Str.repeat("x", 129))
+
+private def isOkDecode(raw: String): Bool =
+  IdeSync.decodeActions(raw) match {
+    case Result.Ok(_) => true
+    case Result.Err(_) => false
+  }
+
+private def decodeErr(raw: String): String =
+  IdeSync.decodeActions(raw) match {
+    case Result.Ok(_) => ""
+    case Result.Err(code) => code
+  }
+
+oracle decodeBoundaries(): Bool =
+  for {
+    hex = Str.repeat("a", 64)
+    singleAccept = Str.concat("{\"v\":1,\"id\":\"a_1\",\"kind\":\"accept\",\"card\":\"", Str.concat(hex, Str.concat("\",\"baseline\":\"", Str.concat(hex, "\"}"))))
+    singleSteer512 = Str.concat("{\"v\":1,\"id\":\"s1\",\"kind\":\"steer\",\"prompt\":\"", Str.concat(Str.repeat("p", 512), "\"}"))
+    singleSteer513 = Str.concat("{\"v\":1,\"id\":\"s1\",\"kind\":\"steer\",\"prompt\":\"", Str.concat(Str.repeat("p", 513), "\"}"))
+    oneItem = "{\"id\":\"s1\",\"kind\":\"steer\",\"prompt\":\"ok\"}"
+    batch64 = Str.concat("{\"v\":1,\"actions\":[", Str.concat(List.join(List.map(List.range(0, 64), _ => oneItem), ","), "]}"))
+    batch65 = Str.concat("{\"v\":1,\"actions\":[", Str.concat(List.join(List.map(List.range(0, 65), _ => oneItem), ","), "]}"))
+    skipReasons = List.forall(["", "no-visible-difference", "need-another-scenario", "outside-my-goal"], r => isOkDecode(Str.concat("{\"v\":1,\"id\":\"k1\",\"kind\":\"skip\",\"card\":\"", Str.concat(hex, Str.concat("\",\"reason\":\"", Str.concat(r, "\"}"))))))
+  } yield isOkDecode(singleAccept) && isOkDecode(singleSteer512) && decodeErr(singleSteer513) == "invalid-steer" && isOkDecode(batch64) && decodeErr(batch65) == "invalid-actions" && skipReasons && decodeErr(Str.concat("{\"v\":1,\"id\":\"k1\",\"kind\":\"skip\",\"card\":\"", Str.concat(hex, "\",\"reason\":\"bad\"}"))) == "invalid-reason" && decodeErr(Str.concat("{\"v\":1,\"id\":\"k1\",\"kind\":\"skip\",\"card\":\"", Str.concat(hex, "\",\"reason\":1}"))) == "invalid-reason" && decodeErr("{") == "invalid-json" && decodeErr("{\"v\":2,\"id\":\"s1\",\"kind\":\"steer\",\"prompt\":\"ok\"}") == "invalid-version" && decodeErr("{\"v\":\"1\",\"id\":\"s1\",\"kind\":\"steer\",\"prompt\":\"ok\"}") == "invalid-version" && decodeErr("[]") == "invalid-version" && decodeErr("{\"v\":1,\"actions\":1}") == "invalid-actions" && decodeErr("{\"v\":1,\"actions\":[1]}") == "expected-action-object" && decodeErr("{\"v\":1,\"id\":\"\",\"kind\":\"steer\",\"prompt\":\"ok\"}") == "invalid-action-id" && decodeErr("{\"v\":1,\"id\":1,\"kind\":\"steer\",\"prompt\":\"ok\"}") == "invalid-action-id" && decodeErr(Str.concat("{\"v\":1,\"id\":\"a1\",\"kind\":\"accept\",\"card\":\"", Str.concat(hex, "\"}"))) == "invalid-accept" && decodeErr("{\"v\":1,\"id\":\"r1\",\"kind\":\"reject\",\"card\":\"bad\"}") == "invalid-reject" && decodeErr(Str.concat("{\"v\":1,\"id\":\"r1\",\"kind\":\"reject\",\"card\":\"", Str.concat(hex, "\",\"baseline\":\"bad\"}"))) == "invalid-reject" && decodeErr(Str.concat("{\"v\":1,\"id\":\"r1\",\"kind\":\"reject\",\"card\":\"", Str.concat(hex, "\",\"baseline\":1}"))) == "invalid-reject" && decodeErr("{\"v\":1,\"id\":\"k1\",\"kind\":\"skip\",\"card\":\"bad\"}") == "invalid-skip" && decodeErr("{\"v\":1,\"id\":\"s1\",\"kind\":\"steer\",\"prompt\":\"   \"}") == "invalid-steer" && decodeErr("{\"v\":1,\"id\":\"s1\",\"kind\":\"steer\",\"prompt\":1}") == "invalid-steer" && decodeErr("{\"v\":1,\"id\":\"x1\",\"kind\":\"other\"}") == "invalid-kind" && decodeErr(Str.repeat("x", 262145)) == "payload-too-large" && decodeErr(Str.repeat("x", 262144)) == "invalid-json"
+
+oracle pathAndSourceBounds(): Bool =
+  for {
+    okRel = IdeSync.relPath("src/Main file.scuzz") match {
+  case Result.Ok(_) => true
+  case Result.Err(_) => false
+}
+    badRel = List.forall(["", "../a", "src/../a", "src/./a", "src//a", "a\\b", "a:b", Hex.decode("1f"), Hex.decode("7f")], p => IdeSync.relPath(p) match {
+  case Result.Ok(_) => false
+  case Result.Err(_) => true
+})
+    exact64k = [("src/A.scuzz", Str.repeat("x", 65536))]
+    over64k = [("src/A.scuzz", Str.repeat("x", 65537))]
+    three = [("src/A.scuzz", "1"), ("src/B.scuzz", "2"), ("src/C.scuzz", "3")]
+    four = List.append(three, ("src/D.scuzz", "4"))
+    dup = [("src/A.scuzz", "1"), ("src/A.scuzz", "2")]
+  } yield okRel && badRel && IdeSync.safePath("src/Main_1.scuzz") && !IdeSync.safePath("src/1Bad.scuzz") && !IdeSync.safePath("Main.scuzz") && !IdeSync.sourceSetOk([]) && IdeSync.sourceSetOk(exact64k) && !IdeSync.sourceSetOk(over64k) && IdeSync.sourceSetOk(three) && !IdeSync.sourceSetOk(four) && !IdeSync.sourceSetOk(dup)
+
+oracle operationValidation(): Bool =
+  for {
+    card = Str.repeat("f", 64)
+    w = Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("v0")), ("before_exists", Json.Bool(true)), ("after", Json.Str("v1")), ("after_exists", Json.Bool(true))])
+    goodAccept = Json.Obj([("operation", Json.Str(Str.concat("accept-", card))), ("card", Json.Str(card)), ("decision", Json.Str("accept")), ("writes", Json.Arr([w]))])
+    goodUndo = Json.Obj([("operation", Json.Str(Str.concat("undo-", card))), ("card", Json.Str(card)), ("decision", Json.Str("undo")), ("writes", Json.Arr([Json.set(Json.set(w, "after_exists", Json.Bool(false)), "after", Json.Str(""))]))])
+    badGhostBefore = Json.set(goodAccept, "writes", Json.Arr([Json.set(w, "before_exists", Json.Bool(false))]))
+    badGhostAfter = Json.set(goodAccept, "writes", Json.Arr([Json.set(w, "after_exists", Json.Bool(false))]))
+    badDup = Json.set(goodAccept, "writes", Json.Arr([w, w]))
+    badEmpty = Json.set(goodAccept, "writes", Json.Arr([]))
+    w2 = Json.set(w, "path", Json.Str("src/B.scuzz"))
+    w3 = Json.set(w, "path", Json.Str("src/C.scuzz"))
+    w4 = Json.set(w, "path", Json.Str("src/D.scuzz"))
+    threeOk = Json.set(goodAccept, "writes", Json.Arr([w, w2, w3]))
+    fourBad = Json.set(goodAccept, "writes", Json.Arr([w, w2, w3, w4]))
+  } yield IdeSync.validOperation(goodAccept) && IdeSync.validOperation(goodUndo) && IdeSync.validOperation(threeOk) && !IdeSync.validOperation(fourBad) && !IdeSync.validOperation(badGhostBefore) && !IdeSync.validOperation(badGhostAfter) && !IdeSync.validOperation(badDup) && !IdeSync.validOperation(badEmpty) && !IdeSync.validOperation(Json.set(goodAccept, "decision", Json.Str("baseline")))
+
+oracle recordEncoding(): Bool =
+  for {
+    cid = Str.repeat("9", 64)
+    work = Json.Obj([("label", Json.Str("idle")), ("delta", Json.Obj([("changes", Json.Arr([Json.Str("c1")]))]))])
+    card0 = Json.Obj([("id", Json.Str(cid)), ("proposal", Json.Str("p0")), ("publication", Json.Str("{\"generator\":\"g1\"}")), ("objective", Json.Str("obj")), ("baseline", IdeSync.pairsJson([("src/Main.scuzz", "v0"), ("src/Keep.scuzz", "k")])), ("proposed", IdeSync.pairsJson([("src/Main.scuzz", "v1")])), ("a", Json.Str("ha")), ("b", Json.Str("hb")), ("status", Json.Str("ready")), ("question", Json.Obj([("workload", Json.Str("idle"))])), ("evidence", Json.Obj([("workloads", Json.Arr([work]))]))])
+    card1 = Json.set(Json.set(Json.set(card0, "flip", Json.Int(1)), "publication", Json.Str("{")), "question", Json.Obj([("workload", Json.Str("miss"))]))
+    opAcc0 = IdeSync.buildOperation(card0, IdeSync.SyncAction("a0", "accept", cid, "ha", "", ""), true, 10)
+    opRej0 = IdeSync.buildOperation(card0, IdeSync.SyncAction("r0", "reject", cid, "ha", "", ""), false, 11)
+    opAcc1 = IdeSync.buildOperation(card1, IdeSync.SyncAction("a1", "accept", cid, "ha", "", ""), true, 12)
+    opRej1 = IdeSync.buildOperation(card1, IdeSync.SyncAction("r1", "reject", cid, "ha", "", ""), false, 13)
+    opSkip = IdeSync.buildOperation(card1, IdeSync.SyncAction("s1", "skip", cid, "ha", "outside-my-goal", ""), false, 14)
+    sum0 = IdeSync.cardSummary(card0)
+    sum1 = IdeSync.cardSummary(card1)
+  } yield Json.getInt(opAcc0, "v", 0) == 1 && Json.getInt(opAcc0, "lane", -9) == 1 && Json.getInt(opRej0, "lane", -9) == 0 && Json.getInt(opAcc1, "lane", -9) == 0 && Json.getInt(opRej1, "lane", -9) == 1 && Json.getInt(opSkip, "lane", -9) == -1 && IdeSync.str(opAcc0, "generator") == "g1" && IdeSync.str(opAcc1, "generator") == "" && IdeSync.str(opSkip, "decision") == "abstain" && IdeSync.str(opSkip, "reason") == "outside-my-goal" && List.len(Json.arr(IdeSync.field(opAcc0, "writes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(opRej0, "writes"))) && List.len(Json.arr(IdeSync.field(sum0, "before"))) == 1 && List.len(Json.arr(IdeSync.field(sum0, "changes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(sum1, "changes"))) && Json.getInt(sum0, "flip", -1) == 0 && Json.getInt(sum1, "flip", -1) == 1
+
+oracle hashOrderCanonical(): Bool =
+  IdeSync.setHash([("src/B.scuzz", "2"), ("src/A.scuzz", "1")]) == IdeSync.setHash([("src/A.scuzz", "1"), ("src/B.scuzz", "2")]) && IdeSync.applyPaths([("src/Main.scuzz", "v0")], [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]) == [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]
+
+private def faulted(t: Timeline, i: Int): Bool =
+  Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs")
+
+private def isUnauthorizedDrive(t: Timeline, i: Int): Bool =
+  Timeline.driveHas(t, i, "unauthorizedMissing") || Timeline.driveHas(t, i, "unauthorizedWrongToken") || Timeline.driveHas(t, i, "unauthorizedScheme") || Timeline.driveHas(t, i, "invalidServerToken")
+
+private def isRejectedDrive(t: Timeline, i: Int): Bool =
+  isUnauthorizedDrive(t, i) || Timeline.driveHas(t, i, "wrongRoute") || Timeline.driveHas(t, i, "wrongMethod") || Timeline.driveHas(t, i, "malformedRequest")
+
+def sourceIntegrity(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.fileTextIs(t, i, "ws/src/Main.scuzz", "v0") || Timeline.fileTextIs(t, i, "ws/src/Main.scuzz", "alpha") || Timeline.fileTextIs(t, i, "ws/src/Main.scuzz", "beta"))
+
+def acceptedNeverClobbered(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.fileTextIs(t, a, "ws/src/Main.scuzz", "alpha") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha")) && (!Timeline.fileTextIs(t, a, "ws/src/Main.scuzz", "beta") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "beta"))
+})
+
+def rejectedPreservesWorkspace(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !isRejectedDrive(t, b) || Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") && Timeline.fileSame(t, a, b, "ws/.scuzz/ide/journal.json") && Timeline.fileSame(t, a, b, "ws/.scuzz/ide/steer.json") && Timeline.fileSame(t, a, b, "ws/.scuzz/ide/last.json")
+})
+
+def rejectedStatuses(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!isUnauthorizedDrive(t, b) || Timeline.fileTextIs(t, b, "obs/status.txt", "401") || faulted(t, b) && Timeline.fileSame(t, a, b, "obs/status.txt")) && (!Timeline.driveHas(t, b, "wrongRoute") || Timeline.fileTextIs(t, b, "obs/status.txt", "404") || faulted(t, b) && Timeline.fileSame(t, a, b, "obs/status.txt")) && (!Timeline.driveHas(t, b, "wrongMethod") || Timeline.fileTextIs(t, b, "obs/status.txt", "405") || faulted(t, b) && Timeline.fileSame(t, a, b, "obs/status.txt")) && (!Timeline.driveHas(t, b, "malformedRequest") || Timeline.fileTextIs(t, b, "obs/status.txt", "400") || faulted(t, b) && Timeline.fileSame(t, a, b, "obs/status.txt"))
+})
+
+def acceptAppliesOrPreserves(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "acceptAlpha") || Timeline.fileTextIs(t, a, "ws/src/Main.scuzz", "beta") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:stale:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:stale:true") || faulted(t, b) && Timeline.fileSame(t, a, b, "ws/src/Main.scuzz")) || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha") && Timeline.fileTextIs(t, b, "ws/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") || faulted(t, b) && (Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha"))
+})
+
+def duplicateAcceptIdempotent(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, a, "acceptAlpha") && Timeline.driveHas(t, b, "acceptAlpha")) || faulted(t, a) && (Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha")) || faulted(t, b) && Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") || Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") && Timeline.fileSame(t, a, b, "ws/.scuzz/ide/last.json") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:applied:true") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:stale:true") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:already-decided:true"))
+})
+
+def staleBaseNeverClobbers(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "staleBetaAfterAlpha") || Timeline.fileTextIs(t, a, "ws/src/Main.scuzz", "beta") && Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "beta") || Timeline.fileSame(t, a, b, "ws/src/Extra.scuzz") && Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha") && Timeline.fileTextIs(t, b, "obs/status.txt", "200,200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:applied:false;act-beta-stale:stale:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:applied:true;act-beta-stale:stale:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:applied:true;act-beta-stale:stale:true") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:applied:false;act-beta-stale:already-decided:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:applied:true;act-beta-stale:already-decided:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:applied:true;act-beta-stale:already-decided:true") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:already-decided:false;act-beta-stale:already-decided:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:already-decided:true;act-beta-stale:already-decided:true") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:already-decided:false;act-beta-stale:stale:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-alpha:already-decided:true;act-beta-stale:stale:true")) || faulted(t, b) && Timeline.fileSame(t, a, b, "ws/src/Extra.scuzz") && (Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha"))
+})
+
+private def alphaWonRace(t: Timeline, b: Int): Bool =
+  Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha") && Timeline.fileTextIs(t, b, "obs/race-a.txt", "race-alpha:applied:false") && Timeline.fileTextIs(t, b, "obs/race-b.txt", "race-beta:stale:false")
+
+private def betaWonRace(t: Timeline, b: Int): Bool =
+  Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "beta") && Timeline.fileTextIs(t, b, "ws/src/Extra.scuzz", "extra") && Timeline.fileTextIs(t, b, "obs/race-b.txt", "race-beta:applied:false") && Timeline.fileTextIs(t, b, "obs/race-a.txt", "race-alpha:stale:false")
+
+def competingRaceConsistent(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "competingAcceptRace") || a != 0 && (Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "beta") || faulted(t, b) && Timeline.fileSame(t, a, b, "ws/src/Main.scuzz")) || alphaWonRace(t, b) || betaWonRace(t, b) || faulted(t, b) && (Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "v0") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "beta"))
+})
+
+def offlineBatchOrderAndIdempotence(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.driveHas(t, b, "offlineBatchReplay") || a == 0 && Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha") && Timeline.fileTextIs(t, b, "ws/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "obs/gamma-decision.txt", "baseline") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") && Timeline.fileTextIs(t, b, "obs/summary.txt", "b-missing:missing-card:false,b-reject:applied:false,b-reject-other:already-decided:false#,b-skip:applied:false#need-another-scenario,b-steer-1:queued:false#1@0,b-accept:applied:false,b-steer-2:queued:false#2@a") || a != 0 && (!Timeline.driveHas(t, a, "offlineBatchReplay") || faulted(t, a) && (Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha")) || faulted(t, b) && Timeline.fileSame(t, a, b, "ws/.scuzz/ide/steer.json") || Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") && Timeline.fileSame(t, a, b, "ws/.scuzz/ide/steer.json") && Timeline.fileTextIs(t, b, "obs/summary.txt", "b-missing:missing-card:true,b-reject:applied:true,b-reject-other:already-decided:true#,b-skip:applied:true#need-another-scenario,b-steer-1:queued:true#1@0,b-accept:applied:true,b-steer-2:queued:true#2@a")) || faulted(t, b) && (Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") || Timeline.fileTextIs(t, b, "ws/src/Main.scuzz", "alpha"))) && (!(a == 1 && Timeline.driveHas(t, a, "offlineBatchReplay") && Timeline.driveHas(t, b, "fetchFeed")) || faulted(t, a) || faulted(t, b) && Timeline.fileSame(t, a, b, "ws/src/Main.scuzz") || Timeline.fileTextIs(t, b, "obs/status.txt", "200") && Timeline.fileTextIs(t, b, "obs/summary.txt", "rev=5;obj=ship sync;cards=dddd;steer=keep layout compact|add dark contrast"))
+})
+
+def feedInitialSnapshot(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(a == 0 && Timeline.driveHas(t, b, "fetchFeed")) || Timeline.effectHas(t, b, "Net.httpGet") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") && Timeline.fileTextIs(t, b, "obs/summary.txt", "rev=0;obj=ship sync;cards=aaaa,bbbb,cccc;steer=") || faulted(t, b) && Timeline.fileSame(t, a, b, "ws/src/Main.scuzz")
+})
+
+def recoveryAndDirtySafety(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.driveHas(t, b, "dirtyAccept") || Timeline.fileTextIs(t, b, "ws-dirty/src/Main.scuzz", "v0") && (Timeline.fileTextIs(t, b, "obs/status.txt", "200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "act-dirty:dirty:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-dirty:dirty:true")) || faulted(t, b) && Timeline.fileSame(t, a, b, "ws-dirty/src/Main.scuzz"))) && (!Timeline.driveHas(t, b, "recoverAcceptJournal") || Timeline.fileTextIs(t, b, "ws-rec/src/Main.scuzz", "beta") && Timeline.fileTextIs(t, b, "ws-rec/src/Extra.scuzz", "extra") && Timeline.fileTextIs(t, b, "ws-rec/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "rec-beta:applied:true,rec-gamma:applied:false,rec-steer:queued:false#1@b") || Timeline.fileTextIs(t, b, "obs/summary.txt", "rec-beta:applied:true,rec-gamma:applied:true,rec-steer:queued:true#1@b")) || faulted(t, b) && Timeline.fileTextIs(t, b, "ws-rec/src/Main.scuzz", "beta")) && (!Timeline.driveHas(t, b, "recoverUndoJournal") || Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, b, "ws-undo/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "ws-undo/.scuzz/ide/last.json", "") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "beta") || Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "v0"))) && (!Timeline.driveHas(t, b, "conflictJournal") || Timeline.fileTextIs(t, b, "ws-conflict/src/Main.scuzz", "external-edit") && (Timeline.fileTextIs(t, b, "obs/status.txt", "409") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/status.txt") || Timeline.fileTextIs(t, b, "obs/status.txt", "503")))) && (!Timeline.driveHas(t, b, "mintFreshToken") || Timeline.fileTextIs(t, b, "obs/summary.txt", "token-minted-and-reused") || faulted(t, b) && Timeline.fileSame(t, a, b, "ws-token/src/Main.scuzz"))
+})
+

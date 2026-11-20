@@ -1,0 +1,4 @@
+[package]
+name = "ide-sync"
+version = "0.1.0"
+description = "Serve verified IDE proposal cards, idempotent decisions, and steer prompts over HTTP"

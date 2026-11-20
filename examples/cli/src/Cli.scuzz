@@ -14,6 +14,7 @@ enum Cmd:
   case Diff(path: String, rev: String, iterations: Int, seed: Int, json: Bool)
   case New(name: String, path: String, ui: Bool)
   case Ide(path: String, outDir: String, target: String)
+  case IdeServe(path: String, port: Int, token: String, once: Bool)
   case Models(action: String, model: String, json: Bool)
   case GenerationRequest(path: String, objective: String, out: String)
   case GenerationReview(path: String, request: String, candidate: String)
@@ -240,6 +241,7 @@ def show(c: Cmd): String =
     case Cmd.Diff(path, rev, iterations, seed, json) => Str.concat("diff path=", Str.concat(path, Str.concat(" rev=", Str.concat(rev, Str.concat(" iterations=", Str.concat(Str.fromInt(iterations), Str.concat(" seed=", Str.concat(Str.fromInt(seed), Str.concat(" json=", yn(json))))))))))
     case Cmd.New(name, path, ui) => Str.concat("new name=", Str.concat(name, Str.concat(" path=", Str.concat(path, Str.concat(" ui=", yn(ui))))))
     case Cmd.Ide(path, outDir, target) => Str.concat("ide path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", target)))))
+    case Cmd.IdeServe(path, port, token, once) => List.foldLeft(["ide serve path=", path, " port=", Str.fromInt(port), " token=", yn(token != ""), " once=", yn(once)], "", p => Str.concat(p._1, p._2))
     case Cmd.Models(action, model, json) => Str.concat("models ", Str.concat(action, Str.concat(" model=", Str.concat(model, Str.concat(" json=", yn(json))))))
     case Cmd.GenerationRequest(path, objective, out) => Str.concat("ide export-request ", path)
     case Cmd.GenerationReview(path, request, candidate) => Str.concat("ide review-suggestion ", path)
@@ -541,7 +543,31 @@ def ideDone(json: Bool, path: String, outDir: String, target: String): Cmd =
   if (!okRunTarget(target)) Cmd.Fail(badRunTarget(target)) else gateJson(Cmd.Ide(orDot(path), outDir, target), json)
 
 def parseIdeTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String, a: String): Cmd =
-  if ((a == "export-request" || a == "review-suggestion") && path == "" && outDir == "build" && target == "") parseGenerationIO(args, i + 1, "", "", "", a == "review-suggestion") else if (a == "generate-suggestion" && path == "" && outDir == "build" && target == "") parseGenerate(args, i + 1, "", "", "", "", false) else if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--target" || flagPref(a, "--target")) parseIdeTarget(takeVal(args, i, "--target"), args, json, path, outDir) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, target) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, target) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, target)
+  if ((a == "export-request" || a == "review-suggestion") && path == "" && outDir == "build" && target == "") parseGenerationIO(args, i + 1, "", "", "", a == "review-suggestion") else if (a == "generate-suggestion" && path == "" && outDir == "build" && target == "") parseGenerate(args, i + 1, "", "", "", "", false) else if (a == "serve" && path == "" && outDir == "build" && target == "") parseIdeServe(args, i + 1, json, "", 8787, false, "", false, false) else if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--target" || flagPref(a, "--target")) parseIdeTarget(takeVal(args, i, "--target"), args, json, path, outDir) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, target) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, target) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, target)
+
+def parseIdeServe(args: List[String], i: Int, json: Bool, path: String, port: Int, hasPort: Bool, token: String, hasToken: Bool, once: Bool): Cmd =
+  if (i >= List.len(args)) gateJson(Cmd.IdeServe(orDot(path), port, token, once), json) else parseIdeServeTok(args, i, json, path, port, hasPort, token, hasToken, once, arg(args, i))
+
+def parseIdeServeTok(args: List[String], i: Int, json: Bool, path: String, port: Int, hasPort: Bool, token: String, hasToken: Bool, once: Bool, a: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--once" && !once) parseIdeServe(args, i + 1, json, path, port, hasPort, token, hasToken, true) else if ((a == "--port" || flagPref(a, "--port")) && !hasPort) parseIdeServePort(takeVal(args, i, "--port"), args, json, path, token, hasToken, once) else if ((a == "--token" || flagPref(a, "--token")) && !hasToken) parseIdeServeToken(takeVal(args, i, "--token"), args, json, path, port, hasPort, once) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeServeMsg(takeVal(args, i, "--message-format"), args, path, port, hasPort, token, hasToken, once) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide serve [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide serve [OPTIONS] [PATH]")) else parseIdeServe(args, i + 1, json, a, port, hasPort, token, hasToken, once)
+
+def parseIdeServePort(p: (String, Int), args: List[String], json: Bool, path: String, token: String, hasToken: Bool, once: Bool): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--port")) else parseFlagNat(v) match {
+  case (ok, k) => if (!ok || k < 1 || k > 65535) Cmd.Fail(badInt("--port", v)) else parseIdeServe(args, n, json, path, k, true, token, hasToken, once)
+}
+  }
+
+def parseIdeServeToken(p: (String, Int), args: List[String], json: Bool, path: String, port: Int, hasPort: Bool, once: Bool): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--token")) else if (!IdeSync.validToken(v)) Cmd.Fail("""error: invalid value for '--token <TOKEN>'; use 16..128 [A-Za-z0-9_-] characters
+""") else parseIdeServe(args, n, json, path, port, hasPort, v, true, once)
+  }
+
+def parseIdeServeMsg(p: (String, Int), args: List[String], path: String, port: Int, hasPort: Bool, token: String, hasToken: Bool, once: Bool): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json" || v == "human") parseIdeServe(args, n, v == "json", path, port, hasPort, token, hasToken, once) else Cmd.Fail(badFmt(v))
+  }
 
 def parseIdeTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String): Cmd =
   p match {
@@ -684,6 +710,7 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, relate, differential, live, asan, session) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles, differential, live, asan, session)
     case Cmd.Diff(path, rev, it, seed, json) => dispatchDiff(path, rev, it, seed, json)
     case Cmd.Ide(path, outDir, target) => dispatchIde(path, outDir, target)
+    case Cmd.IdeServe(path, port, token, once) => dispatchIdeServe(path, port, token, once)
     case Cmd.Models(action, model, json) => if (action == "list") Models.listCommand(json) else Models.downloadCommand(model, json)
     case Cmd.GenerationRequest(path, objective, out) => Generate.exportCommand(path, objective, out)
     case Cmd.GenerationReview(path, request, candidate) => Generate.reviewCommand(path, request, candidate)
@@ -698,6 +725,16 @@ def dispatch(c: Cmd): IO[Unit] =
 
 def dispatchDocs(mode: String, topic: String): IO[Unit] =
   if (docsUnknown(mode, topic)) IO.println(docsOut(mode, topic)).flatMap(_ => IO.fail("scuzz")) else IO.println(docsOut(mode, topic))
+
+def dispatchIdeServe(path: String, port: Int, token: String, once: Bool): IO[Unit] =
+  for {
+    hasToml <- Fs.exists(Fs.join(path, "scuzz.toml"))
+    _ <- if (hasToml != 0) IO.pure(()) else IO.fail(Str.concat("scuzz ide serve: scuzz.toml not found in ", path))
+    tok <- IdeSync.ensureToken(path, token)
+    _ <- IO.println(Str.concat("scuzz ide serve ", Str.concat(path, Str.concat(" on http://0.0.0.0:", Str.concat(Str.fromInt(port), "/v1/ide/sync")))))
+    _ <- IO.println(Str.concat("pairing bearer token: ", tok))
+    _ <- if (once) Net.serveOnce(port, req => IdeSync.handle(path, tok, req)) else IdeSync.run(path, port, tok)
+  } yield ()
 
 def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
   Drive.hostMac().flatMap(mac => dispatchPkgHost(path, outDir, target, mac))

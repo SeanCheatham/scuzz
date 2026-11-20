@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive fetchFeed", "drive unauthorizedWrongToken", "drive offlineBatchReplay", "drive fetchFeed", "drive staleBetaAfterAlpha"]

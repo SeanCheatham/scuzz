@@ -1792,6 +1792,104 @@ with open("examples/webhook/build/drivers.txt") as f:
 assert "faulted" not in drivers and "rejected" not in drivers
 PY_WEBHOOK
 
+fuzz_both_engines examples/ide-sync 64 ide-sync
+assert_fuzz_summary examples/ide-sync/build/fuzz/summary.json /tmp/scuzz-ide-sync-summary.log
+python3 - <<'PY_IDE_SYNC'
+import json
+with open("examples/ide-sync/build/fuzz/summary.json") as f:
+    sync = json.load(f)
+assert sync["fuzz"]["ok"] is True
+assert sync["mutate"]["survived"] == 0
+assert sync["mutate"]["invalid"] == 0
+assert sync["mutate"]["incomplete"] == 0
+assert sync["coverage"]["reached"] == sync["coverage"]["total"]
+assert {"unauthorizedMissing", "unauthorizedWrongToken", "offlineBatchReplay", "staleBetaAfterAlpha", "competingAcceptRace", "recoverAcceptJournal"} <= set(sync["breadth"]["claimed"]["driveHas"])
+assert {"ws/src/Main.scuzz", "ws/.scuzz/ide/journal.json", "ws/.scuzz/ide/steer.json"} <= set(sync["breadth"]["claimed"]["fileSame"])
+PY_IDE_SYNC
+if ! fuzz --live --replay examples/ide-sync/live.toml examples/ide-sync | tee /tmp/scuzz-ide-sync-live.log | grep "fuzz replay ok" >/dev/null; then
+  echo "examples/ide-sync: live loopback replay failed" && exit 1
+fi
+if ! fuzz --asan --iterations 0 examples/ide-sync | tee /tmp/scuzz-ide-sync-asan.log; then
+  echo "examples/ide-sync: ASan corpus replay failed" && exit 1
+fi
+if grep -E 'ERROR: (Address|Leak)Sanitizer' /tmp/scuzz-ide-sync-asan.log; then
+  echo "examples/ide-sync: ASan reported a defect" && exit 1
+fi
+python3 - "$SCUZZ" <<'PY_IDE_SERVE_CLI'
+import json
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+cli = str(Path(sys.argv[1]).resolve())
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+
+with tempfile.TemporaryDirectory(prefix="scuzz-ide-serve-") as tmp:
+    root = Path(tmp)
+    (root / "src").mkdir()
+    (root / "scuzz.toml").write_text('[package]\nname = "sync-smoke"\n')
+    (root / "src/Main.scuzz").write_text("@main def main: IO[Unit] =\n  IO.pure(())\n")
+
+    proc = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(port), "--once", str(root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        token_path = root / ".scuzz/ide/sync-token.txt"
+        deadline = time.monotonic() + 10.0
+        while not token_path.exists() or not token_path.read_text().strip():
+            assert proc.poll() is None, proc.communicate()
+            assert time.monotonic() < deadline, "timed out waiting for sync-token.txt"
+            time.sleep(0.05)
+        token = token_path.read_text().strip()
+        time.sleep(0.05)
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/ide/sync")
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            raise AssertionError("expected 401 without bearer token")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401, exc.code
+        out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 0, (proc.returncode, out, err)
+        assert f"pairing bearer token: {token}" in out, out
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    proc2 = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(port), "--once", str(root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        time.sleep(0.1)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/ide/sync",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+            doc = json.loads(resp.read().decode())
+            assert doc["v"] == 1 and doc["cards"] == [] and doc["steer"] == [], doc
+        out2, err2 = proc2.communicate(timeout=10)
+        assert proc2.returncode == 0, (proc2.returncode, out2, err2)
+    finally:
+        if proc2.poll() is None:
+            proc2.kill()
+            proc2.wait()
+PY_IDE_SERVE_CLI
+
 fuzz_api_report() {
   local dir="examples/api-report" iterations=320 name="api-report"
   rm -f "$dir/.scuzz/mutate.results"

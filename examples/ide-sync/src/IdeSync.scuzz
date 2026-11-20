@@ -1,0 +1,449 @@
+record RelPath private(value: String)
+
+record SyncAction(id: String, kind: String, card: String, baseline: String, reason: String, prompt: String)
+
+def text(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(s) => s
+    case Result.Err(e) => e
+  }
+
+def field(j: Json, key: String): Json =
+  Json.field(j, key) match {
+    case Result.Ok(v) => v
+    case Result.Err(_) => Json.Null()
+  }
+
+def str(j: Json, key: String): String =
+  Json.getStr(j, key, "")
+
+def validHex(s: String): Bool =
+  Str.matches(s, "^[a-f0-9]{64}$")
+
+def validActionId(s: String): Bool =
+  Str.matches(s, "^[A-Za-z0-9_-]{1,128}$")
+
+def validToken(token: String): Bool =
+  Str.matches(token, "^[A-Za-z0-9_-]{16,128}$")
+
+def validSkipReason(reason: String): Bool =
+  reason == "" || reason == "no-visible-difference" || reason == "need-another-scenario" || reason == "outside-my-goal"
+
+def safePath(path: String): Bool =
+  Str.matches(path, "^src/[A-Za-z_][A-Za-z0-9_]*\\.scuzz$")
+
+def sourceSetOk(files: List[(String, String)]): Bool =
+  List.nonEmpty(files) && List.len(files) <= 3 && List.len(List.distinct(List.map(files, f => f._1))) == List.len(files) && List.forall(files, f => safePath(f._1)) && List.foldLeft(files, 0, p => p._1 + Str.byteLen(p._2._2)) <= 65536
+
+def pairsJson(files: List[(String, String)]): Json =
+  Json.Arr(List.map(List.sort(List.map(files, f => f._1)), p => Json.Obj([("path", Json.Str(p)), ("content", Json.Str(List.at(files, List.indexOf(List.map(files, f => f._1), p))._2))])))
+
+def pairs(j: Json): List[(String, String)] =
+  List.map(Json.arr(j), f => (str(f, "path"), str(f, "content")))
+
+def setHash(files: List[(String, String)]): String =
+  Hash.sha256(text(pairsJson(files)))
+
+def applyPaths(disk: List[(String, String)], props: List[(String, String)]): List[(String, String)] =
+  List.concat(List.map(disk, d => (d._1, List.getOrElse(List.map(props, p => p._2), List.indexOf(List.map(props, p => p._1), d._1), d._2))), List.filter(props, p => !List.contains(List.map(disk, d => d._1), p._1)))
+
+private def authHeader(headers: Map[String, String]): String =
+  for {
+    names = List.filter(Map.keys(headers), name => Str.toLower(name) == "authorization")
+  } yield if (List.len(names) != 1) "" else Map.getOrElse(headers, List.getOrElse(names, 0, ""), "")
+
+def authorized(token: String, headers: Map[String, String]): Bool =
+  validToken(token) && Hash.constantTimeEqual(Hash.sha256(authHeader(headers)), Hash.sha256(Str.concat("Bearer ", token)))
+
+def authHeaders(token: String): Map[String, String] =
+  Map.set(Map.empty(), "Authorization", Str.concat("Bearer ", token))
+
+private def optionalHexOk(item: Json, key: String): Bool =
+  !Json.has(item, key) || Json.isStr(field(item, key)) && (str(item, key) == "" || validHex(str(item, key)))
+
+private def decodeReason(item: Json): Result[String, String] =
+  if (!Json.has(item, "reason")) Result.Ok("") else if (!Json.isStr(field(item, "reason")) || !validSkipReason(str(item, "reason"))) Result.Err("invalid-reason") else Result.Ok(str(item, "reason"))
+
+private def decodeOne(item: Json): Result[String, SyncAction] =
+  if (!Json.isObj(item)) Result.Err("expected-action-object") else for {
+  id = str(item, "id")
+  kind = str(item, "kind")
+  card = str(item, "card")
+  base = str(item, "baseline")
+} yield if (!Json.isStr(field(item, "id")) || !validActionId(id)) Result.Err("invalid-action-id") else if (kind == "accept") if (!Json.isStr(field(item, "card")) || !validHex(card) || !Json.isStr(field(item, "baseline")) || !validHex(base)) Result.Err("invalid-accept") else Result.Ok(SyncAction(id, "accept", card, base, "", "")) else if (kind == "reject") if (!Json.isStr(field(item, "card")) || !validHex(card) || !optionalHexOk(item, "baseline")) Result.Err("invalid-reject") else Result.Ok(SyncAction(id, "reject", card, base, "", "")) else if (kind == "skip") if (!Json.isStr(field(item, "card")) || !validHex(card) || !optionalHexOk(item, "baseline")) Result.Err("invalid-skip") else decodeReason(item) match {
+  case Result.Err(e) => Result.Err(e)
+  case Result.Ok(reason) => Result.Ok(SyncAction(id, "skip", card, base, reason, ""))
+} else if (kind == "steer") for {
+  rawPrompt = str(item, "prompt")
+  prompt = Str.trim(rawPrompt)
+} yield if (!Json.isStr(field(item, "prompt")) || prompt == "" || Str.byteLen(prompt) > 512 || !optionalHexOk(item, "baseline")) Result.Err("invalid-steer") else Result.Ok(SyncAction(id, "steer", "", base, "", prompt)) else Result.Err("invalid-kind")
+
+private def decodeList(items: List[Json], acc: List[SyncAction]): Result[String, List[SyncAction]] =
+  items match {
+    case [] => Result.Ok(List.reverse(acc))
+    case head :: tail => decodeOne(head) match {
+  case Result.Err(e) => Result.Err(e)
+  case Result.Ok(act) => decodeList(tail, act :: acc)
+}
+  }
+
+def decodeActions(body: String): Result[String, List[SyncAction]] =
+  if (Str.byteLen(body) > 262144) Result.Err("payload-too-large") else Json.parse(body) match {
+  case Result.Err(_) => Result.Err("invalid-json")
+  case Result.Ok(doc) => if (!Json.isObj(doc) || !Json.isInt(field(doc, "v")) || Json.getInt(doc, "v", 0) != 1) Result.Err("invalid-version") else if (!Json.has(doc, "actions")) decodeOne(doc) match {
+  case Result.Err(e) => Result.Err(e)
+  case Result.Ok(act) => Result.Ok([act])
+} else for {
+  arr = field(doc, "actions")
+  xs = Json.arr(arr)
+} yield if (!Json.isArr(arr) || List.isEmpty(xs) || List.len(xs) > 64) Result.Err("invalid-actions") else decodeList(xs, [])
+}
+
+private def pathCharOk(c: Int): Bool =
+  c >= 32 && c != 127 && c != 92 && c != 58
+
+def relPath(path: String): Result[String, RelPath] =
+  if (Str.len(path) > 0 && List.forall(List.range(0, Str.len(path)), i => pathCharOk(Str.charAt(path, i))) && List.forall(Str.split(path, "/"), part => part != "" && part != "." && part != "..")) Result.Ok(RelPath(path)) else Result.Err(Str.concat("invalid relative path: ", path))
+
+private def need(ok: Bool, why: String): IO[Unit] =
+  if (ok) IO.pure(()) else IO.fail(why)
+
+def checkInside(root: String, path: String): IO[Unit] =
+  relPath(path) match {
+    case Result.Err(e) => IO.fail(e)
+    case Result.Ok(rel) => for {
+  base <- Fs.canonicalize(root)
+  resolved <- Fs.canonicalize(Fs.join(root, rel.value)).handleErrorWith(_ => Fs.canonicalize(Fs.dirname(Fs.join(root, rel.value))).map(p => Fs.join(p, Fs.basename(rel.value))))
+  _ <- need(resolved == Fs.join(base, rel.value), Str.concat("unsafe resolved path: ", rel.value))
+} yield ()
+  }
+
+def storage(root: String): String =
+  Fs.join(root, ".scuzz/ide")
+
+private def cardFile(root: String, id: String): String =
+  Fs.join(Fs.join(Fs.join(storage(root), "cards"), id), "card.json")
+
+private def recordPath(root: String, name: String): String =
+  Fs.join(Fs.join(storage(root), "records"), Str.concat(name, ".json"))
+
+private def actionPath(root: String, id: String): String =
+  Fs.join(Fs.join(Fs.join(storage(root), "sync"), "actions"), Str.concat(id, ".json"))
+
+private def steerPath(root: String): String =
+  Fs.join(storage(root), "steer.json")
+
+private def tokenPath(root: String): String =
+  Fs.join(storage(root), "sync-token.txt")
+
+private def readOptional(path: String): IO[String] =
+  Fs.exists(path).flatMap(hit => if (hit == 0) IO.pure("") else Fs.read(path))
+
+private def parseStored(raw: String, label: String): IO[Json] =
+  Json.parse(raw) match {
+    case Result.Ok(j) => if (Json.isObj(j)) IO.pure(j) else IO.fail(label)
+    case Result.Err(_) => IO.fail(label)
+  }
+
+def setupStorage(root: String): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs(Fs.join(Fs.join(storage(root), "sync"), "actions"))
+    _ <- Fs.mkdirs(Fs.join(storage(root), "cards"))
+    _ <- Fs.mkdirs(Fs.join(storage(root), "records"))
+    _ <- checkInside(root, ".scuzz/ide/cards")
+    _ <- checkInside(root, ".scuzz/ide/records")
+    _ <- checkInside(root, ".scuzz/ide/sync/actions")
+  } yield ()
+
+def own(root: String): IO[List[(String, String)]] =
+  for {
+    _ <- checkInside(root, "src")
+    ents <- Fs.list(Fs.join(root, "src"))
+    names = List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".scuzz")), e => e._1))
+    files <- IO.foreach(names, p => for {
+  rel = Fs.join("src", p)
+  _ <- need(safePath(rel), Str.concat("unsafe source path: ", rel))
+  _ <- checkInside(root, rel)
+  body <- Fs.read(Fs.join(root, rel))
+} yield (rel, body))
+  } yield files
+
+def sourceWrites(c: Json): List[Json] =
+  for {
+    base = pairs(field(c, "baseline"))
+    basePaths = List.map(base, d => d._1)
+    baseBodies = List.map(base, d => d._2)
+  } yield List.map(pairs(field(c, "proposed")), f => Json.Obj([("path", Json.Str(f._1)), ("before", Json.Str(List.getOrElse(baseBodies, List.indexOf(basePaths, f._1), ""))), ("before_exists", Json.Bool(List.contains(basePaths, f._1))), ("after", Json.Str(f._2)), ("after_exists", Json.Bool(true))]))
+
+def validOperation(op: Json): Bool =
+  for {
+    card = str(op, "card")
+    decision = str(op, "decision")
+    ws = Json.arr(field(op, "writes"))
+  } yield (decision == "accept" || decision == "undo") && validHex(card) && str(op, "operation") == Str.concat(decision, Str.concat("-", card)) && List.nonEmpty(ws) && List.len(ws) <= 3 && List.len(List.distinct(List.map(ws, w => str(w, "path")))) == List.len(ws) && List.forall(ws, w => safePath(str(w, "path")) && Json.isStr(field(w, "before")) && Json.isStr(field(w, "after")) && Json.isBool(field(w, "before_exists")) && Json.isBool(field(w, "after_exists")) && (Json.getBool(w, "before_exists", false) || str(w, "before") == "") && (Json.getBool(w, "after_exists", false) || str(w, "after") == ""))
+
+private def matches(root: String, w: Json, side: String): IO[Bool] =
+  for {
+    path = str(w, "path")
+    _ <- checkInside(root, path)
+    hit <- Fs.exists(Fs.join(root, path))
+    src <- if (hit == 0) IO.pure("") else Fs.read(Fs.join(root, path))
+  } yield hit != 0 == Json.getBool(w, Str.concat(side, "_exists"), false) && src == str(w, side)
+
+private def writeOne(root: String, w: Json): IO[Unit] =
+  for {
+    path = str(w, "path")
+    after <- matches(root, w, "after")
+    before <- matches(root, w, "before")
+    _ <- need(after || before, Str.concat("recovery conflict: ", path))
+    _ <- if (after) IO.pure(()) else if (Json.getBool(w, "after_exists", false)) Fs.write(Fs.join(root, path), str(w, "after")) else Fs.delete(Fs.join(root, path))
+    done <- matches(root, w, "after")
+    _ <- need(done, Str.concat("recovery conflict: ", path))
+  } yield ()
+
+private def acceptReceipt(actionId: String, cardId: String, status: String, base: String): Json =
+  Json.Obj([("v", Json.Int(1)), ("id", Json.Str(actionId)), ("kind", Json.Str("accept")), ("card", Json.Str(cardId)), ("status", Json.Str(status)), ("baseline", Json.Str(base))])
+
+private def writeReceipt(root: String, id: String, receipt: Json): IO[Json] =
+  Fs.write(actionPath(root, id), text(receipt)).map(_ => receipt)
+
+def finish(root: String, op: Json): IO[Unit] =
+  for {
+    _ <- need(validOperation(op), "recovery conflict: invalid journal")
+    ws = Json.arr(field(op, "writes"))
+    checks <- IO.foreach(ws, w => matches(root, w, "before").flatMap(b => matches(root, w, "after").map(a => b || a)))
+    _ <- need(List.forall(checks, ok => ok), "recovery conflict: preserve external edits")
+    _ <- IO.foreachDiscard(ws, w => writeOne(root, w))
+    opId = str(op, "operation")
+    _ <- Fs.write(recordPath(root, opId), text(op))
+    _ <- Fs.write(Fs.join(storage(root), "last.json"), if (str(op, "decision") == "accept") text(op) else "")
+    aid = str(op, "action_id")
+    _ <- if (str(op, "decision") == "accept" && validActionId(aid)) writeReceipt(root, aid, acceptReceipt(aid, str(op, "card"), "applied", str(op, "b"))).map(_ => ()) else IO.pure(())
+    _ <- Fs.write(Fs.join(storage(root), "journal.json"), "")
+  } yield ()
+
+def recover(root: String): IO[Unit] =
+  for {
+    _ <- setupStorage(root)
+    raw <- readOptional(Fs.join(storage(root), "journal.json"))
+    _ <- if (raw == "") IO.pure(()) else parseStored(raw, "recovery conflict: invalid journal").flatMap(op => finish(root, op))
+  } yield ()
+
+private def readSteer(root: String): IO[List[Json]] =
+  readOptional(steerPath(root)).flatMap(raw => if (raw == "") IO.pure([]) else parseStored(raw, "invalid steer store").flatMap(doc => for {
+  arr = field(doc, "items")
+  _ <- need(Json.getInt(doc, "v", 0) == 1 && Json.isArr(arr), "invalid steer store")
+} yield Json.arr(arr)))
+
+private def readDirties(root: String): IO[List[String]] =
+  readOptional(Fs.join(storage(root), "dirty.json")).flatMap(raw => if (raw == "") IO.pure([]) else Json.parse(raw) match {
+  case Result.Err(_) => IO.fail("invalid dirty buffer file")
+  case Result.Ok(arr) => if (!Json.isArr(arr) || !List.forall(Json.arr(arr), item => Json.isStr(item))) IO.fail("invalid dirty buffer file") else IO.pure(List.map(Json.arr(arr), item => Json.strOr(item, "")))
+})
+
+private def validCard(c: Json, id: String, base: String, disk: List[(String, String)]): Bool =
+  for {
+    props = pairs(field(c, "proposed"))
+  } yield str(c, "id") == id && str(c, "status") == "ready" && str(c, "a") == base && setHash(pairs(field(c, "baseline"))) == base && sourceSetOk(props) && str(c, "b") == setHash(applyPaths(disk, props))
+
+private def cardDecided(root: String, id: String): IO[Bool] =
+  for {
+    choice <- Fs.exists(recordPath(root, id))
+    accepted <- Fs.exists(recordPath(root, Str.concat("accept-", id)))
+  } yield choice != 0 || accepted != 0
+
+def cardSummary(c: Json): Json =
+  for {
+    props = pairs(field(c, "proposed"))
+    propPaths = List.map(props, p => p._1)
+    before = List.filter(pairs(field(c, "baseline")), b => List.contains(propPaths, b._1))
+    q = field(c, "question")
+    qLabel = str(q, "workload")
+    rows = Json.arr(field(field(c, "evidence"), "workloads"))
+    matched = List.filter(rows, w => str(w, "label") == qLabel)
+    changes = List.head(matched) match {
+  case Option.None => Json.Arr([])
+  case Option.Some(first) => field(field(first, "delta"), "changes")
+}
+  } yield Json.Obj([("id", Json.Str(str(c, "id"))), ("proposal", Json.Str(str(c, "proposal"))), ("objective", Json.Str(str(c, "objective"))), ("baseline", Json.Str(str(c, "a"))), ("after", Json.Str(str(c, "b"))), ("flip", Json.Int(Json.getInt(c, "flip", 0))), ("question", q), ("before", pairsJson(before)), ("proposed", pairsJson(props)), ("changes", if (Json.isArr(changes)) changes else Json.Arr([]))])
+
+private def readyCards(root: String, base: String, disk: List[(String, String)]): IO[List[Json]] =
+  for {
+    entries <- Fs.list(Fs.join(storage(root), "cards"))
+    ids = List.sort(List.map(List.filter(entries, e => e._2 && validHex(e._1)), e => e._1))
+    loaded <- IO.foreach(ids, id => for {
+  raw <- readOptional(cardFile(root, id))
+  decided <- cardDecided(root, id)
+  card <- if (raw == "" || decided) IO.pure(Json.Null()) else parseStored(raw, "invalid card").map(c => if (validCard(c, id, base, disk)) cardSummary(c) else Json.Null())
+} yield card)
+  } yield List.filter(loaded, c => !Json.isNull(c))
+
+private def recordCount(root: String): IO[Int] =
+  Fs.list(Fs.join(storage(root), "records")).map(ents => List.len(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".json"))))
+
+private def sessionObjective(root: String): IO[String] =
+  readOptional(Fs.join(storage(root), "session.json")).flatMap(raw => if (raw == "") IO.pure("") else parseStored(raw, "invalid session").map(s => str(s, "objective")))
+
+private def snapshotCursor(base: String, rev: Int, cards: List[Json], steers: List[Json]): String =
+  Hash.sha256(text(Json.Obj([("baseline", Json.Str(base)), ("revision", Json.Int(rev)), ("cards", Json.Arr(List.map(cards, c => field(c, "id")))), ("steer", Json.Arr(List.map(steers, s => field(s, "id"))))])))
+
+def snapshot(root: String): IO[Json] =
+  for {
+    _ <- recover(root)
+    disk <- own(root)
+    base = setHash(disk)
+    cards <- readyCards(root, base, disk)
+    steers <- readSteer(root)
+    queued = List.filter(steers, s => str(s, "status") == "queued")
+    recs <- recordCount(root)
+    rev = recs + List.len(steers)
+    objective <- sessionObjective(root)
+    cursor = snapshotCursor(base, rev, cards, queued)
+  } yield Json.Obj([("v", Json.Int(1)), ("baseline", Json.Str(base)), ("cursor", Json.Str(cursor)), ("revision", Json.Int(rev)), ("objective", Json.Str(objective)), ("cards", Json.Arr(cards)), ("steer", Json.Arr(queued))])
+
+private def storedReceipt(root: String, id: String): IO[Option[Json]] =
+  readOptional(actionPath(root, id)).flatMap(raw => if (raw == "") IO.pure(Option.None) else parseStored(raw, "invalid action receipt").map(r => Option.Some(r)))
+
+private def generatorOf(c: Json): String =
+  Json.parse(str(c, "publication")) match {
+    case Result.Ok(pub) => str(pub, "generator")
+    case Result.Err(_) => ""
+  }
+
+def buildOperation(c: Json, action: SyncAction, accepted: Bool, now: Int): Json =
+  for {
+    flip = Json.getInt(c, "flip", 0)
+    propLane = if (flip == 1) 0 else 1
+    baseLane = if (flip == 1) 1 else 0
+    lane = if (action.kind == "skip") -1 else if (accepted) propLane else baseLane
+    decision = if (action.kind == "skip") "abstain" else if (accepted) "accept" else "baseline"
+    opName = if (accepted) Str.concat("accept-", action.card) else action.card
+    props = pairs(field(c, "proposed"))
+  } yield Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(opName)), ("action_id", Json.Str(action.id)), ("card", Json.Str(action.card)), ("proposal", Json.Str(str(c, "proposal"))), ("decision", Json.Str(decision)), ("reason", Json.Str(action.reason)), ("lane", Json.Int(lane)), ("flip", Json.Int(flip)), ("a", field(c, "a")), ("b", field(c, "b")), ("objective", field(c, "objective")), ("generator", Json.Str(generatorOf(c))), ("evidence_status", field(c, "status")), ("question", field(c, "question")), ("started", field(c, "started")), ("ready", field(c, "ready")), ("limits", Json.Str("files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")), ("region", Json.Arr(List.map(props, f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(if (accepted) sourceWrites(c) else []))])
+
+private def decisionReceipt(action: SyncAction, status: String, base: String): Json =
+  for {
+    core = [("v", Json.Int(1)), ("id", Json.Str(action.id)), ("kind", Json.Str(action.kind)), ("card", Json.Str(action.card)), ("status", Json.Str(status)), ("baseline", Json.Str(base))]
+  } yield Json.Obj(if (action.kind == "skip") List.append(core, ("reason", Json.Str(action.reason))) else core)
+
+private def loadReadyCard(root: String, cardId: String): IO[Option[Json]] =
+  readOptional(cardFile(root, cardId)).flatMap(raw => if (raw == "") IO.pure(Option.None) else parseStored(raw, "invalid card").map(c => if (str(c, "id") == cardId && str(c, "status") == "ready") Option.Some(c) else Option.None))
+
+private def existingDecisionOwner(root: String, cardId: String): IO[(Bool, String)] =
+  for {
+    choiceRaw <- readOptional(recordPath(root, cardId))
+    acceptRaw <- readOptional(recordPath(root, Str.concat("accept-", cardId)))
+    owner <- if (acceptRaw != "") parseStored(acceptRaw, "invalid record").map(r => (true, str(r, "action_id"))) else if (choiceRaw != "") parseStored(choiceRaw, "invalid record").map(r => (true, str(r, "action_id"))) else IO.pure((false, ""))
+  } yield owner
+
+private def applyAccept(root: String, action: SyncAction, disk: List[(String, String)], base: String): IO[Json] =
+  loadReadyCard(root, action.card).flatMap(found => found match {
+  case Option.None => writeReceipt(root, action.id, decisionReceipt(action, "missing-card", base))
+  case Option.Some(c) => existingDecisionOwner(root, action.card).flatMap(dec => dec match {
+  case (decided, _) => if (decided) writeReceipt(root, action.id, decisionReceipt(action, "already-decided", base)) else if (base != action.baseline || !validCard(c, action.card, base, disk)) writeReceipt(root, action.id, decisionReceipt(action, "stale", base)) else for {
+  dirties <- readDirties(root)
+  props = pairs(field(c, "proposed"))
+  dirty = List.exists(props, p => List.contains(dirties, p._1))
+  receipt <- if (dirty) writeReceipt(root, action.id, decisionReceipt(action, "dirty", base)) else for {
+  ws = sourceWrites(c)
+  beforeChecks <- IO.foreach(ws, w => matches(root, w, "before"))
+  res <- if (!List.forall(beforeChecks, ok => ok)) writeReceipt(root, action.id, decisionReceipt(action, "stale", base)) else for {
+  now <- Clock.monotonic()
+  op = buildOperation(c, action, true, now)
+  _ <- Fs.write(Fs.join(storage(root), "journal.json"), text(op))
+  _ <- finish(root, op)
+} yield acceptReceipt(action.id, action.card, "applied", str(c, "b")).require(r => str(r, "baseline") == str(c, "b"))
+} yield res
+} yield receipt
+})
+})
+
+private def applyNonAcceptCard(root: String, action: SyncAction, base: String): IO[Json] =
+  loadReadyCard(root, action.card).flatMap(found => found match {
+  case Option.None => writeReceipt(root, action.id, decisionReceipt(action, "missing-card", base))
+  case Option.Some(c) => existingDecisionOwner(root, action.card).flatMap(dec => dec match {
+  case (decided, owner) => if (decided && owner != action.id) writeReceipt(root, action.id, decisionReceipt(action, "already-decided", base)) else if (decided) writeReceipt(root, action.id, decisionReceipt(action, "applied", base)) else for {
+  now <- Clock.monotonic()
+  op = buildOperation(c, action, false, now)
+  _ <- Fs.write(recordPath(root, action.card), text(op))
+  receipt <- writeReceipt(root, action.id, decisionReceipt(action, "applied", base))
+} yield receipt
+})
+})
+
+private def applySteer(root: String, action: SyncAction, base: String): IO[Json] =
+  for {
+    items <- readSteer(root)
+    existing = List.head(List.filter(items, s => str(s, "id") == action.id))
+    receipt <- existing match {
+  case Option.Some(item) => writeReceipt(root, action.id, Json.Obj([("v", Json.Int(1)), ("id", Json.Str(action.id)), ("kind", Json.Str("steer")), ("status", Json.Str("queued")), ("seq", field(item, "seq")), ("baseline", field(item, "baseline"))]))
+  case Option.None => for {
+  seq = List.len(items) + 1
+  now <- Clock.monotonic()
+  effBase = if (action.baseline == "") base else action.baseline
+  entry = Json.Obj([("seq", Json.Int(seq)), ("id", Json.Str(action.id)), ("prompt", Json.Str(action.prompt)), ("baseline", Json.Str(effBase)), ("status", Json.Str("queued")), ("time", Json.Int(now))])
+  doc = Json.Obj([("v", Json.Int(1)), ("items", Json.Arr(List.append(items, entry)))])
+  _ <- Fs.write(steerPath(root), text(doc))
+  saved <- writeReceipt(root, action.id, Json.Obj([("v", Json.Int(1)), ("id", Json.Str(action.id)), ("kind", Json.Str("steer")), ("status", Json.Str("queued")), ("seq", Json.Int(seq)), ("baseline", Json.Str(effBase))]))
+} yield saved
+}
+  } yield receipt
+
+private def applyOne(root: String, action: SyncAction): IO[Json] =
+  for {
+    _ <- recover(root)
+    prior <- storedReceipt(root, action.id)
+    out <- prior match {
+  case Option.Some(saved) => IO.pure(Json.set(saved, "replayed", Json.Bool(true)))
+  case Option.None => for {
+  disk <- own(root)
+  base = setHash(disk)
+  fresh <- if (action.kind == "accept") applyAccept(root, action, disk, base) else if (action.kind == "steer") applySteer(root, action, base) else applyNonAcceptCard(root, action, base)
+} yield Json.set(fresh, "replayed", Json.Bool(false))
+}
+  } yield out.require(r => str(r, "id") == action.id)
+
+def applyActions(root: String, actions: List[SyncAction]): IO[Json] =
+  for {
+    _ <- recover(root)
+    results <- IO.foreach(actions, act => applyOne(root, act))
+    snap <- snapshot(root)
+  } yield Json.Obj([("v", Json.Int(1)), ("baseline", field(snap, "baseline")), ("cursor", field(snap, "cursor")), ("revision", field(snap, "revision")), ("results", Json.Arr(results))])
+
+private def jsonHeaders(): Map[String, String] =
+  Map.set(Map.empty(), "Content-Type", "application/json")
+
+private def jsonReply(status: Int, doc: Json): IO[(Int, Map[String, String], String)] =
+  IO.pure((status, jsonHeaders(), text(doc)))
+
+private def errorObj(code: String): Json =
+  Json.Obj([("v", Json.Int(1)), ("error", Json.Str(code))])
+
+private def classifyError(err: String): IO[(Int, Map[String, String], String)] =
+  if (Str.startsWith(err, "recovery conflict:")) jsonReply(409, errorObj("recovery-conflict")) else jsonReply(503, errorObj("storage-unavailable"))
+
+def handle(root: String, token: String, request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  request match {
+    case (path, method, headers, body) => if (path != "/v1/ide/sync") jsonReply(404, errorObj("not-found")) else if (method != "GET" && method != "POST") jsonReply(405, errorObj("method-not-allowed")) else if (!authorized(token, headers)) jsonReply(401, errorObj("unauthorized")) else if (method == "GET") snapshot(root).flatMap(doc => jsonReply(200, doc)).handleErrorWith(err => classifyError(err)) else decodeActions(body) match {
+  case Result.Err(code) => jsonReply(400, errorObj(code))
+  case Result.Ok(actions) => applyActions(root, actions).flatMap(doc => jsonReply(200, doc)).handleErrorWith(err => classifyError(err))
+}
+  }
+
+def ensureToken(root: String, explicit: String): IO[String] =
+  for {
+    _ <- setupStorage(root)
+    tok <- if (explicit != "") need(validToken(explicit), "scuzz ide serve: invalid --token (use 16..128 [A-Za-z0-9_-] characters)").flatMap(_ => Fs.write(tokenPath(root), explicit).map(_ => explicit)) else readOptional(tokenPath(root)).flatMap(raw => for {
+  saved = Str.trim(raw)
+  chosen <- if (validToken(saved)) IO.pure(saved) else for {
+  u1 <- Uuid.v4()
+  u2 <- Uuid.v4()
+  fresh = Hash.sha256(Str.concat(u1, u2))
+  _ <- Fs.write(tokenPath(root), fresh)
+} yield fresh
+} yield chosen)
+  } yield tok.require(t => validToken(t))
+
+def run(root: String, port: Int, token: String): IO[Unit] =
+  if (!validToken(token)) IO.fail("scuzz ide serve: invalid bearer token".require(_ => !validToken(token))) else Net.serve(port, req => handle(root, token, req))
+

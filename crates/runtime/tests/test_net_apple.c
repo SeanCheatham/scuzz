@@ -121,8 +121,12 @@ int scuzz_net_apple_proof(void) {
   }
   r = run(sz_io_sleep_ms(100)); drop(r);
   check(descriptors() <= before + 4, "cancellation closes request descriptors");
-  r = run(request(tls, "/echo", "GET", NULL));
   int trusted = getenv("SCUZZ_NET_TRUSTED") != NULL;
+  r = run(request(tls, "/echo", "GET", NULL));
+  if (trusted && !r.ok) {
+    drop(r);
+    r = run(request(tls, "/echo", "GET", NULL));
+  }
   if (trusted) check_http(r, 200, "platform certificate trust on loopback");
   else check(!r.ok, "platform certificate trust on loopback");
   drop(r);

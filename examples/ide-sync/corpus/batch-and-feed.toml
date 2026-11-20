@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive offlineBatchReplay", "drive fetchFeed", "drive offlineBatchReplay"]

@@ -8,3 +8,4 @@ syntax = { path = "../syntax" }
 compiler = { path = "../compiler" }
 manual = { path = "../manual" }
 generation = { path = "../editor/generation" }
+ide_sync = { path = "../ide-sync" }

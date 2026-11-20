@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "3"
+events = ["drive competingAcceptRace", "drive dirtyAccept", "drive recoverAcceptJournal", "drive recoverUndoJournal", "drive conflictJournal", "drive mintFreshToken"]
