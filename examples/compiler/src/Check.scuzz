@@ -3820,8 +3820,31 @@ def checkFiles(files: List[(String, String)]): String =
 def checkFilesOwn(files: List[(String, String)], stems: List[String]): String =
   check3(files, checkProgOwn(Parse.parseFiles(files), stems))
 
+def parseLocOfIdx(starts: LineIndex, src: String, off: Int): (Int, Int, Int, Int) =
+  if (off < 0 || src == "") (1, 1, 1, 1) else parseLocOf2(starts, src, off)
+
+def parseErrorDiagFile(o: Out, stem: String, src: String, starts: LineIndex, offs: List[Int], acc: List[String]): List[String] =
+  if (List.isEmpty(offs)) acc else parseErrorDiagFile(o, stem, src, starts, List.tail(offs), diagJson2(o, fileOf(stem), parseLocOfIdx(starts, src, List.at(offs, 0))) :: acc)
+
+def parseErrorDiagsHd(file: (String, String), rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  file match {
+    case (stem, src) => parseErrorDiagsOffs(stem, src, Parse.parseErrorOffs(src), rest, o, acc)
+  }
+
+def parseErrorDiagsOffs(stem: String, src: String, offs: List[Int], rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  parseErrorDiagsGo(rest, o, if (List.isEmpty(offs)) acc else parseErrorDiagFile(o, stem, src, fastLineIndex(src), offs, acc))
+
+def parseErrorDiagsGo(files: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  if (List.isEmpty(files)) List.reverse(acc) else parseErrorDiagsHd(List.at(files, 0), List.tail(files), o, acc)
+
+def parseErrorCheckRows(files: List[(String, String)], o: Out, rows: List[String]): String =
+  if (List.isEmpty(rows)) Str.concat("[", Str.concat(diagJson(files, o), "]")) else Str.concat("[", Str.concat(List.join(rows, ","), "]"))
+
+def parseErrorCheckJson(files: List[(String, String)], o: Out): String =
+  parseErrorCheckRows(files, o, parseErrorDiagsGo(files, o, []))
+
 def check3(files: List[(String, String)], o: Out): String =
-  if (hasErr(o)) Str.concat("[", Str.concat(diagJson(files, o), "]")) else "[]"
+  if (!hasErr(o)) "[]" else if (o.err == "unexpected token" && o.span == noSpan()) parseErrorCheckJson(files, o) else Str.concat("[", Str.concat(diagJson(files, o), "]"))
 
 def unclaimedJsonVer(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): String =
   unclaimedWrap(unclaimedLines(p, files, stems, vers))
@@ -3928,8 +3951,29 @@ def humanFiles(files: List[(String, String)]): String =
 def humanFilesOwn(files: List[(String, String)], stems: List[String]): String =
   human3(files, checkProgOwn(Parse.parseFiles(files), stems))
 
+def parseErrorHumanFile(o: Out, stem: String, src: String, starts: LineIndex, offs: List[Int], acc: List[String]): List[String] =
+  if (List.isEmpty(offs)) acc else parseErrorHumanFile(o, stem, src, starts, List.tail(offs), humanLine2(o, fileOf(stem), parseLocOfIdx(starts, src, List.at(offs, 0))) :: acc)
+
+def parseErrorHumansHd(file: (String, String), rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  file match {
+    case (stem, src) => parseErrorHumansOffs(stem, src, Parse.parseErrorOffs(src), rest, o, acc)
+  }
+
+def parseErrorHumansOffs(stem: String, src: String, offs: List[Int], rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  parseErrorHumansGo(rest, o, if (List.isEmpty(offs)) acc else parseErrorHumanFile(o, stem, src, fastLineIndex(src), offs, acc))
+
+def parseErrorHumansGo(files: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  if (List.isEmpty(files)) List.reverse(acc) else parseErrorHumansHd(List.at(files, 0), List.tail(files), o, acc)
+
+def parseErrorHumanRows(files: List[(String, String)], o: Out, rows: List[String]): String =
+  if (List.isEmpty(rows)) humanLine(files, o) else List.join(rows, """
+""")
+
+def parseErrorHumanText(files: List[(String, String)], o: Out): String =
+  parseErrorHumanRows(files, o, parseErrorHumansGo(files, o, []))
+
 def human3(files: List[(String, String)], o: Out): String =
-  if (hasErr(o)) humanLine(files, o) else "scuzz check ok"
+  if (!hasErr(o)) "scuzz check ok" else if (o.err == "unexpected token" && o.span == noSpan()) parseErrorHumanText(files, o) else humanLine(files, o)
 
 def typeOfEns(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], mod: String): String =
   tyStr(infer(e, bindParams(ps, envSelfMod(mod)), defs, ens))

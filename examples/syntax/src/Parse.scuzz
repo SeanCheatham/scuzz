@@ -1983,35 +1983,77 @@ def vImplMethsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
     case (ok, j) => if (!ok) (false, j) else vImplMeths(toks, j)
   }
 
-def vItems(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
-  if (_is(toks, i, Tok.Eof)) (true, i) else if (_is(toks, i, Tok.Private)) vItemsPriv(toks, i, hasMain) else if (_is(toks, i, Tok.Oracle)) vItemsNext(toks, vDef(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Enum)) vItemsNext(toks, vEnum(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Record)) vItemsNext(toks, vRec(toks, i + 1), hasMain) else if (_is(toks, i, Tok.TypeKw)) vItemsNext(toks, vAlias(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Trait)) vItemsNext(toks, vTrait(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Impl)) vItemsNext(toks, vImpl(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Import)) vItemsNext(toks, vImport(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Def)) vItemsNext(toks, vDef(toks, i + 1), hasMain) else if (_is(toks, i, Tok.AtMain)) vItemsMain(toks, i, hasMain) else vFail(toks, i)
+def vItemOne(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
+  if (_is(toks, i, Tok.Private)) vItemPriv(toks, i) else if (_is(toks, i, Tok.Oracle)) vDef(toks, i + 1) else if (_is(toks, i, Tok.Enum)) vEnum(toks, i + 1) else if (_is(toks, i, Tok.Record)) vRec(toks, i + 1) else if (_is(toks, i, Tok.TypeKw)) vAlias(toks, i + 1) else if (_is(toks, i, Tok.Trait)) vTrait(toks, i + 1) else if (_is(toks, i, Tok.Impl)) vImpl(toks, i + 1) else if (_is(toks, i, Tok.Import)) vImport(toks, i + 1) else if (_is(toks, i, Tok.Def)) vDef(toks, i + 1) else if (_is(toks, i, Tok.AtMain)) vItemMain(toks, i, hasMain) else vFail(toks, i)
 
-def vItemsPriv(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
-  if (_is(toks, i + 1, Tok.Def)) vItemsNext(toks, vDef(toks, i + 2), hasMain) else vFail(toks, i + 1)
+def vItemPriv(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i + 1, Tok.Def)) vDef(toks, i + 2) else vFail(toks, i + 1)
 
-def vItemsMain(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
-  if (hasMain) vFail(toks, i) else vItemsNext(toks, vMain(toks, i + 1), true)
+def vItemMain(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
+  if (hasMain) vFail(toks, i) else vMain(toks, i + 1)
 
-def vItemsNext(toks: Toks, step: (Bool, Int), hasMain: Bool): (Bool, Int) =
-  step match {
-    case (ok, j) => if (!ok) (false, j) else vItems(toks, j, hasMain)
+def stepDepth(t: Tok, d: Int): Int =
+  t match {
+    case Tok.LParen => d + 1
+    case Tok.LBracket => d + 1
+    case Tok.LBrace => d + 1
+    case Tok.RParen => if (d > 0) d - 1 else 0
+    case Tok.RBracket => if (d > 0) d - 1 else 0
+    case Tok.RBrace => if (d > 0) d - 1 else 0
+    case _ => d
   }
 
-def vPkgItems(toks: Toks, step: (Bool, Int)): (Bool, Int) =
-  step match {
-    case (ok, j) => if (!ok) (false, j) else vItems(toks, j, false)
+def isTopTok(t: Tok): Bool =
+  t match {
+    case Tok.Def => true
+    case Tok.Oracle => true
+    case Tok.Private => true
+    case Tok.Enum => true
+    case Tok.Record => true
+    case Tok.TypeKw => true
+    case Tok.Trait => true
+    case Tok.Impl => true
+    case Tok.Import => true
+    case Tok.AtMain => true
+    case _ => false
   }
 
-def parseErrorToks(toks: Toks): Int =
-  parseErrorFinish(toks, if (_is(toks, 0, Tok.Package)) vPkgItems(toks, vQualIdent(toks, 1)) else vItems(toks, 0, false))
+def isTopStart(src: String, toks: Toks, k: Int): Bool =
+  isTopTok(_at(toks, k)) && Lexer.columnAt(src, _off(toks, k) - 1, 0) == 0
 
-def parseErrorFinish(toks: Toks, step: (Bool, Int)): Int =
+def syncTop(src: String, toks: Toks, itemStart: Int, k: Int, errByteOff: Int, d: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) k else if (k > itemStart && _off(toks, k) >= errByteOff && d == 0 && isTopStart(src, toks, k)) k else syncTop(src, toks, itemStart, k + 1, errByteOff, stepDepth(_at(toks, k), d))
+
+def addErrOff(off: Int, acc: List[Int]): List[Int] =
+  if (!List.isEmpty(acc) && List.at(acc, 0) == off) acc else off :: acc
+
+def vItemsStep(src: String, toks: Toks, i: Int, nextMain: Bool, step: (Bool, Int), acc: List[Int]): List[Int] =
   step match {
-    case (ok, off) => if (!ok) off else if (toks.bad >= 0) _off(toks, toks.bad) else 0 - 1
+    case (ok, j) => if (ok) vItemsCollect(src, toks, j, nextMain, acc) else vItemsCollect(src, toks, syncTop(src, toks, i, i, j, 0), nextMain, addErrOff(j, acc))
   }
+
+def vItemsCollect(src: String, toks: Toks, i: Int, hasMain: Bool, acc: List[Int]): List[Int] =
+  if (i >= toks.n || _is(toks, i, Tok.Eof)) parseErrorFinishList(toks, acc) else vItemsStep(src, toks, i, hasMain || _is(toks, i, Tok.AtMain), vItemOne(toks, i, hasMain), acc)
+
+def vPkgCollect(src: String, toks: Toks, step: (Bool, Int)): List[Int] =
+  step match {
+    case (ok, j) => if (ok) vItemsCollect(src, toks, j, false, []) else vItemsCollect(src, toks, syncTop(src, toks, 0, 0, j, 0), false, j :: [])
+  }
+
+def parseErrorFinishList(toks: Toks, acc: List[Int]): List[Int] =
+  if (!List.isEmpty(acc)) List.reverse(acc) else if (toks.bad >= 0) _off(toks, toks.bad) :: [] else []
+
+def parseErrorToksList(src: String, toks: Toks): List[Int] =
+  if (_is(toks, 0, Tok.Package)) vPkgCollect(src, toks, vQualIdent(toks, 1)) else vItemsCollect(src, toks, 0, false, [])
+
+def parseErrorOffs(src: String): List[Int] =
+  parseErrorToksList(src, indexToks(Lexer.lex(src)))
+
+def parseErrorOffFirst(offs: List[Int]): Int =
+  if (List.isEmpty(offs)) 0 - 1 else List.at(offs, 0)
 
 def parseErrorOff(src: String): Int =
-  parseErrorToks(indexToks(Lexer.lex(src)))
+  parseErrorOffFirst(parseErrorOffs(src))
 
 def parseErrorExpr(e: Expr): Bool =
   e match {
