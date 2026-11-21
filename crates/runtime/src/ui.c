@@ -602,17 +602,63 @@ static void fputs_hit_json(FILE *f, const char *key, float x, float y,
   fputc('}', f);
 }
 
+static FILE *open_atomic_file(const char *path, char **out_tmp) {
+  const char suffix[] = ".scuzz-ui-XXXXXX";
+  const char *slash;
+  size_t dir_len;
+  char *tmp;
+  int fd;
+  FILE *f;
+  *out_tmp = NULL;
+  if (!path || !path[0])
+    return NULL;
+  slash = strrchr(path, '/');
+  dir_len = slash ? (size_t)(slash - path) + 1 : 0;
+  tmp = (char *)malloc(dir_len + sizeof(suffix));
+  if (!tmp)
+    return NULL;
+  memcpy(tmp, path, dir_len);
+  memcpy(tmp + dir_len, suffix, sizeof(suffix));
+  fd = mkstemp(tmp);
+  if (fd < 0) {
+    free(tmp);
+    return NULL;
+  }
+  f = fdopen(fd, "wb");
+  if (!f) {
+    close(fd);
+    remove(tmp);
+    free(tmp);
+    return NULL;
+  }
+  *out_tmp = tmp;
+  return f;
+}
+
+static int close_atomic_file(FILE *f, char *tmp, const char *path) {
+  int failed = ferror(f) != 0;
+  if (fclose(f) != 0)
+    failed = 1;
+  if (failed || rename(tmp, path) != 0) {
+    remove(tmp);
+    free(tmp);
+    return 0;
+  }
+  free(tmp);
+  return 1;
+}
+
 int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   FILE *f;
+  char *tmp;
+  int ok;
   SzString *views;
   SzView *buttons[64];
   SzView *fields[64];
   SzView *scrolls[64];
   SzView *field_target;
   int n_buttons, n_fields, n_scrolls, i;
-  if (!path || !path[0])
-    return 0;
-  f = fopen(path, "w");
+  f = open_atomic_file(path, &tmp);
   if (!f)
     return 0;
   fputs("{\"v\":2,\"kind\":\"dump\",\"signals\":", f);
@@ -769,9 +815,9 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     fputc(']', f);
   }
   fputs("}\n", f);
-  fclose(f);
+  ok = close_atomic_file(f, tmp, path);
   sz_string_free(views);
-  return 1;
+  return ok;
 }
 
 int sz_ui_session_dump_now(SzUiSession *session) {
@@ -1130,6 +1176,7 @@ static void json_append_escaped(char **buf, size_t *len, size_t *cap,
 /* Append one event object and rewrite the record file. */
 static void record_json_event(SzUiSession *session, char *obj) {
   FILE *f;
+  char *tmp;
   if (!obj) return;
   if (!session || !session->record_path || session->record_depth || session->inject_playing) {
     sz_free(obj); return;
@@ -1141,13 +1188,13 @@ static void record_json_event(SzUiSession *session, char *obj) {
   sz_dump_append(&session->record_events, &session->record_events_len,
                  &session->record_events_cap, obj);
   sz_free(obj);
-  f = fopen(session->record_path, "w");
+  f = open_atomic_file(session->record_path, &tmp);
   if (!f)
     return;
   fputs("{\"v\":1,\"kind\":\"inject\",\"manualPumps\":true,\"events\":[", f);
   fputs(session->record_events, f);
   fputs("]}\n", f);
-  fclose(f);
+  (void)close_atomic_file(f, tmp, session->record_path);
 }
 
 void sz_ui_session_script_begin(SzUiSession *session) {

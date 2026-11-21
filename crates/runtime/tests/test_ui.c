@@ -1560,6 +1560,27 @@ static int64_t dump_i64(const char *s, const char *key) {
   return (int64_t)atoll(p + strlen(key));
 }
 
+typedef struct {
+  const char *path;
+  atomic_int stop;
+  size_t reads;
+} DumpRaceCtx;
+
+static void *dump_race_reader(void *arg) {
+  DumpRaceCtx *ctx = (DumpRaceCtx *)arg;
+  do {
+    char *body = slurp_cstr(ctx->path);
+    size_t n = strlen(body);
+    assert(n > 20000);
+    assert(strncmp(body, "{\"v\":2,\"kind\":\"dump\"", 20) == 0);
+    assert(body[n - 2] == '}' && body[n - 1] == '\n');
+    free(body);
+    ctx->reads++;
+    sched_yield();
+  } while (!atomic_load(&ctx->stop));
+  return NULL;
+}
+
 static void test_session_debug_dump(void) {
   SzUiConfig cfg = {0};
   SzUiSession *session;
@@ -1679,6 +1700,33 @@ static void test_session_debug_dump(void) {
   assert(strstr(c, "\"desc\":\"button:+\"") != NULL || strstr(c, "\"desc\":\"textfield:search\"") != NULL);
   free(b);
   free(c);
+
+  {
+    char big[24001];
+    DumpRaceCtx race;
+    pthread_t reader;
+    SzAdt *parsed;
+    int i;
+    memset(big, 'x', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    sz_signal_str_set(draft, big);
+    assert(sz_ui_pump_sync(session));
+    race.path = path;
+    atomic_init(&race.stop, 0);
+    race.reads = 0;
+    assert(pthread_create(&reader, NULL, dump_race_reader, &race) == 0);
+    for (i = 0; i < 64; i++) {
+      big[0] = (char)('a' + (i % 26));
+      sz_signal_str_set(draft, big);
+      assert(sz_ui_pump_sync(session));
+      sched_yield();
+    }
+    atomic_store(&race.stop, 1);
+    assert(pthread_join(reader, NULL) == 0);
+    assert(race.reads > 0);
+    parsed = json_slurp_parse(path);
+    sz_release(parsed);
+  }
 
   sz_ui_unmount(session);
   assert(sz_alloc_panic_dump_path() == NULL);
