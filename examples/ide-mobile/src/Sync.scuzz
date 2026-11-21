@@ -1,0 +1,140 @@
+import Deck.ClientState
+import Deck.OutboxAction
+import Deck.Pairing
+
+def defaultDir(): String =
+  ".scuzz/ide-mobile"
+
+def statePath(dir: String): String =
+  Fs.join(dir, "state.json")
+
+def resolveDir(): IO[String] =
+  Sys.getenv("SCUZZ_IDE_MOBILE_DIR").map(env => if (env == "") defaultDir() else env)
+
+def makeCell(st: ClientState): Signal[String] =
+  Signal.make(Deck.encodeState(st))
+
+def readCell(cell: Signal[String]): ClientState =
+  Deck.decodeState(Signal.get(cell)) match {
+    case Result.Ok(st) => st
+    case Result.Err(_) => Deck.initialState("mob", Deck.defaultPairing())
+  }
+
+def writeCell(cell: Signal[String], st: ClientState): Unit =
+  Signal.set(cell, Deck.encodeState(st))
+
+private def envPairing(): IO[Pairing] =
+  for {
+    hostEnv <- Sys.getenv("SCUZZ_IDE_HOST")
+    portEnv <- Sys.getenv("SCUZZ_IDE_PORT")
+    tokEnv <- Sys.getenv("SCUZZ_IDE_TOKEN")
+    host = if (Deck.validHost(Str.trim(hostEnv))) Str.trim(hostEnv) else "127.0.0.1"
+    port = Str.parseInt(Str.trim(portEnv)) match {
+  case Result.Ok(p) => if (Deck.validPort(p)) p else 8787
+  case Result.Err(_) => 8787
+}
+    tok = if (Deck.validToken(Str.trim(tokEnv))) Str.trim(tokEnv) else ""
+  } yield Pairing(host, port, tok)
+
+def persist(dir: String, cell: Signal[String]): IO[Unit] =
+  for {
+    encoded = Signal.get(cell)
+    res <- IO.attempt(Fs.mkdirs(dir).flatMap(_ => Fs.write(statePath(dir), encoded)))
+    _ = res match {
+  case Result.Ok(_) => ()
+  case Result.Err(_) => writeCell(cell, readCell(cell).copy(syncStatus = "Storage write failed"))
+}
+  } yield ()
+
+def loadOrInit(dir: String): IO[ClientState] =
+  IO.attempt(Fs.exists(statePath(dir))).flatMap(existsRes => existsRes match {
+  case Result.Err(_) => Uuid.v4().map(u => Deck.initialState(Str.take(u, 8), Deck.defaultPairing()).copy(syncStatus = "Storage read failed"))
+  case Result.Ok(hit) => if (hit == 1) IO.attempt(Fs.read(statePath(dir))).flatMap(res => res match {
+  case Result.Ok(raw) => Deck.decodeState(raw) match {
+  case Result.Ok(loaded) => IO.pure(loaded)
+  case Result.Err(_) => Uuid.v4().map(u => Deck.initialState(Str.take(u, 8), Deck.defaultPairing()).copy(alert = "Saved state was invalid; started clean"))
+}
+  case Result.Err(_) => Uuid.v4().map(u => Deck.initialState(Str.take(u, 8), Deck.defaultPairing()).copy(syncStatus = "Storage read failed"))
+}) else for {
+  pair <- envPairing()
+  uid <- Uuid.v4()
+} yield Deck.initialState(Str.take(uid, 8), pair)
+})
+
+def httpGet(url: String, headers: Map[String, String]): IO[(Int, Map[String, String], String)] =
+  IO.timeout(5000, Net.httpGet(url, headers))
+
+def httpPost(url: String, headers: Map[String, String], body: String): IO[(Int, Map[String, String], String)] =
+  IO.timeout(5000, Net.httpPost(url, headers, body))
+
+private def flushBatches(dir: String, cell: Signal[String], url: String, headers: Map[String, String]): IO[Bool] =
+  for {
+    batch = Deck.nextBatch(readCell(cell).outbox)
+  } yield if (List.isEmpty(batch)) IO.pure(true) else sendOneBatch(dir, cell, url, headers, batch)
+
+private def sendOneBatch(dir: String, cell: Signal[String], url: String, headers: Map[String, String], batch: List[OutboxAction]): IO[Bool] =
+  for {
+    res <- IO.attempt(httpPost(url, headers, Deck.encodeBatch(batch)))
+    cont <- res match {
+  case Result.Err(_) => for {
+  _ = writeCell(cell, Deck.applyOffline(readCell(cell)))
+  _ <- persist(dir, cell)
+} yield false
+  case Result.Ok((code, _, body)) => if (code != 200) for {
+  _ = writeCell(cell, Deck.applyHttpError(readCell(cell), code))
+  _ <- persist(dir, cell)
+} yield false else Deck.decodeBatchReply(body, batch) match {
+  case Result.Err(msg) => for {
+  _ = writeCell(cell, readCell(cell).copy(syncStatus = msg))
+  _ <- persist(dir, cell)
+} yield false
+  case Result.Ok(reply) => for {
+  _ = writeCell(cell, Deck.applyBatchReply(readCell(cell), batch, reply))
+  _ <- persist(dir, cell)
+  more <- if (List.isEmpty(readCell(cell).outbox)) IO.pure(true) else flushBatches(dir, cell, url, headers)
+} yield more
+}
+}
+  } yield cont
+
+private def refreshFeed(dir: String, cell: Signal[String], url: String, headers: Map[String, String]): IO[Unit] =
+  for {
+    res <- IO.attempt(httpGet(url, headers))
+    _ <- res match {
+  case Result.Err(_) => for {
+  _ = writeCell(cell, Deck.applyOffline(readCell(cell)))
+  _ <- persist(dir, cell)
+} yield ()
+  case Result.Ok((code, _, body)) => if (code != 200) for {
+  _ = writeCell(cell, Deck.applyHttpError(readCell(cell), code))
+  _ <- persist(dir, cell)
+} yield () else Deck.decodeSnapshot(body) match {
+  case Result.Err(msg) => for {
+  _ = writeCell(cell, readCell(cell).copy(syncStatus = msg))
+  _ <- persist(dir, cell)
+} yield ()
+  case Result.Ok(snap) => for {
+  _ = writeCell(cell, Deck.applySnapshot(readCell(cell), snap))
+  _ <- persist(dir, cell)
+} yield ()
+}
+}
+  } yield ()
+
+def syncNow(dir: String, cell: Signal[String], busy: Signal[Int]): IO[Unit] =
+  if (Signal.get(busy) != 0) IO.pure(()) else Deck.endpointUrl(readCell(cell).pairing) match {
+  case Result.Err(msg) => for {
+  _ = writeCell(cell, readCell(cell).copy(syncStatus = msg))
+  _ <- persist(dir, cell)
+} yield ()
+  case Result.Ok(url) => for {
+  headers = Deck.authHeaders(readCell(cell).pairing.token)
+  _ = Signal.set(busy, 1)
+  _ = writeCell(cell, readCell(cell).copy(syncStatus = "Syncing"))
+  _ <- IO.ensure(for {
+  flushed <- if (List.isEmpty(readCell(cell).outbox)) IO.pure(true) else flushBatches(dir, cell, url, headers)
+  _ <- if (flushed) refreshFeed(dir, cell, url, headers) else IO.pure(())
+} yield (), IO.pure(Signal.set(busy, 0)))
+} yield ()
+}
+

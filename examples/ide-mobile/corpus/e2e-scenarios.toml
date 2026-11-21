@@ -1,0 +1,9 @@
+[fuzz]
+events = [
+  "drive offlineSwipeSteerRestartFlush",
+  "drive retryIdempotentBatch",
+  "drive staleAndDirtyHandling",
+  "drive unauthorizedKeepsOutbox",
+  "drive chunkedLargeOutbox",
+  "drive corruptStoreRecovery",
+]

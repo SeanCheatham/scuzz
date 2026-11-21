@@ -1,0 +1,364 @@
+private def validTok(): String =
+  "pairing-token-1234"
+
+private def rotatedTok(): String =
+  "rotated-token-5678"
+
+private def cardAlphaId(): String =
+  Str.repeat("a", 64)
+
+private def cardBetaId(): String =
+  Str.repeat("b", 64)
+
+private def cardGammaId(): String =
+  Str.repeat("c", 64)
+
+private def cardNextId(): String =
+  Str.repeat("d", 64)
+
+private def jsonStr(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(s) => s
+    case Result.Err(e) => e
+  }
+
+private def jField(obj: Json, key: String): Json =
+  Json.field(obj, key) match {
+    case Result.Ok(v) => v
+    case Result.Err(_) => Json.Null()
+  }
+
+private def hashSource(content: String): String =
+  Hash.sha256(Str.concat("[{\"path\":\"src/Main.scuzz\",\"content\":\"", Str.concat(content, "\"}]")))
+
+private def baseZero(): String =
+  hashSource("v0")
+
+private def baseAlpha(): String =
+  hashSource("alpha")
+
+private def baseBeta(): String =
+  hashSource("beta")
+
+private def sampleCards(mainSrc: String, decidedIds: List[String]): List[Deck.CardItem] =
+  for {
+    curBase = hashSource(mainSrc)
+    all = if (curBase == baseZero()) [Deck.CardItem(cardAlphaId(), "ship mobile sync", baseZero(), baseAlpha(), 0, "idle", 0, ["signals"], [Deck.FilePair("src/Main.scuzz", "v0")], [Deck.FilePair("src/Main.scuzz", "alpha")]), Deck.CardItem(cardBetaId(), "ship mobile sync", baseZero(), baseBeta(), 1, "swipe", 2, ["a11y"], [Deck.FilePair("src/Main.scuzz", "v0")], [Deck.FilePair("src/Main.scuzz", "beta")]), Deck.CardItem(cardGammaId(), "ship mobile sync", baseZero(), hashSource("gamma"), 0, "offline", 1, ["files"], [Deck.FilePair("src/Main.scuzz", "v0")], [Deck.FilePair("src/Main.scuzz", "gamma")])] else if (curBase == baseAlpha()) [Deck.CardItem(cardNextId(), "ship mobile sync", baseAlpha(), hashSource("alpha-next"), 0, "next", 1, ["signals"], [Deck.FilePair("src/Main.scuzz", "alpha")], [Deck.FilePair("src/Main.scuzz", "alpha-next")])] else []
+  } yield List.filter(all, c => !List.contains(decidedIds, c.id))
+
+private def cardWireJson(c: Deck.CardItem, propName: String): Json =
+  Json.Obj([("id", Json.Str(c.id)), ("proposal", Json.Str(propName)), ("objective", Json.Str(c.objective)), ("baseline", Json.Str(c.baseline)), ("after", Json.Str(c.after)), ("flip", Json.Int(c.flip)), ("question", Json.Obj([("workload", Json.Str(c.workload)), ("step", Json.Int(c.step))])), ("changes", Json.Arr(List.map(c.changes, s => Json.Obj([("section", Json.Str(s))])))), ("before", Json.Arr(List.map(c.before, f => Json.Obj([("path", Json.Str(f.path)), ("content", Json.Str(f.content))])))), ("proposed", Json.Arr(List.map(c.proposed, f => Json.Obj([("path", Json.Str(f.path)), ("content", Json.Str(f.content))]))))])
+
+private def initSimServer(prefix: String, mainSrc: String, tok: String, online: String, dirty: String): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs(prefix)
+    _ <- Fs.write(Fs.join(prefix, "online.txt"), online)
+    _ <- Fs.write(Fs.join(prefix, "token.txt"), tok)
+    _ <- Fs.write(Fs.join(prefix, "dirty.txt"), dirty)
+    _ <- Fs.write(Fs.join(prefix, "main.txt"), mainSrc)
+    _ <- Fs.write(Fs.join(prefix, "rev.txt"), "0")
+    _ <- Fs.write(Fs.join(prefix, "decided.json"), "[]")
+    _ <- Fs.write(Fs.join(prefix, "receipts.json"), "{}")
+    _ <- Fs.write(Fs.join(prefix, "steers.json"), "[]")
+    _ <- Fs.write(Fs.join(prefix, "batches.txt"), "")
+  } yield ()
+
+private def headerAuth(headers: Map[String, String]): String =
+  for {
+    vals = List.map(List.filter(Map.toList(headers), kv => Str.toLower(kv._1) == "authorization"), kv => kv._2)
+  } yield if (List.len(vals) == 1) List.at(vals, 0) else ""
+
+private def checkBearer(expected: String, headers: Map[String, String]): Bool =
+  Deck.validToken(expected) && headerAuth(headers) == Str.concat("Bearer ", expected)
+
+private def jsonHeaders(): Map[String, String] =
+  Map.set(Map.empty(), "Content-Type", "application/json")
+
+private def readJsonOr(path: String, fallback: Json): IO[Json] =
+  Fs.read(path).map(raw => Json.parse(raw) match {
+  case Result.Ok(j) => j
+  case Result.Err(_) => fallback
+})
+
+private def readIntOr(path: String, fallback: Int): IO[Int] =
+  Fs.read(path).map(raw => Str.parseInt(Str.trim(raw)) match {
+  case Result.Ok(n) => n
+  case Result.Err(_) => fallback
+})
+
+private def simGet(prefix: String): IO[(Int, Map[String, String], String)] =
+  for {
+    mainSrc <- Fs.read(Fs.join(prefix, "main.txt"))
+    rev <- readIntOr(Fs.join(prefix, "rev.txt"), 0)
+    decidedJ <- readJsonOr(Fs.join(prefix, "decided.json"), Json.Arr([]))
+    steersJ <- readJsonOr(Fs.join(prefix, "steers.json"), Json.Arr([]))
+    decidedIds = List.map(Json.arr(decidedJ), j => Json.strOr(j, ""))
+    cards = sampleCards(mainSrc, decidedIds)
+    cardsJson = Json.Arr(List.map(cards, c => cardWireJson(c, if (c.id == cardAlphaId()) "p-alpha" else if (c.id == cardBetaId()) "p-beta" else if (c.id == cardGammaId()) "p-gamma" else "p-next")))
+    base = hashSource(mainSrc)
+    cursor = Hash.sha256(Str.concat(base, Str.concat(":", Str.fromInt(rev))))
+    doc = Json.Obj([("v", Json.Int(1)), ("baseline", Json.Str(base)), ("cursor", Json.Str(cursor)), ("revision", Json.Int(rev)), ("objective", Json.Str("ship mobile sync")), ("cards", cardsJson), ("steer", steersJ)])
+  } yield (200, jsonHeaders(), jsonStr(doc))
+
+private def applySimAction(prefix: String, item: Json): IO[Json] =
+  for {
+    id = Json.getStr(item, "id", "")
+    kind = Json.getStr(item, "kind", "")
+    card = Json.getStr(item, "card", "")
+    expBase = Json.getStr(item, "baseline", "")
+    reason = Json.getStr(item, "reason", "")
+    prompt = Json.getStr(item, "prompt", "")
+    receipts <- readJsonOr(Fs.join(prefix, "receipts.json"), Json.Obj([]))
+    res <- if (Json.has(receipts, id)) IO.pure(Json.set(jField(receipts, id), "replayed", Json.Bool(true))) else for {
+  mainSrc <- Fs.read(Fs.join(prefix, "main.txt"))
+  dirty <- Fs.read(Fs.join(prefix, "dirty.txt"))
+  rev <- readIntOr(Fs.join(prefix, "rev.txt"), 0)
+  decidedJ <- readJsonOr(Fs.join(prefix, "decided.json"), Json.Arr([]))
+  steersJ <- readJsonOr(Fs.join(prefix, "steers.json"), Json.Arr([]))
+  decidedIds = List.map(Json.arr(decidedJ), j => Json.strOr(j, ""))
+  curBase = hashSource(mainSrc)
+  built <- if (kind == "steer") for {
+  seq = List.len(Json.arr(steersJ)) + 1
+  useBase = if (Deck.validHex(expBase)) expBase else curBase
+  sRow = Json.Obj([("seq", Json.Int(seq)), ("id", Json.Str(id)), ("prompt", Json.Str(prompt)), ("baseline", Json.Str(useBase)), ("status", Json.Str("queued"))])
+  _ <- Fs.write(Fs.join(prefix, "steers.json"), jsonStr(Json.Arr(List.append(Json.arr(steersJ), sRow))))
+  _ <- Fs.write(Fs.join(prefix, "rev.txt"), Str.fromInt(rev + 1))
+  rec = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("kind", Json.Str("steer")), ("status", Json.Str("queued")), ("seq", Json.Int(seq)), ("baseline", Json.Str(useBase)), ("replayed", Json.Bool(false))])
+} yield rec else if (List.contains(decidedIds, card)) IO.pure(Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("kind", Json.Str(kind)), ("card", Json.Str(card)), ("status", Json.Str("already-decided")), ("baseline", Json.Str(curBase)), ("replayed", Json.Bool(false))])) else if (kind == "accept") if (dirty == "1") IO.pure(Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("kind", Json.Str("accept")), ("card", Json.Str(card)), ("status", Json.Str("dirty")), ("baseline", Json.Str(curBase)), ("replayed", Json.Bool(false))])) else if (curBase != expBase) IO.pure(Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("kind", Json.Str("accept")), ("card", Json.Str(card)), ("status", Json.Str("stale")), ("baseline", Json.Str(curBase)), ("replayed", Json.Bool(false))])) else for {
+  nextSrc = if (card == cardAlphaId()) "alpha" else if (card == cardBetaId()) "beta" else "gamma"
+  nextBase = hashSource(nextSrc)
+  _ <- Fs.write(Fs.join(prefix, "main.txt"), nextSrc)
+  _ <- Fs.write(Fs.join(prefix, "decided.json"), jsonStr(Json.Arr(List.append(Json.arr(decidedJ), Json.Str(card)))))
+  _ <- Fs.write(Fs.join(prefix, "rev.txt"), Str.fromInt(rev + 1))
+} yield Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("kind", Json.Str("accept")), ("card", Json.Str(card)), ("status", Json.Str("applied")), ("baseline", Json.Str(nextBase)), ("replayed", Json.Bool(false))]) else for {
+  _ <- Fs.write(Fs.join(prefix, "decided.json"), jsonStr(Json.Arr(List.append(Json.arr(decidedJ), Json.Str(card)))))
+  _ <- Fs.write(Fs.join(prefix, "rev.txt"), Str.fromInt(rev + 1))
+  baseFields = [("v", Json.Int(1)), ("id", Json.Str(id)), ("kind", Json.Str(kind)), ("card", Json.Str(card)), ("status", Json.Str("applied")), ("baseline", Json.Str(curBase)), ("replayed", Json.Bool(false))]
+  fields = if (kind == "skip") List.append(baseFields, ("reason", Json.Str(reason))) else baseFields
+} yield Json.Obj(fields)
+  _ <- Fs.write(Fs.join(prefix, "receipts.json"), jsonStr(Json.set(receipts, id, built)))
+} yield built
+  } yield res
+
+private def applySimBatch(prefix: String, items: List[Json], acc: List[Json]): IO[List[Json]] =
+  if (List.isEmpty(items)) IO.pure(acc) else applySimAction(prefix, List.at(items, 0)).flatMap(r => applySimBatch(prefix, List.tail(items), List.append(acc, r)))
+
+private def simPost(prefix: String, body: String): IO[(Int, Map[String, String], String)] =
+  Json.parse(body) match {
+    case Result.Err(_) => IO.pure((400, jsonHeaders(), "{\"v\":1,\"error\":\"invalid-json\"}"))
+    case Result.Ok(doc) => for {
+  items = Json.arr(jField(doc, "actions"))
+  valid = Json.isObj(doc) && Json.getInt(doc, "v", 0) == 1 && Json.isArr(jField(doc, "actions")) && List.nonEmpty(items) && List.len(items) <= 64
+  resp <- if (!valid) IO.pure((400, jsonHeaders(), "{\"v\":1,\"error\":\"invalid-actions\"}")) else for {
+  prevBatches <- Fs.read(Fs.join(prefix, "batches.txt"))
+  batchLen = Str.fromInt(List.len(items))
+  nextBatches = if (prevBatches == "") batchLen else Str.concat(prevBatches, Str.concat(",", batchLen))
+  _ <- Fs.write(Fs.join(prefix, "batches.txt"), nextBatches)
+  results <- applySimBatch(prefix, items, [])
+  mainSrc <- Fs.read(Fs.join(prefix, "main.txt"))
+  rev <- readIntOr(Fs.join(prefix, "rev.txt"), 0)
+  base = hashSource(mainSrc)
+  cursor = Hash.sha256(Str.concat(base, Str.concat(":", Str.fromInt(rev))))
+  reply = Json.Obj([("v", Json.Int(1)), ("baseline", Json.Str(base)), ("cursor", Json.Str(cursor)), ("revision", Json.Int(rev)), ("results", Json.Arr(results))])
+} yield (200, jsonHeaders(), jsonStr(reply))
+} yield resp
+  }
+
+private def simHandle(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (path, method, headers, body) => (for {
+  prefix <- Fs.read("sim/active.txt")
+  tok <- Fs.read(Fs.join(prefix, "token.txt"))
+  resp <- if (path != "/v1/ide/sync") IO.pure((404, jsonHeaders(), "{\"v\":1,\"error\":\"not-found\"}")) else if (!checkBearer(tok, headers)) IO.pure((401, jsonHeaders(), "{\"v\":1,\"error\":\"unauthorized\"}")) else if (method == "GET") simGet(prefix) else if (method == "POST") simPost(prefix, body) else IO.pure((405, jsonHeaders(), "{\"v\":1,\"error\":\"method-not-allowed\"}"))
+} yield resp).handleErrorWith(_ => IO.pure((503, jsonHeaders(), "{\"v\":1,\"error\":\"storage-unavailable\"}")))
+  }
+
+def Sync.httpGet(url: String, headers: Map[String, String]): IO[(Int, Map[String, String], String)] =
+  for {
+    prefix <- Fs.read("sim/active.txt").handleErrorWith(_ => IO.pure(""))
+    online <- (if (prefix == "") IO.pure("0") else Fs.read(Fs.join(prefix, "online.txt"))).handleErrorWith(_ => IO.pure("0"))
+    resp <- if (online != "1" || url != "http://127.0.0.1:18795/v1/ide/sync") IO.fail("network offline") else IO.both(Net.serveOnce(18795, req => simHandle(req)), IO.timeout(1000, Net.httpGet(url, headers))).map(p => p._2)
+  } yield resp
+
+def Sync.httpPost(url: String, headers: Map[String, String], body: String): IO[(Int, Map[String, String], String)] =
+  for {
+    prefix <- Fs.read("sim/active.txt").handleErrorWith(_ => IO.pure(""))
+    online <- (if (prefix == "") IO.pure("0") else Fs.read(Fs.join(prefix, "online.txt"))).handleErrorWith(_ => IO.pure("0"))
+    resp <- if (online != "1" || url != "http://127.0.0.1:18795/v1/ide/sync") IO.fail("network offline") else IO.both(Net.serveOnce(18795, req => simHandle(req)), IO.timeout(1000, Net.httpPost(url, headers, body))).map(p => p._2)
+  } yield resp
+
+def setup(): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs("sim")
+    _ <- Fs.mkdirs("obs")
+    _ <- Fs.write("sim/active.txt", "sim/ui")
+    _ <- initSimServer("sim/ui", "v0", validTok(), "1", "0")
+    seeded = Deck.ClientState("mob", 1, Deck.Pairing("127.0.0.1", 18795, validTok()), Deck.Snapshot(baseZero(), Hash.sha256(Str.concat(baseZero(), ":0")), 0, "ship mobile sync", sampleCards("v0", []), []), [], "Synced rev 0", "")
+    _ <- Fs.mkdirs(".scuzz/ide-mobile")
+    _ <- Fs.write(".scuzz/ide-mobile/state.json", Deck.encodeState(seeded))
+    _ <- Fs.write("obs/e2e.txt", "")
+    _ <- Fs.write("obs/idempotent.txt", "")
+    _ <- Fs.write("obs/conflicts.txt", "")
+    _ <- Fs.write("obs/auth.txt", "")
+    _ <- Fs.write("obs/chunked.txt", "")
+    _ <- Fs.write("obs/corrupt.txt", "")
+  } yield ()
+
+def faults(): List[String] =
+  ["net", "fs"]
+
+def offlineSwipeSteerRestartFlush(): IO[Unit] =
+  IO.attempt(for {
+  _ <- initSimServer("sim/e2e", "v0", validTok(), "1", "0")
+  _ <- Fs.write("sim/active.txt", "sim/e2e")
+  cDir = "e2e/full"
+  fresh <- Sync.loadOrInit(cDir)
+  stSig = Sync.makeCell(fresh.copy(pairing = Deck.Pairing("127.0.0.1", 18795, validTok()), syncStatus = "Paired"))
+  busySig = Signal.make(0)
+  _ <- Sync.persist(cDir, stSig)
+  _ <- Sync.syncNow(cDir, stSig, busySig)
+  _ <- Fs.write("sim/e2e/online.txt", "0")
+  _ <- Sync.syncNow(cDir, stSig, busySig)
+  s1 = Deck.applySwipeDelta(Sync.readCell(stSig), 85)
+  s2 = Deck.applySwipeDelta(s1, -85)
+  s3 = Deck.queueCardAction(s2, "skip", "need-another-scenario")
+  s4 = Deck.queueSteer(s3, "  keep layout compact  ") match {
+  case Result.Ok(v) => v
+  case Result.Err(_) => s3
+}
+  _ = Sync.writeCell(stSig, s4)
+  _ <- Sync.persist(cDir, stSig)
+  restarted <- Sync.loadOrInit(cDir)
+  restSig = Sync.makeCell(restarted)
+  _ <- Fs.write("sim/e2e/online.txt", "1")
+  _ <- Sync.syncNow(cDir, restSig, busySig)
+  finalSt = Sync.readCell(restSig)
+  mainDisk <- Fs.read("sim/e2e/main.txt")
+  cardsTag = List.join(List.map(finalSt.snapshot.cards, c => Str.take(c.id, 4)), ",")
+  steerTag = List.join(List.map(finalSt.snapshot.steer, s => s.prompt), "|")
+  okPre = Sync.readCell(stSig).syncStatus == "Offline" && List.len(restarted.outbox) == 4 && List.map(restarted.outbox, a => a.kind) == ["accept", "reject", "skip", "steer"]
+  summary = if (okPre && mainDisk == "alpha" && List.isEmpty(finalSt.outbox)) Str.concat("ok:rev=", Str.concat(Str.fromInt(finalSt.snapshot.revision), Str.concat(";cards=", Str.concat(cardsTag, Str.concat(";steer=", steerTag))))) else "incomplete"
+  _ <- Fs.write("obs/e2e.txt", summary)
+  _ <- Fs.write("sim/active.txt", "sim/ui")
+} yield ()).map(_ => ())
+
+def retryIdempotentBatch(): IO[Unit] =
+  IO.attempt(for {
+  _ <- initSimServer("sim/idem", "v0", validTok(), "1", "0")
+  _ <- Fs.write("sim/active.txt", "sim/idem")
+  cDir = "e2e/idem"
+  st0 = Deck.ClientState("idem", 1, Deck.Pairing("127.0.0.1", 18795, validTok()), Deck.Snapshot(baseZero(), baseZero(), 0, "ship mobile sync", sampleCards("v0", []), []), [], "Synced rev 0", "")
+  st1 = Deck.queueCardAction(st0, "accept", "")
+  st2 = Deck.queueCardAction(st1, "reject", "")
+  st3 = Deck.queueCardAction(st2, "skip", "outside-my-goal")
+  st4 = Deck.queueSteer(st3, "one steer only") match {
+  case Result.Ok(v) => v
+  case Result.Err(_) => st3
+}
+  savedJson = Deck.encodeState(st4)
+  sig1 = Sync.makeCell(st4)
+  busy = Signal.make(0)
+  _ <- Sync.persist(cDir, sig1)
+  _ <- Sync.syncNow(cDir, sig1, busy)
+  _ <- Fs.write(Sync.statePath(cDir), savedJson)
+  reloaded <- Sync.loadOrInit(cDir)
+  sig2 = Sync.makeCell(reloaded)
+  _ <- Sync.syncNow(cDir, sig2, busy)
+  steersJ <- readJsonOr("sim/idem/steers.json", Json.Arr([]))
+  mainSrc <- Fs.read("sim/idem/main.txt")
+  directResp <- Sync.httpPost("http://127.0.0.1:18795/v1/ide/sync", Deck.authHeaders(validTok()), Deck.encodeBatch(st4.outbox))
+  replayCount = Deck.decodeBatchReply(directResp._3, st4.outbox) match {
+  case Result.Ok(rep) => List.count(rep.results, r => r.replayed)
+  case Result.Err(_) => -1
+}
+  done = Sync.readCell(sig2)
+  msg = if (mainSrc == "alpha" && replayCount == 4 && List.len(Json.arr(steersJ)) == 1 && List.isEmpty(done.outbox)) "ok:replayed=4;steers=1;outbox=0" else "mismatch"
+  _ <- Fs.write("obs/idempotent.txt", msg)
+  _ <- Fs.write("sim/active.txt", "sim/ui")
+} yield ()).map(_ => ())
+
+def staleAndDirtyHandling(): IO[Unit] =
+  IO.attempt(for {
+  _ <- initSimServer("sim/conf", "v0", validTok(), "1", "1")
+  _ <- Fs.write("sim/active.txt", "sim/conf")
+  cDir = "e2e/conf"
+  baseSt = Deck.ClientState("conf", 1, Deck.Pairing("127.0.0.1", 18795, validTok()), Deck.Snapshot(baseZero(), baseZero(), 0, "ship mobile sync", sampleCards("v0", []), []), [], "Synced rev 0", "")
+  dirtyQueued = Deck.queueCardAction(baseSt, "accept", "")
+  sig = Sync.makeCell(dirtyQueued)
+  busy = Signal.make(0)
+  _ <- Sync.persist(cDir, sig)
+  _ <- Sync.syncNow(cDir, sig, busy)
+  afterDirty = Sync.readCell(sig)
+  mainAfterDirty <- Fs.read("sim/conf/main.txt")
+  _ <- Fs.write("sim/conf/dirty.txt", "0")
+  _ <- Fs.write("sim/conf/main.txt", "external")
+  staleQueued = Deck.queueCardAction(afterDirty.copy(snapshot = baseSt.snapshot), "accept", "")
+  _ = Sync.writeCell(sig, staleQueued)
+  _ <- Sync.syncNow(cDir, sig, busy)
+  afterStale = Sync.readCell(sig)
+  mainAfterStale <- Fs.read("sim/conf/main.txt")
+  ok = mainAfterDirty == "v0" && mainAfterStale == "external" && Str.contains(afterDirty.alert, "dirty workspace") && Str.contains(afterStale.alert, "stale baseline")
+  _ <- Fs.write("obs/conflicts.txt", if (ok) "ok:dirty-and-stale-flagged" else "mismatch")
+  _ <- Fs.write("sim/active.txt", "sim/ui")
+} yield ()).map(_ => ())
+
+def unauthorizedKeepsOutbox(): IO[Unit] =
+  IO.attempt(for {
+  _ <- initSimServer("sim/auth", "v0", rotatedTok(), "1", "0")
+  _ <- Fs.write("sim/active.txt", "sim/auth")
+  cDir = "e2e/auth"
+  baseSt = Deck.ClientState("auth", 1, Deck.Pairing("127.0.0.1", 18795, validTok()), Deck.Snapshot(baseZero(), baseZero(), 0, "ship mobile sync", sampleCards("v0", []), []), [], "Synced rev 0", "")
+  q1 = Deck.queueCardAction(baseSt, "accept", "")
+  q2 = Deck.queueSteer(q1, "survive 401") match {
+  case Result.Ok(v) => v
+  case Result.Err(_) => q1
+}
+  sig = Sync.makeCell(q2)
+  busy = Signal.make(0)
+  _ <- Sync.persist(cDir, sig)
+  _ <- Sync.syncNow(cDir, sig, busy)
+  after401 = Sync.readCell(sig)
+  persisted401 <- Sync.loadOrInit(cDir)
+  _ = Sync.writeCell(sig, persisted401.copy(pairing = Deck.Pairing("127.0.0.1", 18795, rotatedTok()), alert = ""))
+  _ <- Sync.syncNow(cDir, sig, busy)
+  afterFix = Sync.readCell(sig)
+  mainSrc <- Fs.read("sim/auth/main.txt")
+  ok = after401.syncStatus == "401 unauthorized" && Str.contains(after401.alert, "401 unauthorized") && List.len(persisted401.outbox) == 2 && List.isEmpty(afterFix.outbox) && mainSrc == "alpha"
+  _ <- Fs.write("obs/auth.txt", if (ok) "ok:401-kept=2;flushed=0;main=alpha" else "mismatch")
+  _ <- Fs.write("sim/active.txt", "sim/ui")
+} yield ()).map(_ => ())
+
+private def addManySteers(st: Deck.ClientState, i: Int, total: Int): Deck.ClientState =
+  if (i > total) st else Deck.queueSteer(st, Str.concat("steer-", Str.fromInt(i))) match {
+  case Result.Ok(next) => addManySteers(next, i + 1, total)
+  case Result.Err(_) => st
+}
+
+def chunkedLargeOutbox(): IO[Unit] =
+  IO.attempt(for {
+  _ <- initSimServer("sim/chunk", "v0", validTok(), "1", "0")
+  _ <- Fs.write("sim/active.txt", "sim/chunk")
+  cDir = "e2e/chunk"
+  baseSt = Deck.ClientState("chunk", 1, Deck.Pairing("127.0.0.1", 18795, validTok()), Deck.Snapshot(baseZero(), baseZero(), 0, "ship mobile sync", [], []), [], "Synced rev 0", "")
+  queued = addManySteers(baseSt, 1, 66)
+  sig = Sync.makeCell(queued)
+  busy = Signal.make(0)
+  _ <- Sync.persist(cDir, sig)
+  _ <- Sync.syncNow(cDir, sig, busy)
+  batches <- Fs.read("sim/chunk/batches.txt")
+  steersJ <- readJsonOr("sim/chunk/steers.json", Json.Arr([]))
+  done = Sync.readCell(sig)
+  ok = batches == "64,2" && List.len(Json.arr(steersJ)) == 66 && List.isEmpty(done.outbox)
+  _ <- Fs.write("obs/chunked.txt", if (ok) "ok:batches=64,2;steers=66;outbox=0" else "mismatch")
+  _ <- Fs.write("sim/active.txt", "sim/ui")
+} yield ()).map(_ => ())
+
+def corruptStoreRecovery(): IO[Unit] =
+  IO.attempt(for {
+  _ <- Fs.mkdirs("e2e/corrupt")
+  _ <- Fs.write("e2e/corrupt/state.json", "{broken")
+  loaded <- Sync.loadOrInit("e2e/corrupt")
+  ok = List.isEmpty(loaded.outbox) && Str.contains(loaded.alert, "Saved state was invalid")
+  _ <- Fs.write("obs/corrupt.txt", if (ok) "ok:recovered" else "mismatch")
+} yield ()).map(_ => ())
+

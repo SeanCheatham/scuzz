@@ -1,0 +1,10 @@
+[fuzz]
+events = [
+  "tap outlined:Choose A",
+  "tap outlined:Choose B",
+  "tap outlined:Pair",
+  "tap textbutton:Close pairing",
+  "tap outlined:Pair",
+  "tap button:Save pairing",
+  "tap button:Sync",
+]

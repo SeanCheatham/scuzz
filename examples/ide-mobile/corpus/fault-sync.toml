@@ -1,0 +1,8 @@
+[fuzz]
+schedule_seed = "7"
+fault_seed = "2"
+events = [
+  "tap button:Accept",
+  "tap button:Sync",
+  "drive offlineSwipeSteerRestartFlush",
+]

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 extern int scuzz_app_main(int argc, char **argv);
 void scuzz_android_set_alive(int alive);
@@ -88,8 +89,19 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeStart(
     setenv("SCUZZ_UI_SCALE", sbuf, 1);
   }
   dump = dump_path ? (*env)->GetStringUTFChars(env, dump_path, NULL) : NULL;
-  if (dump && dump[0])
+  if (dump && dump[0]) {
+    const char *slash = strrchr(dump, '/');
     setenv("SCUZZ_UI_DEBUG_DUMP", dump, 1);
+    if (slash && slash > dump) {
+      size_t n = (size_t)(slash - dump);
+      char dir[PATH_MAX];
+      if (n < sizeof dir) {
+        memcpy(dir, dump, n);
+        dir[n] = '\0';
+        (void)chdir(dir);
+      }
+    }
+  }
   if (dump_path && dump)
     (*env)->ReleaseStringUTFChars(env, dump_path, dump);
   record = record_path ? (*env)->GetStringUTFChars(env, record_path, NULL) : NULL;

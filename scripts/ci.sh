@@ -1060,6 +1060,9 @@ PY_MOTION
   "$SCUZZ" run --target headless --exec "" examples/studio
   test -f examples/studio/build/snapshot.png
   "$SCUZZ" fuzz --iterations 0 examples/studio
+  "$SCUZZ" run --target headless --exec "" examples/ide-mobile
+  test -f examples/ide-mobile/build/snapshot.png
+  "$SCUZZ" fuzz --iterations 0 examples/ide-mobile
   "$SCUZZ" check examples/layout
   "$SCUZZ" fuzz --iterations 16 examples/layout
   prove_evaluator_replay layout
@@ -2385,6 +2388,7 @@ slice_ios() {
   need_cmd xcrun "Install Xcode and an iOS simulator runtime"
   need_cmd python3 "Install the Xcode command-line tools"
   "$SCUZZ" fuzz --iterations 0 examples/network-ui
+  "$SCUZZ" fuzz --iterations 0 examples/ide-mobile
   python3 crates/runtime/tests/test_net_apple.py --ios
   "$SCUZZ" fuzz --iterations 0 examples/counter
   python3 crates/embedder-mobile/shells/ios/test_loop.py "$SCUZZ"
@@ -2397,6 +2401,19 @@ slice_mobile() {
     ./examples/counter/build/counter 2>&1 | tee /tmp/mobile.out
   grep -q "UiRuntime.Mobile" /tmp/mobile.out
   grep -q "scuzz mobile: present" /tmp/mobile.out
+  env SCUZZ_IDE_MOBILE_DIR=/tmp/scuzz-mobile-shell-state \
+    "$SCUZZ" run --target headless --out-dir /tmp/scuzz-ide-mobile-shell --exec "" examples/ide-mobile
+  env SCUZZ_UI_RUNTIME=mobile SCUZZ_MOBILE_SHELL=1 SCUZZ_UI_WIDTH=390 SCUZZ_UI_HEIGHT=844 \
+    SCUZZ_IDE_MOBILE_DIR=/tmp/scuzz-mobile-shell-state \
+    /tmp/scuzz-ide-mobile-shell/ide-mobile 2>&1 | tee /tmp/ide-mobile.out
+  grep -q "UiRuntime.Mobile" /tmp/ide-mobile.out
+  grep -q "scuzz mobile: present" /tmp/ide-mobile.out
+  if "$SCUZZ" package --target android examples/ide-mobile > /tmp/android-ide-mobile.out 2>&1; then
+    test -f examples/ide-mobile/build/package/android/lib/arm64-v8a/libscuzz.so
+    test -f examples/ide-mobile/build/package/android/ide-mobile.apk
+  else
+    grep -Eq "ANDROID_NDK_HOME|ANDROID_HOME" /tmp/android-ide-mobile.out
+  fi
   host_target="linux"
   [ "$(uname -s)" = Darwin ] && host_target="macos"
   "$SCUZZ" package --target "$host_target" examples/counter

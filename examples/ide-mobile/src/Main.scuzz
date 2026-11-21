@@ -1,0 +1,124 @@
+import Deck.CardItem
+import Deck.ClientState
+
+private def activeCard(st: ClientState): Option[CardItem] =
+  List.head(Deck.visibleCards(st))
+
+private def recordCardDecision(dir: String, store: Signal[String], swipe: Signal[Int], kind: String, reason: String): IO[Unit] =
+  for {
+    _ = Signal.set(swipe, 0)
+    next = Deck.queueCardAction(Sync.readCell(store), kind, reason)
+    _ = Sync.writeCell(store, next)
+    _ <- Sync.persist(dir, store)
+  } yield ()
+
+private def recordLaneChoice(dir: String, store: Signal[String], swipe: Signal[Int], lane: Int): IO[Unit] =
+  for {
+    _ = Signal.set(swipe, 0)
+    next = Deck.queueLaneChoice(Sync.readCell(store), lane)
+    _ = Sync.writeCell(store, next)
+    _ <- Sync.persist(dir, store)
+  } yield ()
+
+private def commitSwipe(dir: String, store: Signal[String], swipe: Signal[Int]): IO[Unit] =
+  for {
+    delta = Signal.get(swipe)
+    _ = Signal.set(swipe, 0)
+    prev = Sync.readCell(store)
+    next = Deck.applySwipeDelta(prev, delta)
+    _ <- if (next.nextSeq == prev.nextSeq) IO.pure(()) else for {
+  _ = Sync.writeCell(store, next)
+  _ <- Sync.persist(dir, store)
+} yield ()
+  } yield ()
+
+private def submitSteer(dir: String, store: Signal[String], steerInput: Signal[String]): IO[Unit] =
+  Deck.queueSteer(Sync.readCell(store), Signal.get(steerInput)) match {
+    case Result.Err(msg) => IO.pure(Sync.writeCell(store, Sync.readCell(store).copy(syncStatus = msg, alert = msg)))
+    case Result.Ok(next) => for {
+  _ = Signal.set(steerInput, "")
+  _ = Sync.writeCell(store, next)
+  _ <- Sync.persist(dir, store)
+} yield ()
+  }
+
+private def savePairing(dir: String, store: Signal[String], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], pairOpen: Signal[Int]): IO[Unit] =
+  Deck.parsePairing(Signal.get(hostInput), Signal.get(portInput), Signal.get(tokenInput)) match {
+    case Result.Err(msg) => IO.pure(Sync.writeCell(store, Sync.readCell(store).copy(syncStatus = msg, alert = msg)))
+    case Result.Ok(pair) => for {
+  cur = Sync.readCell(store)
+  cleared = if (Str.startsWith(cur.alert, "401 ")) "" else cur.alert
+  _ = Sync.writeCell(store, cur.copy(pairing = pair, syncStatus = "Paired", alert = cleared))
+  _ = Signal.set(pairOpen, 0)
+  _ <- Sync.persist(dir, store)
+} yield ()
+  }
+
+private def clearAlert(dir: String, store: Signal[String]): IO[Unit] =
+  for {
+    _ = Sync.writeCell(store, Sync.readCell(store).copy(alert = ""))
+    _ <- Sync.persist(dir, store)
+  } yield ()
+
+def buildApp(dir: String, store: Signal[String], busy: Signal[Int], swipe: Signal[Int], skipReason: Signal[Int], steerInput: Signal[String], pairOpen: Signal[Int], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], outboxCount: Signal[Int], hasCard: Signal[Int], hasEmpty: Signal[Int], hasAlert: Signal[Int], statusLine: Signal[String], objectiveLine: Signal[String], alertText: Signal[String], deckHeader: Signal[String], questionLine: Signal[String], changesLine: Signal[String], laneAText: Signal[String], laneBText: Signal[String], swipeHint: Signal[String], steerItems: Signal[List[String]]): View =
+  View.appShell(View.appBar(View.text("Scuzz Mobile"), View.row([View.badge(outboxCount, View.button("Sync", _ => Sync.syncNow(dir, store, busy))), View.outlinedButton("Pair", _ => for {
+  p = Sync.readCell(store).pairing
+  _ = Signal.set(hostInput, p.host)
+  _ = Signal.set(portInput, Str.fromInt(p.port))
+  _ = Signal.set(tokenInput, p.token)
+} yield Signal.set(pairOpen, 1))])), View.stack([View.expanded(1, View.scroll(View.padding(6, View.gap(4, View.column([View.card(View.column([View.bindText(statusLine), View.bindText(objectiveLine)])), View.showWhen(hasAlert, 1, View.card(View.column([View.bindText(alertText), View.textButton("Dismiss alert", _ => clearAlert(dir, store))]))), View.showWhen(hasCard, 1, View.card(View.gap(4, View.column([View.bindText(deckHeader), View.bindText(questionLine), View.bindText(changesLine), View.grid(2, [View.column([View.text("Lane A"), View.bindText(laneAText), View.outlinedButton("Choose A", _ => recordLaneChoice(dir, store, swipe, 0))]), View.column([View.text("Lane B"), View.bindText(laneBText), View.outlinedButton("Choose B", _ => recordLaneChoice(dir, store, swipe, 1))])]), View.bindText(swipeHint), View.inkWell("Swipe release", _ => commitSwipe(dir, store, swipe), View.slider(swipe, "Swipe card", -100, 100, 1)), View.row([View.outlinedButton("Reject", _ => recordCardDecision(dir, store, swipe, "reject", "")), View.button("Accept", _ => recordCardDecision(dir, store, swipe, "accept", "")), View.textButton("Skip", _ => recordCardDecision(dir, store, swipe, "skip", Deck.skipReasonOf(Signal.get(skipReason))))]), View.segmented(skipReason, "Skip reason", ["None", "No diff", "Need scenario", "Off goal"])])))), View.showWhen(hasEmpty, 1, View.card(View.column([View.text("No undecided cards in local deck."), View.text("Tap Sync to refresh from scuzz ide serve or queue a steer prompt below.")]))), View.card(View.gap(4, View.column([View.text("Steer"), View.textField(steerInput, "Steer prompt"), View.button("Queue steer", _ => submitSteer(dir, store, steerInput)), View.each(steerItems, line => View.text(line))])))]))))), View.overlay(pairOpen, "Pair laptop", View.center(View.maxSize(360, 340, View.card(View.gap(8, View.column([View.heading(2, View.text("Pair laptop")), View.textField(hostInput, "Host"), View.textField(portInput, "Port"), View.textField(tokenInput, "Bearer token"), View.row([View.button("Save pairing", _ => savePairing(dir, store, hostInput, portInput, tokenInput, pairOpen)), View.textButton("Close pairing", _ => Signal.set(pairOpen, 0))])]))))))]))
+
+@main def main: IO[Unit] =
+  for {
+    dir <- Sync.resolveDir()
+    initial <- Sync.loadOrInit(dir)
+    store = Signal.make(Deck.encodeState(initial))
+    busy = Signal.make(0)
+    swipe = Signal.make(0)
+    skipReason = Signal.make(0)
+    steerInput = Signal.make("")
+    pairOpen = Signal.make(0)
+    hostInput = Signal.make(initial.pairing.host)
+    portInput = Signal.make(Str.fromInt(initial.pairing.port))
+    tokenInput = Signal.make(initial.pairing.token)
+    outboxCount = Signal.map(store, _ => List.len(Sync.readCell(store).outbox))
+    cardCount = Signal.map(store, _ => List.len(Deck.visibleCards(Sync.readCell(store))))
+    syncStatus = Signal.map(store, _ => Sync.readCell(store).syncStatus)
+    alert = Signal.map(store, _ => Sync.readCell(store).alert)
+    revision = Signal.map(store, _ => Sync.readCell(store).snapshot.revision)
+    hasCard = Signal.map(cardCount, n => if (n > 0) 1 else 0)
+    hasEmpty = Signal.map(cardCount, n => if (n == 0) 1 else 0)
+    hasAlert = Signal.map(alert, s => if (s == "") 0 else 1)
+    statusLine = Signal.map(store, _ => for {
+  st = Sync.readCell(store)
+} yield Str.concat("Status: ", Str.concat(st.syncStatus, Str.concat(" | Outbox: ", Str.fromInt(List.len(st.outbox))))))
+    objectiveLine = Signal.map(store, _ => for {
+  st = Sync.readCell(store)
+} yield Str.concat("Objective: ", if (st.snapshot.objective == "") "(none)" else st.snapshot.objective))
+    alertText = Signal.map(alert, s => Str.concat("Alert: ", s))
+    deckHeader = Signal.map(store, _ => for {
+  st = Sync.readCell(store)
+} yield activeCard(st) match {
+  case None => "Cards: 0"
+  case Some(c) => Str.concat("Card ", Str.concat(Str.take(c.id, 8), Str.concat(" | Remaining: ", Str.fromInt(List.len(Deck.visibleCards(st))))))
+})
+    questionLine = Signal.map(store, _ => activeCard(Sync.readCell(store)) match {
+  case None => ""
+  case Some(c) => Str.concat("Question: ", Str.concat(c.workload, Str.concat(" @ step ", Str.fromInt(c.step))))
+})
+    changesLine = Signal.map(store, _ => activeCard(Sync.readCell(store)) match {
+  case None => ""
+  case Some(c) => Str.concat("Changed: ", if (List.isEmpty(c.changes)) "behavior" else List.join(c.changes, ", "))
+})
+    laneAText = Signal.map(store, _ => activeCard(Sync.readCell(store)) match {
+  case None => ""
+  case Some(c) => Deck.formatFiles(Deck.laneFiles(c, 0))
+})
+    laneBText = Signal.map(store, _ => activeCard(Sync.readCell(store)) match {
+  case None => ""
+  case Some(c) => Deck.formatFiles(Deck.laneFiles(c, 1))
+})
+    swipeHint = Signal.map(swipe, d => if (d >= 60) "Release right to accept" else if (d <= -60) "Release left to reject" else "Swipe left to reject or right to accept")
+    steerItems = Signal.map(store, _ => Deck.steerLines(Sync.readCell(store)))
+    _ <- Ui.run(_ => buildApp(dir, store, busy, swipe, skipReason, steerInput, pairOpen, hostInput, portInput, tokenInput, outboxCount, hasCard, hasEmpty, hasAlert, statusLine, objectiveLine, alertText, deckHeader, questionLine, changesLine, laneAText, laneBText, swipeHint, steerItems)).require(Signal.get(outboxCount) >= 0).require(Signal.get(cardCount) >= 0).require(Signal.get(revision) >= 0).require(Signal.get(swipe) >= -100 && Signal.get(swipe) <= 100)
+  } yield ()

@@ -1,0 +1,12 @@
+[fuzz]
+events = [
+  "tap button:Accept",
+  "tap outlined:Reject",
+  "tap choicechip:Need scenario",
+  "tap textbutton:Skip",
+  "tap button:Queue steer",
+  "tap textbutton:Dismiss alert",
+  "type 0 keep cards compact",
+  "tap button:Queue steer",
+  "tap button:Sync",
+]

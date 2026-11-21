@@ -15009,6 +15009,52 @@ static void test_slider_pointer_drag(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_slider_ink_well_release(void) {
+  SzUiConfig cfg = {0};
+  SzUiSession *session;
+  SzView *root, *sl, *ink;
+  SzSignalInt *sig, *commits;
+  SzInputEvent ev;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  commits = sz_signal_int(0);
+  sl = sz_view_slider(sig, "Swipe", -100, 100, 1);
+  ink = sz_view_ink_well("Commit", counter_tap, commits, sl);
+  root = sz_view_column();
+  sz_view_add_child(root, ink);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_view_layout(root, 200.f, 80.f, theme);
+  f = sz_view_frame(sl);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.x = f.x + f.w * 0.5f;
+  ev.y = f.y + f.h * 0.5f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(commits) == 0);
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.x = f.x + f.w - 1.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(commits) == 0);
+  ev.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(sig) >= 95);
+  assert(sz_signal_int_get(commits) == 1);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  sz_signal_int_free(commits);
+}
+
 static void test_replace_root_drops_pointer(void) {
   SzUiConfig cfg = {0};
   SzUiSession *session;
@@ -22717,6 +22763,7 @@ int main(int argc, char **argv) {
   test_slider_hit_test();
   test_slider_paint_fill();
   test_slider_pointer_drag();
+  test_slider_ink_well_release();
   test_replace_root_drops_pointer();
   test_slider_live_records_xy();
   test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();

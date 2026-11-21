@@ -188,6 +188,19 @@ def verify_manifests_and_build_scripts(temp):
         serve_ir = (serve_pkg / "build/netserve.ll").read_text()
         assert re.search(r"call [^@]*@sz_net_serve", serve_ir)
 
+        ide_mobile = root / "examples/ide-mobile"
+        if ide_mobile.is_dir():
+            ide_mobile_out = temp / "ide-mobile-build"
+            subprocess.run(
+                [str(cli), "build", "--out-dir", str(ide_mobile_out), str(ide_mobile)],
+                check=True,
+                env=dict(os.environ, SCUZZ_SKIA="sk_sw"),
+            )
+            mobile_ir = (ide_mobile_out / "ide-mobile.ll").read_text()
+            assert re.search(r"call [^@]*@sz_net_http_get\(", mobile_ir)
+            assert re.search(r"call [^@]*@sz_net_http_post\(", mobile_ir)
+            assert not re.search(r"call [^@]*@sz_net_serve", mobile_ir)
+
 
 def main():
     jdk = find_jdk()

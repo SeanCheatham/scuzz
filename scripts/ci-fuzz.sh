@@ -1890,6 +1890,157 @@ with tempfile.TemporaryDirectory(prefix="scuzz-ide-serve-") as tmp:
             proc2.wait()
 PY_IDE_SERVE_CLI
 
+rm -f examples/ide-mobile/.scuzz/mutate.results
+fuzz --iterations 64 examples/ide-mobile | tee /tmp/scuzz-ide-mobile-summary.log
+if grep -q 'probes run compiled' /tmp/scuzz-ide-mobile-summary.log; then
+  echo "examples/ide-mobile: the evaluator engine fell back to compiled probes" && exit 1
+fi
+assert_fuzz_summary examples/ide-mobile/build/fuzz/summary.json /tmp/scuzz-ide-mobile-summary.log
+python3 - <<'PY_IDE_MOBILE'
+import json
+with open("examples/ide-mobile/build/fuzz/summary.json") as f:
+    mob = json.load(f)
+assert mob["fuzz"]["ok"] is True
+assert mob["mutate"]["survived"] == 0
+assert mob["mutate"]["invalid"] == 0
+assert mob["mutate"]["incomplete"] == 0
+assert not mob["triggers"]["never"], mob["triggers"]
+assert "slider:Swipe card" in mob["triggers"]["reached"]
+assert {"offlineSwipeSteerRestartFlush", "retryIdempotentBatch", "staleAndDirtyHandling", "unauthorizedKeepsOutbox", "chunkedLargeOutbox", "corruptStoreRecovery"} <= set(mob["claim_drives"]["reached"])
+PY_IDE_MOBILE
+SCUZZ_FUZZ_ENGINE=compiled fuzz --iterations 0 examples/ide-mobile
+python3 - "$SCUZZ" <<'PY_IDE_MOBILE_LIVE'
+import hashlib
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+cli = str(Path(sys.argv[1]).resolve())
+repo = Path.cwd()
+app = str((repo / "examples/ide-mobile").resolve())
+
+def source_hash(files):
+    rows = [{"path": p, "content": c} for p, c in sorted(files)]
+    return hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode()).hexdigest()
+
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+
+with tempfile.TemporaryDirectory(prefix="scuzz-ide-mobile-live-") as tmp:
+    base = Path(tmp)
+    ws = base / "ws"
+    mob_dir = base / "mobile-state"
+    out_dir = base / "mobile-build"
+    (ws / "src").mkdir(parents=True)
+    (ws / ".scuzz/ide/cards").mkdir(parents=True)
+    (ws / "scuzz.toml").write_text('[package]\nname = "demo"\n')
+    (ws / "src/Main.scuzz").write_text("v0")
+
+    card_id = "a" * 64
+    base_h = source_hash([("src/Main.scuzz", "v0")])
+    prop_h = source_hash([("src/Main.scuzz", "alpha")])
+    card_dir = ws / ".scuzz/ide/cards" / card_id
+    card_dir.mkdir(parents=True)
+    (card_dir / "card.json").write_text(json.dumps({
+        "v": 1,
+        "id": card_id,
+        "proposal": "hidden-candidate-name",
+        "publication": '{"generator":"local"}',
+        "objective": "ship mobile deck",
+        "baseline": [{"path": "src/Main.scuzz", "content": "v0"}],
+        "proposed": [{"path": "src/Main.scuzz", "content": "alpha"}],
+        "a": base_h,
+        "b": prop_h,
+        "flip": 0,
+        "started": 1,
+        "ready": 2,
+        "status": "ready",
+        "question": {"workload": "idle", "step": 0},
+        "evidence": {"workloads": [{"label": "idle", "delta": {"changes": [{"section": "signals"}]}}]},
+    }))
+
+    token = "live-mobile-token-123456"
+    env = dict(
+        os.environ,
+        SCUZZ_IDE_MOBILE_DIR=str(mob_dir),
+        SCUZZ_IDE_HOST="127.0.0.1",
+        SCUZZ_IDE_PORT=str(port),
+        SCUZZ_IDE_TOKEN=token,
+    )
+
+    def run_mobile(events):
+        script = base / "script.json"
+        script.write_text(json.dumps({"v": 1, "kind": "inject", "events": events}))
+        subprocess.run(
+            [cli, "run", "--target", "headless", "--out-dir", str(out_dir), "--exec", str(script), app],
+            check=True,
+            env=env,
+        )
+
+    # 1. Online prefetch from scuzz ide serve (--once serves GET /v1/ide/sync).
+    srv1 = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(port), "--token", token, "--once", str(ws)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        time.sleep(0.1)
+        run_mobile([{"op": "tap", "id": "button:Sync"}])
+        out1, err1 = srv1.communicate(timeout=10)
+        assert srv1.returncode == 0, (srv1.returncode, out1, err1)
+    finally:
+        if srv1.poll() is None:
+            srv1.kill()
+            srv1.wait()
+
+    state1 = json.loads((mob_dir / "state.json").read_text())
+    assert len(state1["snapshot"]["cards"]) == 1, state1
+    assert "proposal" not in json.dumps(state1), state1
+
+    # 2. Restart offline: swipe-drag right to accept, queue a steer prompt, and try Sync while server is down.
+    run_mobile([
+        {"op": "drag", "x1": 195, "y1": 608, "x2": 315, "y2": 608},
+        {"op": "type", "i": 0, "value": "keep mobile fast"},
+        {"op": "tap", "id": "button:Queue steer"},
+        {"op": "tap", "id": "button:Sync"},
+    ])
+    state2 = json.loads((mob_dir / "state.json").read_text())
+    assert state2["sync_status"] == "Offline", state2
+    assert [a["kind"] for a in state2["outbox"]] == ["accept", "steer"], state2
+
+    # 3. Reconnect after second restart: flush FIFO outbox (POST) + refresh feed (GET) against live scuzz ide serve.
+    srv2 = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(port), "--token", token, str(ws)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        time.sleep(0.1)
+        run_mobile([{"op": "tap", "id": "button:Sync"}])
+    finally:
+        srv2.terminate()
+        try:
+            srv2.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            srv2.kill()
+            srv2.wait()
+
+    state3 = json.loads((mob_dir / "state.json").read_text())
+    assert state3["outbox"] == [], state3
+    assert state3["sync_status"] == "Synced rev 2", state3
+    assert (ws / "src/Main.scuzz").read_text() == "alpha"
+    steer_doc = json.loads((ws / ".scuzz/ide/steer.json").read_text())
+    assert [s["prompt"] for s in steer_doc["items"]] == ["keep mobile fast"], steer_doc
+PY_IDE_MOBILE_LIVE
+
 fuzz_api_report() {
   local dir="examples/api-report" iterations=320 name="api-report"
   rm -f "$dir/.scuzz/mutate.results"

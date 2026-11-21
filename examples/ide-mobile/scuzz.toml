@@ -1,0 +1,10 @@
+[package]
+name = "ide-mobile"
+version = "0.1.0"
+description = "Mobile swipe review and steer client for scuzz ide serve"
+
+[ui]
+default_runtime = "headless"
+headless_size = [390, 920]
+headless_scale = 1.0
+bundle_id = "dev.scuzz.idemobile"

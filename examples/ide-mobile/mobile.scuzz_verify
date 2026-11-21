@@ -1,0 +1,195 @@
+private def sampleHex(ch: String): String =
+  Str.repeat(ch, 64)
+
+private def sampleCard(flip: Int): Deck.CardItem =
+  Deck.CardItem(sampleHex("a"), "ship mobile sync", sampleHex("0"), sampleHex("1"), flip, "idle", 0, ["signals"], [Deck.FilePair("src/Main.scuzz", "v0")], [Deck.FilePair("src/Main.scuzz", "v1")])
+
+oracle pairingAndReasonBounds(): Bool =
+  for {
+    goodTok = Str.repeat("t", 16)
+    maxTok = Str.repeat("t", 128)
+    okPair = Deck.parsePairing(" 192.168.1.10 ", " 8787 ", Str.concat(" ", Str.concat(goodTok, " ")))
+    pairUrl = Deck.endpointUrl(Deck.Pairing("192.168.1.10", 8787, goodTok))
+    badHost = Deck.parsePairing("bad/host", "8787", goodTok)
+    badPort0 = Deck.parsePairing("127.0.0.1", "0", goodTok)
+    badPortHi = Deck.parsePairing("127.0.0.1", "65536", goodTok)
+    badPortNan = Deck.parsePairing("127.0.0.1", "abc", goodTok)
+    badTokShort = Deck.parsePairing("127.0.0.1", "8787", Str.repeat("t", 15))
+    badTokLong = Deck.parsePairing("127.0.0.1", "8787", Str.repeat("t", 129))
+    badUrlHost = Deck.endpointUrl(Deck.Pairing("", 8787, goodTok))
+    badUrlPort = Deck.endpointUrl(Deck.Pairing("127.0.0.1", 0, goodTok))
+    badUrlTok = Deck.endpointUrl(Deck.Pairing("127.0.0.1", 8787, "short"))
+    reasonsOk = Deck.skipReasonOf(0) == "" && Deck.skipReasonOf(1) == "no-visible-difference" && Deck.skipReasonOf(2) == "need-another-scenario" && Deck.skipReasonOf(3) == "outside-my-goal" && Deck.skipReasonOf(9) == "" && Deck.validReason("") && Deck.validReason("no-visible-difference") && Deck.validReason("need-another-scenario") && Deck.validReason("outside-my-goal") && !Deck.validReason("other")
+    clientIds = Deck.sanitizeClientId("abc_1-2") == "abc_1-2" && Deck.sanitizeClientId("") == "mob" && Deck.sanitizeClientId("bad space") == "mob"
+  } yield okPair == Result.Ok(Deck.Pairing("192.168.1.10", 8787, goodTok)) && Deck.validToken(maxTok) && pairUrl == Result.Ok("http://192.168.1.10:8787/v1/ide/sync") && badHost == Result.Err("Host is invalid") && badPort0 == Result.Err("Port must be 1..65535") && badPortHi == Result.Err("Port must be 1..65535") && badPortNan == Result.Err("Port must be 1..65535") && badTokShort == Result.Err("Bearer token must be 16..128 URL-safe chars") && badTokLong == Result.Err("Bearer token must be 16..128 URL-safe chars") && badUrlHost == Result.Err("Host is invalid") && badUrlPort == Result.Err("Port must be 1..65535") && badUrlTok == Result.Err("Pair bearer token first") && reasonsOk && clientIds
+
+oracle blindLaneProjection(flipRaw: Int, laneRaw: Int): Bool =
+  for {
+    flip = if (flipRaw % 2 == 0) 0 else 1
+    lane = if (laneRaw % 2 == 0) 0 else 1
+    card = sampleCard(flip)
+    files = Deck.laneFiles(card, lane)
+    kind = Deck.laneKind(card, lane)
+    st0 = Deck.ClientState("mob", 1, Deck.defaultPairing(), Deck.Snapshot(sampleHex("0"), sampleHex("0"), 0, "obj", [card], []), [], "Ready", "")
+    st1 = Deck.queueLaneChoice(st0, lane)
+    isProposalLane = lane == 0 && flip == 1 || lane == 1 && flip == 0
+  } yield (if (isProposalLane) files == card.proposed && kind == "accept" else files == card.before && kind == "reject") && List.len(st1.outbox) == 1 && List.at(st1.outbox, 0).kind == kind && List.at(st1.outbox, 0).baseline == card.baseline && List.isEmpty(Deck.visibleCards(st1))
+
+oracle swipeThresholdLaw(delta: Int): Bool =
+  for {
+    card = sampleCard(0)
+    st0 = Deck.ClientState("mob", 5, Deck.defaultPairing(), Deck.Snapshot(sampleHex("0"), sampleHex("0"), 0, "obj", [card], []), [], "Ready", "")
+    st1 = Deck.applySwipeDelta(st0, delta)
+  } yield if (delta >= 60) st1.nextSeq == 6 && List.len(st1.outbox) == 1 && List.at(st1.outbox, 0).kind == "accept" && List.at(st1.outbox, 0).id == "mob-5" else if (delta <= -60) st1.nextSeq == 6 && List.len(st1.outbox) == 1 && List.at(st1.outbox, 0).kind == "reject" && List.at(st1.outbox, 0).id == "mob-5" else st1.nextSeq == 5 && List.isEmpty(st1.outbox)
+
+oracle steerBoundsAndFormatting(): Bool =
+  for {
+    st0 = Deck.initialState("mob", Deck.Pairing("127.0.0.1", 8787, Str.repeat("k", 16)))
+    emptyErr = Deck.queueSteer(st0, "   ")
+    ok512 = Deck.queueSteer(st0, Str.repeat("p", 512))
+    over513 = Deck.queueSteer(st0, Str.repeat("p", 513))
+    withSteer = ok512 match {
+  case Result.Ok(s) => s.copy(snapshot = s.snapshot.copy(steer = [Deck.SteerRow(1, "r1", "server steer", sampleHex("0"), "queued")]))
+  case Result.Err(_) => st0
+}
+    lines = Deck.steerLines(withSteer)
+  } yield emptyErr == Result.Err("Enter a steer prompt") && over513 == Result.Err("Steer prompt exceeds 512 bytes") && List.len(lines) == 2 && List.at(lines, 1) == "[#1 queued] server steer" && Deck.formatFiles([]) == "(no file changes)" && Deck.formatFiles([Deck.FilePair("src/A.scuzz", "1")]) == """src/A.scuzz
+1"""
+
+oracle statePersistenceAndWireProtocol(): Bool =
+  for {
+    tok = Str.repeat("z", 20)
+    c0 = sampleCard(0)
+    c1 = sampleCard(1).copy(id = sampleHex("b"))
+    st0 = Deck.ClientState("mob_1", 1, Deck.Pairing("127.0.0.1", 8787, tok), Deck.Snapshot(sampleHex("0"), sampleHex("9"), 2, "ship", [c0, c1], [Deck.SteerRow(1, "s0", "first", sampleHex("0"), "queued")]), [], "Synced rev 2", "")
+    st1 = Deck.queueCardAction(st0, "accept", "")
+    st2 = Deck.queueCardAction(st1, "skip", "outside-my-goal")
+    st3 = Deck.queueSteer(st2, "compact cards") match {
+  case Result.Ok(v) => v
+  case Result.Err(_) => st2
+}
+    encoded = Deck.encodeState(st3)
+    roundTrip = Deck.decodeState(encoded)
+    batchWire = Deck.encodeBatch(st3.outbox)
+    h1 = sampleHex("1")
+    h8 = sampleHex("8")
+    ha = sampleHex("a")
+    hb = sampleHex("b")
+    replyRaw = List.join(["{\"v\":1,\"baseline\":\"", h1, "\",\"cursor\":\"", h8, "\",\"revision\":5,\"results\":[{\"v\":1,\"id\":\"mob_1-1\",\"kind\":\"accept\",\"card\":\"", ha, "\",\"status\":\"stale\",\"baseline\":\"", h1, "\",\"replayed\":false},{\"v\":1,\"id\":\"mob_1-2\",\"kind\":\"skip\",\"card\":\"", hb, "\",\"status\":\"dirty\",\"baseline\":\"", h1, "\",\"replayed\":false},{\"v\":1,\"id\":\"mob_1-3\",\"kind\":\"steer\",\"status\":\"queued\",\"baseline\":\"", h1, "\",\"replayed\":false}]}"], "")
+    concurrent = Deck.queueSteer(st3, "added during flight") match {
+  case Result.Ok(v) => v
+  case Result.Err(_) => st3
+}
+    merged = Deck.decodeBatchReply(replyRaw, st3.outbox) match {
+  case Result.Ok(rep) => Deck.applyBatchReply(concurrent, st3.outbox, rep)
+  case Result.Err(_) => concurrent
+}
+    err401 = Deck.applyHttpError(st3, 401)
+    err503 = Deck.applyHttpError(st3, 503)
+    badStates = List.forall(["{", "[]", "{\"v\":2}", "{\"v\":1,\"client_id\":\"\",\"next_seq\":1}"], s => Deck.decodeState(s) match {
+  case Result.Ok(_) => false
+  case Result.Err(_) => true
+})
+    badBatch = List.forall(["{", "{\"v\":2,\"results\":[]}", "{\"v\":1,\"baseline\":\"bad\",\"cursor\":\"bad\",\"revision\":0,\"results\":[]}"], s => Deck.decodeBatchReply(s, st3.outbox) match {
+  case Result.Ok(_) => false
+  case Result.Err(_) => true
+})
+    badSnap = List.forall(["{", "{\"v\":2}", "{\"v\":1,\"baseline\":\"bad\",\"cursor\":\"bad\",\"revision\":0,\"cards\":[],\"steer\":[]}"], s => Deck.decodeSnapshot(s) match {
+  case Result.Ok(_) => false
+  case Result.Err(_) => true
+})
+  } yield roundTrip == Result.Ok(st3) && Str.contains(batchWire, "\"outside-my-goal\"") && List.len(merged.outbox) == 1 && List.at(merged.outbox, 0).prompt == "added during flight" && Str.contains(merged.alert, "stale baseline") && err401.syncStatus == "401 unauthorized" && List.len(err401.outbox) == 3 && err503.syncStatus == "Sync HTTP 503" && List.len(err503.outbox) == 3 && badStates && badBatch && badSnap
+
+private def faulted(t: Timeline, i: Int): Bool =
+  Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs")
+
+def shellControlsStayAvailable(t: Timeline): Verdict =
+  Verdict.and(Verdict.alwaysHas(t, "button:Sync"), Verdict.alwaysHas(t, "outlined:Pair"))
+
+def blindDeckNeverShowsCandidateNames(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.a11yHas(t, i, "p-alpha") && !Timeline.a11yHas(t, i, "p-beta") && !Timeline.a11yHas(t, i, "p-gamma") && !Timeline.a11yHas(t, i, "p-next"))
+
+def deckSignalsMatchView(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  cards = Timeline.signalInt(t, i, "cardCount")
+  outbox = Timeline.signalInt(t, i, "outboxCount")
+  hasCard = Timeline.signalInt(t, i, "hasCard")
+  hasEmpty = Timeline.signalInt(t, i, "hasEmpty")
+  hasAlert = Timeline.signalInt(t, i, "hasAlert")
+  pairOpen = Timeline.signalInt(t, i, "pairOpen")
+} yield cards >= 0 && outbox >= 0 && cards > 0 == (hasCard == 1) && cards == 0 == (hasEmpty == 1) && pairOpen != 0 == Timeline.a11yHas(t, i, "button:Save pairing") && (pairOpen != 0 || Timeline.a11yHas(t, i, Str.concat(" | Outbox: ", Str.fromInt(outbox))) && hasAlert != 0 == Timeline.a11yHas(t, i, "textbutton:Dismiss alert")))
+
+def acceptButtonQueuesDecision(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Accept", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, before, "cardCount") == 0 || Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") - 1
+})
+
+def rejectButtonQueuesDecision(t: Timeline): Verdict =
+  Verdict.onHit(t, "outlined:Reject", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, before, "cardCount") == 0 || Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") - 1
+})
+
+def skipButtonQueuesDecision(t: Timeline): Verdict =
+  Verdict.onHit(t, "textbutton:Skip", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, before, "cardCount") == 0 || Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") - 1
+})
+
+def chooseLaneAQueuesDecision(t: Timeline): Verdict =
+  Verdict.onHit(t, "outlined:Choose A", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, before, "cardCount") == 0 || Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") - 1
+})
+
+def chooseLaneBQueuesDecision(t: Timeline): Verdict =
+  Verdict.onHit(t, "outlined:Choose B", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, before, "cardCount") == 0 || Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") - 1
+})
+
+def swipeSliderCommitsOrResets(t: Timeline): Verdict =
+  Verdict.onHit(t, "slider:Swipe card", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "swipe") == 0 && (Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") || Timeline.signalInt(t, before, "cardCount") > 0 && Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") - 1)
+})
+
+def queueSteerUpdatesOutboxOrAlerts(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Queue steer", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalStrHas(t, after, "steerInput", "") || Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") && Timeline.signalInt(t, after, "hasAlert") == 1
+})
+
+def dismissAlertHidesBanner(t: Timeline): Verdict =
+  Verdict.onHit(t, "textbutton:Dismiss alert", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "hasAlert") == 0
+})
+
+def pairOverlayOpensAndCloses(t: Timeline): Verdict =
+  Verdict.and(Verdict.onHit(t, "outlined:Pair", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "pairOpen") == 1
+}), Verdict.and(Verdict.onHit(t, "textbutton:Close pairing", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "pairOpen") == 0
+}), Verdict.onHit(t, "button:Save pairing", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount")
+})))
+
+def syncButtonPreservesOutbox(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Sync", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "outboxCount") <= Timeline.signalInt(t, before, "outboxCount")
+})
+
+def syncSettlesAndNeverDropsSilently(t: Timeline): Verdict =
+  Verdict.and(Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Sync") || !Timeline.signalStrHas(t, Timeline.len(t) - 1, "syncStatus", "Syncing") && Timeline.signalInt(t, Timeline.len(t) - 1, "busy") == 0), Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => Timeline.signalInt(t, b, "outboxCount") >= Timeline.signalInt(t, a, "outboxCount") || Timeline.effectHas(t, b, "Net.httpPost")
+}))
+
+def e2eOfflineRestartAndFlushClaim(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "offlineSwipeSteerRestartFlush") || (Timeline.effectCount(t, b) == 0 || Timeline.effectHas(t, b, "Net.httpPost") && Timeline.effectHas(t, b, "Net.httpGet") && Timeline.effectHas(t, b, "Fs.write")) && Timeline.fileTextIs(t, b, "obs/e2e.txt", "ok:rev=4;cards=dddd;steer=keep layout compact") && Timeline.fileTextIs(t, b, "sim/e2e/main.txt", "alpha") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/e2e.txt") || Timeline.fileTextIs(t, b, "obs/e2e.txt", "incomplete") || Timeline.fileTextIs(t, b, "sim/e2e/main.txt", "v0") || Timeline.fileTextIs(t, b, "sim/e2e/main.txt", "alpha"))
+})
+
+def idempotentAndChunkedBatchClaims(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.driveHas(t, b, "retryIdempotentBatch") || Timeline.fileTextIs(t, b, "obs/idempotent.txt", "ok:replayed=4;steers=1;outbox=0") && Timeline.fileTextIs(t, b, "sim/idem/main.txt", "alpha") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/idempotent.txt") || Timeline.fileTextIs(t, b, "obs/idempotent.txt", "mismatch") || Timeline.fileTextIs(t, b, "sim/idem/main.txt", "v0") || Timeline.fileTextIs(t, b, "sim/idem/main.txt", "alpha"))) && (!Timeline.driveHas(t, b, "chunkedLargeOutbox") || Timeline.fileTextIs(t, b, "obs/chunked.txt", "ok:batches=64,2;steers=66;outbox=0") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/chunked.txt") || Timeline.fileTextIs(t, b, "obs/chunked.txt", "mismatch")))
+})
+
+def conflictAuthAndRecoveryClaims(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.driveHas(t, b, "staleAndDirtyHandling") || Timeline.fileTextIs(t, b, "obs/conflicts.txt", "ok:dirty-and-stale-flagged") && Timeline.fileTextIs(t, b, "sim/conf/main.txt", "external") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/conflicts.txt") || Timeline.fileTextIs(t, b, "obs/conflicts.txt", "mismatch"))) && (!Timeline.driveHas(t, b, "unauthorizedKeepsOutbox") || Timeline.fileTextIs(t, b, "obs/auth.txt", "ok:401-kept=2;flushed=0;main=alpha") && Timeline.fileTextIs(t, b, "sim/auth/main.txt", "alpha") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/auth.txt") || Timeline.fileTextIs(t, b, "obs/auth.txt", "mismatch"))) && (!Timeline.driveHas(t, b, "corruptStoreRecovery") || Timeline.fileTextIs(t, b, "obs/corrupt.txt", "ok:recovered") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/corrupt.txt") || Timeline.fileTextIs(t, b, "obs/corrupt.txt", "mismatch")))
+})
+
