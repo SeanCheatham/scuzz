@@ -1,2 +1,2 @@
 [fuzz]
-events = ["tap expansion:Details", "tap button:Add", "tap expansion:More details", "tap button:Close details", "tap button:Open details", "tap button:Hide details", "tap checkbox:Show conditional body", "tap expansion:Conditional", "tap expansion:Conditional"]
+events = ["tap expansion:Details", "tap button:Add", "tap expansion:More details", "tap button:Close details", "tap button:Open details", "tap button:Hide details", "tap checkbox:Show conditional body", "tap expansion:Conditional", "tap expansion:Conditional", "tap tab:Metrics", "tap button:Apply metric", "tap choicechip:Keys", "tap button:Run key", "tap button:Pin", "tap button:Open modal", "tap tab:Beta", "tap button:Modal pick", "tap choicechip:Second", "tap button:Done modal", "tap button:Reset picks"]

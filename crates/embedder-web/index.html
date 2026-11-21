@@ -244,26 +244,20 @@ var Module = {
         Module.ccall('sz_web_activate', 'number', ['number'], [node.item.id]);
       });
       node.addEventListener('keydown', event => {
-        if ([9, 24, 32].includes(node.item.role) &&
+        if (([9, 24, 32, 45].includes(node.item.role) || node.item.inGroup) &&
             ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) &&
             !event.ctrlKey && !event.metaKey && !event.altKey) {
-          event.preventDefault();
-          Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, 0, 0]);
-          const id = Module.ccall('sz_web_focused', 'number', [], []);
-          Module.nodes.get(id)?.focus({preventScroll: true});
+          if (Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, 0, Number(event.repeat)])) {
+            event.preventDefault();
+            const id = Module.ccall('sz_web_focused', 'number', [], []);
+            Module.nodes.get(id)?.focus({preventScroll: true});
+          }
           return;
         }
-        const tab = node.item.role === 45;
-        if ((!node.item.route && !tab) || event.ctrlKey || event.metaKey || event.altKey) return;
-        const links = [...(tab ? node.closest('[role="tablist"]').querySelectorAll('[role="tab"]') : layer.querySelectorAll('a'))];
-        let next = links.indexOf(node);
-        if ((!tab && event.key === 'ArrowDown') || event.key === 'ArrowRight') next = (next + 1) % links.length;
-        else if ((!tab && event.key === 'ArrowUp') || event.key === 'ArrowLeft') next = (next + links.length - 1) % links.length;
-        else if (event.key === 'Home') next = 0;
-        else if (event.key === 'End') next = links.length - 1;
-        else if (event.key === ' ') { event.preventDefault(); node.click(); return; }
-        else return;
-        event.preventDefault(); links[next].focus({preventScroll: true});
+        if (node.item.route !== null && event.key === ' ' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          node.click();
+        }
       });
     }
     return node;

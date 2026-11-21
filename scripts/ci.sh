@@ -3211,7 +3211,39 @@ cases = {
                     {'op': 'tap', 'id': 'expansion:Details'},
                     {'op': 'type', 'i': 0, 'value': 'kept'},
                     {'op': 'tap', 'id': 'button:Hide details'},
-                    {'op': 'tap', 'id': 'button:Open details'}])],
+                    {'op': 'tap', 'id': 'button:Open details'}]),
+        ('composite-modal', [
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'End'}, {'op': 'key', 'key': 'Space'},
+            {'op': 'key', 'key': 'ArrowLeft'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'ArrowDown'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'Tab', 'mods': ['shift']},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'ArrowLeft'}, {'op': 'key', 'key': 'Home'},
+            {'op': 'key', 'key': 'ArrowDown'}, {'op': 'key', 'key': 'Space'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'End'}, {'op': 'key', 'key': 'ArrowUp'},
+            {'op': 'key', 'key': 'Space'},
+            {'op': 'key', 'key': 'ArrowRight'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'End'}, {'op': 'key', 'key': 'Space'},
+            {'op': 'key', 'key': 'Escape'},
+            {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'ArrowRight'}, {'op': 'key', 'key': 'Space'},
+            {'op': 'key', 'key': 'ArrowLeft'}, {'op': 'key', 'key': 'Enter'}]),
+        ('modal-open', [
+            {'op': 'tap', 'id': 'button:Open modal'},
+            {'op': 'key', 'key': 'ArrowRight'}, {'op': 'key', 'key': 'Enter'},
+            {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'Space'},
+            {'op': 'key', 'key': 'ArrowRight'},
+            {'op': 'key', 'key': 'Tab'},
+            {'op': 'key', 'key': 'ArrowDown'}, {'op': 'key', 'key': 'Enter'}])],
     'choices': [('keys', [
         {'op': 'key', 'key': 'Tab'}, {'op': 'key', 'key': 'ArrowRight'},
         {'op': 'key', 'key': 'ArrowDown'}, {'op': 'key', 'key': 'End'},
@@ -3732,14 +3764,20 @@ for label, events in cases:
     if name == 'disclosure':
         native = json.loads((output / 'native.json').read_text())
         evaluated = json.loads((output / 'eval.json').read_text())
-        assert native['fields'] == evaluated['fields'], (label, native, evaluated)
-        assert native['taps'] == evaluated['taps'], (label, native, evaluated)
+        for field in ('fields', 'taps', 'a11y'):
+            assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
         values = {s.get('name'): s.get('value') for s in native['signals']}
-        expected = {'keys': (1, 1, 1, 0), 'pointer': (2, 1, 1, 1), 'resize': (2, 0, 0, 0)}[label]
+        expected = {'keys': (1, 1, 1, 0), 'pointer': (2, 1, 1, 1), 'resize': (2, 0, 0, 0),
+                    'composite-modal': (0, 0, 0, 0), 'modal-open': (0, 0, 0, 0)}[label]
         assert tuple(values[k] for k in ('open', 'nested', 'count', 'show')) == expected, values
-        assert values['name'] == ('kept' if label != 'pointer' else ''), values
+        assert values['name'] == ('kept' if label in ('keys', 'resize') else ''), values
         assert values['note'] == ('kept note' if label == 'keys' else ''), values
         assert values['conditional'] == 1, values
+        if label == 'composite-modal':
+            assert tuple(values[k] for k in ('tab', 'book', 'picks', 'modal', 'modalTab', 'modalBook', 'modalPicks')) == (1, 1, 211, 0, 1, 1, 2), values
+        if label == 'modal-open':
+            assert tuple(values[k] for k in ('tab', 'book', 'picks', 'modal', 'modalTab', 'modalBook', 'modalPicks')) == (0, 0, 0, 1, 1, 1, 1), values
+            assert [t['label'] for t in native['taps']] == ['Alpha', 'Beta', 'Modal pick', 'Done modal', 'First', 'Second'], native['taps']
         print(f'disclosure {label}: equal content, geometry, and retained fields pass', flush=True)
     if name == 'choices':
         native = json.loads((output / 'native.json').read_text())
