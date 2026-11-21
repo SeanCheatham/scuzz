@@ -104,11 +104,37 @@ def setup(): IO[Unit] =
     confOp = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(Str.concat("accept-", cardAlpha()))), ("card", Json.Str(cardAlpha())), ("decision", Json.Str("accept")), ("b", Json.Str(baseAlpha())), ("writes", Json.Arr(confWs))])
     _ <- Fs.write("ws-conflict/.scuzz/ide/journal.json", rawJson(confOp))
     _ <- initWorkspace("ws-token", "v0", "")
+    _ <- initWorkspace("ws-gen", "v0", token())
+    _ <- writeCard("ws-gen", cardAlpha(), makeCard(cardAlpha(), "p-alpha", 0, baseFiles, alphaFiles))
+    _ <- writeCard("ws-gen", cardBeta(), makeCard(cardBeta(), "p-beta", 1, baseFiles, betaProps))
+    _ <- initWorkspace("ws-adv", "v0", token())
+    _ <- writeCard("ws-adv", cardAlpha(), makeCard(cardAlpha(), "p-alpha", 0, baseFiles, alphaFiles))
+    _ <- writeCard("ws-adv", cardBeta(), makeCard(cardBeta(), "p-beta", 1, baseFiles, betaProps))
+    _ <- initWorkspace("ws-gen-dirty", "v0", token())
+    _ <- Fs.write("ws-gen-dirty/.scuzz/ide/dirty.json", "[\"src/Main.scuzz\"]")
+    _ <- initWorkspace("ws-gen-crash", "v0", token())
+    _ <- Fs.write("ws-gen-crash/.scuzz/ide/session.json", "")
+    _ <- Fs.mkdirs(Str.concat("ws-gen-crash/.scuzz/ide/cards/", cardMissing()))
+    crashDoneCard = Json.set(Json.set(Json.parse(makeCard(cardAlpha(), "p-pre", 0, baseFiles, alphaFiles)) match {
+  case Result.Ok(j) => j
+  case Result.Err(_) => Json.Null()
+}, "steer_id", Json.Str("s-crash-card")), "steer_prompt", Json.Str("pre-written-steer"))
+    crashStaleCard = Json.set(Json.set(Json.parse(makeCard(cardBeta(), "p-pre-stale", 0, baseFiles, betaProps)) match {
+  case Result.Ok(j) => j
+  case Result.Err(_) => Json.Null()
+}, "steer_id", Json.Str("s-crash-stale")), "status", Json.Str("stale"))
+    _ <- writeCard("ws-gen-crash", cardAlpha(), rawJson(crashDoneCard))
+    _ <- writeCard("ws-gen-crash", cardBeta(), rawJson(crashStaleCard))
+    _ <- Fs.write("ws-gen-crash/.scuzz/ide/steer.json", Str.concat("{\"v\":1,\"items\":[{\"seq\":0,\"id\":\"s-crash-done\",\"prompt\":\"already-done\",\"baseline\":\"", Str.concat(baseZero(), Str.concat("\",\"status\":\"consumed\",\"attempts\":1,\"time\":0},{\"seq\":1,\"id\":\"s-crash-card\",\"prompt\":\"pre-written-steer\",\"baseline\":\"", Str.concat(baseZero(), Str.concat("\",\"status\":\"active\",\"attempts\":0,\"time\":1},{\"seq\":2,\"id\":\"s-crash-stale\",\"prompt\":\"pre-stale-steer\",\"baseline\":\"", Str.concat(baseZero(), Str.concat("\",\"status\":\"active\",\"attempts\":0,\"time\":2},{\"seq\":3,\"id\":\"s-crash-mid\",\"prompt\":\"crash-mid-steer\",\"baseline\":\"", Str.concat(baseZero(), "\",\"status\":\"active\",\"attempts\":0,\"time\":3}]}")))))))))
+    _ <- initWorkspace("ws-gen-gates", "v0", token())
+    _ <- Fs.write("ws-gen-gates/src/Extra.scuzz", "keep")
+    _ <- Fs.write("ws-gen-gates/.scuzz/ide/session.json", "{\"objective\":\"gate checks\",\"allowed\":[\"src/Main.scuzz\",\"../bad\",\"src/Main.scuzz\"]}")
     _ <- Fs.write("obs/status.txt", "")
     _ <- Fs.write("obs/summary.txt", "")
     _ <- Fs.write("obs/gamma-decision.txt", "")
     _ <- Fs.write("obs/race-a.txt", "")
     _ <- Fs.write("obs/race-b.txt", "")
+    _ <- Fs.write("obs/gen.txt", "")
   } yield ()
 
 def faults(): List[String] =
@@ -186,9 +212,11 @@ def staleBetaAfterAlpha(): IO[Unit] =
   b1 = Str.concat("{\"v\":1,\"id\":\"act-alpha\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardAlpha(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}"))))
   b2 = Str.concat("{\"v\":1,\"id\":\"act-beta-stale\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardBeta(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}"))))
   r1 <- Net.httpPost("http://127.0.0.1:18787/v1/ide/sync", IdeSync.authHeaders(token()), b1)
+  _ <- if (r1._1 != 200) Fs.write("obs/status.txt", Str.fromInt(r1._1)) else for {
   r2 <- Net.httpPost("http://127.0.0.1:18787/v1/ide/sync", IdeSync.authHeaders(token()), b2)
   _ <- Fs.write("obs/status.txt", Str.concat(Str.fromInt(r1._1), Str.concat(",", Str.fromInt(r2._1))))
-  _ <- if (r1._1 == 200 && r2._1 == 200) Fs.write("obs/summary.txt", Str.concat(summarizePost(r1._3), Str.concat(";", summarizePost(r2._3)))) else IO.pure(())
+  _ <- if (r2._1 == 200) Fs.write("obs/summary.txt", Str.concat(summarizePost(r1._3), Str.concat(";", summarizePost(r2._3)))) else IO.pure(())
+} yield ()
 } yield (), Fiber.interrupt(server))
 } yield ()).map(_ => ())
 
@@ -261,5 +289,153 @@ def mintFreshToken(): IO[Unit] =
   case Result.Err(_) => true
 }
   _ <- Fs.write("obs/summary.txt", if (minted == reused && IdeSync.validToken(minted) && explicit == "explicit-token-123456" && reusedExplicit == "explicit-token-123456" && badRejected) "token-minted-and-reused" else "token-mismatch")
+} yield ()).map(_ => ())
+
+private def simPropose(ctx: IdeLoop.GenContext): IO[Result[String, IdeLoop.Candidate]] =
+  if (ctx.steerPrompt == "err-empty") IO.pure(Result.Err("")) else if (ctx.steerPrompt == "err-msg") IO.pure(Result.Err("model-timeout")) else if (ctx.steerPrompt == "bad-path") IO.pure(Result.Ok(IdeLoop.Candidate("p-bad-path", "sim-qwen", [("src/Extra.scuzz", "disallowed")]))) else if (ctx.steerPrompt == "bad-empty") IO.pure(Result.Ok(IdeLoop.Candidate("p-bad-empty", "sim-qwen", []))) else if (ctx.steerPrompt == "unchanged") IO.pure(Result.Ok(IdeLoop.Candidate("p-same", "sim-qwen", [("src/Main.scuzz", "v0")]))) else if (ctx.steerPrompt == "dup") IO.pure(Result.Ok(IdeLoop.Candidate("p-dup", "sim-qwen", [("src/Main.scuzz", "v1-compact")]))) else if (ctx.steerPrompt == "no-diff") IO.pure(Result.Ok(IdeLoop.Candidate("p-nodiff", "sim-qwen", [("src/Main.scuzz", "UNVERIFIED:nodiff")]))) else if (ctx.steerPrompt == "incomplete") IO.pure(Result.Ok(IdeLoop.Candidate("p-incomp", "sim-qwen", [("src/Main.scuzz", "UNVERIFIED:incomplete")]))) else if (ctx.steerPrompt == "type-err") IO.pure(Result.Ok(IdeLoop.Candidate("p-type-err", "sim-qwen", [("src/Main.scuzz", "UNVERIFIED:type-error")]))) else if (ctx.steerPrompt == "race-base") IO.pure(Result.Ok(IdeLoop.Candidate("p-race-base", "sim-qwen", [("src/Main.scuzz", "v1-race-base")]))) else if (ctx.steerPrompt == "race-dirty") IO.pure(Result.Ok(IdeLoop.Candidate("p-race-dirty", "sim-qwen", [("src/Main.scuzz", "v1-race-dirty")]))) else if (ctx.steerPrompt == "broken-then-compact") if (List.isEmpty(ctx.notes)) IO.pure(Result.Ok(IdeLoop.Candidate("p-broken", "sim-qwen", [("src/Main.scuzz", "UNVERIFIED:type-error")]))) else if (Str.contains(ctx.prompt, "ship sync | steer: broken-then-compact | prefs: reject:p-alpha,skip:p-beta#need-another-scenario") && List.at(ctx.notes, 0).diagnostic == "static-type-error" && List.len(ctx.feedback) >= 4) IO.pure(Result.Ok(IdeLoop.Candidate("p-compact", "sim-qwen", [("src/Main.scuzz", "v1-compact")]))) else IO.pure(Result.Err("missing-folded-context")) else if (ctx.steerPrompt == "always-broken") if (ctx.steerAttempts == 0) IO.pure(Result.Ok(IdeLoop.Candidate("p-mutant", "sim-qwen", [("src/Main.scuzz", "UNVERIFIED:mutant")]))) else IO.pure(Result.Ok(IdeLoop.Candidate("p-regress", "sim-qwen", [("src/Main.scuzz", "UNVERIFIED:regressed")]))) else if (ctx.steerPrompt == "polish-after-bad") IO.pure(Result.Ok(IdeLoop.Candidate("p-polished", "sim-qwen", [("src/Main.scuzz", "v1-polished")]))) else if (ctx.steerPrompt == "extend-alpha") if (Str.contains(ctx.prompt, "ship sync | steer: extend-alpha | prefs: accept:p-alpha") && List.contains(ctx.sources, ("src/Main.scuzz", "alpha"))) IO.pure(Result.Ok(IdeLoop.Candidate("p-alpha-ext", "sim-qwen", [("src/Main.scuzz", "alpha-v2")]))) else IO.pure(Result.Err("missing-accept-context")) else if (ctx.steerPrompt == "crash-mid-steer") IO.pure(Result.Ok(IdeLoop.Candidate("p-recovered", "sim-qwen", [("src/Main.scuzz", "v1-recovered")]))) else if (ctx.steerPrompt == "steer-without-session") IO.pure(Result.Ok(IdeLoop.Candidate("p-steer-only", "sim-qwen", [("src/Main.scuzz", "v1-steer-only")]))) else if (List.contains(ctx.sources, ("src/Main.scuzz", "alpha"))) IO.pure(Result.Ok(IdeLoop.Candidate("p-alpha-ext", "sim-qwen", [("src/Main.scuzz", "alpha-v2")]))) else IO.pure(Result.Ok(IdeLoop.Candidate("p-polished", "sim-qwen", [("src/Main.scuzz", "v1-polished")])))
+
+private def simVerify(root: String, _disk: List[(String, String)], after: List[(String, String)]): IO[IdeLoop.VerifyEvidence] =
+  for {
+    mainBody = List.getOrElse(List.map(after, f => f._2), List.indexOf(List.map(after, f => f._1), "src/Main.scuzz"), "")
+    _ <- if (mainBody == "v1-race-base") Fs.write(Fs.join(root, "src/Main.scuzz"), "alpha") else if (mainBody == "v1-race-dirty") Fs.write(Fs.join(root, ".scuzz/ide/dirty.json"), "[\"src/Main.scuzz\"]") else IO.pure(())
+    change = [Json.Obj([("section", Json.Str("a11y")), ("after", Json.Str(mainBody))])]
+  } yield if (mainBody == "UNVERIFIED:type-error") IdeLoop.VerifyEvidence(false, "static-type-error", "", 0, "", "", [], 0, 0, 0) else if (mainBody == "UNVERIFIED:mutant") IdeLoop.VerifyEvidence(true, "", "idle", 0, "tl-a", "tl-b", change, 1, 0, 1) else if (mainBody == "UNVERIFIED:regressed") IdeLoop.VerifyEvidence(true, "", "idle", 0, "tl-a", "tl-b", change, 1, 1, 0) else if (mainBody == "UNVERIFIED:nodiff") IdeLoop.VerifyEvidence(true, "", "idle", 0, "tl-a", "tl-a", [], 0, 0, 0) else if (mainBody == "UNVERIFIED:incomplete") IdeLoop.VerifyEvidence(true, "", "idle", 0, "tl-a", "", change, 1, 0, 0) else IdeLoop.VerifyEvidence(true, "", "idle", 1, """# timeline a
+""", Str.concat("# timeline b ", mainBody), change, 1, 0, 0)
+
+private def summarizeGenFeed(body: String): String =
+  Json.parse(body) match {
+    case Result.Err(_) => "bad-json"
+    case Result.Ok(doc) => for {
+  cards = Json.arr(IdeSync.field(doc, "cards"))
+  names = List.sort(List.map(cards, c => IdeSync.str(c, "proposal")))
+  steers = List.map(Json.arr(IdeSync.field(doc, "steer")), s => IdeSync.str(s, "prompt"))
+  base = IdeSync.str(doc, "baseline")
+  allMatchBase = List.forall(cards, c => IdeSync.str(c, "baseline") == base && List.nonEmpty(Json.arr(IdeSync.field(c, "changes"))))
+} yield if (!allMatchBase) "card-base-mismatch" else Str.concat("proposals=", Str.concat(List.join(names, ","), Str.concat(";steer=", List.join(steers, "|"))))
+  }
+
+def mobileSteerGenerateAndServe(): IO[Unit] =
+  IO.attempt(for {
+  server <- Fiber.fork(IdeSync.run("ws-gen", 18792, token()))
+  _ <- IO.ensure(for {
+  a1 = Str.concat("{\"id\":\"g-rej\",\"kind\":\"reject\",\"card\":\"", Str.concat(cardAlpha(), "\"}"))
+  a2 = Str.concat("{\"id\":\"g-skip\",\"kind\":\"skip\",\"card\":\"", Str.concat(cardBeta(), "\",\"reason\":\"need-another-scenario\"}"))
+  a3 = "{\"id\":\"g-s1\",\"kind\":\"steer\",\"prompt\":\"broken-then-compact\"}"
+  a4 = "{\"id\":\"g-s2\",\"kind\":\"steer\",\"prompt\":\"always-broken\"}"
+  a5 = "{\"id\":\"g-s3\",\"kind\":\"steer\",\"prompt\":\"polish-after-bad\"}"
+  batch = Str.concat("{\"v\":1,\"actions\":[", Str.concat(List.join([a1, a2, a3, a4, a5], ","), "]}"))
+  postResp <- Net.httpPost("http://127.0.0.1:18792/v1/ide/sync", IdeSync.authHeaders(token()), batch)
+  _ <- if (postResp._1 != 200) Fs.write("obs/gen.txt", Str.fromInt(postResp._1)) else for {
+  _ <- IdeLoop.crankRounds("ws-gen", 5, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  getResp <- Net.httpGet("http://127.0.0.1:18792/v1/ide/sync", IdeSync.authHeaders(token()))
+  _ <- Fs.write("obs/gen.txt", if (getResp._1 == 200) summarizeGenFeed(getResp._3) else Str.fromInt(getResp._1))
+} yield ()
+} yield (), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+def acceptAdvancesAndRetiresStale(): IO[Unit] =
+  IO.attempt(for {
+  server <- Fiber.fork(IdeSync.run("ws-adv", 18793, token()))
+  _ <- IO.ensure(for {
+  a1 = Str.concat("{\"id\":\"adv-acc\",\"kind\":\"accept\",\"card\":\"", Str.concat(cardAlpha(), Str.concat("\",\"baseline\":\"", Str.concat(baseZero(), "\"}"))))
+  a2 = "{\"id\":\"adv-s1\",\"kind\":\"steer\",\"prompt\":\"extend-alpha\"}"
+  batch = Str.concat("{\"v\":1,\"actions\":[", Str.concat(List.join([a1, a2], ","), "]}"))
+  postResp <- Net.httpPost("http://127.0.0.1:18793/v1/ide/sync", IdeSync.authHeaders(token()), batch)
+  _ <- if (postResp._1 != 200) Fs.write("obs/gen.txt", Str.fromInt(postResp._1)) else for {
+  _ <- IdeLoop.crankRounds("ws-adv", 1, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  betaRaw <- Fs.read(IdeSync.cardFile("ws-adv", cardBeta()))
+  betaStatus = Json.parse(betaRaw) match {
+  case Result.Ok(j) => IdeSync.str(j, "status")
+  case Result.Err(_) => "bad"
+}
+  getResp <- Net.httpGet("http://127.0.0.1:18793/v1/ide/sync", IdeSync.authHeaders(token()))
+  _ <- Fs.write("obs/gen.txt", if (getResp._1 == 200) Str.concat("beta=", Str.concat(betaStatus, Str.concat(";", summarizeGenFeed(getResp._3)))) else Str.fromInt(getResp._1))
+} yield ()
+} yield (), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+def dirtyBlocksAndPreservesSteer(): IO[Unit] =
+  IO.attempt(for {
+  server <- Fiber.fork(IdeSync.run("ws-gen-dirty", 18794, token()))
+  _ <- IO.ensure(for {
+  postResp <- Net.httpPost("http://127.0.0.1:18794/v1/ide/sync", IdeSync.authHeaders(token()), "{\"v\":1,\"id\":\"d-s1\",\"kind\":\"steer\",\"prompt\":\"keep-clean\"}")
+  _ <- if (postResp._1 != 200) Fs.write("obs/gen.txt", Str.fromInt(postResp._1)) else for {
+  rounds <- IdeLoop.crankRounds("ws-gen-dirty", 2, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  getResp <- Net.httpGet("http://127.0.0.1:18794/v1/ide/sync", IdeSync.authHeaders(token()))
+  tag = if (List.len(rounds) == 1 && List.at(rounds, 0).status == "dirty") "dirty-stopped;" else "bad-rounds;"
+  _ <- Fs.write("obs/gen.txt", if (getResp._1 == 200) Str.concat(tag, summarizeGenFeed(getResp._3)) else Str.fromInt(getResp._1))
+} yield ()
+} yield (), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+def crashActiveSteerRecovery(): IO[Unit] =
+  IO.attempt(for {
+  server <- Fiber.fork(IdeSync.run("ws-gen-crash", 18795, token()))
+  _ <- IO.ensure(for {
+  snap1 <- Net.httpGet("http://127.0.0.1:18795/v1/ide/sync", IdeSync.authHeaders(token()))
+  _ <- if (snap1._1 != 200) Fs.write("obs/gen.txt", Str.fromInt(snap1._1)) else for {
+  _ <- IdeLoop.crankRounds("ws-gen-crash", 1, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  snap2 <- Net.httpGet("http://127.0.0.1:18795/v1/ide/sync", IdeSync.authHeaders(token()))
+  _ <- Fs.write("obs/gen.txt", if (snap2._1 == 200) Str.concat(summarizeGenFeed(snap1._3), Str.concat(" -> ", summarizeGenFeed(snap2._3))) else Str.fromInt(snap2._1))
+} yield ()
+} yield (), Fiber.interrupt(server))
+} yield ()).map(_ => ())
+
+private def roundDiag(r: IdeLoop.RoundResult): String =
+  r.diagnostic
+
+private def roundStatus(r: IdeLoop.RoundResult): String =
+  r.status
+
+def verifierGateRejections(): IO[Unit] =
+  IO.attempt(for {
+  seqHit <- Fs.exists("obs/gates-seq.txt")
+  seqRaw <- if (seqHit == 0) IO.pure("0") else Fs.read("obs/gates-seq.txt")
+  nextSeq = Str.fromInt(Str.toInt(seqRaw, 0) + 1)
+  _ <- Fs.write("obs/gates-seq.txt", nextSeq)
+  root = Str.concat("ws-gates-", nextSeq)
+  _ <- initWorkspace(root, "v0", token())
+  _ <- Fs.write(Fs.join(root, "src/Extra.scuzz"), "keep")
+  _ <- Fs.write(Fs.join(root, ".scuzz/ide/session.json"), "{\"objective\":\"gate checks\",\"allowed\":[\"src/Main.scuzz\",\"../bad\",\"src/Main.scuzz\"]}")
+  zero <- IdeLoop.crankRounds(root, 0, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  unsteeredPub <- IdeLoop.crankOne(root, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  unsteeredDup <- IdeLoop.crankOne(root, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  unsteeredRaw <- Fs.read(IdeSync.cardFile(root, unsteeredPub.cardId))
+  unsteeredDoc <- IdeSync.parseStored(unsteeredRaw, "unsteered card")
+  tlA <- Fs.read(Fs.join(Fs.join(Fs.join(root, ".scuzz/ide/cards"), unsteeredPub.cardId), "tl-a.txt"))
+  tlB <- Fs.read(Fs.join(Fs.join(Fs.join(root, ".scuzz/ide/cards"), unsteeredPub.cardId), "tl-b.txt"))
+  prompts = ["err-empty", "err-msg", "bad-path", "bad-empty", "unchanged", "no-diff", "incomplete", "type-err"]
+  items = List.map(List.indices(prompts), i => Json.Obj([("seq", Json.Int(i + 1)), ("id", Json.Str(Str.concat("gs-", Str.fromInt(i)))), ("prompt", Json.Str(List.at(prompts, i))), ("baseline", Json.Str(baseZero())), ("status", Json.Str("queued")), ("attempts", Json.Int(1)), ("time", Json.Int(i + 1))]))
+  _ <- Fs.write(Fs.join(root, ".scuzz/ide/steer.json"), rawJson(Json.Obj([("v", Json.Int(1)), ("items", Json.Arr(items))])))
+  gateRes <- IdeLoop.crankRounds(root, 8, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  recFiles <- Fs.list(Fs.join(root, ".scuzz/ide/records"))
+  recDocs <- IO.foreach(List.filter(recFiles, e => !e._2), e => Fs.read(Fs.join(Fs.join(root, ".scuzz/ide/records"), e._1)).flatMap(raw => IdeSync.parseStored(raw, "rec")))
+  recPairs = List.map(recDocs, r => (IdeSync.str(r, "diagnostic"), IdeSync.str(r, "decision")))
+  _ <- Fs.write(Fs.join(root, ".scuzz/ide/session.json"), "")
+  _ <- Fs.write(Fs.join(root, ".scuzz/ide/steer.json"), "")
+  idleRes <- IdeLoop.crankRounds(root, 2, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  idleSteerAfter <- Fs.read(Fs.join(root, ".scuzz/ide/steer.json"))
+  _ <- Fs.write(Fs.join(root, ".scuzz/ide/steer.json"), rawJson(Json.Obj([("v", Json.Int(1)), ("items", Json.Arr([Json.Obj([("seq", Json.Int(1)), ("id", Json.Str("s-only")), ("prompt", Json.Str("steer-without-session")), ("baseline", Json.Str(baseZero())), ("status", Json.Str("queued")), ("attempts", Json.Int(0)), ("time", Json.Int(10))]), Json.Obj([("seq", Json.Int(2)), ("id", Json.Str("s-dup")), ("prompt", Json.Str("dup")), ("baseline", Json.Str(baseZero())), ("status", Json.Str("queued")), ("attempts", Json.Int(1)), ("time", Json.Int(11))]), Json.Obj([("seq", Json.Int(3)), ("id", Json.Str("s-rdirty")), ("prompt", Json.Str("race-dirty")), ("baseline", Json.Str(baseZero())), ("status", Json.Str("queued")), ("attempts", Json.Int(0)), ("time", Json.Int(12))])]))])))
+  cardPre = makeCard(cardGamma(), "p-pre-dup", 0, [("src/Extra.scuzz", "keep"), ("src/Main.scuzz", "v0")], [("src/Extra.scuzz", "keep"), ("src/Main.scuzz", "v1-compact")])
+  _ <- writeCard(root, cardGamma(), cardPre)
+  mixedRes <- IdeLoop.crankRounds(root, 3, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  sOnlyRaw <- Fs.read(IdeSync.cardFile(root, List.at(mixedRes, 0).cardId))
+  sOnlyDoc <- IdeSync.parseStored(sOnlyRaw, "s-only card")
+  afterDirtySteer <- IdeSync.readSteer(root)
+  dirtySteerItem = List.at(afterDirtySteer, 2)
+  _ <- Fs.write(Fs.join(root, ".scuzz/ide/dirty.json"), "")
+  _ <- Fs.write(Fs.join(root, ".scuzz/ide/steer.json"), rawJson(Json.Obj([("v", Json.Int(1)), ("items", Json.Arr([Json.Obj([("seq", Json.Int(1)), ("id", Json.Str("s-rbase")), ("prompt", Json.Str("race-base")), ("baseline", Json.Str(baseZero())), ("status", Json.Str("queued")), ("attempts", Json.Int(0)), ("time", Json.Int(20))])]))])))
+  raceBase <- IdeLoop.crankOne(root, c => simPropose(c), v => simVerify(v.root, v.disk, v.after))
+  afterRaceSteer <- IdeSync.readSteer(root)
+  gammaAfterRaw <- Fs.read(IdeSync.cardFile(root, cardGamma()))
+  gammaAfterDoc <- IdeSync.parseStored(gammaAfterRaw, "gamma after race")
+  diags = List.map(gateRes, r => roundDiag(r))
+  mixedStatuses = List.map(mixedRes, r => roundStatus(r))
+  unsteeredOk = unsteeredPub.status == "published" && unsteeredDup.status == "rejected" && unsteeredDup.diagnostic == "duplicate-source" && Json.getInt(unsteeredDoc, "v", 0) == 1 && IdeSync.str(unsteeredDoc, "objective") == "gate checks" && Str.contains(tlA, "timeline a") && Str.contains(tlB, "timeline b")
+  decisionsOk = List.contains(recPairs, ("no-observed-difference", "no-observed-difference")) && List.contains(recPairs, ("static-type-error", "candidate-failed")) && List.contains(recPairs, ("unchanged-source", "unchanged-source")) && List.contains(recPairs, ("duplicate-source", "duplicate-source")) && List.forall(recDocs, r => Json.getInt(r, "v", 0) == 1)
+  steerOnlyOk = IdeSync.str(sOnlyDoc, "objective") == "steer-without-session" && IdeSync.str(List.at(afterDirtySteer, 0), "status") == "consumed" && Json.getInt(List.at(afterDirtySteer, 0), "attempts", 0) == 1 && IdeSync.str(dirtySteerItem, "status") == "queued" && Json.getInt(dirtySteerItem, "attempts", -1) == 0
+  raceBaseOk = raceBase.status == "stale-baseline" && IdeSync.str(List.at(afterRaceSteer, 0), "status") == "queued" && IdeSync.str(gammaAfterDoc, "status") == "stale"
+  ok = List.isEmpty(zero) && idleSteerAfter == "" && unsteeredOk && decisionsOk && steerOnlyOk && raceBaseOk && diags == ["generator-failed", "model-timeout", "invalid-candidate-files", "invalid-candidate-files", "unchanged-source", "no-observed-difference", "incomplete-evidence", "static-type-error"] && List.len(idleRes) == 1 && List.at(idleRes, 0).status == "idle" && mixedStatuses == ["published", "rejected", "dirty"] && List.at(mixedRes, 1).diagnostic == "duplicate-source"
+  _ <- Fs.write("obs/gen.txt", if (ok) "gates-verified" else Str.concat("gates-bad:", Str.concat(List.join(diags, ","), Str.concat("|", List.join(mixedStatuses, ",")))))
 } yield ()).map(_ => ())
 

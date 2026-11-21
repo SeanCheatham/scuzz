@@ -162,7 +162,7 @@ Do not add a general proof language, a second compiler, or a mandatory app model
 
 ## Active arc: split laptop daemon and native mobile review
 
-The laptop runs unattended local GGUF generation (`scuzz models`) against the workspace.
+The laptop runs unattended local GGUF generation (`scuzz models`) against the workspace through `scuzz ide crank` and `scuzz ide serve --generate`.
 Every candidate passes `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks before it enters the ready card buffer.
 `scuzz ide serve` exposes the card feed, idempotent decisions, and steer prompts over local Wi-Fi HTTP with a bearer pairing token.
 A native mobile client runs on Headless, iOS, and Android as peers.
@@ -186,16 +186,7 @@ Persist pending actions in a local offline outbox and flush them in order when W
 
 **Gate:** Headless, iOS simulator, and Android emulator run the same deck and outbox code. Duplicate flushes stay idempotent. Stale-base acceptances surface cleanly without corrupting local state or laptop files. Offline swipe and steer actions survive app restart before sync.
 
-### 2. Unattended laptop generation loop
-
-Run unattended local GGUF generation rounds (`scuzz models`) against the workspace.
-Gate every candidate with `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks before publishing a ready card.
-Consume queued `.scuzz/ide/steer.json` prompts and recorded preferences in order.
-Rebase generation onto the new workspace baseline after an accepted card.
-
-**Gate:** Failed static, fuzz, diff, or mutation candidates never enter the ready feed. Consumed steer prompts advance cleanly without loss under restart or file faults. Work limits and cancellation stop owned inference cleanly.
-
-### 3. Learn from local choices
+### 2. Learn from local choices
 
 Send bounded recent preferences, abstention reasons, and Undo results with local model requests and exported generation requests. Keep candidate rationale hidden before a blind choice. Show the reveal and a short result after the choice. Let the developer retain region focus or select another region.
 
@@ -203,7 +194,7 @@ Add a local session summary. Report accepted choices, baseline choices, abstenti
 
 **Gate:** Skip does not become a negative preference. Automatic exclusions do not count as human choices. Undo and later replacement change the retention result. The next request reflects the current baseline and bounded feedback. Session records reproduce the displayed totals. A reveal cannot expose the next card's lane mapping.
 
-### 4. Offer a rule from a preference
+### 3. Offer a rule from a preference
 
 Add an explicit Suggest rule action for a recorded choice. Use the same local model path or external import with a rule request kind. External mode exports the rule request and waits for a matching published draft. A rule response contains added claim source and the supporting witness identity. It can add a root `*.scuzz_verify` file or add claims to one existing verify file. It cannot alter existing definitions or the scenario.
 
@@ -211,7 +202,7 @@ Show rule source and the witness in a separate rule review. Check and replay all
 
 **Gate:** A behavior choice never writes verification source. Rule installation needs its own action. A rejected rule changes no file. A weakened existing claim is rejected. An untriggered new claim cannot be offered as verified. Installation and Undo preserve existing claims and recover after interruption. The installed rule constrains a later behavior proposal. Finite evidence does not become a universal proof label.
 
-### 5. Prove and refine the complete session
+### 4. Prove and refine the complete session
 
 Use existing examples for the proof. Exercise one UI objective and one IO objective in scratch workspaces. Include generation, candidate checks, a short witness, each lane choice, abstention, next-baseline generation, Undo, rule review, restart, and a session summary. Include invalid, stale, and interrupted operations. Keep the simulation proof hermetic. Add live finite Headless proofs for the real local process, private HTTP, and filesystem paths.
 
@@ -247,6 +238,7 @@ Do not start FFI, a registry, plugins, provider SDKs, a remote generator service
 | A narrow workload misses a consequence | Corpus, bounded search, and visible evidence scope |
 | A claim never triggers | Show trigger reach; do not call an untriggered rule verified |
 | A generator rewrites accepted work | Bind requests to a baseline and discard stale results |
+| An interrupted generation round drops or repeats a steer prompt | Persist active steer transitions, recover completed or interrupted items on restart, and bound retries per prompt |
 | The stream consumes unlimited work | Explicit limits, bounded queues, and cancellation |
 | Model setup expands into an inference platform | One pinned llama.cpp release, Metal and Vulkan device discovery, CPU fallback, two catalog entries, one format, and explicit setup limits |
 | Model weights duplicate or damage another tool's cache | Use a Scuzz-owned cache. Verify each temporary download before rename. Do not prune |

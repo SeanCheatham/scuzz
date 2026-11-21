@@ -214,24 +214,23 @@ Keep these gaps open until the corresponding runtime behavior and platform check
 
 ### Split laptop and mobile review
 
-`scuzz ide serve` serves the workspace card feed, idempotent decisions, and steer queue over local Wi-Fi HTTP with a bearer pairing token. Hermetic `TestRuntime` claims and live loopback replay check unauthorized request rejection, duplicate action IDs, stale-base `accept` refusal, ordered batch replay, and crash-safe `.scuzz/ide/` journal and steer persistence across `fs` and `net` faults.
+`scuzz ide serve` serves the workspace card feed, idempotent decisions, and steer queue over local Wi-Fi HTTP with a bearer pairing token. `scuzz ide crank` and `scuzz ide serve --generate` run unattended laptop proposal rounds against `.scuzz/ide/`. Each round recovers interrupted `active` steer items, retires undecided cards from older baselines, folds the `.scuzz/ide/session.json` objective, queued `.scuzz/ide/steer.json` prompts, and bounded `.scuzz/ide/records/*.json` choices into local `Qwen3.5` GGUF or inbox candidate rounds, and gates every candidate with `scuzz check`, `scuzz diff`, `scuzz fuzz`, and mutation checks before writing a ready card. Hermetic `TestRuntime` claims, ASan corpus replay, live loopback replay, and CLI checks cover unauthorized request rejection, duplicate action IDs, stale-base `accept` refusal, ordered batch replay, steer and preference folding, unverified candidate rejection, dirty-buffer refusal, and crash recovery across `fs` and `net` faults.
 
-Two slices remain open before the mobile loop works end to end:
+One slice remains open before the mobile loop works end to end:
 
 - **Native mobile swipe and steer client.** No phone client UI or persistent offline outbox exists yet. Gate 1 builds the shared Headless, iOS, and Android deck that prefetches cards on local Wi-Fi, records offline swipe accept, swipe reject, skip, and steer actions, and flushes them on reconnect.
-- **Unattended laptop generation loop.** Local generation still runs one explicit request or bounded IDE session at a time. Gate 2 runs continuous unattended local GGUF rounds gated by `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation checks while consuming `.scuzz/ide/steer.json` prompts and preferences.
 
 ### Local choice feedback
 
-The desktop IDE Can't decide control does not select a reason yet, although `scuzz ide serve` records optional skip reasons on synced mobile abstentions. Local model requests and exported producer requests do not consume preferences or queued steer prompts yet. There is no retained-acceptance measure or local session summary. Region focus needs controls to retain or select a region after a result.
+The desktop IDE Can't decide control does not select a reason yet, although `scuzz ide serve` records optional skip reasons on synced mobile abstentions. `scuzz ide crank` and `scuzz ide serve --generate` fold bounded human preferences and queued steer prompts into background generation requests, while desktop IDE session requests and exported producer requests do not include recorded preferences yet. There is no retained-acceptance measure or local session summary. Region focus needs controls to retain or select a region after a result.
 
-**Proof:** Gate 3. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
+**Proof:** Gate 2. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
 
 ### Rule review
 
 There is no explicit claim suggestion or installation path from a preference. A finite witness cannot establish a universal rule. Rule installation needs protection against weakening existing claims and against stale source.
 
-**Proof:** Gate 4. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
+**Proof:** Gate 3. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
 
 ### Verification scope and application correctness
 
