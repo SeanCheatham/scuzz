@@ -296,3 +296,85 @@ def readyQueueRestoresFrozenEvidence(t: Timeline): Verdict =
 def projectChecksKeepErrors(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.driveHas(t, i, "projectChecks") || Timeline.signalInt(t, i, "projectChecked") == 1)
 
+def abstentionControlsFollowArmedCard(t: Timeline): Verdict =
+  Verdict.every(t, i => if (Timeline.a11yHas(t, i, "button:Choose left")) Timeline.a11yHas(t, i, "outlined:Can't decide") && Timeline.a11yHas(t, i, "choicechip:No reason") && Timeline.a11yHas(t, i, "choicechip:No visible difference") && Timeline.a11yHas(t, i, "choicechip:Need another scenario") && Timeline.a11yHas(t, i, "choicechip:Outside my goal") else !Timeline.a11yHas(t, i, "outlined:Can't decide") && !Timeline.a11yHas(t, i, "choicechip:Need another scenario"))
+
+def abstentionReasonResetsAfterChoice(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "outlined:Can't decide") || Timeline.signalInt(t, i, "abstainReason") == 0)
+
+def revealNeverNamesArmedCard(t: Timeline): Verdict =
+  Verdict.every(t, i => !visibleReadyCard(t, i) || (!Timeline.signalStrHas(t, i, "deckCard", "\"proposal\":\"p1\"") || !Timeline.signalStrHas(t, i, "deckLast", " p1 ") && !Timeline.signalStrHas(t, i, "deckLastResult", "Result (p1)")) && (!Timeline.signalStrHas(t, i, "deckCard", "\"proposal\":\"p2\"") || !Timeline.signalStrHas(t, i, "deckLast", " p2 ") && !Timeline.signalStrHas(t, i, "deckLastResult", "Result (p2)")) && (!Timeline.signalStrHas(t, i, "deckCard", "\"proposal\":\"p3\"") || !Timeline.signalStrHas(t, i, "deckLast", " p3 ") && !Timeline.signalStrHas(t, i, "deckLastResult", "Result (p3)")))
+
+def postResultExposesRegionFocus(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 0 || Timeline.signalInt(t, i, "evidenceDetails") != 0 || Timeline.signalStrHas(t, i, "deckLast", "") && !Timeline.a11yHas(t, i, "text:accepted ") && !Timeline.a11yHas(t, i, "text:baseline chosen ") && !Timeline.a11yHas(t, i, "text:abstained") || Timeline.a11yHas(t, i, "outlined:Retain region") && Timeline.a11yHas(t, i, "outlined:All regions"))
+
+def sessionDisplaysConservativeSummary(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 2 || Timeline.a11yHas(t, i, "text:Session summary") && Timeline.a11yHas(t, i, "text:Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior.") && Timeline.a11yHas(t, i, "outlined:Refresh summary"))
+
+def choiceFeedbackContract(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "choiceFeedbackFlow") || Timeline.signalInt(t, i, "choiceFeedbackBound") == 1)
+
+def sessionSummaryContract(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "sessionSummaryFlow") || Timeline.signalInt(t, i, "sessionSummaryBound") == 1)
+
+oracle skipNeverBecomesNegativePreference(reasonIdx: Int): Bool =
+  for {
+    reason = Proposal.abstentionReasonAt(reasonIdx)
+    rec = Json.Obj([("operation", Json.Str("abstain-c1")), ("card", Json.Str("c1")), ("proposal", Json.Str("p1")), ("decision", Json.Str("abstain")), ("reason", Json.Str(reason)), ("time", Json.Int(10)), ("writes", Json.Arr([]))])
+    fb = Proposal.boundedFeedback([rec], [])
+    summary = Cards.summarizeRecords([("src/Main.scuzz", "x")], [rec])
+  } yield List.len(fb) == 1 && Proposal.str(List.at(fb, 0), "kind") == "abstention" && Proposal.str(List.at(fb, 0), "decision") == "abstain" && Proposal.str(List.at(fb, 0), "reason") == reason && Json.getInt(summary, "baseline_choices", -1) == 0 && Json.getInt(summary, "abstentions", -1) == 1
+
+oracle automaticExclusionsNeverCountAsHumanChoices(n: Int where n >= 0 && n <= 8): Bool =
+  for {
+    autos = List.map(List.range(0, n), idx => Json.Obj([("card", Json.Str(Str.concat("a", Str.fromInt(idx)))), ("proposal", Json.Str(Str.concat("pa", Str.fromInt(idx)))), ("kind", Json.Str("automatic")), ("decision", Json.Str(if (idx % 2 == 0) "duplicate-source" else "candidate-failed")), ("readiness_ms", Json.Int(25)), ("time", Json.Int(idx + 1)), ("writes", Json.Arr([]))]))
+    humanFb = Proposal.boundedFeedback(autos, [])
+    summary = Cards.summarizeRecords([("src/Main.scuzz", "x")], autos)
+  } yield List.isEmpty(humanFb) && Json.getInt(summary, "accepted", -1) == 0 && Json.getInt(summary, "retained_acceptances", -1) == 0 && Json.getInt(summary, "baseline_choices", -1) == 0 && Json.getInt(summary, "abstentions", -1) == 0 && Json.getInt(summary, "undo", -1) == 0 && Json.getInt(summary, "automatic_exclusions", -1) == n && Json.getInt(summary, "duplicates", -1) == (n + 1) / 2
+
+oracle retentionChangesOnUndoAndReplacement(undone: Bool, replaced: Bool, reviewMs: Int where reviewMs >= 0 && reviewMs <= 600000): Bool =
+  for {
+    cid = Hash.sha256("ret-card")
+    acceptedBody = """@main def main: IO[Unit] = IO.println(2)
+"""
+    diskBody = if (replaced) """@main def main: IO[Unit] = IO.println(9)
+""" else if (undone) """@main def main: IO[Unit] = IO.println(1)
+""" else acceptedBody
+    acc = Json.Obj([("operation", Json.Str(Str.concat("accept-", cid))), ("card", Json.Str(cid)), ("proposal", Json.Str("p1")), ("decision", Json.Str("accept")), ("readiness_ms", Json.Int(50)), ("review_ms", Json.Int(reviewMs)), ("time", Json.Int(10)), ("writes", Json.Arr([Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("""@main def main: IO[Unit] = IO.println(1)
+""")), ("before_exists", Json.Bool(true)), ("after", Json.Str(acceptedBody)), ("after_exists", Json.Bool(true))])]))])
+    records = if (undone) [acc, Cards.undoOperation(acc, 20)] else [acc]
+    summary = Cards.summarizeRecords([("src/Main.scuzz", diskBody)], records)
+    expectedRetained = if (!undone && !replaced) 1 else 0
+    expectedRate = if (reviewMs <= 0) 0 else (expectedRetained * 6000000 + reviewMs / 2) / reviewMs
+  } yield Json.getInt(summary, "accepted", -1) == 1 && Json.getInt(summary, "retained_acceptances", -1) == expectedRetained && Json.getInt(summary, "undo", -1) == (if (undone) 1 else 0) && Json.getInt(summary, "readiness_ms", -1) == 50 && Json.getInt(summary, "review_ms", -1) == reviewMs && Json.getInt(summary, "retained_per_review_minute_x100", -1) == expectedRate
+
+oracle activeReviewTimingExcludesPauseAndWait(waitMs: Int where waitMs >= 0 && waitMs <= 5000, revMs: Int where revMs >= 0 && revMs <= 5000, pauseMs: Int where pauseMs >= 0 && pauseMs <= 20000): Bool =
+  for {
+    rev1 = revMs / 2
+    rev2 = revMs - rev1
+    t0 = Main.timingWaitStart(Main.emptyTiming(), 100)
+    t1 = Main.timingCardShown(t0, "card-a", 100 + waitMs)
+    t2 = Main.timingPause(t1, 100 + waitMs + rev1)
+    t3 = Main.timingCardShown(t2, "card-a", 100 + waitMs + rev1 + pauseMs)
+    done = Main.timingFinishCard(t3, "card-a", false, 100 + waitMs + rev1 + pauseMs + rev2)
+  } yield done._2 == waitMs && done._3 == revMs
+
+oracle boundedFeedbackRespectsCap(totalHuman: Int where totalHuman >= 0 && totalHuman <= 24, totalAuto: Int where totalAuto >= 0 && totalAuto <= 6): Bool =
+  for {
+    humans = List.map(List.range(0, totalHuman), idx => Json.Obj([("operation", Json.Str(Str.concat("op-", Str.fromInt(idx)))), ("card", Json.Str(Str.concat("c-", Str.fromInt(idx)))), ("proposal", Json.Str(Str.concat("p-", Str.fromInt(idx)))), ("decision", Json.Str(if (idx % 2 == 0) "baseline" else "abstain")), ("reason", Json.Str(if (idx % 2 == 0) "" else "outside-my-goal")), ("time", Json.Int(idx + 1)), ("writes", Json.Arr([]))]))
+    autos = List.map(List.range(0, totalAuto), idx => Json.Obj([("kind", Json.Str("automatic")), ("decision", Json.Str("duplicate-source")), ("time", Json.Int(100 + idx))]))
+    fb = Proposal.boundedFeedback(humans, autos)
+    autoCount = List.len(List.filter(fb, f => Proposal.str(f, "kind") == "automatic"))
+    expectedAuto = if (totalAuto > 3) 3 else totalAuto
+    expectedHuman = if (totalHuman > 16 - expectedAuto) 16 - expectedAuto else totalHuman
+  } yield List.len(fb) == expectedHuman + expectedAuto && List.len(fb) <= 16 && autoCount == expectedAuto
+
+oracle revealIsolatesNextCardFlip(decidedFlip: Int, nextFlip: Int): Bool =
+  for {
+    dBit = if (decidedFlip % 2 == 0) 0 else 1
+    nBit = if (nextFlip % 2 == 0) 0 else 1
+    decidedCard = Json.Obj([("proposal", Json.Str("p-decided")), ("flip", Json.Int(dBit))])
+    nextCard = Json.Obj([("proposal", Json.Str("p-next")), ("flip", Json.Int(nBit))])
+    reveal = Deck.revealText("baseline chosen", Cards.str(decidedCard, "proposal"), Main.cardProposalSide(decidedCard))
+  } yield reveal == Deck.revealText("baseline chosen", "p-decided", if (dBit == 1) "Left" else "Right") && !Str.contains(reveal, Cards.str(nextCard, "proposal"))
+

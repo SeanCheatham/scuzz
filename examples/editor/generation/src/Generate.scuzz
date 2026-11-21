@@ -69,15 +69,23 @@ private def feedbackGuidance(feedback: List[Json]): String =
   for {
     steers = List.filter(feedback, f => Proposal.str(f, "kind") == "steer" && Proposal.str(f, "prompt") != "")
     prefs = List.filter(feedback, f => Proposal.str(f, "kind") == "preference")
+    abstentions = List.filter(feedback, f => Proposal.str(f, "kind") == "abstention")
+    undos = List.filter(feedback, f => Proposal.str(f, "kind") == "undo")
     steerLine = List.head(List.reverse(steers)) match {
   case Option.None => ""
   case Option.Some(s) => Str.concat("""
 Follow this mobile steer prompt: """, Proposal.str(s, "prompt"))
 }
-    prefItems = List.map(prefs, p => Str.concat(Proposal.str(p, "decision"), Str.concat(":", Str.concat(Proposal.str(p, "proposal"), if (Proposal.str(p, "reason") == "") "" else Str.concat(" (", Str.concat(Proposal.str(p, "reason"), ")"))))))
+    prefItems = List.map(prefs, p => Str.concat(if (Json.getBool(p, "undone", false)) Str.concat(Proposal.str(p, "decision"), "(undone)") else Proposal.str(p, "decision"), Str.concat(":", Str.concat(Proposal.str(p, "proposal"), if (Proposal.str(p, "reason") == "") "" else Str.concat(" (", Str.concat(Proposal.str(p, "reason"), ")"))))))
     prefLine = if (List.isEmpty(prefItems)) "" else Str.concat("""
 Respect recorded human preferences (build on accept, avoid reject, address skip reasons): """, List.join(prefItems, ", "))
-  } yield Str.concat(steerLine, prefLine)
+    abstainItems = List.map(abstentions, a => if (Proposal.str(a, "reason") == "") Proposal.str(a, "proposal") else Str.concat(Proposal.str(a, "proposal"), Str.concat(" (", Str.concat(Proposal.str(a, "reason"), ")"))))
+    abstainLine = if (List.isEmpty(abstainItems)) "" else Str.concat("""
+Address abstention feedback without treating abstention as rejection: """, List.join(abstainItems, ", "))
+    undoItems = List.filter(List.map(undos, u => Proposal.str(u, "proposal")), s => s != "")
+    undoLine = if (List.isEmpty(undoItems)) "" else Str.concat("""
+Do not repeat undone acceptances: """, List.join(undoItems, ", "))
+  } yield Str.concat(steerLine, Str.concat(prefLine, Str.concat(abstainLine, undoLine)))
 
 def messages(request: Json): Json =
   for {
@@ -224,7 +232,8 @@ def exportCommand(root: String, objective: String, out: String): IO[Unit] =
   for {
     compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
     sources <- Proposal.own(root)
-    request <- Proposal.make(root, objective, List.map(sources, f => f._1), compiler, [])
+    feedback <- Proposal.recentFeedback(root, [])
+    request <- Proposal.make(root, objective, List.map(sources, f => f._1), compiler, feedback)
     exists <- Fs.exists(out)
     _ <- Models.need(exists == 0, "request output file already exists")
     _ <- Fs.mkdirs(Fs.dirname(out))

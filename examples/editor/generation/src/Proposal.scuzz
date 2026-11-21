@@ -218,3 +218,53 @@ def publish(root: String, out: String, request: Json, reply: Json, compiler: Str
 } yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
   } yield ()
 
+def validAbstentionReason(reason: String): Bool =
+  reason == "" || reason == "no-visible-difference" || reason == "need-another-scenario" || reason == "outside-my-goal"
+
+def abstentionReasonAt(index: Int): String =
+  if (index == 1) "no-visible-difference" else if (index == 2) "need-another-scenario" else if (index == 3) "outside-my-goal" else ""
+
+def recordSortKey(r: Json): String =
+  Str.concat(str(r, "operation"), Str.concat("|", Str.concat(str(r, "card"), Str.concat("|", text(r)))))
+
+def sortRecords(records: List[Json]): List[Json] =
+  for {
+    keys = List.sort(List.distinct(List.map(records, r => recordSortKey(r))))
+    byKey = List.sortBy(records, r => List.indexOf(keys, recordSortKey(r)))
+  } yield List.sortBy(byKey, r => Json.getInt(r, "time", 0))
+
+def feedbackEntry(r: Json, undoneCards: List[String]): Json =
+  for {
+    kind = str(r, "kind")
+    decision = str(r, "decision")
+    region = if (arrayValue(field(r, "region"))) field(r, "region") else Json.Arr([])
+    time = Json.getInt(r, "time", 0)
+    reason = if (validAbstentionReason(str(r, "reason"))) str(r, "reason") else ""
+  } yield if (kind == "automatic") Json.Null() else if (decision == "accept" || decision == "baseline" || decision == "reject") Json.Obj([("kind", Json.Str("preference")), ("decision", Json.Str(if (decision == "accept") "accept" else "baseline")), ("card", Json.Str(str(r, "card"))), ("proposal", Json.Str(str(r, "proposal"))), ("region", region), ("undone", Json.Bool(decision == "accept" && List.contains(undoneCards, str(r, "card")))), ("time", Json.Int(time))]) else if (decision == "abstain" || decision == "skip") Json.Obj([("kind", Json.Str("abstention")), ("decision", Json.Str("abstain")), ("card", Json.Str(str(r, "card"))), ("proposal", Json.Str(str(r, "proposal"))), ("reason", Json.Str(reason)), ("region", region), ("time", Json.Int(time))]) else if (decision == "undo") Json.Obj([("kind", Json.Str("undo")), ("decision", Json.Str("undo")), ("card", Json.Str(str(r, "card"))), ("proposal", Json.Str(str(r, "proposal"))), ("region", region), ("time", Json.Int(time))]) else Json.Null()
+
+def boundedFeedback(records: List[Json], automatic: List[Json]): List[Json] =
+  for {
+    ordered = sortRecords(records)
+    undoneCards = List.distinct(List.map(List.filter(ordered, r => str(r, "kind") != "automatic" && str(r, "decision") == "undo"), r => str(r, "card")))
+    humanAll = List.filter(List.map(ordered, r => feedbackEntry(r, undoneCards)), item => !Json.isNull(item))
+    keptAuto = List.takeRight(List.sortBy(automatic, a => Json.getInt(a, "time", 0)), 3)
+    keptHuman = List.takeRight(humanAll, 16 - List.len(keptAuto))
+  } yield List.sortBy(List.concat(keptHuman, keptAuto), item => Json.getInt(item, "time", 0))
+
+def loadLocalRecords(root: String): IO[List[Json]] =
+  for {
+    dir = Fs.join(root, ".scuzz/ide/records")
+    entries <- Fs.list(dir).handleErrorWith(_ => IO.pure([]))
+    names = List.sort(List.map(List.filter(entries, e => !e._2 && Str.matches(e._1, "^[A-Za-z0-9_-]+\\.json$")), e => e._1))
+    parsed <- IO.foreach(names, name => for {
+  _ <- checkInside(root, Fs.join(".scuzz/ide/records", name))
+  raw <- Fs.read(Fs.join(dir, name)).handleErrorWith(_ => IO.pure(""))
+} yield Json.parse(raw) match {
+  case Result.Ok(j) => if (Json.isObj(j)) j else Json.Null()
+  case Result.Err(_) => Json.Null()
+})
+  } yield sortRecords(List.filter(parsed, j => !Json.isNull(j)))
+
+def recentFeedback(root: String, automatic: List[Json]): IO[List[Json]] =
+  loadLocalRecords(root).map(records => boundedFeedback(records, automatic))
+

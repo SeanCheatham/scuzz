@@ -218,9 +218,7 @@ Keep these gaps open until the corresponding runtime behavior and platform check
 
 ### Local choice feedback
 
-The desktop IDE Can't decide control does not select a reason yet, although `scuzz ide serve` records optional skip reasons on synced mobile abstentions. `scuzz ide crank` and `scuzz ide serve --generate` fold bounded human preferences and queued steer prompts into background generation requests, while desktop IDE session requests and exported producer requests do not include recorded preferences yet. There is no retained-acceptance measure or local session summary. Region focus needs controls to retain or select a region after a result.
-
-**Proof:** Gate 2. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
+`examples/editor` records optional abstention reasons (`no-visible-difference`, `need-another-scenario`, and `outside-my-goal`) alongside `Can't decide` without turning abstention into a negative preference. Desktop IDE session requests, local model generation, and `scuzz ide export` fold bounded human choices, abstention reasons, Undo state, and automatic exclusions from `.scuzz/ide/records/`. Post-choice output shows an isolated lane reveal, a short behavior result, and region focus controls that retain or narrow `allowed` source paths. The local session summary reports accepted choices, conservative SHA-256 retained acceptances, baseline choices, abstentions by reason, automatic exclusions, duplicates, Undo, readiness wait, active review time, and retained acceptances per active review minute from primary records. Hermetic `TestRuntime` claims and corpus replay cover abstention reasons, bounded feedback, Undo, later replacement, isolated reveals, region focus, pause, and restart. Human usefulness and measured developer keep rates remain open.
 
 ### Rule review
 

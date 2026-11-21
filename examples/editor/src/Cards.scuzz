@@ -101,6 +101,9 @@ def stalePublicationMessage(): String =
   "publication request no longer matches the session"
 
 def excludePublication(root: String, name: String, context: String): IO[Unit] =
+  excludePublicationWithWait(root, name, context, 0)
+
+def excludePublicationWithWait(root: String, name: String, context: String, waitMs: Int): IO[Unit] =
   for {
     _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
     relative = Fs.join(Fs.join("build/proposals", name), "proposal.json")
@@ -109,7 +112,8 @@ def excludePublication(root: String, name: String, context: String): IO[Unit] =
     publication <- Proposal.parse(raw, 131072)
     id <- Uuid.v4()
     now <- Clock.monotonic()
-    entry = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(id)), ("proposal", Json.Str(name)), ("kind", Json.Str("automatic")), ("decision", Json.Str("stale-publication")), ("evidence_status", Json.Str("not-reviewed")), ("input_context", Json.Str(context)), ("publication", publication), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
+    effWait = if (waitMs > 0) waitMs else 0
+    entry = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(id)), ("proposal", Json.Str(name)), ("kind", Json.Str("automatic")), ("decision", Json.Str("stale-publication")), ("evidence_status", Json.Str("not-reviewed")), ("input_context", Json.Str(context)), ("publication", publication), ("readiness_ms", Json.Int(effWait)), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
     _ <- setupStorage(root)
     _ <- Fs.write(recordPath(root, id), text(entry))
   } yield ()
@@ -232,6 +236,9 @@ def current(root: String, c: Json): IO[Unit] =
   } yield ()
 
 def complete(root: String, c: Json, raw: String): IO[Json] =
+  completeWithWait(root, c, raw, -1)
+
+def completeWithWait(root: String, c: Json, raw: String, waitMs: Int): IO[Json] =
   for {
     _ <- need(candidatePass(raw), "candidate fails required review")
     _ <- current(root, c)
@@ -267,7 +274,11 @@ def complete(root: String, c: Json, raw: String): IO[Json] =
     readyCard = Json.set(Json.set(Json.set(Json.set(Json.set(Json.set(c, "evidence_files", pairsJson(hashes)), "outcome", Json.Str(observed)), "status", Json.Str(if (List.isEmpty(items)) "excluded" else "ready")), "evidence", evidence), "ready", Json.Int(now)), "question", question)
     out = if (List.nonEmpty(items)) readyCard else Json.set(Json.set(readyCard, "exclusion", Json.Str("no-observed-difference")), "feedback_time", Json.Int(now))
     _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(out))
-    _ <- if (List.nonEmpty(items)) IO.pure(()) else Fs.write(recordPath(root, str(c, "id")), text(Json.Obj([("card", Json.Str(str(c, "id"))), ("decision", Json.Str("no-observed-difference")), ("kind", Json.Str("automatic")), ("evidence_status", Json.Str("excluded")), ("evidence", evidence), ("time", Json.Int(now)), ("writes", Json.Arr([]))])))
+    _ <- if (List.nonEmpty(items)) IO.pure(()) else for {
+  started = Json.getInt(c, "started", now)
+  effWait = if (waitMs >= 0) waitMs else if (now > started) now - started else 0
+  _ <- Fs.write(recordPath(root, str(c, "id")), text(Json.Obj([("card", Json.Str(str(c, "id"))), ("proposal", Proposal.field(c, "proposal")), ("decision", Json.Str("no-observed-difference")), ("kind", Json.Str("automatic")), ("evidence_status", Json.Str("excluded")), ("evidence", evidence), ("started", Proposal.field(c, "started")), ("ready", Json.Int(now)), ("readiness_ms", Json.Int(effWait)), ("time", Json.Int(now)), ("writes", Json.Arr([]))])))
+} yield ()
   } yield out
 
 def outcome(root: String, c: Json, evidence: Json): IO[String] =
@@ -321,11 +332,16 @@ def propsOf(c: Json): List[(String, String)] =
   pairs(Diags.jsonField(c, "proposed"))
 
 def automatic(root: String, c: Json, reason: String): IO[Unit] =
+  automaticWithWait(root, c, reason, -1)
+
+def automaticWithWait(root: String, c: Json, reason: String, waitMs: Int): IO[Unit] =
   for {
     now <- Clock.monotonic()
+    started = Json.getInt(c, "started", now)
+    effWait = if (waitMs >= 0) waitMs else if (now > started) now - started else 0
     excluded = Json.set(Json.set(Json.set(c, "status", Json.Str("excluded")), "exclusion", Json.Str(reason)), "feedback_time", Json.Int(now))
     _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(excluded))
-    entry = Json.Obj([("v", Json.Int(1)), ("card", Proposal.field(c, "id")), ("proposal", Proposal.field(c, "proposal")), ("kind", Json.Str("automatic")), ("decision", Json.Str(reason)), ("diagnostic", Proposal.field(c, "diagnostic")), ("objective", Proposal.field(c, "objective")), ("a", Proposal.field(c, "a")), ("b", Proposal.field(c, "b")), ("inputs", Proposal.field(c, "inputs")), ("request", Proposal.field(c, "request")), ("evidence_status", Json.Str("excluded")), ("evidence", Proposal.field(c, "evidence")), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
+    entry = Json.Obj([("v", Json.Int(1)), ("card", Proposal.field(c, "id")), ("proposal", Proposal.field(c, "proposal")), ("kind", Json.Str("automatic")), ("decision", Json.Str(reason)), ("diagnostic", Proposal.field(c, "diagnostic")), ("objective", Proposal.field(c, "objective")), ("a", Proposal.field(c, "a")), ("b", Proposal.field(c, "b")), ("inputs", Proposal.field(c, "inputs")), ("request", Proposal.field(c, "request")), ("evidence_status", Json.Str("excluded")), ("evidence", Proposal.field(c, "evidence")), ("started", Proposal.field(c, "started")), ("readiness_ms", Json.Int(effWait)), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
     _ <- Fs.write(recordPath(root, str(c, "id")), text(entry))
   } yield ()
 
@@ -383,16 +399,28 @@ def undecided(root: String, id: String): IO[Unit] =
   } yield ()
 
 def operation(c: Json, lane: Int, now: Int): Json =
+  operationDetails(c, lane, "", -1, -1, now)
+
+def operationDetails(c: Json, lane: Int, reason: String, readinessMs: Int, reviewMs: Int, now: Int): Json =
   for {
     accepted = lane >= 0 && lane == (if (Json.getInt(c, "flip", 0) == 1) 0 else 1)
     decision = if (lane < 0) "abstain" else if (accepted) "accept" else "baseline"
-    id = Str.concat("accept-", str(c, "id"))
-  } yield Json.Obj([("operation", Json.Str(id)), ("card", Json.Str(str(c, "id"))), ("proposal", Json.Str(str(c, "proposal"))), ("decision", Json.Str(decision)), ("lane", Json.Int(lane)), ("flip", Diags.jsonField(c, "flip")), ("a", Diags.jsonField(c, "a")), ("b", Diags.jsonField(c, "b")), ("objective", Diags.jsonField(c, "objective")), ("generator", Json.Str(str(LspClient.parseJson(str(c, "publication")), "generator"))), ("evidence_status", Diags.jsonField(c, "status")), ("question", Diags.jsonField(c, "question")), ("started", Diags.jsonField(c, "started")), ("ready", Diags.jsonField(c, "ready")), ("limits", Json.Str("files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")), ("region", Json.Arr(List.map(propsOf(c), f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(if (accepted) sourceWrites(c) else []))])
+    id = Str.concat(decision, Str.concat("-", str(c, "id")))
+    started = Json.getInt(c, "started", now)
+    ready = Json.getInt(c, "ready", now)
+    effWait = if (readinessMs >= 0) readinessMs else if (ready > started) ready - started else 0
+    effReview = if (reviewMs >= 0) reviewMs else if (now > ready) now - ready else 0
+    cleanReason = if (lane < 0) reason else ""
+  } yield Json.Obj([("operation", Json.Str(id)), ("card", Json.Str(str(c, "id"))), ("proposal", Json.Str(str(c, "proposal"))), ("decision", Json.Str(decision)), ("reason", Json.Str(cleanReason)), ("lane", Json.Int(lane)), ("flip", Diags.jsonField(c, "flip")), ("a", Diags.jsonField(c, "a")), ("b", Diags.jsonField(c, "b")), ("objective", Diags.jsonField(c, "objective")), ("generator", Json.Str(str(LspClient.parseJson(str(c, "publication")), "generator"))), ("evidence_status", Diags.jsonField(c, "status")), ("question", Diags.jsonField(c, "question")), ("started", Diags.jsonField(c, "started")), ("ready", Diags.jsonField(c, "ready")), ("readiness_ms", Json.Int(effWait)), ("review_ms", Json.Int(effReview)), ("limits", Json.Str("files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")), ("region", Json.Arr(List.map(propsOf(c), f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(if (accepted) sourceWrites(c) else []))])
 
 def decide(root: String, c: Json, lane: Int): IO[Unit] =
+  decideWithDetails(root, c, lane, "", -1, -1)
+
+def decideWithDetails(root: String, c: Json, lane: Int, reason: String, readinessMs: Int, reviewMs: Int): IO[Unit] =
   for {
     _ <- recover(root)
     _ <- need(lane == -1 || lane == 0 || lane == 1, "invalid choice lane")
+    _ <- need(Proposal.validAbstentionReason(reason) && (lane < 0 || reason == ""), "invalid abstention reason")
     _ <- need(str(c, "status") == "ready", "card is not ready")
     question = Diags.jsonField(c, "question")
     work = Lanes.workAt(Diags.jsonField(c, "evidence"), str(question, "workload"))
@@ -408,7 +436,7 @@ def decide(root: String, c: Json, lane: Int): IO[Unit] =
     _ <- need(valid, "review evidence changed")
     accepted = lane >= 0 && lane == (if (Json.getInt(c, "flip", 0) == 1) 0 else 1)
     now <- Clock.monotonic()
-    op = operation(c, lane, now)
+    op = operationDetails(c, lane, reason, readinessMs, reviewMs, now)
     _ <- if (accepted) Fs.write(Fs.join(storage(root), "journal.json"), text(op)).flatMap(_ => finish(root, op)) else Fs.write(recordPath(root, str(c, "id")), text(op))
   } yield ()
 
@@ -443,4 +471,95 @@ def undoOperation(prior: Json, now: Int): Json =
     ws = Json.arr(Diags.jsonField(prior, "writes"))
     reverse = List.map(ws, w => Json.Obj([("path", Diags.jsonField(w, "path")), ("before", Diags.jsonField(w, "after")), ("before_exists", Diags.jsonField(w, "after_exists")), ("after", Diags.jsonField(w, "before")), ("after_exists", Diags.jsonField(w, "before_exists"))]))
   } yield Json.set(Json.set(Json.set(Json.set(prior, "operation", Json.Str(Str.concat("undo-", str(prior, "card")))), "decision", Json.Str("undo")), "writes", Json.Arr(reverse)), "time", Json.Int(now))
+
+def max0(n: Int): Int =
+  if (n < 0) 0 else n
+
+def formatHundredths(n: Int): String =
+  for {
+    safe = max0(n)
+    whole = safe / 100
+    frac = safe % 100
+    pad = if (frac < 10) Str.concat("0", Str.fromInt(frac)) else Str.fromInt(frac)
+  } yield Str.concat(Str.fromInt(whole), Str.concat(".", pad))
+
+def recordReviewMs(r: Json): Int =
+  if (Json.isInt(Diags.jsonField(r, "review_ms"))) max0(Json.getInt(r, "review_ms", 0)) else max0(Json.getInt(r, "time", 0) - Json.getInt(r, "ready", Json.getInt(r, "time", 0)))
+
+def recordReadinessMs(r: Json): Int =
+  if (Json.isInt(Diags.jsonField(r, "readiness_ms"))) max0(Json.getInt(r, "readiness_ms", 0)) else max0(Json.getInt(r, "ready", 0) - Json.getInt(r, "started", Json.getInt(r, "ready", 0)))
+
+def recordAutoWaitMs(r: Json): Int =
+  if (Json.isInt(Diags.jsonField(r, "readiness_ms"))) max0(Json.getInt(r, "readiness_ms", 0)) else 0
+
+def summarizeRecords(disk: List[(String, String)], records: List[Json]): Json =
+  for {
+    ordered = Proposal.sortRecords(records)
+    rawPaths = List.map(disk, f => f._1)
+    diskPaths = List.sort(List.distinct(rawPaths))
+    diskSorted = List.map(diskPaths, p => (p, List.at(disk, List.indexOf(rawPaths, p))._2))
+    workspaceFiles = Json.Arr(List.map(diskSorted, f => Json.Obj([("path", Json.Str(f._1)), ("sha256", Json.Str(Hash.sha256(f._2)))])))
+    workspaceSha = setHash(diskSorted)
+    human = List.filter(ordered, r => str(r, "kind") != "automatic")
+    accepts = List.filter(human, r => str(r, "decision") == "accept")
+    baselines = List.filter(human, r => str(r, "decision") == "baseline" || str(r, "decision") == "reject")
+    abstains = List.filter(human, r => str(r, "decision") == "abstain" || str(r, "decision") == "skip")
+    undos = List.filter(human, r => str(r, "decision") == "undo")
+    undoneCards = List.distinct(List.map(undos, r => str(r, "card")))
+    autos = List.filter(ordered, r => str(r, "kind") == "automatic")
+    dups = List.filter(autos, r => str(r, "decision") == "duplicate-source" || str(r, "decision") == "duplicate-outcome")
+    audits = List.map(accepts, r => for {
+  cardId = str(r, "card")
+  isUndone = List.contains(undoneCards, cardId)
+  ws = Json.arr(Diags.jsonField(r, "writes"))
+  fileAudits = List.map(ws, w => for {
+  path = str(w, "path")
+  after = str(w, "after")
+  afterExists = Json.getBool(w, "after_exists", false)
+  accSha = if (afterExists) Hash.sha256(after) else ""
+  existsNow = List.contains(diskPaths, path)
+  curBody = if (existsNow) List.at(diskSorted, List.indexOf(diskPaths, path))._2 else ""
+  curSha = if (existsNow) Hash.sha256(curBody) else ""
+  ok = existsNow == afterExists && (!afterExists || curSha == accSha && curBody == after)
+} yield Json.Obj([("path", Json.Str(path)), ("accepted_sha256", Json.Str(accSha)), ("current_sha256", Json.Str(curSha)), ("matches", Json.Bool(ok))]))
+  allMatch = List.nonEmpty(ws) && List.forall(fileAudits, fa => Json.getBool(fa, "matches", false))
+  isRetained = !isUndone && allMatch
+  status = if (isUndone) "undone" else if (allMatch) "retained" else "replaced"
+} yield Json.Obj([("card", Json.Str(cardId)), ("proposal", Json.Str(str(r, "proposal"))), ("undone", Json.Bool(isUndone)), ("retained", Json.Bool(isRetained)), ("status", Json.Str(status)), ("b", Diags.jsonField(r, "b")), ("files", Json.Arr(fileAudits))]))
+    retainedCount = List.len(List.filter(audits, a => Json.getBool(a, "retained", false)))
+    noDiff = List.len(List.filter(abstains, r => str(r, "reason") == "no-visible-difference"))
+    needScen = List.len(List.filter(abstains, r => str(r, "reason") == "need-another-scenario"))
+    outsideGoal = List.len(List.filter(abstains, r => str(r, "reason") == "outside-my-goal"))
+    unspecified = List.len(abstains) - noDiff - needScen - outsideGoal
+    cardReviews = List.concat(accepts, List.concat(baselines, abstains))
+    reviewMs = List.foldLeft(cardReviews, 0, p => p._1 + recordReviewMs(p._2))
+    readinessMs = List.foldLeft(cardReviews, 0, p => p._1 + recordReadinessMs(p._2)) + List.foldLeft(autos, 0, p => p._1 + recordAutoWaitMs(p._2))
+    rateX100 = if (reviewMs <= 0) 0 else (retainedCount * 6000000 + reviewMs / 2) / reviewMs
+    rateText = formatHundredths(rateX100)
+    byReason = Json.Obj([("no-visible-difference", Json.Int(noDiff)), ("need-another-scenario", Json.Int(needScen)), ("outside-my-goal", Json.Int(outsideGoal)), ("unspecified", Json.Int(unspecified))])
+    note = "Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior."
+  } yield Json.Obj([("accepted", Json.Int(List.len(accepts))), ("retained_acceptances", Json.Int(retainedCount)), ("baseline_choices", Json.Int(List.len(baselines))), ("abstentions", Json.Int(List.len(abstains))), ("abstentions_by_reason", byReason), ("automatic_exclusions", Json.Int(List.len(autos))), ("duplicates", Json.Int(List.len(dups))), ("undo", Json.Int(List.len(undos))), ("readiness_ms", Json.Int(readinessMs)), ("review_ms", Json.Int(reviewMs)), ("retained_per_review_minute_x100", Json.Int(rateX100)), ("retained_per_review_minute", Json.Str(rateText)), ("measure_note", Json.Str(note)), ("workspace_sha256", Json.Str(workspaceSha)), ("workspace_files", workspaceFiles), ("acceptances", Json.Arr(audits))])
+
+def loadRecords(root: String): IO[List[Json]] =
+  Proposal.loadLocalRecords(root)
+
+def sessionSummary(root: String): IO[Json] =
+  for {
+    disk <- own(root).handleErrorWith(_ => IO.pure([]: List[(String, String)]))
+    records <- loadRecords(root)
+  } yield summarizeRecords(disk, records)
+
+def emptySummaryLines(workspaceSha: String): List[String] =
+  ["Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior.", "Accepted: 0; retained: 0; retained / active review min: 0.00", "Baseline choices: 0; Undo: 0", "Abstentions: 0 (no-visible-difference: 0, need-another-scenario: 0, outside-my-goal: 0, unspecified: 0)", "Automatic exclusions: 0; duplicates: 0", "Readiness wait: 0 ms; active review time: 0 ms", Str.concat("Workspace SHA-256: ", workspaceSha)]
+
+def summaryLines(summary: Json): List[String] =
+  for {
+    byReason = Diags.jsonField(summary, "abstentions_by_reason")
+    audits = Json.arr(Diags.jsonField(summary, "acceptances"))
+    auditLines = List.map(audits, a => for {
+  fs = Json.arr(Diags.jsonField(a, "files"))
+  fileText = List.join(List.map(fs, f => Str.concat(str(f, "path"), Str.concat(":", Str.concat(Str.take(str(f, "accepted_sha256"), 8), Str.concat("->", if (str(f, "current_sha256") == "") "missing" else Str.take(str(f, "current_sha256"), 8)))))), ", ")
+} yield Str.concat("Audit ", Str.concat(str(a, "proposal"), Str.concat(" (", Str.concat(Str.take(str(a, "card"), 8), Str.concat("): ", Str.concat(str(a, "status"), Str.concat(" [", Str.concat(fileText, "]")))))))))
+    header = [str(summary, "measure_note"), Str.concat("Accepted: ", Str.concat(Str.fromInt(Json.getInt(summary, "accepted", 0)), Str.concat("; retained: ", Str.concat(Str.fromInt(Json.getInt(summary, "retained_acceptances", 0)), Str.concat("; retained / active review min: ", str(summary, "retained_per_review_minute")))))), Str.concat("Baseline choices: ", Str.concat(Str.fromInt(Json.getInt(summary, "baseline_choices", 0)), Str.concat("; Undo: ", Str.fromInt(Json.getInt(summary, "undo", 0))))), Str.concat("Abstentions: ", Str.concat(Str.fromInt(Json.getInt(summary, "abstentions", 0)), Str.concat(" (no-visible-difference: ", Str.concat(Str.fromInt(Json.getInt(byReason, "no-visible-difference", 0)), Str.concat(", need-another-scenario: ", Str.concat(Str.fromInt(Json.getInt(byReason, "need-another-scenario", 0)), Str.concat(", outside-my-goal: ", Str.concat(Str.fromInt(Json.getInt(byReason, "outside-my-goal", 0)), Str.concat(", unspecified: ", Str.concat(Str.fromInt(Json.getInt(byReason, "unspecified", 0)), ")")))))))))), Str.concat("Automatic exclusions: ", Str.concat(Str.fromInt(Json.getInt(summary, "automatic_exclusions", 0)), Str.concat("; duplicates: ", Str.fromInt(Json.getInt(summary, "duplicates", 0))))), Str.concat("Readiness wait: ", Str.concat(Str.fromInt(Json.getInt(summary, "readiness_ms", 0)), Str.concat(" ms; active review time: ", Str.concat(Str.fromInt(Json.getInt(summary, "review_ms", 0)), " ms")))), Str.concat("Workspace SHA-256: ", str(summary, "workspace_sha256"))]
+  } yield List.concat(header, auditLines)
 

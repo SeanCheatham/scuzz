@@ -267,7 +267,10 @@ def Session.create(root: String): IO[SessionS] =
     request <- Fs.read(Fs.join(root, "build/ide/request.json"))
     jobs <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
     reviews <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
-  } yield SessionS(Signal.make("Review behavior"), Signal.make("src/Main.scuzz,src/Other.scuzz"), Signal.make(0), Signal.make("qwen3.5-4b"), Signal.make(1), Signal.make(0), Signal.make("External proposals"), Signal.make(request), Signal.make(0), jobs, reviews, Signal.make(""), "model-cache", Signal.make(Proposal.text(Json.Obj([("objective", Json.Str("Review behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz"), Json.Str("src/Other.scuzz")])), ("mode", Json.Int(0)), ("model", Json.Str("qwen3.5-4b"))]))), Signal.make(List.map(Models.catalog(), m => Models.modelJson("model-cache", m, false))), Signal.make(0), Signal.make(0))
+    created = SessionS(Signal.make("Review behavior"), Signal.make("src/Main.scuzz,src/Other.scuzz"), Signal.make(0), Signal.make("qwen3.5-4b"), Signal.make(1), Signal.make(0), Signal.make("External proposals"), Signal.make(request), Signal.make(0), jobs, reviews, Signal.make(""), "model-cache", Signal.make(Proposal.text(Json.Obj([("objective", Json.Str("Review behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz"), Json.Str("src/Other.scuzz")])), ("mode", Json.Int(0)), ("model", Json.Str("qwen3.5-4b"))]))), Signal.make(List.map(Models.catalog(), m => Models.modelJson("model-cache", m, false))), Signal.make(0), Signal.make(0), Signal.make(Cards.emptySummaryLines("")))
+    records <- Fs.list(Fs.join(root, ".scuzz/ide/records")).handleErrorWith(_ => IO.pure([]))
+    _ <- if (List.isEmpty(records)) IO.pure(()) else Session.refreshSummary(root, created)
+  } yield created
 
 def proofCard(flip: Int): IO[Json] =
   for {
@@ -378,7 +381,7 @@ private def proofLanes(): LaneS =
   Main.LaneS(Signal.make([]: List[String]), Signal.make(""), Signal.make(""), Signal.make(""), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make(0), Signal.make(""), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make([]: List[(String, String, String)]), Signal.make(0), Signal.make(""), Signal.make(""), Signal.make(""), Signal.make(0), Signal.make([]: List[String]), Signal.make(0))
 
 private def proofDeck(session: SessionS, lanes: LaneS): DeckS =
-  Main.DeckS(Signal.make(""), Signal.make([]: List[String]), Signal.make(""), Signal.make(""), lanes.flip, Signal.make(""), Signal.make(0), session, Signal.makeN("$mirror", Main.emptyQueue(Signal.get(session.epoch))), Signal.make(""), Signal.make("proof"))
+  Main.DeckS(Signal.make(""), Signal.make([]: List[String]), Signal.make(""), Signal.make(""), lanes.flip, Signal.make(""), Signal.make(""), Signal.make([]: List[String]), Signal.make(0), Signal.makeN("$mirror", Main.emptyTiming()), Signal.make(0), session, Signal.makeN("$mirror", Main.emptyQueue(Signal.get(session.epoch))), Signal.make(""), Signal.make("proof"))
 
 private def waitPreparation(s: SessionS, remaining: Int): IO[Unit] =
   Ref.get(s.reviews).flatMap(owner => if (Str.isEmpty(owner.token)) IO.pure(()) else if (remaining <= 0) IO.fail("controlled preparation did not finish") else IO.sleep(1).flatMap(_ => waitPreparation(s, remaining - 1)))
@@ -1007,7 +1010,7 @@ private def ownershipSession(): IO[SessionS] =
   for {
     jobs <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
     reviews <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
-    s = SessionS(Signal.make("One objective"), Signal.make("src/Main.scuzz"), Signal.make(0), Signal.make("qwen3.5-4b"), Signal.make(1), Signal.make(0), Signal.make(""), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), "", Signal.make(""), Signal.make([]: List[Json]), Signal.make(0), Signal.make(0))
+    s = SessionS(Signal.make("One objective"), Signal.make("src/Main.scuzz"), Signal.make(0), Signal.make("qwen3.5-4b"), Signal.make(1), Signal.make(0), Signal.make(""), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), "", Signal.make(""), Signal.make([]: List[Json]), Signal.make(0), Signal.make(0), Signal.make([]: List[String]))
     _ = Signal.set(s.config, Session.settings(s))
   } yield s
 
@@ -1153,5 +1156,184 @@ def wrong(): IO[Unit] = IO.println(7)""")))
     checked = blocked && hasCheckError(missing) && hasCheckError(invalid) && Str.contains(format, "needs formatting") && hasCheckError(verify) && hasCheckError(typedVerify) && hasCheckError(typedDriver) && !hasCheckError(valid)
     projectChecked = Signal.make(if (checked) 1 else 0)
     _ = Signal.set(projectChecked, if (checked) 1 else 0)
+  } yield ()
+
+private def isErrRes(r: Result[String, Unit]): Bool =
+  r match {
+    case Result.Err(_) => true
+    case Result.Ok(_) => false
+  }
+
+private def isOkRes(r: Result[String, Unit]): Bool =
+  !isErrRes(r)
+
+def choiceFeedbackFlow(mode: Int where mode >= 0 && mode <= 5): IO[Unit] =
+  for {
+    initial <- proofCard(1)
+    _ <- Fs.delete(Cards.cardDir("proof", Cards.str(initial, "id")))
+    session <- Session.create("proof")
+    lanes = proofLanes()
+    deck = proofDeck(session, lanes)
+    ok <- if (mode == 0) for {
+  c1 <- proofCard(1)
+  session0 <- Session.create("proof")
+  badReason <- IO.attempt(Cards.decideWithDetails("proof", c1, -1, "bad-reason", 40, 120))
+  badLaneReason <- IO.attempt(Cards.decideWithDetails("proof", c1, 0, "need-another-scenario", 40, 120))
+  _ <- Cards.decideWithDetails("proof", c1, -1, "need-another-scenario", 40, 120)
+  _ <- publishQueue("p-nodiff", [("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(3)")])
+  _ <- Main.deckNext("proof", lanes, deck)
+  _ <- waitPreparation(session, 2000)
+  armedId = Signal.get(deck.armed)
+  _ = Signal.set(deck.abstainReason, 1)
+  _ <- Main.chooseCardWithReason("proof", armedId, -1, Proposal.abstentionReasonAt(Signal.get(deck.abstainReason)), lanes, deck, _ => [], IO.pure(()))
+  exported <- Session.exportRequest("proof", session0, false)
+  fb = Json.arr(Proposal.field(exported, "feedback"))
+  msgs = Cards.text(Generate.messages(exported))
+} yield isErrRes(badReason) && isErrRes(badLaneReason) && List.len(fb) == 2 && List.forall(fb, item => Proposal.str(item, "kind") == "abstention" && Proposal.str(item, "decision") == "abstain") && List.exists(fb, item => Proposal.str(item, "reason") == "need-another-scenario") && List.exists(fb, item => Proposal.str(item, "reason") == "no-visible-difference") && Str.contains(msgs, "Address abstention feedback without treating abstention as rejection") && Str.contains(msgs, "need-another-scenario") && Str.contains(msgs, "no-visible-difference") && Signal.get(deck.abstainReason) == 0 && Str.contains(Signal.get(deck.last), "abstained [no-visible-difference]") else if (mode == 1) for {
+  c1 <- proofCard(1)
+  session1 <- Session.create("proof")
+  _ <- Cards.decideWithDetails("proof", c1, 0, "", 50, 200)
+  afterAccept <- Session.exportRequest("proof", session1, false)
+  fbAccept = Json.arr(Proposal.field(afterAccept, "feedback"))
+  _ <- Cards.undo("proof")
+  _ <- Session.invalidateBaseline("proof", session1)
+  afterUndo <- Session.exportRequest("proof", session1, false)
+  fbUndo = Json.arr(Proposal.field(afterUndo, "feedback"))
+  autoCard = Json.set(Json.set(c1, "id", Json.Str(Hash.sha256("auto-1"))), "diagnostic", Json.Str("type error"))
+  _ <- Fs.mkdirs(Cards.cardDir("proof", Cards.str(autoCard, "id")))
+  _ <- Cards.automaticWithWait("proof", autoCard, "candidate-failed", 75)
+  afterAutoIdle <- Session.exportRequest("proof", session1, false)
+  fbAutoIdle = Json.arr(Proposal.field(afterAutoIdle, "feedback"))
+  msgs = Cards.text(Generate.messages(afterUndo))
+} yield List.len(fbAccept) == 1 && Proposal.str(List.at(fbAccept, 0), "kind") == "preference" && Proposal.str(List.at(fbAccept, 0), "decision") == "accept" && !Json.getBool(List.at(fbAccept, 0), "undone", true) && List.len(fbUndo) == 2 && Json.getBool(List.at(fbUndo, 0), "undone", false) && Proposal.str(List.at(fbUndo, 1), "kind") == "undo" && List.len(fbAutoIdle) == 2 && List.forall(fbAutoIdle, item => Proposal.str(item, "kind") != "automatic") && Str.contains(msgs, "accept(undone):p") && Str.contains(msgs, "Do not repeat undone acceptances: p") else if (mode == 2) for {
+  _ <- IO.foreachDiscard(List.range(0, 20), idx => for {
+  id = Hash.sha256(Str.concat("hist-", Str.fromInt(idx)))
+  decision = if (idx % 3 == 0) "baseline" else if (idx % 3 == 1) "abstain" else "accept"
+  reason = if (decision == "abstain") "outside-my-goal" else ""
+  rec = Json.Obj([("operation", Json.Str(Str.concat(decision, Str.concat("-", id)))), ("card", Json.Str(id)), ("proposal", Json.Str(Str.concat("p", Str.fromInt(idx)))), ("decision", Json.Str(decision)), ("reason", Json.Str(reason)), ("region", Json.Arr([Json.Str("src/Main.scuzz")])), ("time", Json.Int(10 + idx)), ("writes", Json.Arr([]))])
+  _ <- Fs.write(Cards.recordPath("proof", id), Cards.text(rec))
+} yield ())
+  autos = List.map(List.range(0, 5), idx => Json.Obj([("kind", Json.Str("automatic")), ("decision", Json.Str("duplicate-source")), ("time", Json.Int(100 + idx))]))
+  loaded <- Proposal.recentFeedback("proof", autos)
+  exported <- Session.exportRequest("proof", session, false)
+  compiler <- Cards.compilerIdentity()
+  validated <- IO.attempt(Proposal.validate("proof", exported, compiler))
+  exportedFb = Json.arr(Proposal.field(exported, "feedback"))
+} yield isOkRes(validated) && List.len(loaded) == 16 && List.len(List.filter(loaded, item => Proposal.str(item, "kind") == "automatic")) == 3 && List.len(List.filter(loaded, item => Proposal.str(item, "kind") != "automatic")) == 13 && List.len(exportedFb) == 16 && Proposal.str(List.at(exportedFb, 0), "proposal") == "p4" && Proposal.str(List.at(exportedFb, 15), "proposal") == "p19" else if (mode == 3) for {
+  c1 <- proofCard(1)
+  _ <- Cards.decideWithDetails("proof", c1, -1, "outside-my-goal", 30, 90)
+  compiler <- Cards.compilerIdentity()
+  sources <- Proposal.own("proof")
+  recent <- Proposal.recentFeedback("proof", [])
+  cliReq <- Proposal.make("proof", "CLI export objective", List.map(sources, f => f._1), compiler, recent)
+  valid <- IO.attempt(Proposal.validate("proof", cliReq, compiler))
+  fb = Json.arr(Proposal.field(cliReq, "feedback"))
+} yield isOkRes(valid) && List.len(fb) == 1 && Proposal.str(List.at(fb, 0), "kind") == "abstention" && Proposal.str(List.at(fb, 0), "reason") == "outside-my-goal" else if (mode == 4) for {
+  _ <- Main.deckNext("proof", lanes, deck)
+  _ <- waitPreparation(session, 2000)
+  _ <- publishQueue("p-next", [("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(3)")])
+  _ <- Main.queuePulse("proof", lanes, deck)
+  _ <- waitPreparation(session, 2000)
+  qBefore <- Main.queueRead(deck)
+  firstCard = List.at(qBefore.cards, 0).card
+  secondCard = List.at(qBefore.cards, 1).card
+  firstId = Cards.str(firstCard, "id")
+  secondId = Cards.str(secondCard, "id")
+  expectedSide = if (Json.getInt(firstCard, "flip", 0) == 1) "Left" else "Right"
+  baselineLane = if (Json.getInt(firstCard, "flip", 0) == 1) 1 else 0
+  _ <- Main.chooseCard("proof", firstId, baselineLane, lanes, deck, _ => [], IO.pure(()))
+} yield List.len(qBefore.cards) == 2 && Signal.get(deck.armed) == secondId && Signal.get(deck.last) == Str.concat("baseline chosen p (proposal was ", Str.concat(expectedSide, ")")) && !Str.contains(Signal.get(deck.last), "p-next") && !Str.contains(Signal.get(deck.lastResult), "p-next") && Signal.get(lanes.rev) == "Left" && Signal.get(lanes.blab) == "Right" else for {
+  _ <- Fs.write("proof/src/Other.scuzz", """def other(): Int =
+  1
+""")
+  _ <- Fs.delete("proof/build/proposals/p").handleErrorWith(_ => IO.pure(()))
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session5 <- Session.create("proof")
+  lanes5 = proofLanes()
+  deck5 = proofDeck(session5, lanes5)
+  _ <- publishQueue("p-r1", [("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(2)")])
+  _ <- publishQueue("p-r2", [("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(3)")])
+  _ <- Main.deckNext("proof", lanes5, deck5)
+  _ <- waitPreparation(session5, 2000)
+  _ <- Main.queuePulse("proof", lanes5, deck5)
+  _ <- waitPreparation(session5, 2000)
+  qTwo <- Main.queueRead(deck5)
+  first = List.at(qTwo.cards, 0).card
+  second = List.at(qTwo.cards, 1).card
+  baseLane = if (Json.getInt(first, "flip", 0) == 1) 1 else 0
+  _ <- Main.chooseCard("proof", Cards.str(first, "id"), baseLane, lanes5, deck5, _ => [], IO.pure(()))
+  armedBeforeRetain = Signal.get(deck5.armed)
+  _ <- Session.selectRegion("proof", session5, ["src/Main.scuzz", "src/Other.scuzz"], _ => Main.deckNext("proof", lanes5, deck5), _ => Main.queueClear(lanes5, deck5))
+  armedAfterRetain = Signal.get(deck5.armed)
+  badTraversal <- IO.attempt(Session.selectRegion("proof", session5, ["../Main.scuzz"], _ => Main.deckNext("proof", lanes5, deck5), _ => Main.queueClear(lanes5, deck5)))
+  badMissing <- IO.attempt(Session.selectRegion("proof", session5, ["src/Missing.scuzz"], _ => Main.deckNext("proof", lanes5, deck5), _ => Main.queueClear(lanes5, deck5)))
+  _ <- Session.selectRegion("proof", session5, ["src/Main.scuzz"], _ => Main.deckNext("proof", lanes5, deck5), _ => Main.queueClear(lanes5, deck5))
+  reqRaw <- Fs.read("proof/build/ide/request.json")
+  req = LspClient.parseJson(reqRaw)
+  allowedNow = List.map(Json.arr(Proposal.field(req, "allowed")), j => Json.strOr(j, ""))
+  sourcesNow = List.map(Cards.pairs(Proposal.field(req, "sources")), p => p._1)
+  fbNow = Json.arr(Proposal.field(req, "feedback"))
+} yield armedBeforeRetain == Cards.str(second, "id") && armedAfterRetain == Cards.str(second, "id") && isErrRes(badTraversal) && isErrRes(badMissing) && Signal.get(session5.paths) == "src/Main.scuzz" && allowedNow == ["src/Main.scuzz"] && sourcesNow == ["src/Main.scuzz"] && List.len(fbNow) == 1 && Proposal.str(List.at(fbNow, 0), "decision") == "baseline"
+    choiceFeedbackBound = Signal.make(if (ok) 1 else 0)
+    _ = Signal.set(choiceFeedbackBound, if (ok) 1 else 0)
+  } yield ()
+
+def sessionSummaryFlow(mode: Int where mode >= 0 && mode <= 3): IO[Unit] =
+  for {
+    c1 <- proofCard(1)
+    ok <- if (mode == 0) for {
+  _ <- Cards.decideWithDetails("proof", c1, 0, "", 200, 15000)
+  baseId = Hash.sha256("sum-base")
+  _ <- Fs.write(Cards.recordPath("proof", baseId), Cards.text(Json.Obj([("operation", Json.Str(Str.concat("baseline-", baseId))), ("card", Json.Str(baseId)), ("proposal", Json.Str("p-base")), ("decision", Json.Str("baseline")), ("reason", Json.Str("")), ("readiness_ms", Json.Int(100)), ("review_ms", Json.Int(15000)), ("time", Json.Int(20)), ("writes", Json.Arr([]))])))
+  reasons = [("no-visible-difference", 1), ("need-another-scenario", 2), ("outside-my-goal", 3), ("", 4)]
+  _ <- IO.foreachDiscard(reasons, r => for {
+  aid = Hash.sha256(Str.concat("sum-abs-", Str.fromInt(r._2)))
+  _ <- Fs.write(Cards.recordPath("proof", aid), Cards.text(Json.Obj([("operation", Json.Str(Str.concat("abstain-", aid))), ("card", Json.Str(aid)), ("proposal", Json.Str(Str.concat("p-abs-", Str.fromInt(r._2)))), ("decision", Json.Str("abstain")), ("reason", Json.Str(r._1)), ("readiness_ms", Json.Int(100)), ("review_ms", Json.Int(7500)), ("time", Json.Int(30 + r._2)), ("writes", Json.Arr([]))])))
+} yield ())
+  autos = [("duplicate-source", 1), ("duplicate-outcome", 2), ("candidate-failed", 3)]
+  _ <- IO.foreachDiscard(autos, a => for {
+  eid = Hash.sha256(Str.concat("sum-auto-", Str.fromInt(a._2)))
+  _ <- Fs.write(Cards.recordPath("proof", eid), Cards.text(Json.Obj([("card", Json.Str(eid)), ("proposal", Json.Str(Str.concat("p-auto-", Str.fromInt(a._2)))), ("kind", Json.Str("automatic")), ("decision", Json.Str(a._1)), ("readiness_ms", Json.Int(100)), ("time", Json.Int(50 + a._2)), ("writes", Json.Arr([]))])))
+} yield ())
+  summary <- Cards.sessionSummary("proof")
+  byReason = Diags.jsonField(summary, "abstentions_by_reason")
+  audits = Json.arr(Diags.jsonField(summary, "acceptances"))
+  disk <- Cards.own("proof")
+} yield Json.getInt(summary, "accepted", -1) == 1 && Json.getInt(summary, "retained_acceptances", -1) == 1 && Json.getInt(summary, "baseline_choices", -1) == 1 && Json.getInt(summary, "abstentions", -1) == 4 && Json.getInt(byReason, "no-visible-difference", -1) == 1 && Json.getInt(byReason, "need-another-scenario", -1) == 1 && Json.getInt(byReason, "outside-my-goal", -1) == 1 && Json.getInt(byReason, "unspecified", -1) == 1 && Json.getInt(summary, "automatic_exclusions", -1) == 3 && Json.getInt(summary, "duplicates", -1) == 2 && Json.getInt(summary, "undo", -1) == 0 && Json.getInt(summary, "readiness_ms", -1) == 1000 && Json.getInt(summary, "review_ms", -1) == 60000 && Cards.str(summary, "retained_per_review_minute") == "1.00" && Cards.str(summary, "workspace_sha256") == Cards.setHash(disk) && List.len(audits) == 1 && Cards.str(List.at(audits, 0), "status") == "retained" else if (mode == 1) for {
+  _ <- Cards.decideWithDetails("proof", c1, 0, "", 120, 30000)
+  beforeUndo <- Cards.sessionSummary("proof")
+  _ <- Cards.undo("proof")
+  afterUndo <- Cards.sessionSummary("proof")
+  audits = Json.arr(Diags.jsonField(afterUndo, "acceptances"))
+} yield Json.getInt(beforeUndo, "retained_acceptances", -1) == 1 && Cards.str(beforeUndo, "retained_per_review_minute") == "2.00" && Json.getInt(afterUndo, "accepted", -1) == 1 && Json.getInt(afterUndo, "retained_acceptances", -1) == 0 && Json.getInt(afterUndo, "undo", -1) == 1 && Json.getInt(afterUndo, "readiness_ms", -1) == 120 && Json.getInt(afterUndo, "review_ms", -1) == 30000 && Cards.str(afterUndo, "retained_per_review_minute") == "0.00" && List.len(audits) == 1 && Cards.str(List.at(audits, 0), "status") == "undone" else if (mode == 2) for {
+  _ <- Cards.decideWithDetails("proof", c1, 0, "", 80, 20000)
+  retained0 <- Cards.sessionSummary("proof")
+  _ <- Fs.write("proof/src/Main.scuzz", """@main def main: IO[Unit] =
+  IO.println(99)
+""")
+  replaced <- Cards.sessionSummary("proof")
+  audits = Json.arr(Diags.jsonField(replaced, "acceptances"))
+  secondId = Hash.sha256("second-accept")
+  secondBody = """@main def main: IO[Unit] =
+  IO.println(99)
+"""
+  secondOp = Json.Obj([("operation", Json.Str(Str.concat("accept-", secondId))), ("card", Json.Str(secondId)), ("proposal", Json.Str("p2")), ("decision", Json.Str("accept")), ("readiness_ms", Json.Int(40)), ("review_ms", Json.Int(40000)), ("time", Json.Int(999999999)), ("writes", Json.Arr([Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("")), ("before_exists", Json.Bool(true)), ("after", Json.Str(secondBody)), ("after_exists", Json.Bool(true))])]))])
+  _ <- Fs.write(Cards.recordPath("proof", Str.concat("accept-", secondId)), Cards.text(secondOp))
+  both <- Cards.sessionSummary("proof")
+} yield Json.getInt(retained0, "retained_acceptances", -1) == 1 && Json.getInt(replaced, "accepted", -1) == 1 && Json.getInt(replaced, "retained_acceptances", -1) == 0 && Cards.str(List.at(audits, 0), "status") == "replaced" && Json.getInt(both, "accepted", -1) == 2 && Json.getInt(both, "retained_acceptances", -1) == 1 && Cards.str(both, "retained_per_review_minute") == "1.00" else for {
+  _ <- Cards.decideWithDetails("proof", c1, 0, "", 150, 30000)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  sessionA <- Session.create("proof")
+  _ <- Session.pause(sessionA)
+  _ <- Session.refreshSummary("proof", sessionA)
+  beforeSummary <- Cards.sessionSummary("proof")
+  beforeLines = Signal.get(sessionA.summary)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  restarted <- Session.create("proof")
+  afterSummary <- Cards.sessionSummary("proof")
+  afterLines = Signal.get(restarted.summary)
+} yield Cards.text(beforeSummary) == Cards.text(afterSummary) && beforeLines == afterLines && List.nonEmpty(afterLines) && Str.contains(List.at(afterLines, 0), "Conservative source measure")
+    sessionSummaryBound = Signal.make(if (ok) 1 else 0)
+    _ = Signal.set(sessionSummaryBound, if (ok) 1 else 0)
   } yield ()
 

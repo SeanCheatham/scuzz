@@ -1,6 +1,8 @@
 record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], srcs: Signal[List[(String, String, String)]], play: Signal[Int], work: Signal[String], resultA: Signal[String], resultB: Signal[String], flip: Signal[Int], scope: Signal[List[String]], details: Signal[Int])
 
-record DeckS(card: Signal[String], pending: Signal[List[String]], armed: Signal[String], title: Signal[String], flip: Signal[Int], last: Signal[String], busy: Signal[Int], session: SessionS, queue: Signal[QueueS], queueStatus: Signal[String], root: Signal[String])
+record DeckTiming(waitStarted: Int, waitAcc: Int, shownCard: String, shownStarted: Int, cardWait: List[(String, Int)], cardReview: List[(String, Int)])
+
+record DeckS(card: Signal[String], pending: Signal[List[String]], armed: Signal[String], title: Signal[String], flip: Signal[Int], last: Signal[String], lastResult: Signal[String], lastRegions: Signal[List[String]], abstainReason: Signal[Int], timing: Signal[DeckTiming], busy: Signal[Int], session: SessionS, queue: Signal[QueueS], queueStatus: Signal[String], root: Signal[String])
 
 record PrepSlot(token: String, role: String, name: String)
 
@@ -78,6 +80,7 @@ def deckEnd(ls: LaneS, ds: DeckS): Unit =
   for {
     _ = Signal.set(ds.card, "")
     _ = Signal.set(ds.armed, "")
+    _ = Signal.set(ds.abstainReason, 0)
     _ = Signal.set(ds.title, "")
     _ = Signal.set(ls.raw, "")
     _ = Signal.set(ls.tls, []: List[String])
@@ -104,6 +107,78 @@ def deckEnd(ls: LaneS, ds: DeckS): Unit =
     _ = Signal.set(ls.blab, "b: working tree")
   } yield ()
 
+def emptyTiming(): DeckTiming =
+  DeckTiming(0, 0, "", 0, []: List[(String, Int)], []: List[(String, Int)])
+
+def pairHas(pairs: List[(String, Int)], key: String): Bool =
+  List.exists(pairs, p => p._1 == key)
+
+def pairGet(pairs: List[(String, Int)], key: String): Int =
+  List.getOrElse(List.map(pairs, p => p._2), List.indexOf(List.map(pairs, p => p._1), key), 0)
+
+def pairPut(pairs: List[(String, Int)], key: String, value: Int): List[(String, Int)] =
+  if (pairHas(pairs, key)) List.map(pairs, p => if (p._1 == key) (key, value) else p) else List.append(pairs, (key, value))
+
+def pairDrop(pairs: List[(String, Int)], key: String): List[(String, Int)] =
+  List.filter(pairs, p => p._1 != key)
+
+def timingPause(t: DeckTiming, now: Int): DeckTiming =
+  for {
+    waitDelta = if (t.waitStarted > 0 && now > t.waitStarted) now - t.waitStarted else 0
+    revDelta = if (!Str.isEmpty(t.shownCard) && t.shownStarted > 0 && now > t.shownStarted) now - t.shownStarted else 0
+    nextRev = if (Str.isEmpty(t.shownCard)) t.cardReview else pairPut(t.cardReview, t.shownCard, pairGet(t.cardReview, t.shownCard) + revDelta)
+  } yield DeckTiming(0, t.waitAcc + waitDelta, "", 0, t.cardWait, nextRev)
+
+def timingWaitStart(t: DeckTiming, now: Int): DeckTiming =
+  for {
+    paused = timingPause(t, now)
+    start = if (now > 0) now else 0
+  } yield DeckTiming(start, paused.waitAcc, "", 0, paused.cardWait, paused.cardReview)
+
+def timingNoteBackgroundReady(t: DeckTiming, id: String): DeckTiming =
+  if (Str.isEmpty(id) || pairHas(t.cardWait, id)) t else DeckTiming(t.waitStarted, t.waitAcc, t.shownCard, t.shownStarted, pairPut(t.cardWait, id, 0), t.cardReview)
+
+def timingCardShown(t: DeckTiming, id: String, now: Int): DeckTiming =
+  if (Str.isEmpty(id)) t else if (t.shownCard == id && (t.shownStarted > 0 || now <= 0)) t else for {
+  paused = timingPause(t, now)
+  prevWait = if (pairHas(paused.cardWait, id)) pairGet(paused.cardWait, id) else 0
+  nextWait = pairPut(paused.cardWait, id, prevWait + paused.waitAcc)
+} yield DeckTiming(0, 0, id, if (now > 0) now else 0, nextWait, paused.cardReview)
+
+def timingConsumeAutoWait(t: DeckTiming, active: Bool, now: Int): (DeckTiming, Int) =
+  for {
+    waitDelta = if (t.waitStarted > 0 && now > t.waitStarted) now - t.waitStarted else 0
+    total = t.waitAcc + waitDelta
+    nextStart = if (active && Str.isEmpty(t.shownCard) && now > 0) now else 0
+  } yield (DeckTiming(nextStart, 0, t.shownCard, t.shownStarted, t.cardWait, t.cardReview), total)
+
+def timingFinishCard(t: DeckTiming, id: String, active: Bool, now: Int): (DeckTiming, Int, Int) =
+  for {
+    revDelta = if (t.shownCard == id && t.shownStarted > 0 && now > t.shownStarted) now - t.shownStarted else 0
+    totalRev = pairGet(t.cardReview, id) + revDelta
+    waitMs = if (pairHas(t.cardWait, id)) pairGet(t.cardWait, id) else -1
+    otherRev = if (!Str.isEmpty(t.shownCard) && t.shownCard != id && t.shownStarted > 0 && now > t.shownStarted) pairPut(t.cardReview, t.shownCard, pairGet(t.cardReview, t.shownCard) + (now - t.shownStarted)) else t.cardReview
+    nextStart = if (active && now > 0) now else 0
+    next = DeckTiming(nextStart, t.waitAcc, "", 0, pairDrop(t.cardWait, id), pairDrop(otherRev, id))
+  } yield (next, waitMs, totalRev)
+
+def shortCardResult(c: Json, lane: Int, accepted: Bool, reason: String): String =
+  for {
+    question = Diags.jsonField(c, "question")
+    work = Lanes.workAt(Diags.jsonField(c, "evidence"), Cards.str(question, "workload"))
+    chosenSide = if (lane < 0) "b" else if (accepted) "b" else "a"
+    line = if (Json.isNull(work)) "Behavior check recorded" else Lanes.resultLine(work, chosenSide)
+    regions = List.map(Cards.propsOf(c), p => p._1)
+    reasonPart = if (lane < 0 && !Str.isEmpty(reason)) Str.concat("reason: ", Str.concat(reason, "; ")) else ""
+    regionPart = if (List.isEmpty(regions)) "" else Str.concat("; region: ", List.join(regions, ", "))
+  } yield Str.concat("Result (", Str.concat(Cards.str(c, "proposal"), Str.concat("): ", Str.concat(reasonPart, Str.concat(line, regionPart)))))
+
+def revealDecisionLabel(lane: Int, accepted: Bool, reason: String): String =
+  if (lane < 0) if (Str.isEmpty(reason)) "abstained" else Str.concat("abstained [", Str.concat(reason, "]")) else if (accepted) "accepted" else "baseline chosen"
+
+def cardProposalSide(c: Json): String =
+  if (Json.getInt(c, "flip", 0) == 1) "Left" else "Right"
+
 def emptyQueue(epoch: Int): QueueS =
   QueueS(epoch, "", []: List[PreparedCard], []: List[PrepSlot], []: List[String], []: List[String], false, false, false)
 
@@ -125,12 +200,25 @@ def queueStatus(ds: DeckS, q: QueueS): Unit =
     _ = if (q.enabled && q.automatic && !q.retry && Signal.get(ds.session.count) >= 8 && List.isEmpty(q.cards) && List.isEmpty(q.slots)) Signal.set(ds.session.status, "The 8-request limit is reached. No comparison is ready.") else ()
   } yield ()
 
-def queueClear(ls: LaneS, ds: DeckS): IO[Unit] =
+def queueStop(ls: LaneS, ds: DeckS): IO[Unit] =
   queueUpdate(ds, q => for {
+  _ = Signal.set(ds.timing, timingPause(Signal.get(ds.timing), 0))
   next = q.copy(epoch = Signal.get(ds.session.epoch), cards = []: List[PreparedCard], slots = []: List[PrepSlot], enabled = false, retry = false)
   _ = deckEnd(ls, ds)
   _ = queueStatus(ds, next)
 } yield next)
+
+def queueClear(ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    cur = Signal.get(ds.timing)
+    now <- if (cur.waitStarted > 0 || cur.shownStarted > 0) Clock.monotonic() else IO.pure(0)
+    _ <- queueUpdate(ds, q => for {
+  _ = Signal.set(ds.timing, timingPause(Signal.get(ds.timing), now))
+  next = q.copy(epoch = Signal.get(ds.session.epoch), cards = []: List[PreparedCard], slots = []: List[PrepSlot], enabled = false, retry = false)
+  _ = deckEnd(ls, ds)
+  _ = queueStatus(ds, next)
+} yield next)
+  } yield ()
 
 def restoreReady(root: String, cards: List[Json], capacity: Int): IO[List[PreparedCard]] =
   if (capacity <= 0 || List.isEmpty(cards)) IO.pure([]) else for {
@@ -177,6 +265,8 @@ def queueInit(root: String, ds: DeckS): IO[Unit] =
   _ = queueStatus(ds, next)
 } yield next)
 } yield ()
+    now <- Clock.monotonic()
+    _ = if (Signal.get(ds.session.active) == 1 && Str.isEmpty(Signal.get(ds.armed))) Signal.set(ds.timing, timingWaitStart(Signal.get(ds.timing), now)) else ()
   } yield ()
 
 def queueReserve(ds: DeckS, role: String, token: String): IO[Bool] =
@@ -259,7 +349,8 @@ def queuePulse(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
   _ <- if (!q.enabled || q.retry) IO.pure(()) else for {
   _ <- if (Str.isEmpty(q.context) || q.epoch != Signal.get(ds.session.epoch)) queueInit(root, ds) else IO.pure(())
   current <- queueRead(ds)
-  _ = if (Str.isEmpty(Signal.get(ds.armed)) && List.nonEmpty(current.cards)) presentCard(List.at(current.cards, 0), ls, ds) else ()
+  now <- Clock.monotonic()
+  _ = if (Str.isEmpty(Signal.get(ds.armed)) && List.nonEmpty(current.cards)) presentCardAt(List.at(current.cards, 0), ls, ds, now) else if (Str.isEmpty(Signal.get(ds.armed))) Signal.set(ds.timing, timingWaitStart(Signal.get(ds.timing), now)) else ()
   owner <- Ref.get(ds.session.reviews)
   _ <- if (!Str.isEmpty(owner.token)) IO.pure(()) else queueReviewOne(root, ls, ds)
   latest <- queueRead(ds)
@@ -297,6 +388,12 @@ def queueReviewReserved(root: String, token: String, ls: LaneS, ds: DeckS): IO[U
 } yield ()
   } yield ()
 
+def recordAutoWait(ds: DeckS): IO[Int] =
+  Clock.monotonic().map(now => for {
+  res = timingConsumeAutoWait(Signal.get(ds.timing), Signal.get(ds.session.active) == 1, now)
+  _ = Signal.set(ds.timing, res._1)
+} yield res._2)
+
 def queuePrepare(root: String, name: String, token: String, ls: LaneS, ds: DeckS): IO[Unit] =
   (for {
   _ <- Cards.recover(root)
@@ -307,19 +404,22 @@ def queuePrepare(root: String, name: String, token: String, ls: LaneS, ds: DeckS
   card <- Cards.freeze(root, name, props, flip)
   q <- queueRead(ds)
   source = Str.concat("source:", Cards.str(card, "b"))
-  _ <- if (Cards.str(card, "a") == Cards.str(card, "b")) Cards.automatic(root, card, "unchanged-source").flatMap(_ => queueExclude(ds, token, name, [source])) else if (List.contains(q.seen, source)) Cards.automatic(root, card, "duplicate-source").flatMap(_ => queueExclude(ds, token, name, [source])) else for {
+  _ <- if (Cards.str(card, "a") == Cards.str(card, "b")) recordAutoWait(ds).flatMap(w => Cards.automaticWithWait(root, card, "unchanged-source", w)).flatMap(_ => queueExclude(ds, token, name, [source])).flatMap(_ => Session.refreshSummary(root, ds.session)) else if (List.contains(q.seen, source)) recordAutoWait(ds).flatMap(w => Cards.automaticWithWait(root, card, "duplicate-source", w)).flatMap(_ => queueExclude(ds, token, name, [source])).flatMap(_ => Session.refreshSummary(root, ds.session)) else for {
   reviewed <- reviewProposal(root, toml, disk, Deck.applyProposal(disk, props)).map(_ => true).handleErrorWith(e => if (q.automatic && Signal.get(ds.session.mode) == 1 && Str.startsWith(name, "local-") && (e == "scuzz check" || Str.startsWith(e, "scuzz check: ") || Str.startsWith(e, "scuzz ide: candidate workload fails:"))) queueReject(root, name, token, card, e, ds).map(_ => false) else IO.fail(e))
   _ <- if (!reviewed) IO.pure(()) else for {
   raw <- Fs.read(Lanes.reportPathAt(root, "ide"))
-  ready <- Cards.complete(root, card, raw)
-  _ <- if (Cards.str(ready, "status") == "excluded") queueExclude(ds, token, name, [source]) else for {
+  hasItems = List.nonEmpty(Lanes.workItems(LspClient.parseJson(raw)))
+  autoWait <- if (hasItems) IO.pure(-1) else recordAutoWait(ds)
+  ready <- Cards.completeWithWait(root, card, raw, autoWait)
+  _ <- if (Cards.str(ready, "status") == "excluded") queueExclude(ds, token, name, [source]).flatMap(_ => Session.refreshSummary(root, ds.session)) else for {
   cached <- loadCard(root, ready, disk, props)
   _ <- Cards.current(root, ready)
   current <- queueRead(ds)
   outcome = Str.concat("outcome:", cached.outcome)
-  _ <- if (List.contains(current.seen, outcome)) Cards.automatic(root, ready, "duplicate-outcome").flatMap(_ => queueExclude(ds, token, name, [source, outcome])) else queueUpdate(ds, latest => if (latest.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || latest.context != Cards.setHash(Cards.pairs(Proposal.field(ready, "inputs"))) || !List.exists(latest.slots, slot => slot.token == token && slot.role == "review" && slot.name == name)) latest else for {
+  now <- Clock.monotonic()
+  _ <- if (List.contains(current.seen, outcome)) recordAutoWait(ds).flatMap(w => Cards.automaticWithWait(root, ready, "duplicate-outcome", w)).flatMap(_ => queueExclude(ds, token, name, [source, outcome])).flatMap(_ => Session.refreshSummary(root, ds.session)) else queueUpdate(ds, latest => if (latest.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || latest.context != Cards.setHash(Cards.pairs(Proposal.field(ready, "inputs"))) || !List.exists(latest.slots, slot => slot.token == token && slot.role == "review" && slot.name == name)) latest else for {
   next = latest.copy(cards = List.append(latest.cards, cached), slots = List.filter(latest.slots, slot => slot.token != token), seen = List.distinct(List.concat(latest.seen, [source, outcome])), ignored = List.distinct(name :: latest.ignored))
-  _ = if (List.isEmpty(latest.cards) && Signal.get(ds.busy) == 0) presentCard(cached, ls, ds) else ()
+  _ = if (List.isEmpty(latest.cards) && Signal.get(ds.busy) == 0) presentCardAt(cached, ls, ds, now) else Signal.set(ds.timing, timingNoteBackgroundReady(Signal.get(ds.timing), Cards.str(ready, "id")))
   _ = queueStatus(ds, next)
 } yield next)
 } yield ()
@@ -327,7 +427,7 @@ def queuePrepare(root: String, name: String, token: String, ls: LaneS, ds: DeckS
 } yield ()
 } yield ()).handleErrorWith(e => if (e != Cards.stalePublicationMessage()) IO.fail(e) else for {
   q <- queueRead(ds)
-  _ <- if (q.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || !List.exists(q.slots, slot => slot.token == token && slot.role == "review" && slot.name == name)) IO.pure(()) else Cards.excludePublication(root, name, q.context).flatMap(_ => queueExclude(ds, token, name, []))
+  _ <- if (q.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || !List.exists(q.slots, slot => slot.token == token && slot.role == "review" && slot.name == name)) IO.pure(()) else recordAutoWait(ds).flatMap(w => Cards.excludePublicationWithWait(root, name, q.context, w)).flatMap(_ => queueExclude(ds, token, name, [])).flatMap(_ => Session.refreshSummary(root, ds.session))
 } yield ())
 
 def queueReject(root: String, name: String, token: String, card: Json, error: String, ds: DeckS): IO[Unit] =
@@ -335,8 +435,10 @@ def queueReject(root: String, name: String, token: String, card: Json, error: St
     _ <- Cards.current(root, card)
     raw <- Chrome.readOr(Lanes.reportPathAt(root, "ide"))
     rejected = Json.set(Json.set(card, "diagnostic", Json.Str(error)), "evidence", LspClient.parseJson(raw))
-    _ <- Cards.automatic(root, rejected, "candidate-failed")
+    waitMs <- recordAutoWait(ds)
+    _ <- Cards.automaticWithWait(root, rejected, "candidate-failed", waitMs)
     _ <- queueExclude(ds, token, name, [Str.concat("source:", Cards.str(card, "b"))])
+    _ <- Session.refreshSummary(root, ds.session)
     _ = if (Signal.get(ds.session.active) == 1) Signal.set(ds.session.reviewStatus, "Suggestion fails checks. Another suggestion is required.") else ()
     _ = if (Signal.get(ds.session.active) == 1) Signal.set(ds.session.status, if (Signal.get(ds.session.count) < 8) "Suggestion fails checks. Preparing another suggestion." else "The 8-request limit is reached. No comparison is ready.") else ()
   } yield ()
@@ -348,18 +450,18 @@ def queueExclude(ds: DeckS, token: String, name: String, keys: List[String]): IO
 } yield next)
 
 def deckRandom(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
-  if (Signal.get(ds.busy) != 0 || Signal.get(ds.session.active) != 1) IO.pure(()) else queueUpdate(ds, q => if (q.retry || List.len(q.cards) != 2) q else for {
+  if (Signal.get(ds.busy) != 0 || Signal.get(ds.session.active) != 1) IO.pure(()) else Clock.monotonic().flatMap(now => queueUpdate(ds, q => if (q.retry || List.len(q.cards) != 2) q else for {
   cards = [List.at(q.cards, 1), List.at(q.cards, 0)]
-  _ = presentCard(List.at(cards, 0), ls, ds)
-} yield q.copy(cards = cards))
+  _ = presentCardAt(List.at(cards, 0), ls, ds, now)
+} yield q.copy(cards = cards)))
 
 def queueAdvance(ls: LaneS, ds: DeckS, id: String): IO[Unit] =
-  queueUpdate(ds, q => if (List.isEmpty(q.cards) || Cards.str(List.at(q.cards, 0).card, "id") != id) q else for {
+  Clock.monotonic().flatMap(now => queueUpdate(ds, q => if (List.isEmpty(q.cards) || Cards.str(List.at(q.cards, 0).card, "id") != id) q else for {
   next = q.copy(cards = List.tail(q.cards))
   _ = deckEnd(ls, ds)
-  _ = if (List.isEmpty(next.cards)) () else presentCard(List.at(next.cards, 0), ls, ds)
+  _ = if (List.isEmpty(next.cards)) Signal.set(ds.timing, timingWaitStart(Signal.get(ds.timing), now)) else presentCardAt(List.at(next.cards, 0), ls, ds, now)
   _ = queueStatus(ds, next)
-} yield next)
+} yield next))
 
 def loadCard(root: String, ready: Json, disk: List[(String, String)], props: List[(String, String)]): IO[PreparedCard] =
   for {
@@ -372,6 +474,9 @@ def loadCard(root: String, ready: Json, disk: List[(String, String)], props: Lis
   } yield PreparedCard(ready, texts, Deck.guardLines(vers), Deck.changedTriples(disk, Deck.applyProposal(disk, props)), Cards.str(ready, "outcome"))
 
 def presentCard(cached: PreparedCard, ls: LaneS, ds: DeckS): Unit =
+  presentCardAt(cached, ls, ds, 0)
+
+def presentCardAt(cached: PreparedCard, ls: LaneS, ds: DeckS, now: Int): Unit =
   for {
     ready = cached.card
     evidence = Diags.jsonField(ready, "evidence")
@@ -380,6 +485,7 @@ def presentCard(cached: PreparedCard, ls: LaneS, ds: DeckS): Unit =
     _ = Signal.set(ls.raw, raw)
     _ = Signal.set(ls.tls, if (flip == 0) cached.texts else Deck.swapPairs(cached.texts))
     _ = Signal.set(ds.flip, flip)
+    _ = Signal.set(ds.abstainReason, 0)
     _ = Signal.set(ls.works, List.map(Lanes.workItems(LspClient.parseJson(raw)), w => Cards.str(w, "label")))
     _ = Signal.set(ls.srcs, cached.sources)
     _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), cached.guards))
@@ -391,6 +497,7 @@ def presentCard(cached: PreparedCard, ls: LaneS, ds: DeckS): Unit =
     _ = Signal.set(ds.title, "Behavior review")
     _ = Signal.set(ds.card, Cards.text(ready))
     _ = Signal.set(ds.armed, Cards.str(ready, "id"))
+    _ = Signal.set(ds.timing, timingCardShown(Signal.get(ds.timing), Cards.str(ready, "id"), now))
   } yield ()
 
 def deckArm(ls: LaneS): Unit =
@@ -400,22 +507,35 @@ def deckArm(ls: LaneS): Unit =
   } yield ()
 
 def chooseCard(root: String, id: String, lane: Int, ls: LaneS, ds: DeckS, dirties: Unit => List[String], refresh: IO[Unit]): IO[Unit] =
+  chooseCardWithReason(root, id, lane, "", ls, ds, dirties, refresh)
+
+def chooseCardWithReason(root: String, id: String, lane: Int, reason: String, ls: LaneS, ds: DeckS, dirties: Unit => List[String], refresh: IO[Unit]): IO[Unit] =
   if (Signal.get(ds.busy) != 0 || Str.isEmpty(id) || id != Signal.get(ds.armed)) IO.pure(()) else deckGuard(ds, _ => for {
   c = Json.set(LspClient.parseJson(Signal.get(ds.card)), "question", Json.Obj([("workload", Json.Str(Signal.get(ls.work))), ("step", Json.Int(Signal.get(ls.step)))]))
   props = Cards.pairs(Diags.jsonField(c, "proposed"))
   _ <- Cards.need(id == Signal.get(ds.armed) && Cards.str(c, "id") == id, "expired card action")
+  cleanReason = if (lane < 0) reason else ""
+  _ <- Cards.need(Proposal.validAbstentionReason(cleanReason), "invalid abstention reason")
   proposalLane = if (Json.getInt(c, "flip", 0) == 1) 0 else 1
   hits <- if (lane == proposalLane) Cards.dirtyHits(root, props, dirties(())) else IO.pure([]: List[String])
   _ <- Cards.need(List.isEmpty(hits), List.join(Deck.dirtyLines(hits), Lanes.nl()))
   accepted = lane >= 0 && lane == proposalLane
+  now <- Clock.monotonic()
+  timed = timingFinishCard(Signal.get(ds.timing), id, !accepted && Signal.get(ds.session.active) == 1, now)
   _ <- if (accepted) Session.pause(ds.session) else IO.pure(())
-  _ <- Cards.decide(root, c, lane)
+  _ <- Cards.decideWithDetails(root, c, lane, cleanReason, timed._2, timed._3)
+  _ = Signal.set(ds.timing, timed._1)
   _ <- if (accepted) Session.invalidateBaseline(root, ds.session) else IO.pure(())
   bytesMatch <- if (accepted) IO.foreach(props, p => Fs.read(Fs.join(root, p._1)).map(src => src == p._2)) else IO.pure([]: List[Bool])
   _ <- Property.assert("accepted frozen bytes", List.forall(bytesMatch, b => b))
   _ <- if (accepted) refresh else IO.pure(())
-  _ = Signal.set(ds.last, Deck.revealText(if (lane < 0) "abstained" else if (accepted) "accepted" else "baseline chosen", Cards.str(c, "proposal"), if (Signal.get(ds.flip) == 1) "Left" else "Right"))
-  _ <- if (accepted) queueClear(ls, ds).flatMap(_ => Session.start(root, ds.session)).flatMap(_ => queueInit(root, ds)) else queueAdvance(ls, ds, id)
+  diskNow <- Cards.own(root).handleErrorWith(_ => IO.pure([]: List[(String, String)]))
+  diskPaths = List.map(diskNow, f => f._1)
+  touchedRegions = List.distinct(List.filter(List.map(props, p => p._1), p => List.contains(diskPaths, p)))
+  _ = Signal.set(ds.lastRegions, touchedRegions)
+  _ = Signal.set(ds.lastResult, shortCardResult(c, lane, accepted, cleanReason))
+  _ = Signal.set(ds.last, Deck.revealText(revealDecisionLabel(lane, accepted, cleanReason), Cards.str(c, "proposal"), cardProposalSide(c)))
+  _ <- if (accepted) queueClear(ls, ds).flatMap(_ => Session.start(root, ds.session)).flatMap(_ => queueInit(root, ds)) else queueAdvance(ls, ds, id).flatMap(_ => if (Signal.get(ds.session.active) == 1) Session.exportRequest(root, ds.session, false).map(_ => ()) else Session.refreshSummary(root, ds.session))
   _ <- dropProposal(root, Cards.str(c, "proposal"))
   _ <- queuePulse(root, ls, ds)
 } yield ()).handleErrorWith(e => if (id != Signal.get(ds.armed)) IO.pure(()) else queueUpdate(ds, q => for {
@@ -459,7 +579,7 @@ def editorWrite(ls: LaneS, ds: DeckS, io: Unit => IO[Unit]): IO[Unit] =
   _ <- queueClear(ls, ds)
   _ <- Session.invalidateBaseline(Signal.get(ds.root), ds.session)
   _ <- io(())
-  _ <- if (active == 1) Session.start(Signal.get(ds.root), ds.session).flatMap(_ => queueInit(Signal.get(ds.root), ds)) else IO.pure(())
+  _ <- if (active == 1) Session.start(Signal.get(ds.root), ds.session).flatMap(_ => queueInit(Signal.get(ds.root), ds)) else Session.refreshSummary(Signal.get(ds.root), ds.session)
 } yield ())
 
 def undoCard(root: String, ls: LaneS, ds: DeckS, dirties: Unit => List[String], refresh: IO[Unit]): IO[Unit] =
@@ -471,8 +591,9 @@ def undoCard(root: String, ls: LaneS, ds: DeckS, dirties: Unit => List[String], 
   _ <- Session.invalidateBaseline(root, ds.session)
   _ <- Cards.undo(root)
   _ <- refresh
+  _ = Signal.set(ds.lastResult, "")
   _ = Signal.set(ds.last, "Undo completes")
-  _ <- if (active == 1) Session.start(root, ds.session).flatMap(_ => queueInit(root, ds)) else IO.pure(())
+  _ <- if (active == 1) Session.start(root, ds.session).flatMap(_ => queueInit(root, ds)) else Session.refreshSummary(root, ds.session)
 } yield ()).handleErrorWith(e => IO.pure(Signal.set(ls.status, [e])))
 
 def writeMutant(root: String, kept: List[(String, String, Prog)], disk: List[(String, String)], site: Int): IO[Unit] =
@@ -860,13 +981,17 @@ Y
     deckTitle = Signal.make("")
     deckFlip = Signal.make(0)
     deckLast = Signal.make("")
+    deckLastResult = Signal.make("")
+    deckLastRegions = Signal.make([]: List[String])
+    abstainReason = Signal.make(0)
+    deckTiming = Signal.makeN("$mirror", emptyTiming())
     deckBusy = Signal.make(0)
     lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, srcFiles, playOn, questionWork, resultLeft, resultRight, deckFlip, evidenceScope, evidenceDetails)
     deckCard = Signal.make("")
     objectiveSession <- Session.create(root)
     readyQueue = Signal.makeN("$mirror", emptyQueue(Signal.get(objectiveSession.epoch)).copy(enabled = Signal.get(objectiveSession.active) == 1))
     readyStatus = Signal.make("")
-    deck = DeckS(deckCard, deckPending, deckArmed, deckTitle, deckFlip, deckLast, deckBusy, objectiveSession, readyQueue, readyStatus, dirSig)
+    deck = DeckS(deckCard, deckPending, deckArmed, deckTitle, deckFlip, deckLast, deckLastResult, deckLastRegions, abstainReason, deckTiming, deckBusy, objectiveSession, readyQueue, readyStatus, dirSig)
     _ <- if (Str.isEmpty(recoveryError)) loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel) else IO.pure(Signal.set(deltaStatus, [recoveryError]))
     _ = queueStatus(deck, Signal.get(readyQueue))
     _ = LspClient.frame("{}")
@@ -1063,7 +1188,19 @@ Y
   line <- runProject(Signal.get(dirSig))
   runOut = List.append(Signal.get(output), line)
   _ = Signal.set(output, runOut)
-} yield ()), View.text("Package target"), View.wrap([View.choiceChip(packageChoice, 0, "Linux"), View.choiceChip(packageChoice, 1, "macOS"), View.choiceChip(packageChoice, 2, "Android"), View.choiceChip(packageChoice, 3, "iOS"), View.choiceChip(packageChoice, 4, "Web")]), View.button("Build package", _ => if (Signal.get(packageChoice) < 0) IO.pure(Signal.set(packageStatus, "Select a target before you build")) else startPackage(Signal.get(dirSig), packageTarget(Signal.get(packageChoice)), packagePid, packageStatus, packageOutput)), View.bindText(packageStatus), View.bindText(packageOutput), View.showWhen(showOut, 1, View.each(output, s => View.text(s)))])), View.column([View.maxSize(0, 64, View.row([View.expanded(1, View.textField(objectiveSession.objective, "One short objective")), View.wrap([View.showWhen(objectiveSession.active, 0, View.button("Start", _ => queueClear(lanes, deck).flatMap(_ => Session.start(Signal.get(dirSig), objectiveSession)).flatMap(_ => deckNext(Signal.get(dirSig), lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e))))), View.showWhen(Signal.map(objectiveSession.active, active => if (active == 1 && Signal.get(objectiveSession.mode) == 1 && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.button("Generate suggestion", _ => queueGenerate(Signal.get(dirSig), lanes, deck).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e))))), View.showWhen(Signal.map(readyQueue, q => if (q.retry) 1 else 0), 1, View.button("Retry preparation", _ => queueRetry(Signal.get(dirSig), lanes, deck))), View.choiceChip(developSection, 1, "Code"), View.choiceChip(developSection, 2, "Session")])])), View.showWhen(Signal.map(deltaStatus, rows => if (List.exists(rows, row => Str.startsWith(row, "unguarded:"))) 1 else 0), 1, View.fontSize(12, View.text("unguarded: no claims"))), View.showWhen(Signal.map(readyQueue, q => if (q.retry && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.bindText(readyStatus)), View.showWhen(Signal.map(readyQueue, q => if (!q.retry && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.bindText(objectiveSession.status)), View.showWhen(evidenceDetails, 0, View.bindText(stepTitle)), View.showWhen(evidenceDetails, 0, View.expanded(1, View.column([View.showWhen(Signal.map(deckArmed, id => if (Str.isEmpty(id)) 0 else 1), 1, View.expanded(1, View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => View.column([View.expanded(1, View.row([View.expanded(1, reviewLane("Left", stepViewA, rowsA, resultLeft, laneChoice(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig, 0))), View.expanded(1, reviewLane("Right", stepViewB, rowsB, resultRight, laneChoice(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig, 1)))])), View.row([View.outlinedButton("Can't decide", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(Signal.get(dirSig), id, -1, lanes, deck, _ => [], IO.pure(())))), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.choiceChip(evidenceDetails, 1, "More evidence"), View.fontSize(12, View.text("Recorded structure"))])])))), View.showWhen(Signal.map(deckArmed, id => if (Str.isEmpty(id)) 1 else 0), 1, View.expanded(1, View.column([View.expanded(1, View.row([View.expanded(1, reviewLane("Left", stepViewA, rowsA, resultLeft, View.text(""))), View.expanded(1, reviewLane("Right", stepViewB, rowsB, resultRight, View.text("")))])), View.row([View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.choiceChip(evidenceDetails, 1, "More evidence")])]))), View.showWhen(Signal.map(deckLast, text => if (Str.isEmpty(text)) 0 else 1), 1, View.bindText(deckLast))]))), View.showWhen(evidenceDetails, 1, View.expanded(1, View.column([View.choiceChip(evidenceDetails, 0, "Question"), View.expanded(1, View.scroll(View.column([View.wrap([View.button("Diff", _ => deckGuard(deck, _ => for {
+} yield ()), View.text("Package target"), View.wrap([View.choiceChip(packageChoice, 0, "Linux"), View.choiceChip(packageChoice, 1, "macOS"), View.choiceChip(packageChoice, 2, "Android"), View.choiceChip(packageChoice, 3, "iOS"), View.choiceChip(packageChoice, 4, "Web")]), View.button("Build package", _ => if (Signal.get(packageChoice) < 0) IO.pure(Signal.set(packageStatus, "Select a target before you build")) else startPackage(Signal.get(dirSig), packageTarget(Signal.get(packageChoice)), packagePid, packageStatus, packageOutput)), View.bindText(packageStatus), View.bindText(packageOutput), View.showWhen(showOut, 1, View.each(output, s => View.text(s)))])), View.column([View.maxSize(0, 64, View.row([View.expanded(1, View.textField(objectiveSession.objective, "One short objective")), View.wrap([View.showWhen(objectiveSession.active, 0, View.button("Start", _ => queueClear(lanes, deck).flatMap(_ => Session.start(Signal.get(dirSig), objectiveSession)).flatMap(_ => deckNext(Signal.get(dirSig), lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e))))), View.showWhen(Signal.map(objectiveSession.active, active => if (active == 1 && Signal.get(objectiveSession.mode) == 1 && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.button("Generate suggestion", _ => queueGenerate(Signal.get(dirSig), lanes, deck).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e))))), View.showWhen(Signal.map(readyQueue, q => if (q.retry) 1 else 0), 1, View.button("Retry preparation", _ => queueRetry(Signal.get(dirSig), lanes, deck))), View.choiceChip(developSection, 1, "Code"), View.choiceChip(developSection, 2, "Session")])])), View.showWhen(Signal.map(deltaStatus, rows => if (List.exists(rows, row => Str.startsWith(row, "unguarded:"))) 1 else 0), 1, View.fontSize(12, View.text("unguarded: no claims"))), View.showWhen(Signal.map(readyQueue, q => if (q.retry && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.bindText(readyStatus)), View.showWhen(Signal.map(readyQueue, q => if (!q.retry && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.bindText(objectiveSession.status)), View.showWhen(evidenceDetails, 0, View.bindText(stepTitle)), View.showWhen(evidenceDetails, 0, View.expanded(1, View.column([View.showWhen(Signal.map(deckArmed, id => if (Str.isEmpty(id)) 0 else 1), 1, View.expanded(1, View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => View.column([View.expanded(1, View.row([View.expanded(1, reviewLane("Left", stepViewA, rowsA, resultLeft, laneChoice(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig, 0))), View.expanded(1, reviewLane("Right", stepViewB, rowsB, resultRight, laneChoice(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig, 1)))])), View.wrap([View.outlinedButton("Can't decide", _ => Session.guard(objectiveSession).flatMap(_ => chooseCardWithReason(Signal.get(dirSig), id, -1, Proposal.abstentionReasonAt(Signal.get(abstainReason)), lanes, deck, _ => [], IO.pure(())))), View.choiceChip(abstainReason, 0, "No reason"), View.choiceChip(abstainReason, 1, "No visible difference"), View.choiceChip(abstainReason, 2, "Need another scenario"), View.choiceChip(abstainReason, 3, "Outside my goal"), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.choiceChip(evidenceDetails, 1, "More evidence"), View.fontSize(12, View.text("Recorded structure"))])])))), View.showWhen(Signal.map(deckArmed, id => if (Str.isEmpty(id)) 1 else 0), 1, View.expanded(1, View.column([View.expanded(1, View.row([View.expanded(1, reviewLane("Left", stepViewA, rowsA, resultLeft, View.text(""))), View.expanded(1, reviewLane("Right", stepViewB, rowsB, resultRight, View.text("")))])), View.row([View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.choiceChip(evidenceDetails, 1, "More evidence")])]))), View.each(Signal.map(deckLast, text => if (Str.isEmpty(text)) []: List[String] else [text]), lastText => View.column([View.text(lastText), View.showWhen(Signal.map(deckLastResult, text => if (Str.isEmpty(text)) 0 else 1), 1, View.bindText(deckLastResult)), View.wrap([View.bindText(Signal.map(objectiveSession.paths, p => Str.concat("Region focus: ", p))), View.outlinedButton("Retain region", _ => for {
+  _ = Signal.set(playOn, 0)
+  _ <- Session.selectRegion(Signal.get(dirSig), objectiveSession, Session.allowed(objectiveSession), _ => deckNext(Signal.get(dirSig), lanes, deck), _ => queueClear(lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e)))
+} yield ()), View.showWhen(Signal.map(deckLastRegions, rs => if (List.isEmpty(rs)) 0 else 1), 1, View.outlinedButton("Focus card region", _ => for {
+  _ = Signal.set(playOn, 0)
+  _ <- Session.selectRegion(Signal.get(dirSig), objectiveSession, Signal.get(deckLastRegions), _ => deckNext(Signal.get(dirSig), lanes, deck), _ => queueClear(lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e)))
+} yield ())), View.each(lives, rel => View.outlinedButton(Str.concat("Focus ", rel), _ => for {
+  _ = Signal.set(playOn, 0)
+  _ <- Session.selectRegion(Signal.get(dirSig), objectiveSession, [rel], _ => deckNext(Signal.get(dirSig), lanes, deck), _ => queueClear(lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e)))
+} yield ())), View.outlinedButton("All regions", _ => for {
+  _ = Signal.set(playOn, 0)
+  _ <- Session.selectRegion(Signal.get(dirSig), objectiveSession, Signal.get(lives), _ => deckNext(Signal.get(dirSig), lanes, deck), _ => queueClear(lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e)))
+} yield ())])]))]))), View.showWhen(evidenceDetails, 1, View.expanded(1, View.column([View.choiceChip(evidenceDetails, 0, "Question"), View.expanded(1, View.scroll(View.column([View.wrap([View.button("Diff", _ => deckGuard(deck, _ => for {
   _ = deckEnd(lanes, deck)
   _ = Signal.set(evidenceDetails, 1)
   _ = Property.sometimes("tappedDiff")
@@ -1121,5 +1258,5 @@ Y
   _ = Property.sometimes("tappedStep")
   _ = Signal.set(playOn, 0)
   _ = showStep(step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
-} yield ()))), View.expanded(1, View.column([View.bindText(revLabel), View.text("Recorded structure"), View.bindText(resultLeft), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s))])), View.expanded(1, View.column([View.bindText(laneBLabel), View.text("Recorded structure"), View.bindText(resultRight), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s))]))]), Lanes.srcSection(lanes.srcs, deckFlip)])))])))])))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => queueClear(lanes, deck)).flatMap(_ => stopOwned(fuzzPid, diffPid, packagePid)))
+} yield ()))), View.expanded(1, View.column([View.bindText(revLabel), View.text("Recorded structure"), View.bindText(resultLeft), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s))])), View.expanded(1, View.column([View.bindText(laneBLabel), View.text("Recorded structure"), View.bindText(resultRight), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s))]))]), Lanes.srcSection(lanes.srcs, deckFlip)])))])))])))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => queueStop(lanes, deck)).flatMap(_ => stopOwned(fuzzPid, diffPid, packagePid)))
   } yield ()
