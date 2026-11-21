@@ -4003,7 +4003,7 @@ def probeMain(): IO[Unit] =
     files = []: List[(String, String)]
     ens = []: List[En]
     faults = []: List[(Int, Int)]
-    job = FuzzJob(dir, dir, "", "probe", false, 0, 42, false, files, false, "", false, ens, true, server, srv, faults, false, false, false)
+    job = FuzzJob(dir, dir, "", "probe", false, 0, 42, false, files, false, "", false, ens, true, server, srv, faults, false, false, false, false)
     first <- Drive.evProbe(job, dir, "KIT=sealed\\n")
     before <- Ref.get(srv)
     second <- if (mode == "slow") Drive.evProbe(job, dir, "KIT=sealed\\n") else IO.pure(1)

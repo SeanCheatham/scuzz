@@ -851,6 +851,143 @@ fi
 "$SCUZZ" check --message-format=json examples/hello | tee /tmp/hello-check.json
 grep -q '"severity":"info"' /tmp/hello-check.json
 grep -q 'unclaimed def' /tmp/hello-check.json
+python3 - "$SCUZZ" <<'PYJSONCLI'
+import json
+import pathlib
+import socket
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+cli = str(pathlib.Path(sys.argv[1]).resolve())
+
+def run_json(*args, ok=True):
+    proc = subprocess.run([cli, *args], text=True, capture_output=True, timeout=120)
+    assert (proc.returncode == 0) == ok, (args, proc.returncode, proc.stdout, proc.stderr)
+    lines = proc.stdout.splitlines()
+    assert len(lines) == 1, (args, proc.stdout, proc.stderr)
+    return json.loads(lines[0])
+
+with tempfile.TemporaryDirectory(prefix="scuzz-json-cli-") as tmp:
+    base = pathlib.Path(tmp)
+    empty = base / "empty"
+    empty.mkdir()
+
+    # 1. Missing manifest failures emit single-line JSON and exit 1.
+    for sub in (["fuzz"], ["package"], ["ide", "crank"], ["ide", "serve", "--once"]):
+        err_doc = run_json(*sub, "--message-format=json", str(empty), ok=False)
+        assert err_doc["v"] == 1 and err_doc["ok"] is False and err_doc["status"] == "failed", err_doc
+        assert "scuzz.toml" in err_doc["error"], err_doc
+
+    # 2. fuzz pass + relate pass/fail + package pass/fail (editor trailing-flag order).
+    pkg = base / "pkg"
+    (pkg / "src").mkdir(parents=True)
+    (pkg / "scuzz.toml").write_text('[package]\nname = "json-proof"\n')
+    (pkg / "src/Main.scuzz").write_text(
+        'def pos(n: Int): Bool = n > 0\n'
+        'def big(n: Int): Bool = n > 2\n'
+        'def neg(n: Int): Bool = n < 0\n'
+        '@main def main: IO[Unit] = IO.println("hi")\n'
+    )
+    (pkg / "law.scuzz_verify").write_text(
+        'oracle a(n: Int): Bool = if (Main.pos(n)) true else true\n'
+        'oracle b(n: Int): Bool = if (Main.big(n)) true else true\n'
+    )
+    fuzz_ok = run_json("fuzz", "--iterations", "0", "--message-format=json", str(pkg), ok=True)
+    assert fuzz_ok["v"] == 1 and fuzz_ok["kind"] == "fuzz" and fuzz_ok["status"] == "passed" and fuzz_ok["fuzz"]["ok"] is True, fuzz_ok
+
+    rel_ok = run_json("fuzz", "--relate", "--message-format=json", str(pkg), ok=True)
+    assert rel_ok["kind"] == "relate" and rel_ok["ok"] is True and rel_ok["failed"] == 0, rel_ok
+
+    (pkg / "law.scuzz_verify").write_text(
+        'oracle pos(n: Int): Bool = Main.pos(n)\n'
+        'oracle neg(n: Int): Bool = Main.neg(n)\n'
+    )
+    rel_bad = run_json("fuzz", "--relate", "--message-format=json", str(pkg), ok=False)
+    assert rel_bad["kind"] == "relate" and rel_bad["ok"] is False and rel_bad["failed"] >= 1, rel_bad
+
+    fuzz_bad = run_json("fuzz", "--iterations", "16", "--seed", "1", "--message-format=json", str(pkg), ok=False)
+    assert fuzz_bad["v"] == 1 and fuzz_bad["kind"] == "fuzz" and fuzz_bad["status"] == "failed" and fuzz_bad["fuzz"]["ok"] is False, fuzz_bad
+    repro_path = pathlib.Path(fuzz_bad["fuzz"]["repro"])
+    assert repro_path.is_file(), fuzz_bad
+    rep_bad = run_json("fuzz", "--replay", str(repro_path), "--message-format=json", str(pkg), ok=False)
+    assert rep_bad["v"] == 1 and rep_bad["kind"] == "replay" and rep_bad["status"] == "failed", rep_bad
+
+    pkg_ok = run_json("package", str(pkg), "--message-format=json", ok=True)
+    assert pkg_ok["kind"] == "package" and pkg_ok["ok"] is True and pkg_ok["status"] == "passed", pkg_ok
+    assert pkg_ok["artifacts"] and pathlib.Path(pkg_ok["artifacts"][0]).exists(), pkg_ok
+
+    pkg_bad = run_json("package", "--target", "web", str(pkg), "--message-format=json", ok=False)
+    assert pkg_bad["kind"] == "package" and pkg_bad["ok"] is False and pkg_bad["status"] == "failed", pkg_bad
+    assert pkg_bad["error"], pkg_bad
+
+    # 3. ide crank + ide serve --once emit single-line JSON with zero progress chatter.
+    ws = base / "ws"
+    (ws / "src").mkdir(parents=True)
+    (ws / "corpus").mkdir(parents=True)
+    (ws / "scuzz.toml").write_text('[package]\nname = "ide-json"\n')
+    (ws / "src/Main.scuzz").write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", "v1")\n\n@main def main: IO[Unit] =\n  step()\n')
+    (ws / "smoke.scuzz_scenario").write_text(
+        'def setup(): IO[Unit] =\n  Fs.write("out.txt", "init")\n\n'
+        'def runStep(): IO[Unit] =\n  Main.step()\n'
+    )
+    (ws / "smoke.scuzz_verify").write_text(
+        'def writesVersion(t: Timeline): Verdict =\n'
+        '  Verdict.every(t, i => !Timeline.driveHas(t, i, "runStep") || Timeline.fileTextIs(t, i, "out.txt", "v1") || Timeline.fileTextIs(t, i, "out.txt", "v2"))\n'
+    )
+    (ws / "corpus/run.toml").write_text('[fuzz]\nevents = ["drive runStep"]\n')
+    subprocess.run([cli, "fmt", str(ws)], check=True, capture_output=True, text=True, timeout=30)
+    prop = ws / "build/proposals/01-next/src"
+    prop.mkdir(parents=True)
+    (prop / "Main.scuzz").write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", "v2")\n\n@main def main: IO[Unit] =\n  step()\n')
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    def serve_once(req_builder):
+        srv = subprocess.Popen(
+            [cli, "ide", "serve", "--port", str(port), "--once", "--message-format=json", str(ws)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            first_line = srv.stdout.readline()
+            assert first_line, srv.stderr.read()
+            srv_doc = json.loads(first_line)
+            assert srv_doc["kind"] == "ide-serve" and srv_doc["ok"] is True and srv_doc["status"] == "listening", srv_doc
+            assert srv_doc["port"] == port and srv_doc["token"], srv_doc
+            with urllib.request.urlopen(req_builder(srv_doc["token"]), timeout=5) as resp:
+                assert resp.status == 200
+                payload = json.loads(resp.read().decode())
+            rest_out, rest_err = srv.communicate(timeout=10)
+            assert srv.returncode == 0 and rest_out == "", (srv.returncode, rest_out, rest_err)
+            return payload
+        finally:
+            if srv.poll() is None:
+                srv.kill()
+                srv.wait()
+
+    post_doc = serve_once(lambda tok: urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/ide/sync",
+        data=json.dumps({"v": 1, "id": "st-1", "kind": "steer", "prompt": "switch output to v2"}).encode(),
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+        method="POST",
+    ))
+    assert post_doc["results"][0]["status"] == "queued", post_doc
+
+    crank_ok = run_json("ide", "crank", "--rounds", "1", "--message-format=json", str(ws), ok=True)
+    assert crank_ok["kind"] == "ide-crank" and crank_ok["ok"] is True and crank_ok["published"] == 1, crank_ok
+
+    sync_doc = serve_once(lambda tok: urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/ide/sync",
+        headers={"Authorization": f"Bearer {tok}"},
+    ))
+    assert len(sync_doc["cards"]) == 1, sync_doc
+print("cli json evidence ok")
+PYJSONCLI
 "$SCUZZ" lsp --help | tee /tmp/lsp-help.txt
 grep -q "scuzz check" /tmp/lsp-help.txt
 if "$SCUZZ" check testdata/fmt/needs_format > /tmp/fmt-check.err 2>&1; then echo "expected format error" && exit 1; fi
