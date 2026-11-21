@@ -36,7 +36,7 @@ jobs:
     name: linux-${{ matrix.name }}
     needs: linux-build
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -50,9 +50,9 @@ jobs:
           - name: fixedpoint
             slices: fixedpoint
           - name: native
-            slices: install-dry runtime asan ubsan skia embedders
+            slices: install-dry runtime asan ubsan skia embedders kernel package
           - name: apps
-            slices: embedders kernel package ui gpu differential new-ui desktop mobile
+            slices: embedders ui gpu differential new-ui desktop mobile
           - name: fuzz
             slices: embedders fuzz delta
           - name: web
@@ -100,7 +100,7 @@ jobs:
             echo "::endgroup::"
           done
       - name: Upload release artifact
-        if: matrix.name == 'apps'
+        if: matrix.name == 'native'
         uses: actions/upload-artifact@v7
         with:
           name: scuzz-linux-x86_64

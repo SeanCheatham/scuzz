@@ -293,10 +293,10 @@ static int on_main_soon(void (^block)(void)) {
 }
 
 int sz_embedder_reduced_motion(void) {
-  __block int reduced = 0;
-  on_main(^{
+  on_main_soon(^{
     NSWorkspace *workspace = NSWorkspace.sharedWorkspace;
     if (!g_motion_observer) {
+      int reduced;
       g_motion_observer = [workspace.notificationCenter
           addObserverForName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
           object:workspace queue:NSOperationQueue.mainQueue
@@ -310,24 +310,37 @@ int sz_embedder_reduced_motion(void) {
       atomic_store(&g_motion_current, reduced);
       atomic_store(&g_motion_reported, reduced);
       atomic_store(&g_motion_active, 1);
-    } else {
-      reduced = atomic_load(&g_motion_current);
     }
   });
-  return reduced;
+  return atomic_load(&g_motion_current);
 }
 
+struct ScaleJob {
+  double scale;
+  int done;
+};
+
 double sz_embedder_display_scale(void) {
-  __block double scale = 1.0;
+  struct ScaleJob *job;
+  double scale = 1.0;
   if (!sz_embedder_available())
     return 1.0;
-  on_main(^{
-    NSScreen *screen = [NSScreen mainScreen];
-    if (screen)
-      scale = (double)[screen backingScaleFactor];
-    if (scale < 1.0)
-      scale = 1.0;
-  });
+  job = calloc(1, sizeof *job);
+  if (!job)
+    return 1.0;
+  job->scale = 1.0;
+  if (on_main_soon(^{
+        NSScreen *screen = [NSScreen mainScreen];
+        if (screen)
+          job->scale = (double)[screen backingScaleFactor];
+        if (job->scale < 1.0)
+          job->scale = 1.0;
+        if (__sync_lock_test_and_set(&job->done, 1))
+          free(job);
+      }))
+    scale = job->scale;
+  if (__sync_lock_test_and_set(&job->done, 1))
+    free(job);
   return scale;
 }
 
@@ -787,8 +800,10 @@ char *sz_embedder_clipboard_get(void) {
   return out;
 }
 
+/* Do not block worker exit when AppKit stalls on the main thread. */
 void sz_embedder_shutdown(void) {
-  on_main(^{
+  atomic_store(&g_motion_active, 0);
+  on_main_soon(^{
     @autoreleasepool {
       shutdown_on_main();
     }
