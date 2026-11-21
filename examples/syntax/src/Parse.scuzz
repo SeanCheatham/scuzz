@@ -79,11 +79,14 @@ def indexToksGroupsDone(cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n:
   Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total, bad)
 
 def _sp(toks: Toks, i: Int): SpTok =
-  if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "", 0) else for {
-  group = (i / tokGroup()).require(n => n >= 0 && n < List.len(toks.groups))
-  chunks = List.at(toks.groups, group)
-  chunk = (i % tokGroup() / tokChunk()).require(n => n >= 0 && n < List.len(chunks))
-} yield _spOff(List.at(chunks, chunk), i % tokChunk())
+  if (toks.n <= 0 || i < 0) SpTok(Tok.Eof, 0, "", 0) else _spAt(toks, if (i >= toks.n) toks.n - 1 else i)
+
+def _spAt(toks: Toks, i: Int): SpTok =
+  for {
+    group = (i / tokGroup()).require(n => n >= 0 && n < List.len(toks.groups))
+    chunks = List.at(toks.groups, group)
+    chunk = (i % tokGroup() / tokChunk()).require(n => n >= 0 && n < List.len(chunks))
+  } yield _spOff(List.at(chunks, chunk), i % tokChunk())
 
 def _spOff(chunk: List[SpTok], i: Int): SpTok =
   List.at(chunk, i.require(n => n >= 0 && n < List.len(chunk)))
@@ -157,8 +160,11 @@ def _joinTypes(toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
 
 def _joinTypes2(p: (String, Int), toks: Toks, acc: List[String]): (List[String], Int) =
   p match {
-    case (t, j) => if (_is(toks, j, Tok.Comma)) _joinTypes(toks, j + 1, t :: acc) else (List.reverse(t :: acc), j)
+    case (t, j) => if (t == "") ("" :: acc, j) else if (_is(toks, j, Tok.Comma)) _joinTypes(toks, j + 1, t :: acc) else (List.reverse(t :: acc), j)
   }
+
+def _badTypes(ts: List[String]): Bool =
+  List.isEmpty(ts) || List.contains(ts, "")
 
 def parseType(toks: Toks, i: Int): (String, Int) =
   if (_is(toks, i, Tok.LParen)) parseTypeParen(toks, i + 1) else parseTypeArrow(toks, parseTypeApp(toks, i))
@@ -168,7 +174,7 @@ def parseTypeParen(toks: Toks, i: Int): (String, Int) =
 
 def parseTypeParen2(p: (List[String], Int), toks: Toks): (String, Int) =
   p match {
-    case (ts, j) => if (_is(toks, j, Tok.RParen)) parseTypeArrow(toks, (_parenType(ts), j + 1)) else ("", toks.n)
+    case (ts, j) => if (!_badTypes(ts) && _is(toks, j, Tok.RParen)) parseTypeArrow(toks, (_parenType(ts), j + 1)) else ("", j)
   }
 
 def _parenType(ts: List[String]): String =
@@ -178,17 +184,17 @@ def _keepFunParen(t: String): String =
   if (Str.contains(t, " => ")) Str.concat("(", Str.concat(t, ")")) else t
 
 def parseTypeApp(toks: Toks, i: Int): (String, Int) =
-  parseTypeName(toks, i + 1, _identOf(_at(toks, i)))
+  if (_identOf(_at(toks, i)) == "") ("", i) else parseTypeName(toks, i + 1, _identOf(_at(toks, i)))
 
 def parseTypeName(toks: Toks, i: Int, name: String): (String, Int) =
   parseTypeQualified(parseTypeQual(toks, i, name), toks)
 
 def parseTypeQual(toks: Toks, i: Int, name: String): (String, Int) =
-  if (_is(toks, i, Tok.Dot)) parseTypeQual(toks, i + 2, Str.concat(name, Str.concat(".", _identOf(_at(toks, i + 1))))) else (name, i)
+  if (_is(toks, i, Tok.Dot)) if (_identOf(_at(toks, i + 1)) == "") ("", i + 1) else parseTypeQual(toks, i + 2, Str.concat(name, Str.concat(".", _identOf(_at(toks, i + 1))))) else (name, i)
 
 def parseTypeQualified(p: (String, Int), toks: Toks): (String, Int) =
   p match {
-    case (name, j) => parseTypeBrack(toks, j, name)
+    case (name, j) => if (name == "") ("", j) else parseTypeBrack(toks, j, name)
   }
 
 def parseTypeBrack(toks: Toks, i: Int, n: String): (String, Int) =
@@ -196,7 +202,7 @@ def parseTypeBrack(toks: Toks, i: Int, n: String): (String, Int) =
 
 def parseTypeBrackClose(p: (List[String], Int), n: String, toks: Toks): (String, Int) =
   p match {
-    case (ts, j) => if (_is(toks, j, Tok.RBracket)) (Str.concat(n, Str.concat("[", Str.concat(_joinComma(ts), "]"))), j + 1) else ("", toks.n)
+    case (ts, j) => if (!_badTypes(ts) && _is(toks, j, Tok.RBracket)) (Str.concat(n, Str.concat("[", Str.concat(_joinComma(ts), "]"))), j + 1) else ("", j)
   }
 
 def parseTypeArrow(toks: Toks, p: (String, Int)): (String, Int) =
@@ -407,11 +413,11 @@ def parseMatchLam2(p: (Expr, Int)): (Expr, Int) =
   }
 
 def parseIf(toks: Toks, i: Int): (Expr, Int) =
-  parseIf2(parseExpr(toks, i + 2), toks, _off(toks, i))
+  if (_is(toks, i + 1, Tok.LParen)) parseIf2(parseExpr(toks, i + 2), toks, _off(toks, i)) else (Expr.EVar("", _off(toks, i + 1)), i + 1)
 
 def parseIf2(p: (Expr, Int), toks: Toks, off: Int): (Expr, Int) =
   p match {
-    case (c, j) => parseIf3(c, parseExpr(toks, j + 1), toks, off)
+    case (c, j) => if (_is(toks, j, Tok.RParen)) parseIf3(c, parseExpr(toks, j + 1), toks, off) else (Expr.EVar("", _off(toks, j)), j)
   }
 
 def parseIf3(c: Expr, p: (Expr, Int), toks: Toks, off: Int): (Expr, Int) =
@@ -425,10 +431,10 @@ def parseIf4(c: Expr, t: Expr, p: (Expr, Int), off: Int): (Expr, Int) =
   }
 
 def parseFor(toks: Toks, i: Int): (Expr, Int) =
-  if (_is(toks, i + 1, Tok.LBrace)) parseForBinds(toks, i + 2, [], _off(toks, i)) else (Expr.EFor([], Expr.EUnit, _off(toks, i)), i + 1)
+  if (_is(toks, i + 1, Tok.LBrace)) parseForBinds(toks, i + 2, [], _off(toks, i)) else (Expr.EVar("", _off(toks, i + 1)), i + 1)
 
 def parseForBinds(toks: Toks, i: Int, acc: List[Bind], off: Int): (Expr, Int) =
-  if (_is(toks, i, Tok.RBrace)) parseForYield(toks, i + 1, List.reverse(acc), off) else parseForBindsNext(parseForOne(toks, i), toks, acc, off)
+  if (_is(toks, i, Tok.RBrace)) parseForYield(toks, i + 1, List.reverse(acc), off) else if (i >= toks.n || _is(toks, i, Tok.Eof)) (Expr.EVar("", _off(toks, i)), toks.n) else parseForBindsNext(parseForOne(toks, i), toks, acc, off, i)
 
 def parseForOne(toks: Toks, i: Int): (Bind, Int) =
   if (_is(toks, i, Tok.If)) parseForGuard(parseExpr(toks, i + 1)) else parseForPat(parsePat(toks, i), toks)
@@ -440,32 +446,34 @@ def parseForGuard(p: (Expr, Int)): (Bind, Int) =
 
 def parseForPat(p: (String, Int), toks: Toks): (Bind, Int) =
   p match {
-    case (pat, j) => parseForOne3(pat, _is(toks, j, Tok.LeftArrow), parseExpr(toks, j + 1), toks)
+    case (pat, j) => if (pat == "" || !_is(toks, j, Tok.LeftArrow) && !_is(toks, j, Tok.Eq)) (Bind(false, "", Expr.EVar("", _off(toks, j))), toks.n) else parseForOne3(pat, _is(toks, j, Tok.LeftArrow), parseExpr(toks, j + 1), toks)
   }
 
 def parseForOne3(name: String, draw: Bool, p: (Expr, Int), toks: Toks): (Bind, Int) =
   p match {
-    case (v, j) => parseForOne4(name, draw, v, skipAscript(toks, j))
+    case (v, j) => parseForAsc(name, draw, parseArgAsc(v, toks, j))
   }
 
-def skipAscript(toks: Toks, i: Int): Int =
-  if (_is(toks, i, Tok.Colon)) skipAscript2(parseType(toks, i + 1)) else i
-
-def skipAscript2(p: (String, Int)): Int =
+def parseForAsc(name: String, draw: Bool, p: (Expr, Int)): (Bind, Int) =
   p match {
-    case (_, j) => j
+    case (v, j) => (Bind(draw, name, v), j)
   }
 
-def parseForOne4(name: String, draw: Bool, v: Expr, j: Int): (Bind, Int) =
-  (Bind(draw, name, v), j)
+def parseArgAsc(e: Expr, toks: Toks, i: Int): (Expr, Int) =
+  if (_is(toks, i, Tok.Colon)) parseArgAsc2(e, parseType(toks, i + 1), _off(toks, i + 1)) else (e, i)
 
-def parseForBindsNext(p: (Bind, Int), toks: Toks, acc: List[Bind], off: Int): (Expr, Int) =
+def parseArgAsc2(e: Expr, p: (String, Int), off: Int): (Expr, Int) =
   p match {
-    case (b, j) => parseForBinds(toks, j, b :: acc, off)
+    case (ty, j) => if (ty == "") (Expr.EVar("", off), j) else (e, j)
+  }
+
+def parseForBindsNext(p: (Bind, Int), toks: Toks, acc: List[Bind], off: Int, prev: Int): (Expr, Int) =
+  p match {
+    case (b, j) => if (j <= prev) (Expr.EVar("", _off(toks, prev)), toks.n) else parseForBinds(toks, j, b :: acc, off)
   }
 
 def parseForYield(toks: Toks, i: Int, bs: List[Bind], off: Int): (Expr, Int) =
-  parseForYield2(bs, parseExpr(toks, i + 1), off)
+  if (_is(toks, i, Tok.Yield)) parseForYield2(bs, parseExpr(toks, i + 1), off) else (Expr.EVar("", _off(toks, i)), i)
 
 def parseForYield2(bs: List[Bind], p: (Expr, Int), off: Int): (Expr, Int) =
   p match {
@@ -492,7 +500,7 @@ def parseParen2(p: (Expr, Int), toks: Toks): (Expr, Int) =
   }
 
 def parseOneLam(e: Expr, toks: Toks, j: Int): (Expr, Int) =
-  if (_is(toks, j, Tok.Colon)) parseOneLamTy(e, parseType(toks, j + 1), toks) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFromAsc(e, parseExpr(toks, j + 2)) else if (_is(toks, j, Tok.RParen)) (e, j + 1) else (e, j)
+  if (_is(toks, j, Tok.Colon)) parseOneLamTy(e, parseType(toks, j + 1), toks) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFromAsc(e, parseExpr(toks, j + 2)) else if (_is(toks, j, Tok.RParen)) (e, j + 1) else (Expr.EVar("", _off(toks, j)), j)
 
 def parseLamFromAsc(e: Expr, q: (Expr, Int)): (Expr, Int) =
   e match {
@@ -546,25 +554,25 @@ def parseTupleRest(toks: Toks, i: Int, acc: List[Expr]): (Expr, Int) =
 
 def parseTupleRest2(p: (Expr, Int), toks: Toks, acc: List[Expr]): (Expr, Int) =
   p match {
-    case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleRest(toks, j + 1, e :: acc) else (Expr.ETuple(List.reverse(e :: acc)), j + 1)
+    case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleRest(toks, j + 1, e :: acc) else if (_is(toks, j, Tok.RParen)) (Expr.ETuple(List.reverse(e :: acc)), j + 1) else (Expr.EVar("", _off(toks, j)), j)
   }
 
 def parseList(toks: Toks, i: Int): (Expr, Int) =
   if (_is(toks, i + 1, Tok.RBracket)) (Expr.EList([]), i + 2) else parseListElems(toks, i + 1, [])
 
 def parseListElems(toks: Toks, i: Int, acc: List[Expr]): (Expr, Int) =
-  if (_is(toks, i, Tok.RBracket)) (Expr.EList(List.reverse(acc)), i + 1) else parseListNext(parseExpr(toks, i), toks, acc)
+  parseListNext(parseExpr(toks, i), toks, acc)
 
 def parseListNext(p: (Expr, Int), toks: Toks, acc: List[Expr]): (Expr, Int) =
   p match {
-    case (e, j) => if (_is(toks, j, Tok.Comma)) parseListElems(toks, j + 1, e :: acc) else (Expr.EList(List.reverse(e :: acc)), j + 1)
+    case (e, j) => if (_is(toks, j, Tok.Comma)) parseListElems(toks, j + 1, e :: acc) else if (_is(toks, j, Tok.RBracket)) (Expr.EList(List.reverse(e :: acc)), j + 1) else (Expr.EVar("", _off(toks, j)), j)
   }
 
 def parseIdentAtom(toks: Toks, i: Int, s: String): (Expr, Int) =
   if (_is(toks, i + 1, Tok.Arrow)) parseLamBody(toks, i + 2, s) else if (s == "IO" && _is(toks, i + 1, Tok.Dot)) parseIo(toks, i + 2, _off(toks, i)) else if (_kit(s) && _is(toks, i + 1, Tok.Dot)) parseKit(toks, i + 2, s, _off(toks, i)) else (Expr.EVar(s, _off(toks, i)), i + 1)
 
 def parseIo(toks: Toks, i: Int, off: Int): (Expr, Int) =
-  parseIoArgs(toks, i + 1, _identOf(_at(toks, i)), off)
+  if (_identOf(_at(toks, i)) == "") (Expr.EVar("", _off(toks, i)), i) else parseIoArgs(toks, i + 1, _identOf(_at(toks, i)), off)
 
 def parseIoArgs(toks: Toks, i: Int, m: String, off: Int): (Expr, Int) =
   parseIoArgs2(m, parseCallArgs(toks, i), off)
@@ -575,7 +583,7 @@ def parseIoArgs2(m: String, p: (List[Expr], Int), off: Int): (Expr, Int) =
   }
 
 def parseKit(toks: Toks, i: Int, kit: String, off: Int): (Expr, Int) =
-  parseKit2(kit, _identOf(_at(toks, i)), toks, i + 1, off)
+  if (_identOf(_at(toks, i)) == "") (Expr.EVar("", _off(toks, i)), i) else parseKit2(kit, _identOf(_at(toks, i)), toks, i + 1, off)
 
 def parseKit2(kit: String, m: String, toks: Toks, i: Int, off: Int): (Expr, Int) =
   parseKit3(Str.concat(kit, Str.concat(".", m)), parseCallArgs(toks, i), off)
@@ -586,10 +594,10 @@ def parseKit3(f: String, p: (List[Expr], Int), off: Int): (Expr, Int) =
   }
 
 def parseCallArgs(toks: Toks, i: Int): (List[Expr], Int) =
-  if (_is(toks, i, Tok.LParen)) parseArgList(toks, i + 1, []) else ([], i)
+  if (_is(toks, i, Tok.LParen) && !forBindAfter(toks, i)) parseArgList(toks, i + 1, []) else ([], i)
 
 def parseArgList(toks: Toks, i: Int, acc: List[Expr]): (List[Expr], Int) =
-  if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parseArgListNext(parseArg(toks, i), toks, acc)
+  if (_is(toks, i, Tok.RParen) && List.isEmpty(acc)) ([], i + 1) else parseArgListNext(parseArg(toks, i), toks, acc)
 
 def parseArg(toks: Toks, i: Int): (Expr, Int) =
   _at(toks, i) match {
@@ -604,15 +612,20 @@ def parseNamed(name: String, p: (Expr, Int)): (Expr, Int) =
 
 def parseArgListNext(p: (Expr, Int), toks: Toks, acc: List[Expr]): (List[Expr], Int) =
   p match {
-    case (e, j) => parseArgListSep(e, skipAscript(toks, j), toks, acc)
+    case (e, j) => parseArgListAsc(parseArgAsc(e, toks, j), toks, acc)
+  }
+
+def parseArgListAsc(p: (Expr, Int), toks: Toks, acc: List[Expr]): (List[Expr], Int) =
+  p match {
+    case (e, j) => parseArgListSep(e, j, toks, acc)
   }
 
 def parseArgListSep(e: Expr, j: Int, toks: Toks, acc: List[Expr]): (List[Expr], Int) =
-  if (_is(toks, j, Tok.LParen) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) parseArgListSep2(parsePost(toks, (e, j)), toks, acc) else if (_is(toks, j, Tok.Comma)) parseArgList(toks, j + 1, e :: acc) else if (_is(toks, j, Tok.RParen)) (List.reverse(e :: acc), j + 1) else (List.reverse(e :: acc), j)
+  if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) parseArgListSep2(parsePost(toks, (e, j)), toks, acc) else if (_is(toks, j, Tok.Comma)) parseArgList(toks, j + 1, e :: acc) else if (_is(toks, j, Tok.RParen)) (List.reverse(e :: acc), j + 1) else (List.reverse(Expr.EVar("", _off(toks, j)) :: e :: acc), j)
 
 def parseArgListSep2(p: (Expr, Int), toks: Toks, acc: List[Expr]): (List[Expr], Int) =
   p match {
-    case (e, j) => parseArgListSep(e, skipAscript(toks, j), toks, acc)
+    case (e, j) => parseArgListAsc(parseArgAsc(e, toks, j), toks, acc)
   }
 
 def parsePost(toks: Toks, p: (Expr, Int)): (Expr, Int) =
@@ -640,22 +653,22 @@ def afterParenTok(t: Tok, toks: Toks, i: Int, d: Int): Int =
   }
 
 def parseMatch(toks: Toks, e: Expr, i: Int, off: Int): (Expr, Int) =
-  parseMatchArms(toks, e, i + 1, [], off)
+  if (_is(toks, i, Tok.LBrace)) parseMatchArms(toks, e, i + 1, [], off) else (Expr.EVar("", _off(toks, i)), i)
 
 def parseMatchArms(toks: Toks, e: Expr, i: Int, acc: List[Arm], off: Int): (Expr, Int) =
-  if (_is(toks, i, Tok.RBrace)) (Expr.EMatch(e, List.reverse(acc), off), i + 1) else if (_is(toks, i, Tok.Case)) parseMatchArmsNext(parseMatchArm(toks, i + 1), toks, e, acc, off) else (Expr.EMatch(e, List.reverse(acc), off), i)
+  if (_is(toks, i, Tok.RBrace)) (Expr.EMatch(e, List.reverse(acc), off), i + 1) else if (_is(toks, i, Tok.Case)) parseMatchArmsNext(parseMatchArm(toks, i + 1), toks, e, acc, off) else (Expr.EVar("", _off(toks, i)), i)
 
 def parseMatchArm(toks: Toks, i: Int): (Arm, Int) =
   parseMatchArm2(parsePat(toks, i), toks)
 
 def parseMatchArm2(p: (String, Int), toks: Toks): (Arm, Int) =
   p match {
-    case (pat, j) => if (_is(toks, j, Tok.If)) parseMatchArmG(pat, parseExpr(toks, j + 1), toks) else parseMatchArm3(pat, "", parseExpr(toks, j + 1))
+    case (pat, j) => if (_is(toks, j, Tok.If)) parseMatchArmG(pat, parseExpr(toks, j + 1), toks) else if (_is(toks, j, Tok.Arrow)) parseMatchArm3(pat, "", parseExpr(toks, j + 1)) else (Arm("", "#parse", Expr.EVar("", _off(toks, j))), j)
   }
 
 def parseMatchArmG(pat: String, p: (Expr, Int), toks: Toks): (Arm, Int) =
   p match {
-    case (g, j) => parseMatchArm3(pat, if (parseErrorExpr(g)) "#parse" else pretty0(g), parseExpr(toks, j + 1))
+    case (g, j) => if (_is(toks, j, Tok.Arrow)) parseMatchArm3(pat, if (parseErrorExpr(g)) "#parse" else pretty0(g), parseExpr(toks, j + 1)) else (Arm("", "#parse", Expr.EVar("", _off(toks, j))), j)
   }
 
 def parseMatchArm3(pat: String, g: String, p: (Expr, Int)): (Arm, Int) =
@@ -678,7 +691,7 @@ def parsePatCons(p: (String, Int), toks: Toks): (String, Int) =
 
 def parsePatCons2(left: String, p: (String, Int)): (String, Int) =
   p match {
-    case (r, k) => (Str.concat(left, Str.concat(" :: ", r)), k)
+    case (r, k) => if (left == "" || r == "") ("", k) else (Str.concat(left, Str.concat(" :: ", r)), k)
   }
 
 def parsePatOr(p: (String, Int), toks: Toks): (String, Int) =
@@ -688,7 +701,7 @@ def parsePatOr(p: (String, Int), toks: Toks): (String, Int) =
 
 def parsePatOr2(left: String, p: (String, Int), toks: Toks): (String, Int) =
   p match {
-    case (r, k) => parsePatOr((Str.concat(left, Str.concat(" | ", r)), k), toks)
+    case (r, k) => if (left == "" || r == "") ("", k) else parsePatOr((Str.concat(left, Str.concat(" | ", r)), k), toks)
   }
 
 def parsePatPrimary(toks: Toks, i: Int): (String, Int) =
@@ -709,11 +722,11 @@ def parsePatNil(toks: Toks, i: Int): (String, Int) =
   if (_is(toks, i + 1, Tok.RBracket)) ("[]", i + 2) else parsePatListRest(toks, i + 1, [])
 
 def parsePatListRest(toks: Toks, i: Int, acc: List[String]): (String, Int) =
-  if (_is(toks, i, Tok.RBracket)) (listPatOf(List.reverse(acc)), i + 1) else parsePatListNext(parsePatPrimary(toks, i), toks, acc)
+  parsePatListNext(parsePatPrimary(toks, i), toks, acc)
 
 def parsePatListNext(p: (String, Int), toks: Toks, acc: List[String]): (String, Int) =
   p match {
-    case (a, j) => if (_is(toks, j, Tok.Comma)) parsePatListRest(toks, j + 1, a :: acc) else (listPatOf(List.reverse(a :: acc)), j + 1)
+    case (a, j) => if (a == "") ("", j) else if (_is(toks, j, Tok.Comma)) parsePatListRest(toks, j + 1, a :: acc) else if (_is(toks, j, Tok.RBracket)) (listPatOf(List.reverse(a :: acc)), j + 1) else ("", j)
   }
 
 def listPatOf(xs: List[String]): String =
@@ -723,18 +736,18 @@ def parsePatTuple(toks: Toks, i: Int): (String, Int) =
   parsePatCtorClose("", parsePatArgs(toks, i + 1, []))
 
 def parsePatNeg(toks: Toks, i: Int): (String, Int) =
-  (Str.concat("-", Str.fromInt(_intOf(_at(toks, i)))), i + 1)
+  if (_is(toks, i, Tok.Int(0))) (Str.concat("-", Str.fromInt(_intOf(_at(toks, i)))), i + 1) else ("", i)
 
 def parsePatIdent(toks: Toks, i: Int, s: String): (String, Int) =
   if (_is(toks, i, Tok.At)) parsePatAs(s, parsePatPrimary(toks, i + 1)) else if (_is(toks, i, Tok.Dot)) parsePatQual(toks, i + 1, s) else if (_is(toks, i, Tok.LParen)) parsePatCtor(s, toks, i) else (s, i)
 
 def parsePatAs(name: String, p: (String, Int)): (String, Int) =
   p match {
-    case (inner, j) => (Str.concat(name, Str.concat(" @ ", inner)), j)
+    case (inner, j) => if (inner == "") ("", j) else (Str.concat(name, Str.concat(" @ ", inner)), j)
   }
 
 def parsePatQual(toks: Toks, i: Int, left: String): (String, Int) =
-  parsePatQual2(Str.concat(left, Str.concat(".", _identOf(_at(toks, i)))), toks, i + 1)
+  if (_identOf(_at(toks, i)) == "") ("", i) else parsePatQual2(Str.concat(left, Str.concat(".", _identOf(_at(toks, i)))), toks, i + 1)
 
 def parsePatQual2(q: String, toks: Toks, i: Int): (String, Int) =
   if (_is(toks, i, Tok.Dot)) parsePatQual(toks, i + 1, q) else if (_is(toks, i, Tok.LParen)) parsePatCtor(q, toks, i) else (q, i)
@@ -743,16 +756,16 @@ def parsePatCtor(q: String, toks: Toks, i: Int): (String, Int) =
   parsePatCtorClose(q, parsePatArgs(toks, i + 1, []))
 
 def parsePatArgs(toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
-  if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parsePatArgsNext(parsePat(toks, i), toks, acc)
+  if (_is(toks, i, Tok.RParen) && List.isEmpty(acc)) ([], i + 1) else parsePatArgsNext(parsePat(toks, i), toks, acc)
 
 def parsePatArgsNext(p: (String, Int), toks: Toks, acc: List[String]): (List[String], Int) =
   p match {
-    case (a, j) => if (_is(toks, j, Tok.Eq)) parsePatArgsEq(a, parsePatPrimary(toks, j + 1), toks, acc) else if (_is(toks, j, Tok.Comma)) parsePatArgs(toks, j + 1, a :: acc) else (List.reverse(a :: acc), j + 1)
+    case (a, j) => if (a == "") ([""], j) else if (_is(toks, j, Tok.Eq)) parsePatArgsEq(a, parsePatPrimary(toks, j + 1), toks, acc) else if (_is(toks, j, Tok.Comma)) parsePatArgs(toks, j + 1, a :: acc) else if (_is(toks, j, Tok.RParen)) (List.reverse(a :: acc), j + 1) else ([""], j)
   }
 
 def parsePatArgsEq(field: String, p: (String, Int), toks: Toks, acc: List[String]): (List[String], Int) =
   p match {
-    case (rhs, k) => if (_is(toks, k, Tok.Comma)) parsePatArgs(toks, k + 1, namedField(field, rhs) :: acc) else (List.reverse(namedField(field, rhs) :: acc), k + 1)
+    case (rhs, k) => if (rhs == "") ([""], k) else if (_is(toks, k, Tok.Comma)) parsePatArgs(toks, k + 1, namedField(field, rhs) :: acc) else if (_is(toks, k, Tok.RParen)) (List.reverse(namedField(field, rhs) :: acc), k + 1) else ([""], k)
   }
 
 def namedField(field: String, rhs: String): String =
@@ -760,7 +773,7 @@ def namedField(field: String, rhs: String): String =
 
 def parsePatCtorClose(q: String, p: (List[String], Int)): (String, Int) =
   p match {
-    case (args, j) => (Str.concat(q, Str.concat("(", Str.concat(_joinComma(args), ")"))), j)
+    case (args, j) => if (List.contains(args, "")) ("", j) else (Str.concat(q, Str.concat("(", Str.concat(_joinComma(args), ")"))), j)
   }
 
 def parsePostCall(e: Expr, p: (List[Expr], Int)): (Expr, Int) =
@@ -794,10 +807,10 @@ def parseParams(toks: Toks, i: Int): (List[Param], Int) =
   if (_is(toks, i, Tok.LParen)) parseParamList(toks, i + 1, []) else ([], i)
 
 def parseParamList(toks: Toks, i: Int, acc: List[Param]): (List[Param], Int) =
-  if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parseParamListNext(parseOneParam(toks, i), toks, acc)
+  if (_is(toks, i, Tok.RParen) && List.isEmpty(acc)) ([], i + 1) else parseParamListNext(parseOneParam(toks, i), toks, acc)
 
 def parseOneParam(toks: Toks, i: Int): (Param, Int) =
-  parseOneParam2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
+  if (_identOf(_at(toks, i)) == "") (Param("#parse", "", "", ""), i) else if (!_is(toks, i + 1, Tok.Colon)) (Param("#parse", "", "", ""), i + 1) else parseOneParam2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
 
 def parseOneParam2(name: String, p: (String, Int), toks: Toks): (Param, Int) =
   p match {
@@ -822,28 +835,31 @@ def parseOneParamD2(name: String, ty: String, w: String, p: (Expr, Int)): (Param
 
 def parseParamListNext(p: (Param, Int), toks: Toks, acc: List[Param]): (List[Param], Int) =
   p match {
-    case (par, j) => if (_is(toks, j, Tok.Comma)) parseParamList(toks, j + 1, par :: acc) else (List.reverse(par :: acc), j + 1)
+    case (par, j) => if (parseErrorParam(par)) (List.reverse(par :: acc), j) else if (_is(toks, j, Tok.Comma)) parseParamList(toks, j + 1, par :: acc) else if (_is(toks, j, Tok.RParen)) (List.reverse(par :: acc), j + 1) else (List.reverse(Param("#parse", "", "", "") :: par :: acc), j)
   }
 
+def _badTParams(ts: List[String]): Bool =
+  List.contains(ts, "") || List.contains(ts, "#parse")
+
 def parseDef(toks: Toks, i: Int, priv: Bool, ora: Bool): (Fun, Int) =
-  parseDefName(priv, ora, _identOf(_at(toks, i)), toks, i + 1, _off(toks, i))
+  if (_identOf(_at(toks, i)) == "") (Fun(priv, ora, "#parse", [], [], "Unit", Expr.EUnit, "", _off(toks, i)), i) else parseDefName(priv, ora, _identOf(_at(toks, i)), toks, i + 1, _off(toks, i))
 
 def parseDefName(priv: Bool, ora: Bool, name: String, toks: Toks, i: Int, off: Int): (Fun, Int) =
-  if (_is(toks, i, Tok.Dot)) parseDefName(priv, ora, Str.concat(name, Str.concat(".", _identOf(_at(toks, i + 1)))), toks, i + 2, off) else parseDefTp(priv, ora, name, parseTParams(toks, i), toks, off)
+  if (_is(toks, i, Tok.Dot)) if (_identOf(_at(toks, i + 1)) == "") (Fun(priv, ora, "#parse", [], [], "Unit", Expr.EUnit, "", off), i + 1) else parseDefName(priv, ora, Str.concat(name, Str.concat(".", _identOf(_at(toks, i + 1)))), toks, i + 2, off) else parseDefTp(priv, ora, name, parseTParams(toks, i), toks, off)
 
 def parseDefTp(priv: Bool, ora: Bool, name: String, p: (List[String], Int), toks: Toks, off: Int): (Fun, Int) =
   p match {
-    case (ts, j) => parseDef2(priv, ora, name, ts, parseParams(toks, j), toks, off)
+    case (ts, j) => if (_badTParams(ts)) (Fun(priv, ora, "#parse", [], [], "Unit", Expr.EUnit, "", off), j) else parseDef2(priv, ora, name, ts, parseParams(toks, j), toks, off)
   }
 
 def parseDef2(priv: Bool, ora: Bool, name: String, ts: List[String], p: (List[Param], Int), toks: Toks, off: Int): (Fun, Int) =
   p match {
-    case (params, j) => parseDef3(priv, ora, name, ts, params, parseType(toks, j + 1), toks, off)
+    case (params, j) => if (List.exists(params, par => parseErrorParam(par)) || !_is(toks, j, Tok.Colon)) (Fun(priv, ora, "#parse", ts, params, "", Expr.EUnit, "", off), j) else parseDef3(priv, ora, name, ts, params, parseType(toks, j + 1), toks, off)
   }
 
 def parseDef3(priv: Bool, ora: Bool, name: String, ts: List[String], params: List[Param], p: (String, Int), toks: Toks, off: Int): (Fun, Int) =
   p match {
-    case (ret, j) => parseDef4(priv, ora, name, ts, params, ret, parseExpr(toks, j + 1), off)
+    case (ret, j) => if (ret == "" || !_is(toks, j, Tok.Eq)) (Fun(priv, ora, "#parse", ts, params, ret, Expr.EUnit, "", off), j) else parseDef4(priv, ora, name, ts, params, ret, parseExpr(toks, j + 1), off)
   }
 
 def parseDef4(priv: Bool, ora: Bool, name: String, ts: List[String], params: List[Param], ret: String, p: (Expr, Int), off: Int): (Fun, Int) =
@@ -852,11 +868,11 @@ def parseDef4(priv: Bool, ora: Bool, name: String, ts: List[String], params: Lis
   }
 
 def parseMain(toks: Toks, i: Int): (String, Expr, Int) =
-  parseMain2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
+  if (_identOf(_at(toks, i)) == "" || !_is(toks, i + 1, Tok.Colon)) ("#parse", Expr.EVar("", _off(toks, i)), i) else parseMain2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
 
 def parseMain2(name: String, p: (String, Int), toks: Toks): (String, Expr, Int) =
   p match {
-    case (_, j) => parseMain3(name, parseExpr(toks, j + 1))
+    case (ret, j) => if (ret == "" || !_is(toks, j, Tok.Eq)) ("#parse", Expr.EVar("", _off(toks, j)), j) else parseMain3(name, parseExpr(toks, j + 1))
   }
 
 def parseMain3(name: String, p: (Expr, Int)): (String, Expr, Int) =
@@ -868,17 +884,17 @@ def parseTParams(toks: Toks, i: Int): (List[String], Int) =
   if (_is(toks, i, Tok.LBracket)) parseTParamList(toks, i + 1, []) else ([], i)
 
 def parseTParamList(toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
-  if (_is(toks, i, Tok.RBracket)) (List.reverse(acc), i + 1) else parseTParamNext(_identOf(_at(toks, i)), toks, i + 1, acc)
+  if (_identOf(_at(toks, i)) == "") ("#parse" :: [], i) else parseTParamNext(_identOf(_at(toks, i)), toks, i + 1, acc)
 
 def parseTParamNext(name: String, toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
-  if (_is(toks, i, Tok.Comma)) parseTParamList(toks, i + 1, name :: acc) else (List.reverse(name :: acc), i + 1)
+  if (_is(toks, i, Tok.Comma)) parseTParamList(toks, i + 1, name :: acc) else if (_is(toks, i, Tok.RBracket)) (List.reverse(name :: acc), i + 1) else ("#parse" :: [], i)
 
 def parseEnum(toks: Toks, i: Int): (En, Int) =
-  parseEnumTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+  if (_identOf(_at(toks, i)) == "") (En(false, "", [], [], "", false), i) else parseEnumTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
 def parseEnumTp(name: String, p: (List[String], Int), toks: Toks): (En, Int) =
   p match {
-    case (ts, j) => parseEnumCases(name, ts, toks, j + 1, [])
+    case (ts, j) => if (_badTParams(ts) || !_is(toks, j, Tok.Colon)) (En(false, "", [], [], "", false), j) else parseEnumCases(name, ts, toks, j + 1, [])
   }
 
 def parseEnumCases(name: String, ts: List[String], toks: Toks, i: Int, acc: List[EnCase]): (En, Int) =
@@ -901,12 +917,15 @@ def parseEnumCasesNext(p: (EnCase, Int), name: String, ts: List[String], toks: T
   }
 
 def parseRec(toks: Toks, i: Int): (En, Int) =
-  parseRecTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+  if (_identOf(_at(toks, i)) == "") (En(true, "", [], [], "", false), i) else parseRecTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
 def parseRecTp(name: String, p: (List[String], Int), toks: Toks): (En, Int) =
   p match {
-    case (ts, j) => parseRecFields(name, ts, _is(toks, j, Tok.Private), parseParamList(toks, j + (if (_is(toks, j, Tok.Private)) 2 else 1), []))
+    case (ts, j) => parseRecOpen(name, ts, _is(toks, j, Tok.Private), if (_is(toks, j, Tok.Private)) j + 1 else j, toks)
   }
+
+def parseRecOpen(name: String, ts: List[String], privateCtor: Bool, i: Int, toks: Toks): (En, Int) =
+  if (_badTParams(ts) || !_is(toks, i, Tok.LParen)) (En(true, "", [], [], "", false), i) else parseRecFields(name, ts, privateCtor, parseParamList(toks, i + 1, []))
 
 def parseRecFields(name: String, ts: List[String], privateCtor: Bool, p: (List[Param], Int)): (En, Int) =
   p match {
@@ -914,11 +933,11 @@ def parseRecFields(name: String, ts: List[String], privateCtor: Bool, p: (List[P
   }
 
 def parseAlias(toks: Toks, i: Int): (Alias, Int) =
-  parseAliasTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+  if (_identOf(_at(toks, i)) == "") (Alias("", [], "", ""), i) else parseAliasTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
 def parseAliasTp(name: String, p: (List[String], Int), toks: Toks): (Alias, Int) =
   p match {
-    case (ts, j) => parseAliasTarget(name, ts, parseType(toks, j + 1))
+    case (ts, j) => if (_badTParams(ts) || !_is(toks, j, Tok.Eq)) (Alias("", [], "", ""), j) else parseAliasTarget(name, ts, parseType(toks, j + 1))
   }
 
 def parseAliasTarget(name: String, ts: List[String], p: (String, Int)): (Alias, Int) =
@@ -927,33 +946,33 @@ def parseAliasTarget(name: String, ts: List[String], p: (String, Int)): (Alias, 
   }
 
 def parseImport(toks: Toks, i: Int): (Imp, Int) =
-  parseImportName(_identOf(_at(toks, i)), toks, i + 2)
+  if (_identOf(_at(toks, i)) == "") (Imp("", "", "", ""), i) else if (!_is(toks, i + 1, Tok.Dot)) (Imp("", "", "", ""), i + 1) else parseImportName(_identOf(_at(toks, i)), toks, i + 2)
 
 def parseImportName(mod: String, toks: Toks, i: Int): (Imp, Int) =
-  if (_is(toks, i, Tok.Star)) parseImportAs(mod, "*", toks, i + 1) else parseImportAs(mod, _identOf(_at(toks, i)), toks, i + 1)
+  if (_is(toks, i, Tok.Star)) (Imp(mod, "*", "", ""), i + 1) else if (_identOf(_at(toks, i)) == "") (Imp("", "", "", ""), i) else parseImportAs(mod, _identOf(_at(toks, i)), toks, i + 1)
 
 def parseImportAs(mod: String, name: String, toks: Toks, i: Int): (Imp, Int) =
-  if (_identOf(_at(toks, i)) == "as") (Imp(mod, name, _identOf(_at(toks, i + 1)), ""), i + 2) else (Imp(mod, name, "", ""), i)
+  if (_identOf(_at(toks, i)) == "as") if (_identOf(_at(toks, i + 1)) == "") (Imp("", "", "", ""), i + 1) else (Imp(mod, name, _identOf(_at(toks, i + 1)), ""), i + 2) else (Imp(mod, name, "", ""), i)
 
 def parseTrait(toks: Toks, i: Int): (Tr, Int) =
-  parseTraitTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+  if (_identOf(_at(toks, i)) == "") (Tr("", [], [], ""), i) else parseTraitTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
 def parseTraitTp(name: String, p: (List[String], Int), toks: Toks): (Tr, Int) =
   p match {
-    case (ts, j) => parseTraitMeths(name, ts, toks, j + 1, [])
+    case (ts, j) => if (_badTParams(ts) || !_is(toks, j, Tok.Colon)) (Tr("", [], [], ""), j) else parseTraitMeths(name, ts, toks, j + 1, [])
   }
 
 def parseTraitMeth(toks: Toks, i: Int): (TrMethod, Int) =
-  parseTraitMeth2(_identOf(_at(toks, i)), parseParams(toks, i + 1), toks)
+  if (_identOf(_at(toks, i)) == "") (TrMethod("", [], ""), i) else parseTraitMeth2(_identOf(_at(toks, i)), parseParams(toks, i + 1), toks)
 
 def parseTraitMeth2(name: String, p: (List[Param], Int), toks: Toks): (TrMethod, Int) =
   p match {
-    case (params, j) => parseTraitMeth3(name, params, parseType(toks, j + 1))
+    case (params, j) => if (List.exists(params, par => parseErrorParam(par)) || !_is(toks, j, Tok.Colon)) (TrMethod("", params, ""), j) else parseTraitMeth3(name, params, parseType(toks, j + 1))
   }
 
 def parseTraitMeth3(name: String, params: List[Param], p: (String, Int)): (TrMethod, Int) =
   p match {
-    case (ret, j) => (TrMethod(name, params, ret), j)
+    case (ret, j) => (TrMethod(if (ret == "") "" else name, params, ret), j)
   }
 
 def parseTraitMeths(name: String, ts: List[String], toks: Toks, i: Int, acc: List[TrMethod]): (Tr, Int) =
@@ -965,29 +984,29 @@ def parseTraitMethsNext(p: (TrMethod, Int), name: String, ts: List[String], toks
   }
 
 def parseImplArgs(toks: Toks, i: Int): (List[String], Int) =
-  if (_is(toks, i, Tok.LBracket)) parseImplArgsClose(_joinTypes(toks, i + 1, [])) else ([], i)
+  if (_is(toks, i, Tok.LBracket)) parseImplArgsClose(_joinTypes(toks, i + 1, []), toks) else ([], i)
 
-def parseImplArgsClose(p: (List[String], Int)): (List[String], Int) =
+def parseImplArgsClose(p: (List[String], Int), toks: Toks): (List[String], Int) =
   p match {
-    case (ts, j) => (ts, j + 1)
+    case (ts, j) => if (!_badTypes(ts) && _is(toks, j, Tok.RBracket)) (ts, j + 1) else ("" :: [], j)
   }
 
 def parseImpl(toks: Toks, i: Int): (Im, Int) =
-  parseImplName(parseTypeQual(toks, i + 1, _identOf(_at(toks, i))), toks)
+  if (_identOf(_at(toks, i)) == "") (Im("", [], "", [], ""), i) else parseImplName(parseTypeQual(toks, i + 1, _identOf(_at(toks, i))), toks)
 
 def parseImplName(p: (String, Int), toks: Toks): (Im, Int) =
   p match {
-    case (name, j) => parseImpl2(name, parseImplArgs(toks, j), toks)
+    case (name, j) => if (name == "") (Im("", [], "", [], ""), j) else parseImpl2(name, parseImplArgs(toks, j), toks)
   }
 
 def parseImpl2(tn: String, p: (List[String], Int), toks: Toks): (Im, Int) =
   p match {
-    case (args, j) => parseImplReceiver(tn, args, parseType(toks, j + 1), toks)
+    case (args, j) => if (List.contains(args, "") || !_is(toks, j, Tok.For)) (Im("", [], "", [], ""), j) else parseImplReceiver(tn, args, parseType(toks, j + 1), toks)
   }
 
 def parseImplReceiver(tn: String, args: List[String], receiver: (String, Int), toks: Toks): (Im, Int) =
   receiver match {
-    case (ty, j) => parseImplMeths(tn, args, ty, toks, j + 1, [])
+    case (ty, j) => if (ty == "" || !_is(toks, j, Tok.Colon)) (Im("", [], "", [], ""), j) else parseImplMeths(tn, args, ty, toks, j + 1, [])
   }
 
 def parseImplMeths(tn: String, args: List[String], forTy: String, toks: Toks, i: Int, acc: List[Fun]): (Im, Int) =
@@ -1005,7 +1024,7 @@ def parseItemsPriv(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], tr
   if (_is(toks, i + 1, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 2, true, false), enums, aliases, traits, impls, imps, defs, main, body) else parseItemsFail(toks, i + 1, enums, aliases, traits, impls, imps, defs, main, body)
 
 def parseItemsGo(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
-  if (i >= toks.n) parseItemsFail(toks, toks.n - 1, enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body, "") else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs, main, body, i) else parseItemsFail(toks, i, enums, aliases, traits, impls, imps, defs, main, body)
+  if (i >= toks.n) parseItemsFail(toks, toks.n - 1, enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body, "") else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) if (!_is(toks, i + 1, Tok.Def)) parseItemsFail(toks, i + 1, enums, aliases, traits, impls, imps, defs, main, body) else parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs, main, body, i) else parseItemsFail(toks, i, enums, aliases, traits, impls, imps, defs, main, body)
 
 def parseItemsFail(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), Fun(false, false, "#parse", [], [], "Unit", Expr.EUnit, "", _off(toks, i)) :: List.reverse(defs), main, body, "")
@@ -1046,10 +1065,10 @@ def parseItemsMain(toks: Toks, p: (String, Expr, Int), enums: List[En], aliases:
 }
 
 def parsePkg(toks: Toks, i: Int): (String, Int) =
-  parsePkgRest(_identOf(_at(toks, i)), toks, i + 1)
+  if (_identOf(_at(toks, i)) == "") ("", i) else parsePkgRest(_identOf(_at(toks, i)), toks, i + 1)
 
 def parsePkgRest(acc: String, toks: Toks, i: Int): (String, Int) =
-  if (_is(toks, i, Tok.Dot)) parsePkgRest(Str.concat(acc, Str.concat(".", _identOf(_at(toks, i + 1)))), toks, i + 2) else (acc, i)
+  if (_is(toks, i, Tok.Dot)) if (_identOf(_at(toks, i + 1)) == "") ("", i + 1) else parsePkgRest(Str.concat(acc, Str.concat(".", _identOf(_at(toks, i + 1)))), toks, i + 2) else (acc, i)
 
 def parse(toks: List[SpTok]): Prog =
   parseGo(indexToks(toks))
@@ -1059,7 +1078,7 @@ def parseGo(toks: Toks): Prog =
 
 def parsePkgThen(p: (String, Int), toks: Toks): Prog =
   p match {
-    case (pkg, j) => withPkg(pkg, parseItems(toks, j, [], [], [], [], [], [], "", Expr.EVar("", 0)))
+    case (pkg, j) => if (pkg == "") parseItemsFail(toks, j, [], [], [], [], [], [], "", Expr.EVar("", 0)) else withPkg(pkg, parseItems(toks, j, [], [], [], [], [], [], "", Expr.EVar("", 0)))
   }
 
 def withPkg(pkg: String, p: Prog): Prog =
@@ -1420,18 +1439,579 @@ def parseFiles3(f: (String, String), rest: List[(String, String)], acc: Prog): P
   }
 
 def hasParseError(p: Prog): Bool =
-  parseErrorDefs(p.defs) || List.exists(p.impls, im => parseErrorDefs(im.methods)) || List.exists(p.enums, en => en.name == "" || List.exists(en.cases, c => c.name == "" || List.exists(c.fields, p => parseErrorParam(p)))) || List.exists(p.aliases, alias => alias.name == "" || alias.target == "") || List.exists(p.traits, tr => tr.name == "" || List.exists(tr.methods, m => m.name == "" || List.exists(m.params, p => parseErrorParam(p)))) || p.main == "#parse" || p.main != "" && parseErrorExpr(p.body)
+  parseErrorDefs(p.defs) || List.exists(p.impls, im => im.tn == "" || im.forTy == "" || parseErrorDefs(im.methods)) || List.exists(p.imps, imp => imp.mod == "" || imp.name == "") || List.exists(p.enums, en => en.name == "" || !en.isRec && List.isEmpty(en.cases) || List.exists(en.cases, c => c.name == "" || List.exists(c.fields, p => parseErrorParam(p)))) || List.exists(p.aliases, alias => alias.name == "" || alias.target == "") || List.exists(p.traits, tr => tr.name == "" || List.exists(tr.methods, m => m.name == "" || m.ret == "" || List.exists(m.params, p => parseErrorParam(p)))) || p.main == "#parse" || p.main != "" && parseErrorExpr(p.body)
 
 def parseErrorDefs(defs: List[Fun]): Bool =
   if (List.isEmpty(defs)) false else parseErrorDef(List.at(defs, 0)) || parseErrorDefs(List.tail(defs))
 
 def parseErrorDef(d: Fun): Bool =
   d match {
-    case Fun(_, _, name, _, _, _, _, _, _) => name == "#parse" || name == "" || List.exists(d.params, p => parseErrorParam(p)) || parseErrorExpr(d.body)
+    case Fun(_, _, name, _, _, _, _, _, _) => name == "#parse" || name == "" || d.ret == "" || List.exists(d.params, p => parseErrorParam(p)) || parseErrorExpr(d.body)
   }
 
 def parseErrorParam(p: Param): Bool =
   p.name == "" || p.name == "#parse" || p.ty == ""
+
+def vFail(toks: Toks, i: Int): (Bool, Int) =
+  (false, _off(toks, i))
+
+def vExpect(toks: Toks, i: Int, t: Tok): (Bool, Int) =
+  if (_is(toks, i, t)) (true, i + 1) else vFail(toks, i)
+
+def vIdent(toks: Toks, i: Int): (Bool, Int) =
+  if (_identOf(_at(toks, i)) != "") (true, i + 1) else vFail(toks, i)
+
+def vQualIdent(toks: Toks, i: Int): (Bool, Int) =
+  vQualIdentNext(toks, vIdent(toks, i))
+
+def vQualIdentNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Dot)) vQualIdent(toks, j + 1) else (true, j)
+  }
+
+def vTParams(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.LBracket)) vTParamList(toks, i + 1) else (true, i)
+
+def vTParamList(toks: Toks, i: Int): (Bool, Int) =
+  vTParamNext(toks, vIdent(toks, i))
+
+def vTParamNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vTParamList(toks, j + 1) else vExpect(toks, j, Tok.RBracket)
+  }
+
+def vTypeList(toks: Toks, i: Int): (Bool, Int) =
+  vTypeListNext(toks, vType(toks, i))
+
+def vTypeListNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vTypeList(toks, j + 1) else (true, j)
+  }
+
+def vType(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.LParen)) vTypeParen(toks, vTypeList(toks, i + 1)) else vTypeArrow(toks, vTypeApp(toks, i))
+
+def vTypeParen(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vTypeArrow(toks, vExpect(toks, j, Tok.RParen))
+  }
+
+def vTypeApp(toks: Toks, i: Int): (Bool, Int) =
+  vTypeAppBrack(toks, vQualIdent(toks, i))
+
+def vTypeAppBrack(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.LBracket)) vTypeBrack(toks, vTypeList(toks, j + 1)) else (true, j)
+  }
+
+def vTypeBrack(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vExpect(toks, j, Tok.RBracket)
+  }
+
+def vTypeArrow(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, i) => if (!ok) (false, i) else if (_is(toks, i, Tok.Arrow)) vType(toks, i + 1) else (true, i)
+  }
+
+def vPat(toks: Toks, i: Int): (Bool, Int) =
+  vPatOr(toks, vPatCons(toks, vPatPrimary(toks, i)))
+
+def vPatCons(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.ColonColon)) vPat(toks, j + 1) else (true, j)
+  }
+
+def vPatOr(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Pipe)) vPat(toks, j + 1) else (true, j)
+  }
+
+def vPatPrimary(toks: Toks, i: Int): (Bool, Int) =
+  _at(toks, i) match {
+    case Tok.Underscore => (true, i + 1)
+    case Tok.Int(_) => (true, i + 1)
+    case Tok.Minus => vExpect(toks, i + 1, Tok.Int(0))
+    case Tok.True => (true, i + 1)
+    case Tok.False => (true, i + 1)
+    case Tok.Str(_) => (true, i + 1)
+    case Tok.Ident(_) => vPatIdent(toks, i + 1)
+    case Tok.LParen => vPatParen(toks, i + 1)
+    case Tok.LBracket => if (_is(toks, i + 1, Tok.RBracket)) (true, i + 2) else vPatList(toks, i + 1)
+    case _ => vFail(toks, i)
+  }
+
+def vPatIdent(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.At)) vPatPrimary(toks, i + 1) else if (_is(toks, i, Tok.Dot)) vPatQual(toks, vIdent(toks, i + 1)) else if (_is(toks, i, Tok.LParen)) vPatParen(toks, i + 1) else (true, i)
+
+def vPatQual(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Dot)) vPatQual(toks, vIdent(toks, j + 1)) else if (_is(toks, j, Tok.LParen)) vPatParen(toks, j + 1) else (true, j)
+  }
+
+def vPatParen(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.RParen)) (true, i + 1) else vPatArgs(toks, i)
+
+def vPatArgs(toks: Toks, i: Int): (Bool, Int) =
+  vPatArgsNext(toks, vPat(toks, i))
+
+def vPatArgsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Eq)) vPatArgsEq(toks, vPatPrimary(toks, j + 1)) else vPatArgsSep(toks, j)
+  }
+
+def vPatArgsEq(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else vPatArgsSep(toks, k)
+  }
+
+def vPatArgsSep(toks: Toks, j: Int): (Bool, Int) =
+  if (_is(toks, j, Tok.Comma)) vPatArgs(toks, j + 1) else vExpect(toks, j, Tok.RParen)
+
+def vPatList(toks: Toks, i: Int): (Bool, Int) =
+  vPatListNext(toks, vPatPrimary(toks, i))
+
+def vPatListNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vPatList(toks, j + 1) else vExpect(toks, j, Tok.RBracket)
+  }
+
+def vExpr(toks: Toks, i: Int): (Bool, Int) =
+  vAscribe(toks, vBin(toks, i, 0))
+
+def vAscribe(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Colon)) vType(toks, j + 1) else (true, j)
+  }
+
+def vPrecWant(lvl: Int): String =
+  if (lvl == 0) "||" else if (lvl == 1) "&&" else if (lvl == 2) "|" else if (lvl == 3) "^" else if (lvl == 4) "&" else if (lvl == 5) "==" else if (lvl == 7) "<<" else if (lvl == 8) "+" else "*"
+
+def vBin(toks: Toks, i: Int, lvl: Int): (Bool, Int) =
+  if (lvl == 6) vCons(toks, i) else if (lvl >= 9) vBinRest(toks, vUnary(toks, i), 9) else vBinRest(toks, vBin(toks, i, lvl + 1), lvl)
+
+def vBinRest(toks: Toks, step: (Bool, Int), lvl: Int): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_opLevel(_opTok(_at(toks, j)), vPrecWant(lvl))) vBinRest(toks, if (lvl >= 9) vUnary(toks, j + 1) else vBin(toks, j + 1, lvl + 1), lvl) else (true, j)
+  }
+
+def vCons(toks: Toks, i: Int): (Bool, Int) =
+  vConsRest(toks, vBin(toks, i, 7))
+
+def vConsRest(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.ColonColon)) vCons(toks, j + 1) else (true, j)
+  }
+
+def vUnary(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.Minus) || _is(toks, i, Tok.Bang) || _is(toks, i, Tok.Tilde)) vUnary(toks, i + 1) else vPost(toks, vAtom(toks, i))
+
+def vAtom(toks: Toks, i: Int): (Bool, Int) =
+  _at(toks, i) match {
+    case Tok.Int(_) => (true, i + 1)
+    case Tok.True => (true, i + 1)
+    case Tok.False => (true, i + 1)
+    case Tok.Str(_) => (true, i + 1)
+    case Tok.Float(_) => (true, i + 1)
+    case Tok.Interp(s) => vInterpAtom(vInterp(s, 0, _off(toks, i) + 2), i + 1)
+    case Tok.Underscore => if (_is(toks, i + 1, Tok.Arrow)) vExpr(toks, i + 2) else (true, i + 1)
+    case Tok.LParen => if (_is(toks, i + 1, Tok.RParen)) (true, i + 2) else vParen(toks, vExpr(toks, i + 1))
+    case Tok.LBracket => if (_is(toks, i + 1, Tok.RBracket)) (true, i + 2) else vListElems(toks, i + 1)
+    case Tok.Ident(s) => vIdentAtom(toks, i, s)
+    case Tok.If => vIf(toks, i)
+    case Tok.For => vFor(toks, i)
+    case Tok.LBrace => if (_is(toks, i + 1, Tok.Case)) vMatch(toks, i) else vFail(toks, i)
+    case _ => vFail(toks, i)
+  }
+
+def vInterpAtom(step: (Bool, Int), next: Int): (Bool, Int) =
+  step match {
+    case (ok, off) => if (ok) (true, next) else (false, off)
+  }
+
+def vInterp(s: String, i: Int, base: Int): (Bool, Int) =
+  if (i >= Str.len(s)) (true, 0) else if (Str.charAt(s, i) == 92 && i + 1 < Str.len(s)) vInterp(s, i + 2, base) else if (Str.charAt(s, i) == 36 && i + 1 < Str.len(s) && Str.charAt(s, i + 1) == 123) vInterpBrace(s, i, interpCloseBrace(s, i + 2, 1), base) else vInterp(s, i + 1, base)
+
+def vInterpBrace(s: String, i: Int, j: Int, base: Int): (Bool, Int) =
+  vInterpBraceNext(vHoleToks(indexToks(interpHoleToks(Str.slice(s, i + 2, j - 1), base + i + 2))), s, j, base)
+
+def vInterpBraceNext(step: (Bool, Int), s: String, j: Int, base: Int): (Bool, Int) =
+  step match {
+    case (ok, off) => if (!ok) (false, off) else vInterp(s, j, base)
+  }
+
+def vHoleToks(toks: Toks): (Bool, Int) =
+  vHoleToksEnd(toks, vExpr(toks, 0))
+
+def vHoleToksEnd(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.Eof)) vFail(toks, j) else if (toks.bad >= 0) (false, _off(toks, toks.bad)) else (true, 0)
+  }
+
+def vIdentAtom(toks: Toks, i: Int, s: String): (Bool, Int) =
+  if (_is(toks, i + 1, Tok.Arrow)) vExpr(toks, i + 2) else if ((s == "IO" || _kit(s)) && _is(toks, i + 1, Tok.Dot)) vKitCall(toks, vIdent(toks, i + 2)) else (true, i + 1)
+
+def vKitCall(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j)) vArgOpen(toks, j + 1) else (true, j)
+  }
+
+def vParen(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vTupleLam(toks, vTupleRest(toks, j + 1)) else vOneLam(toks, j)
+  }
+
+def vOneLam(toks: Toks, j: Int): (Bool, Int) =
+  if (_is(toks, j, Tok.Colon)) vOneLamTy(toks, vType(toks, j + 1)) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) vExpr(toks, j + 2) else vExpect(toks, j, Tok.RParen)
+
+def vOneLamTy(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else vOneLam(toks, k)
+  }
+
+def vTupleRest(toks: Toks, i: Int): (Bool, Int) =
+  vTupleRestNext(toks, vExpr(toks, i))
+
+def vTupleRestNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vTupleRest(toks, j + 1) else vExpect(toks, j, Tok.RParen)
+  }
+
+def vTupleLam(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Arrow)) vExpr(toks, j + 1) else (true, j)
+  }
+
+def vListElems(toks: Toks, i: Int): (Bool, Int) =
+  vListNext(toks, vExpr(toks, i))
+
+def vListNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vListElems(toks, j + 1) else vExpect(toks, j, Tok.RBracket)
+  }
+
+def vIf(toks: Toks, i: Int): (Bool, Int) =
+  if (!_is(toks, i + 1, Tok.LParen)) vFail(toks, i + 1) else vIfCond(toks, vExpr(toks, i + 2))
+
+def vIfCond(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.RParen)) vFail(toks, j) else vIfThen(toks, vExpr(toks, j + 1))
+  }
+
+def vIfThen(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (_is(toks, k, Tok.Else)) vExpr(toks, k + 1) else (true, k)
+  }
+
+def vFor(toks: Toks, i: Int): (Bool, Int) =
+  if (!_is(toks, i + 1, Tok.LBrace)) vFail(toks, i + 1) else vForBinds(toks, i + 2)
+
+def vForBinds(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.RBrace)) vForYield(toks, i + 1) else vForBindsNext(toks, vForOne(toks, i))
+
+def vForBindsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vForBinds(toks, j)
+  }
+
+def vForOne(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.If)) vExpr(toks, i + 1) else vForPat(toks, vPat(toks, i))
+
+def vForPat(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.LeftArrow) || _is(toks, j, Tok.Eq)) vForRhs(toks, vExpr(toks, j + 1)) else vFail(toks, j)
+  }
+
+def vForRhs(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Colon)) vType(toks, j + 1) else (true, j)
+  }
+
+def vForYield(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.Yield)) vExpr(toks, i + 1) else vFail(toks, i)
+
+def vPost(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, i) => if (!ok) (false, i) else if (_is(toks, i, Tok.LParen) && !forBindAfter(toks, i)) vPost(toks, vArgOpen(toks, i + 1)) else if (_is(toks, i, Tok.Dot)) vPost(toks, vPostDot(toks, vIdent(toks, i + 1))) else if (_is(toks, i, Tok.Match)) vPost(toks, vMatch(toks, i + 1)) else (true, i)
+  }
+
+def vPostDot(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j)) vArgOpen(toks, j + 1) else if (_is(toks, j, Tok.LBrace) && _is(toks, j + 1, Tok.Case)) vMatch(toks, j) else (true, j)
+  }
+
+def vArgOpen(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.RParen)) (true, i + 1) else vArgList(toks, i)
+
+def vArgList(toks: Toks, i: Int): (Bool, Int) =
+  vArgListSep(toks, vArgTail(toks, vArgOne(toks, i)))
+
+def vArgOne(toks: Toks, i: Int): (Bool, Int) =
+  if (_identOf(_at(toks, i)) != "" && _is(toks, i + 1, Tok.Eq)) vExpr(toks, i + 2) else vExpr(toks, i)
+
+def vArgTail(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Colon)) vArgTail(toks, vType(toks, j + 1)) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) vArgTail(toks, vPost(toks, (true, j))) else (true, j)
+  }
+
+def vArgListSep(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (_is(toks, k, Tok.Comma)) vArgList(toks, k + 1) else vExpect(toks, k, Tok.RParen)
+  }
+
+def vMatch(toks: Toks, i: Int): (Bool, Int) =
+  if (!_is(toks, i, Tok.LBrace)) vFail(toks, i) else vMatchArms(toks, i + 1)
+
+def vMatchArms(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.RBrace)) (true, i + 1) else if (_is(toks, i, Tok.Case)) vMatchArmsNext(toks, vMatchArm(toks, i + 1)) else vFail(toks, i)
+
+def vMatchArmsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vMatchArms(toks, j)
+  }
+
+def vMatchArm(toks: Toks, i: Int): (Bool, Int) =
+  vMatchArmPat(toks, vPat(toks, i))
+
+def vMatchArmPat(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.If)) vMatchGuard(toks, vExpr(toks, j + 1)) else vMatchBody(toks, j)
+  }
+
+def vMatchGuard(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vMatchBody(toks, j)
+  }
+
+def vMatchBody(toks: Toks, j: Int): (Bool, Int) =
+  if (_is(toks, j, Tok.Arrow)) vExpr(toks, j + 1) else vFail(toks, j)
+
+def vParams(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.LParen)) vParamOpen(toks, i + 1) else (true, i)
+
+def vReqParams(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.LParen)) vParamOpen(toks, i + 1) else vFail(toks, i)
+
+def vParamOpen(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.RParen)) (true, i + 1) else vParamList(toks, i)
+
+def vParamList(toks: Toks, i: Int): (Bool, Int) =
+  vParamListNext(toks, vOneParam(toks, i))
+
+def vParamListNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vParamList(toks, j + 1) else vExpect(toks, j, Tok.RParen)
+  }
+
+def vOneParam(toks: Toks, i: Int): (Bool, Int) =
+  vOneParamName(toks, vIdent(toks, i))
+
+def vOneParamName(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.Colon)) vFail(toks, j) else vParamAfterTy(toks, vType(toks, j + 1))
+  }
+
+def vParamAfterTy(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Where)) vParamAfterW(toks, vExpr(toks, j + 1)) else vParamDefault(toks, j)
+  }
+
+def vParamAfterW(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vParamDefault(toks, j)
+  }
+
+def vParamDefault(toks: Toks, j: Int): (Bool, Int) =
+  if (_is(toks, j, Tok.Eq)) vExpr(toks, j + 1) else (true, j)
+
+def vDef(toks: Toks, i: Int): (Bool, Int) =
+  vDefTp(toks, vQualIdent(toks, i))
+
+def vDefTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vDefParams(toks, vTParams(toks, j))
+  }
+
+def vDefParams(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else vDefColon(toks, vParams(toks, k))
+  }
+
+def vDefColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, m) => if (!ok) (false, m) else if (!_is(toks, m, Tok.Colon)) vFail(toks, m) else vDefEq(toks, vType(toks, m + 1))
+  }
+
+def vDefEq(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, r) => if (!ok) (false, r) else if (!_is(toks, r, Tok.Eq)) vFail(toks, r) else vExpr(toks, r + 1)
+  }
+
+def vMain(toks: Toks, i: Int): (Bool, Int) =
+  if (!_is(toks, i, Tok.Def)) vFail(toks, i) else vMainColon(toks, vIdent(toks, i + 1))
+
+def vMainColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.Colon)) vFail(toks, j) else vDefEq(toks, vType(toks, j + 1))
+  }
+
+def vEnum(toks: Toks, i: Int): (Bool, Int) =
+  vEnumTp(toks, vIdent(toks, i))
+
+def vEnumTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vEnumColon(toks, vTParams(toks, j))
+  }
+
+def vEnumColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.Colon)) vFail(toks, k) else if (!_is(toks, k + 1, Tok.Case)) vFail(toks, k + 1) else vEnumCases(toks, k + 1)
+  }
+
+def vEnumCases(toks: Toks, i: Int): (Bool, Int) =
+  if (!_is(toks, i, Tok.Case)) (true, i) else vEnumCaseName(toks, vIdent(toks, i + 1))
+
+def vEnumCaseName(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vEnumCaseNext(toks, vParams(toks, j))
+  }
+
+def vEnumCaseNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else vEnumCases(toks, k)
+  }
+
+def vRec(toks: Toks, i: Int): (Bool, Int) =
+  vRecTp(toks, vIdent(toks, i))
+
+def vRecTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vRecOpen(toks, vTParams(toks, j))
+  }
+
+def vRecOpen(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else vReqParams(toks, if (_is(toks, k, Tok.Private)) k + 1 else k)
+  }
+
+def vAlias(toks: Toks, i: Int): (Bool, Int) =
+  vAliasTp(toks, vIdent(toks, i))
+
+def vAliasTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vAliasEq(toks, vTParams(toks, j))
+  }
+
+def vAliasEq(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.Eq)) vFail(toks, k) else vType(toks, k + 1)
+  }
+
+def vImport(toks: Toks, i: Int): (Bool, Int) =
+  vImportDot(toks, vIdent(toks, i))
+
+def vImportDot(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.Dot)) vFail(toks, j) else if (_is(toks, j + 1, Tok.Star)) (true, j + 2) else vImportAs(toks, vIdent(toks, j + 1))
+  }
+
+def vImportAs(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (_identOf(_at(toks, k)) == "as") vIdent(toks, k + 1) else (true, k)
+  }
+
+def vTrait(toks: Toks, i: Int): (Bool, Int) =
+  vTraitTp(toks, vIdent(toks, i))
+
+def vTraitTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vTraitColon(toks, vTParams(toks, j))
+  }
+
+def vTraitColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.Colon)) vFail(toks, k) else vTraitMeths(toks, k + 1)
+  }
+
+def vTraitMeths(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.Def) && _sp(toks, i).column > 0) vTraitMethsNext(toks, vTraitMeth(toks, i + 1)) else (true, i)
+
+def vTraitMethsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vTraitMeths(toks, j)
+  }
+
+def vTraitMeth(toks: Toks, i: Int): (Bool, Int) =
+  vTraitMethParams(toks, vIdent(toks, i))
+
+def vTraitMethParams(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vTraitMethColon(toks, vParams(toks, j))
+  }
+
+def vTraitMethColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.Colon)) vFail(toks, k) else vType(toks, k + 1)
+  }
+
+def vImpl(toks: Toks, i: Int): (Bool, Int) =
+  vImplArgsStep(toks, vQualIdent(toks, i))
+
+def vImplArgsStep(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vImplFor(toks, vImplArgs(toks, j))
+  }
+
+def vImplArgs(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.LBracket)) vTypeBrack(toks, vTypeList(toks, i + 1)) else (true, i)
+
+def vImplFor(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.For)) vFail(toks, k) else vImplColon(toks, vType(toks, k + 1))
+  }
+
+def vImplColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, r) => if (!ok) (false, r) else if (!_is(toks, r, Tok.Colon)) vFail(toks, r) else vImplMeths(toks, r + 1)
+  }
+
+def vImplMeths(toks: Toks, i: Int): (Bool, Int) =
+  if (_is(toks, i, Tok.Def) && _sp(toks, i).column > 0) vImplMethsNext(toks, vDef(toks, i + 1)) else (true, i)
+
+def vImplMethsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vImplMeths(toks, j)
+  }
+
+def vItems(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
+  if (_is(toks, i, Tok.Eof)) (true, i) else if (_is(toks, i, Tok.Private)) vItemsPriv(toks, i, hasMain) else if (_is(toks, i, Tok.Oracle)) vItemsNext(toks, vDef(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Enum)) vItemsNext(toks, vEnum(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Record)) vItemsNext(toks, vRec(toks, i + 1), hasMain) else if (_is(toks, i, Tok.TypeKw)) vItemsNext(toks, vAlias(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Trait)) vItemsNext(toks, vTrait(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Impl)) vItemsNext(toks, vImpl(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Import)) vItemsNext(toks, vImport(toks, i + 1), hasMain) else if (_is(toks, i, Tok.Def)) vItemsNext(toks, vDef(toks, i + 1), hasMain) else if (_is(toks, i, Tok.AtMain)) vItemsMain(toks, i, hasMain) else vFail(toks, i)
+
+def vItemsPriv(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
+  if (_is(toks, i + 1, Tok.Def)) vItemsNext(toks, vDef(toks, i + 2), hasMain) else vFail(toks, i + 1)
+
+def vItemsMain(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
+  if (hasMain) vFail(toks, i) else vItemsNext(toks, vMain(toks, i + 1), true)
+
+def vItemsNext(toks: Toks, step: (Bool, Int), hasMain: Bool): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vItems(toks, j, hasMain)
+  }
+
+def vPkgItems(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+  step match {
+    case (ok, j) => if (!ok) (false, j) else vItems(toks, j, false)
+  }
+
+def parseErrorToks(toks: Toks): Int =
+  parseErrorFinish(toks, if (_is(toks, 0, Tok.Package)) vPkgItems(toks, vQualIdent(toks, 1)) else vItems(toks, 0, false))
+
+def parseErrorFinish(toks: Toks, step: (Bool, Int)): Int =
+  step match {
+    case (ok, off) => if (!ok) off else if (toks.bad >= 0) _off(toks, toks.bad) else 0 - 1
+  }
+
+def parseErrorOff(src: String): Int =
+  parseErrorToks(indexToks(Lexer.lex(src)))
 
 def parseErrorExpr(e: Expr): Bool =
   e match {

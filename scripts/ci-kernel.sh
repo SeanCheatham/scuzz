@@ -93,6 +93,34 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
     rows = diagnostics(root, overlay)
     assert [row['message'] for row in rows if row['severity'] == 1] == [row['message'] for row in errors], (errors, rows)
     assert 'unbound variable missing' in rows[0]['message'], rows
+    parse_cases = [
+        ('def ok(): Int = 1\nrecord record(value: Int)\n', 2, 8, 2, 14),
+        ('private oracle hidden(): Bool = true\n', 1, 9, 1, 15),
+        ('def f(x: Int = ): Int = 1\n', 1, 16, 1, 17),
+        ('def f(x: Int where ): Int = 1\n', 1, 20, 1, 21),
+        ('import Domain\n@main def main: IO[Unit] = IO.pure(())\n', 2, 1, 2, 6),
+        ('@main def record: IO[Unit] = IO.println(1)\n', 1, 11, 1, 17),
+        ('def f(): Int = 1 match { case n if => n }\n', 1, 36, 1, 38),
+        ('def f(): Int = (1 + 2', 1, 22, 1, 23),
+        ('def broken(): Int = 1\n)\n', 2, 1, 2, 2),
+    ]
+    for bad_src, line, col, eline, ecol in parse_cases:
+        source_file.write_text(bad_src)
+        human = command('check', root, ok=False).stdout.strip()
+        assert f'Main.scuzz:{line}:{col}: error: unexpected token' in human, (bad_src, human)
+        errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
+        assert len(errors) == 1, (bad_src, errors)
+        err = errors[0]
+        assert (err['file'], err['line'], err['column'], err['end_line'], err['end_column']) == (
+            'Main.scuzz', line, col, eline, ecol
+        ), (bad_src, err)
+        source_file.write_text(source)
+        rows = [row for row in diagnostics(root, bad_src) if row['severity'] == 1]
+        assert len(rows) == 1 and rows[0]['message'] == 'unexpected token', (bad_src, rows)
+        assert rows[0]['range'] == {
+            'start': {'line': line - 1, 'character': col - 1},
+            'end': {'line': eline - 1, 'character': ecol - 1},
+        }, (bad_src, rows[0])
     dep = root / 'dep'
     (dep / 'src').mkdir(parents=True)
     (dep / 'scuzz.toml').write_text('[package]\nname="helper"\n')
