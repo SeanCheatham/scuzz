@@ -1305,40 +1305,100 @@ def patternBindsName(pat: String, name: String): Bool =
   List.exists(bindPat(pat, "", [], []), binding => binding._1 == name)
 
 def exprFreeVar(e: Expr, s: String, live: Bool): Bool =
+  exprUsesPath(e, s, [], live)
+
+def exprUsesPath(e: Expr, s: String, path: List[String], live: Bool): Bool =
   e match {
     case Expr.EVar(n, _) => n == s
-    case Expr.EPrint(inner, _) => exprFreeVar(inner, s, live)
-    case Expr.ECall(f, args, _) => f == s || listFreeVar(args, s, live)
-    case Expr.EMethod(recv, name, args, _) => exprFreeVar(recv, s, live) || (!live || name != "require") && listFreeVar(args, s, live)
-    case Expr.EField(recv, _, _) => exprFreeVar(recv, s, live)
-    case Expr.EBin(_, l, r, _) => exprFreeVar(l, s, live) || exprFreeVar(r, s, live)
-    case Expr.EUn(_, inner, _) => exprFreeVar(inner, s, live)
-    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprFreeVar(body, s, live)
-    case Expr.EIf(c, t, el, _) => exprFreeVar(c, s, live) || exprFreeVar(t, s, live) || exprFreeVar(el, s, live)
-    case Expr.EMatch(sc, arms, _) => exprFreeVar(sc, s, live) || List.exists(arms, arm => armFreeVar(arm, s, live))
-    case Expr.EInterp(_, parts, _) => listFreeVar(parts, s, live)
-    case Expr.EList(xs) => listFreeVar(xs, s, live)
-    case Expr.ETuple(xs) => listFreeVar(xs, s, live)
-    case Expr.ENamed(_, inner) => exprFreeVar(inner, s, live)
-    case Expr.EAscribe(inner, _, _) => exprFreeVar(inner, s, live)
-    case Expr.EFor(bs, body, _) => forFreeVar(bs, body, s, live)
+    case Expr.EPrint(inner, _) => exprUsesPath(inner, s, path, live)
+    case Expr.ECall(f, args, _) => callUsesPath(f, args, s, path, live)
+    case Expr.EMethod(recv, name, args, _) => exprUsesPath(recv, s, path, live) || (!live || name != "require") && listUsesPath(args, s, path, live)
+    case Expr.EField(recv, name, off) => fieldUsesPath(recv, name, off, s, path, live)
+    case Expr.EBin(_, l, r, _) => exprUsesPath(l, s, path, live) || exprUsesPath(r, s, path, live)
+    case Expr.EUn(_, inner, _) => exprUsesPath(inner, s, path, live)
+    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprUsesPath(body, s, path, live)
+    case Expr.EIf(c, t, el, _) => exprUsesPath(c, s, path, live) || exprUsesPath(t, s, path, live) || exprUsesPath(el, s, path, live)
+    case Expr.EMatch(sc, arms, _) => exprUsesPath(sc, s, path, live) || List.exists(arms, arm => armUsesPath(arm, s, path, live))
+    case Expr.EInterp(_, parts, _) => listUsesPath(parts, s, path, live)
+    case Expr.EList(xs) => listUsesPath(xs, s, path, live)
+    case Expr.ETuple(xs) => listUsesPath(xs, s, path, live)
+    case Expr.ENamed(_, inner) => exprUsesPath(inner, s, path, live)
+    case Expr.EAscribe(inner, _, _) => exprUsesPath(inner, s, path, live)
+    case Expr.EFor(bs, body, _) => forUsesPath(bs, body, s, path, live)
     case _ => false
   }
 
-def listFreeVar(xs: List[Expr], s: String, live: Bool): Bool =
-  List.exists(xs, e => exprFreeVar(e, s, live))
+def callUsesPath(f: String, args: List[Expr], s: String, path: List[String], live: Bool): Bool =
+  if (!live) f == s || listUsesPath(args, s, path, false) else if (f == "Property.check") List.len(args) >= 3 && exprUsesPath(List.at(args, 2), s, path, true) else if (isErasedPropertyCall(f)) false else List.isEmpty(path) && f == s || listUsesPath(args, s, path, true)
 
-def armFreeVar(arm: Arm, s: String, live: Bool): Bool =
-  arm match {
-    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprFreeVar(body, s, live) || guard != "" && exprFreeVar(Parse.parseExprList(Lexer.lex(guard), 0)._1, s, live))
+def isErasedPropertyCall(f: String): Bool =
+  f == "Property.assert" || f == "Property.assume" || f == "Property.sometimes" || f == "Property.classify"
+
+def fieldUsesPath(recv: Expr, name: String, off: Int, s: String, path: List[String], live: Bool): Bool =
+  if (!live) exprUsesPath(recv, s, path, false) else fieldUsesLive(projectTupleField(Expr.EField(recv, name, off)), s, path)
+
+def fieldUsesLive(projected: Expr, s: String, path: List[String]): Bool =
+  projected match {
+    case Expr.EField(recv, _, _) => fieldChainUses(varFieldChain(projected, s), recv, s, path)
+    case _ => exprUsesPath(projected, s, path, true)
   }
 
-def forFreeVar(bs: List[Bind], body: Expr, s: String, live: Bool): Bool =
-  if (List.isEmpty(bs)) exprFreeVar(body, s, live) else forFreeBind(List.at(bs, 0), List.tail(bs), body, s, live)
+def fieldChainUses(chain: List[String], recv: Expr, s: String, path: List[String]): Bool =
+  if (List.isEmpty(chain)) exprUsesPath(recv, s, path, true) else pathsCompatible(chain, path)
 
-def forFreeBind(b: Bind, rest: List[Bind], body: Expr, s: String, live: Bool): Bool =
+def pathsCompatible(actual: List[String], required: List[String]): Bool =
+  if (List.isEmpty(actual) || List.isEmpty(required)) true else List.at(actual, 0) == List.at(required, 0) && pathsCompatible(List.tail(actual), List.tail(required))
+
+def varFieldChain(e: Expr, s: String): List[String] =
+  e match {
+    case Expr.EAscribe(inner, _, _) => varFieldChain(inner, s)
+    case Expr.ENamed(_, inner) => varFieldChain(inner, s)
+    case Expr.EField(inner, name, _) => varFieldChainStep(inner, name, s)
+    case _ => []
+  }
+
+def varFieldChainStep(inner: Expr, name: String, s: String): List[String] =
+  if (isVarNamed(inner, s)) [name] else varFieldChainMore(varFieldChain(inner, s), name)
+
+def varFieldChainMore(prefix: List[String], name: String): List[String] =
+  if (List.isEmpty(prefix)) [] else List.concat(prefix, [name])
+
+def isVarNamed(e: Expr, s: String): Bool =
+  e match {
+    case Expr.EVar(n, _) => n == s
+    case Expr.EAscribe(inner, _, _) => isVarNamed(inner, s)
+    case Expr.ENamed(_, inner) => isVarNamed(inner, s)
+    case _ => false
+  }
+
+def projectTupleField(e: Expr): Expr =
+  e match {
+    case Expr.EAscribe(inner, _, _) => projectTupleField(inner)
+    case Expr.ENamed(_, inner) => projectTupleField(inner)
+    case Expr.EField(recv, name, off) => projectTupleRecv(projectTupleField(recv), name, off)
+    case _ => e
+  }
+
+def projectTupleRecv(recv: Expr, name: String, off: Int): Expr =
+  recv match {
+    case Expr.ETuple(xs) => if (tupIdx(name) >= 0 && tupIdx(name) < List.len(xs)) projectTupleField(List.at(xs, tupIdx(name))) else Expr.EField(recv, name, off)
+    case _ => Expr.EField(recv, name, off)
+  }
+
+def listUsesPath(xs: List[Expr], s: String, path: List[String], live: Bool): Bool =
+  List.exists(xs, e => exprUsesPath(e, s, path, live))
+
+def armUsesPath(arm: Arm, s: String, path: List[String], live: Bool): Bool =
+  arm match {
+    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprUsesPath(body, s, path, live) || guard != "" && exprUsesPath(Parse.parseExprList(Lexer.lex(guard), 0)._1, s, path, live))
+  }
+
+def forUsesPath(bs: List[Bind], body: Expr, s: String, path: List[String], live: Bool): Bool =
+  if (List.isEmpty(bs)) exprUsesPath(body, s, path, live) else forUsesBind(List.at(bs, 0), List.tail(bs), body, s, path, live)
+
+def forUsesBind(b: Bind, rest: List[Bind], body: Expr, s: String, path: List[String], live: Bool): Bool =
   b match {
-    case Bind(_, pat, value) => exprFreeVar(value, s, live) || !patternBindsName(pat, s) && forFreeVar(rest, body, s, live)
+    case Bind(_, pat, value) => exprUsesPath(value, s, path, live) || !patternBindsName(pat, s) && forUsesPath(rest, body, s, path, live)
   }
 
 def resultBindErr(name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
@@ -1351,21 +1411,50 @@ def resultBindAlternatives(err: String, name: String, ty: String, rest: List[Bin
   if (err != "") err else resultBindChecked(name, ty, rest, body, ens)
 
 def resultBindChecked(name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
-  if (Type.appName(Type.parse(ty)) == "Result") if (!coverComplete([[name]], [ty], ens)) "Result binding must cover success and failure; use match" else resultBindUse(bindPat(name, ty, [], ens), rest, body) else if (resultListTy(Type.parse(ty)) && coverWild(coverClean(name), ty, ens)) resultListUse(name, ty, rest, body, ens) else resultPatternErr(coverClean(name), ty, rest, body, ens)
+  resultBindCheckedTy(name, ty, Type.parse(ty), rest, body, ens)
+
+def resultBindCheckedTy(name: String, ty: String, parsed: Ty, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (Type.appName(parsed) == "Result") if (!coverComplete([[name]], [ty], ens)) "Result binding must cover success and failure; use match" else resultBindUse(bindPat(name, ty, [], ens), rest, body) else if (resultCarrierTy(parsed) && coverWild(coverClean(name), ty, ens)) resultContainerUse(name, ty, parsed, rest, body, ens) else resultPatternErr(coverClean(name), ty, rest, body, ens)
 
 def resultPatternErr(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
   if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) resultAlternativeErr(pat, ty, rest, body, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (coverWild(pat, ty, ens)) "" else resultPatternCasesErr(coverCases(ty, ens), pat, ty, rest, body, ens)
 
-def resultListTy(ty: Ty): Bool =
+def resultCarrierTy(ty: Ty): Bool =
   ty match {
     case Ty.Named("Result") => true
     case Ty.App("Result", _) => true
-    case Ty.App("List", args) => List.exists(args, item => resultListTy(item))
+    case Ty.App("List", args) => List.exists(args, item => resultCarrierTy(item))
+    case Ty.App("Option", args) => List.exists(args, item => resultCarrierTy(item))
+    case Ty.Tuple(parts) => List.exists(parts, item => resultCarrierTy(item))
     case _ => false
   }
 
-def resultListUse(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
-  if (!resultListTy(Type.parse(ty))) "" else if (List.exists(bindPat(pat, ty, [], ens), binding => resultListTy(binding._2) && forFreeVar(rest, body, binding._1, true))) "" else "Result list is discarded in live code; return it or pass it to a function"
+def resultContainerUse(pat: String, ty: String, parsed: Ty, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (Type.isTup(parsed)) resultTupleUse(bindPat(pat, ty, [], ens), parsed, tupleResultPaths(parsed, []), rest, body) else if (List.exists(bindPat(pat, ty, [], ens), binding => resultCarrierTy(binding._2) && forUsesPath(rest, body, binding._1, [], true))) "" else resultDiscardedMessage(parsed)
+
+def resultTupleUse(bindings: List[(String, Ty)], parsed: Ty, paths: List[List[String]], rest: List[Bind], body: Expr): String =
+  if (List.isEmpty(paths)) "" else if (List.exists(bindings, binding => resultCarrierTy(binding._2) && forUsesPath(rest, body, binding._1, List.at(paths, 0), true))) resultTupleUse(bindings, parsed, List.tail(paths), rest, body) else resultDiscardedMessage(tuplePathTy(parsed, List.at(paths, 0)))
+
+def tupleResultPaths(ty: Ty, prefix: List[String]): List[List[String]] =
+  ty match {
+    case Ty.Tuple(parts) => tuplePartsPaths(parts, prefix, 1)
+    case _ => if (resultCarrierTy(ty)) [prefix] else []
+  }
+
+def tuplePartsPaths(parts: List[Ty], prefix: List[String], index: Int): List[List[String]] =
+  if (List.isEmpty(parts)) [] else List.concat(tupleResultPaths(List.at(parts, 0), List.concat(prefix, [Str.concat("_", Str.fromInt(index))])), tuplePartsPaths(List.tail(parts), prefix, index + 1))
+
+def tuplePathTy(ty: Ty, path: List[String]): Ty =
+  if (List.isEmpty(path)) ty else tuplePathStep(ty, List.at(path, 0), List.tail(path))
+
+def tuplePathStep(ty: Ty, field: String, rest: List[String]): Ty =
+  ty match {
+    case Ty.Tuple(parts) => if (tupIdx(field) >= 0 && tupIdx(field) < List.len(parts)) tuplePathTy(List.at(parts, tupIdx(field)), rest) else ty
+    case _ => ty
+  }
+
+def resultDiscardedMessage(ty: Ty): String =
+  if (Type.appName(ty) == "List") "Result list is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Option") "Result option is discarded in live code; match it, return it, or pass it to a function" else "Result value is discarded in live code; match it, return it, or pass it to a function"
 
 def resultAlternativeErr(pat: String, ty: String, rest: List[Bind], body: Expr, ens: List[En], i: Int): String =
   resultAlternativeNext(resultBindErr(Str.take(pat, i), ty, rest, body, ens), Str.drop(pat, i + 3), ty, rest, body, ens)
@@ -1386,7 +1475,7 @@ def resultPatternFieldNext(err: String, pats: List[String], fields: List[Param],
   if (err != "") err else resultPatternFieldsErr(pats, fields, rest, body, ens)
 
 def resultBindUse(bindings: List[(String, Ty)], rest: List[Bind], body: Expr): String =
-  if (List.exists(bindings, binding => Type.appName(binding._2) == "Result" && forFreeVar(rest, body, binding._1, true))) "" else "Result value is discarded in live code; match it, return it, or pass it to a function"
+  if (List.exists(bindings, binding => Type.appName(binding._2) == "Result" && forUsesPath(rest, body, binding._1, [], true))) "" else "Result value is discarded in live code; match it, return it, or pass it to a function"
 
 def bindingNamesErr(bindings: List[(String, Ty)]): String =
   if (List.isEmpty(bindings)) "" else if (List.exists(List.tail(bindings), binding => binding._1 == List.at(bindings, 0)._1)) Str.concat("binding pattern repeats name ", List.at(bindings, 0)._1) else bindingNamesErr(List.tail(bindings))

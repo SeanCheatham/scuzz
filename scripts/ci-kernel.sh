@@ -526,6 +526,15 @@ def batchText(texts: List[String]): String =
 def batchAlias(value: List[Read]): List[Read] =
   for { all @ _ = value } yield all
 
+def optionAlias(value: Option[Read]): Option[Read] =
+  for { all @ _ = value } yield all
+
+def pairHandled(text: String): Int =
+  for {
+    pair = (Str.parseInt(text), 2)
+    checked = Property.check("input", consume(pair._1) != 0, pair._1)
+  } yield consume(checked) + pair._2
+
 @main def main: IO[Unit] =
   for {
     _ <- IO.println(Str.fromInt(handled("7")))
@@ -546,6 +555,8 @@ def batchAlias(value: List[Read]): List[Read] =
     _ <- IO.println(batchText([]))
     _ <- IO.println(Str.fromInt(resultReceiver("7")))
     _ <- IO.println(Str.fromInt(resultReceiver("bad")))
+    _ <- IO.println(Str.fromInt(pairHandled("7")))
+    _ <- IO.println(Str.fromInt(pairHandled("bad")))
   } yield ()
 '''
     (root / 'src/Main.scuzz').write_text(source)
@@ -556,11 +567,13 @@ def batchAlias(value: List[Read]): List[Read] =
             output = output[1:]
         assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1', '7', '-1',
                           'ok:1,100', 'error:Str.parseInt: invalid integer',
-                          'error:quantity must be 1 through 100', 'ok:', '7', '-1'], (engine, output)
+                          'error:quantity must be 1 through 100', 'ok:', '7', '-1', '9', '1'], (engine, output)
     bad = [('_ = List.map(["7", "bad"], text => Str.parseInt(text))', '()', 'Result list is discarded'),
            ('ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
            ('_ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
            ('ignored = [[Str.parseInt("bad")]]', '()', 'Result list is discarded'),
+           ('ignored = [Option.Some(Str.parseInt("bad"))]', '()', 'Result list is discarded'),
+           ('ignored = [(Str.parseInt("bad"), 7)]', '()', 'Result list is discarded'),
            ('ignored <- IO.pure([Str.parseInt("bad")])', '()', 'Result list is discarded'),
            ('ignored = [Str.parseInt("bad")]\n    use = (ignored: Int) => ignored', '()', 'Result list is discarded'),
            ('ignored = [Str.parseInt("bad")]', 'for { ignored = 1 } yield ()', 'Result list is discarded'),
@@ -568,6 +581,18 @@ def batchAlias(value: List[Read]): List[Read] =
            ('_ = ([Str.parseInt("bad")]: List[Read])', '()', 'Result list is discarded'),
            ('_ = ([Str.parseInt("bad")]: List[Result])', '()', 'Result list is discarded'),
            ('all @ _ = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
+           ('_ = Option.Some(Str.parseInt("bad"))', '()', 'Result option is discarded'),
+           ('ignored = Option.Some(Str.parseInt("bad"))', '()', 'Result option is discarded'),
+           ('ignored <- IO.pure(Option.Some(Str.parseInt("bad")))', '()', 'Result option is discarded'),
+           ('results = [Str.parseInt("bad")]\n    _ = List.head(results)', '()', 'Result option is discarded'),
+           ('_ = (Option.Some(Str.parseInt("bad")): Option[Read])', '()', 'Result option is discarded'),
+           ('all @ _ = Option.Some(Str.parseInt("bad"))', '()', 'Result option is discarded'),
+           ('_ = (Str.parseInt("bad"), 7)', '()', 'discarded in live code'),
+           ('pair = (Str.parseInt("bad"), 7)', '()', 'discarded in live code'),
+           ('pair = ((Str.parseInt("bad"), 7): (Read, Int))\n    _ = pair._2', '()', 'discarded in live code'),
+           ('result = Str.parseInt("bad")\n    pair = (result, 7)\n    _ = pair._2', '()', 'discarded in live code'),
+           ('result = Str.parseInt("bad")\n    _ = (result, 7)._2', '()', 'discarded in live code'),
+           ('pair <- IO.both(IO.attempt(IO.pure(7)), IO.pure(1))\n    _ = pair._2', '()', 'discarded in live code'),
            ('_ = Str.parseInt("7")', '()', 'discarded'),
            ('result = Str.parseInt("7")', '()', 'discarded'),
            ('_ignored = Str.parseInt("7")', '()', 'discarded'),
@@ -616,6 +641,13 @@ def batchAlias(value: List[Read]): List[Read] =
            ('(result, _) = (Str.parseInt("bad"), 7)\n    _ = (7).require("input", n => consume(result) > 0)', '()', 'discarded in live code'),
            ('results = [Str.parseInt("bad")]\n    _ = (7).require("input", n => List.forall(results, item => consume(item) > 0))', '()', 'discarded in live code'),
            ('results <- IO.pure([Str.parseInt("bad")])\n    _ = (7).require("input", n => List.forall(results, item => consume(item) > 0))', '()', 'discarded in live code'),
+           ('result = Str.parseInt("bad")', 'Property.check("input", consume(result) > 0, ())', 'discarded in live code'),
+           ('result = Str.parseInt("bad")\n    _ <- Property.assert("input", consume(result) > 0)', '()', 'discarded in live code'),
+           ('result = Str.parseInt("bad")\n    _ = Property.assume("input", consume(result) > 0)', '()', 'discarded in live code'),
+           ('result = Str.parseInt("bad")\n    _ = Property.sometimes(if (consume(result) > 0) "ok" else "error")', '()', 'discarded in live code'),
+           ('result = Str.parseInt("bad")\n    _ = Property.classify("input", consume(result) > 0)', '()', 'discarded in live code'),
+           ('opt = Option.Some(Str.parseInt("bad"))', 'Property.check("input", opt match { case Some(v) => consume(v) > 0\ncase None => false }, ())', 'Result option is discarded in live code'),
+           ('pair = (Str.parseInt("bad"), 7)\n    _ = Property.check("input", consume(pair._1) > 0, pair._2)', '()', 'discarded in live code'),
            ('_ <- 1', '()', '<- needs IO'),
            ('_ <- Str.parseInt("7")', '()', '<- needs IO'),
            ('_ <- [IO.pure(7)]', '()', '<- needs IO')]
