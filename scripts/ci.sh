@@ -70,7 +70,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   install-dry     installer and bump_version dry-run
   fetch-skia      fetch_skia.sh retry proof (no GitHub Releases)
   runtime         make -C crates/runtime test
-  asan            make -C crates/runtime test-asan
+  asan            runtime test-asan + [ui] corpus replay under ASan
   ubsan           make -C crates/runtime test-ubsan
   skia            ffi-skia tests
   embedders       ffi-skia lib + desktop and mobile embedders
@@ -285,6 +285,65 @@ slice_runtime() {
 
 slice_asan() {
   make -C crates/runtime test-asan -j"$JOBS" CC=clang
+  local asan_probe
+  asan_probe="$(mktemp "${TMPDIR:-/tmp}/scuzz-ci-asan.XXXXXX")"
+  if ! printf 'int main(void){return 0;}\n' | clang -x c -fsanitize=address - -o "$asan_probe" 2>/dev/null; then
+    rm -f "$asan_probe"
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+      echo "slice_asan: AddressSanitizer cannot link on CI" >&2
+      exit 1
+    fi
+    echo "slice_asan: AddressSanitizer cannot link on this host; skipping [ui] replay"
+    return 0
+  fi
+  rm -f "$asan_probe"
+  need_scuzz
+  maybe_wipe
+  make -C crates/runtime lib-ui-asan -j"$JOBS" CC=clang
+  local ar_path
+  for ar_path in \
+    crates/runtime/build/asan/libscuzz_rt.a \
+    crates/ffi-skia/build/asan/libsk_capi.a \
+    crates/embedder-desktop/build/asan/libscuzz_embedder.a \
+    crates/embedder-mobile/build/asan/libscuzz_mobile.a; do
+    nm "$ar_path" | grep '__asan_' >/dev/null
+  done
+  local pkg slug
+  for pkg in examples/counter examples/ide-mobile examples/studio; do
+    slug="${pkg#examples/}"
+    if ! "$SCUZZ" fuzz --asan --iterations 0 "$pkg" | tee "/tmp/scuzz-ui-asan-$slug.log"; then
+      echo "$pkg: ASan corpus replay failed" >&2
+      exit 1
+    fi
+    if grep -E 'ERROR: (Address|Leak)Sanitizer' "/tmp/scuzz-ui-asan-$slug.log"; then
+      echo "$pkg: ASan reported a defect" >&2
+      exit 1
+    fi
+  done
+  nm examples/counter/build/counter.asan | grep '__asan_' >/dev/null
+  nm examples/counter/build/live/counter.asan | grep '__asan_' >/dev/null
+  python3 - <<'PY_UI_ASAN_FUZZ'
+import json
+from pathlib import Path
+for pkg in ("counter", "ide-mobile", "studio"):
+    summary = json.loads(Path(f"examples/{pkg}/build/fuzz/summary.json").read_text())
+    assert summary["v"] == 1 and summary["kind"] == "fuzz", summary
+    assert summary["status"] == "passed" and summary["fuzz"]["ok"] is True, summary
+    assert summary["corpus"]["entries"] >= 1 and summary["corpus"]["failures"] == 0, summary
+    assert summary["scope"]["required"]["failed"] == 0, summary
+    assert all(w["engine"] == "compiled" for w in summary["scope"]["workloads"]), summary
+PY_UI_ASAN_FUZZ
+  "$SCUZZ" fuzz --asan --replay examples/counter/corpus/two-taps.toml --message-format=json examples/counter > /tmp/scuzz-ui-asan-replay.json
+  python3 - <<'PY_UI_ASAN_REPLAY'
+import json
+from pathlib import Path
+replay = json.loads(Path("/tmp/scuzz-ui-asan-replay.json").read_text())
+assert replay["v"] == 1 and replay["kind"] == "replay", replay
+assert replay["status"] == "passed" and replay["asan"] is True, replay
+assert replay["mode"] == "simulation" and replay["guards"]["status"] == "guarded", replay
+assert replay["scope"]["required"]["passed"] == 1 and replay["scope"]["required"]["planned"] == 1, replay
+assert replay["scope"]["workloads"][0]["engine"] == "compiled", replay
+PY_UI_ASAN_REPLAY
 }
 
 slice_ubsan() {

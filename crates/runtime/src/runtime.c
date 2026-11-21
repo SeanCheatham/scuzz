@@ -499,11 +499,6 @@ void sz_panic_pop_src(void) {
     g_panic_src_n--;
 }
 
-void sz_alloc_sweep(void) {
-  while (g_live)
-    sz_free((void *)(g_live + 1));
-}
-
 static int g_panic_exit;
 
 void sz_panic(const char *msg) {
@@ -566,6 +561,18 @@ static _Atomic(void (*)(void *)) g_image_drop;
 void sz_rc_set_image_drop(void (*fn)(void *)) { atomic_store(&g_image_drop, fn); }
 
 void sz_rc_set_view_drop(void (*fn)(void *)) { g_view_drop = fn; }
+
+void sz_alloc_sweep(void) {
+  while (g_live) {
+    void *ptr = (void *)(g_live + 1);
+    if (g_live->kind == SZ_RC_IMAGE) {
+      void (*drop)(void *) = atomic_load(&g_image_drop);
+      if (drop)
+        drop(ptr);
+    }
+    sz_free(ptr);
+  }
+}
 
 void sz_free(void *ptr) {
   SzRcHdr *h;
