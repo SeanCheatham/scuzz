@@ -31,6 +31,7 @@ enum Value:
   case VSig(id: Int, name: String, s: Signal[Value], si: Signal[Int], ss: Signal[String])
   case VLiveSig(s: Signal[Value], si: Signal[Int], ss: Signal[String])
   case VTheme(theme: Theme)
+  case VPureIo(v: Value)
 
 enum EvMap:
   case MEmpty
@@ -294,12 +295,14 @@ def logAfter(_u: Unit, v: Value): Value =
 def logKit(v: Value, f: String, env: EvEnv, p: EvProg, off: Int): Value =
   v match {
     case Value.VIo(_) => logAfter(logAdd(p, off, "", f, env), v)
+    case Value.VPureIo(_) => logAfter(logAdd(p, off, "", f, env), v)
     case _ => v
   }
 
 def tryMain(v: Value): IO[String] =
   v match {
     case Value.VIo(io) => io.map(_ => "").handleErrorWith(e => IO.pure(errText(e)))
+    case Value.VPureIo(_) => IO.pure("")
     case Value.VErr(msg) => IO.pure(msg)
     case _ => IO.pure("eval: @main did not produce IO")
   }
@@ -307,6 +310,7 @@ def tryMain(v: Value): IO[String] =
 def mainIo(v: Value): IO[Unit] =
   v match {
     case Value.VIo(io) => io.handleErrorWith(e => mainFail(e)).flatMap(_ => IO.pure(()))
+    case Value.VPureIo(_) => IO.pure(())
     case Value.VErr(msg) => IO.println(msg).flatMap(_ => IO.fail("eval"))
     case _ => IO.println("eval: @main did not produce IO").flatMap(_ => IO.fail("eval"))
   }
@@ -351,6 +355,7 @@ def show(v: Value): String =
     case Value.VClo(_, _, _) => "<closure>"
     case Value.VFun(name, _) => Str.concat("<fun ", Str.concat(name, ">"))
     case Value.VIo(_) => "<io>"
+    case Value.VPureIo(_) => "<io>"
     case Value.VErr(msg) => msg
     case Value.VFloat(f) => fmtFloat(f)
     case Value.VMap(kvs) => Str.concat("Map(", Str.concat(showAll(pairsToTuples(mapPairs(kvs, noPairs()))), ")"))
@@ -515,6 +520,7 @@ def failWith(e: Value): IO[Value, Value] =
 def ioOf(v: Value): IO[Value, Value] =
   v match {
     case Value.VIo(io) => io
+    case Value.VPureIo(x) => pureIo(x)
     case Value.VErr(msg) => failIo(msg)
     case Value.VUnit => pureIo(v)
     case _ => failIo("eval: continuation did not produce IO")
@@ -894,6 +900,7 @@ def copyField(hit: List[Expr], old: Value, env: EvEnv, p: EvProg): Value =
 def isIo(v: Value): Bool =
   v match {
     case Value.VIo(_) => true
+    case Value.VPureIo(_) => true
     case _ => false
   }
 
@@ -928,6 +935,7 @@ def kitNs(v: Value): String =
     case Value.VStr(_) => "Str"
     case Value.VList(_) => "List"
     case Value.VIo(_) => "IO"
+    case Value.VPureIo(_) => "IO"
     case _ => tyHeadOf(v)
   }
 
@@ -1308,6 +1316,7 @@ def showBound(v: Value): String =
 def forDraw(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int): Value =
   v match {
     case Value.VIo(io) => Value.VIo(forDrawIo(io, name, rest, body, env, p, off))
+    case Value.VPureIo(x) => Value.VIo(forDrawIo(pureIo(x), name, rest, body, env, p, off))
     case Value.VUnit => Value.VIo(forDrawIo(pureIo(v), name, rest, body, env, p, off))
     case _ => errAt("<- needs IO", env, p, off)
   }
@@ -1960,8 +1969,14 @@ def jsonKit2(f: String, j: Json, vals: List[Value], env: EvEnv, p: EvProg, off: 
 def jsonKit3(f: String, j: Json, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Json.isNull") Value.VBool(Json.isNull(j)) else if (f == "Json.isObj") Value.VBool(Json.isObj(j)) else if (f == "Json.isArr") Value.VBool(Json.isArr(j)) else if (f == "Json.isBool") Value.VBool(Json.isBool(j)) else if (f == "Json.isInt") Value.VBool(Json.isInt(j)) else if (f == "Json.isStr") Value.VBool(Json.isStr(j)) else if (f == "Json.isFloat") Value.VBool(Json.isFloat(j)) else if (f == "Json.asInt") vInts(Json.asInt(j)) else if (f == "Json.asBool") Value.VList(List.map(Json.asBool(j), b => Value.VBool(b))) else if (f == "Json.asStr") vStrs(Json.asStr(j)) else if (f == "Json.asFloat") Value.VList(List.map(Json.asFloat(j), x => Value.VFloat(x))) else if (f == "Json.set") fromJson(Json.set(j, strAt(vals, 1), toJson(List.at(vals, 2)))) else if (f == "Json.remove") fromJson(Json.remove(j, strAt(vals, 1))) else if (f == "Json.append") fromJson(Json.append(j, toJson(List.at(vals, 1)))) else if (f == "Json.prepend") fromJson(Json.prepend(j, toJson(List.at(vals, 1)))) else if (f == "Json.setAt") fromJson(Json.setAt(j, intAt(vals, 1), toJson(List.at(vals, 2)))) else if (f == "Json.dropAt") fromJson(Json.dropAt(j, intAt(vals, 1))) else if (f == "Json.merge") fromJson(Json.merge(j, toJson(List.at(vals, 1)))) else unsupported(Str.concat("kit ", f), env, p, off)
 
+def ioWhen(cond: Bool, v: Value): Value =
+  if (!cond) Value.VPureIo(Value.VUnit) else v match {
+  case Value.VPureIo(_) => v
+  case _ => Value.VIo(ioOf(v))
+}
+
 def ioKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "IO.println") Value.VIo(printlnIo(strAt(vals, 0))) else if (f == "IO.pure") Value.VIo(pureIo(List.at(vals, 0))) else if (f == "IO.both") Value.VIo(bothIo(ioAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.fail") Value.VIo(failWith(List.at(vals, 0))) else if (f == "IO.attempt") Value.VIo(attemptIo(ioAt(vals, 0))) else if (f == "IO.sleep") Value.VIo(unitIo(IO.sleep(intAt(vals, 0)))) else if (f == "IO.race") Value.VIo(IO.race(ioAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.ensure") Value.VIo(IO.ensure(ioAt(vals, 0), unitOf(ioAt(vals, 1)))) else if (f == "IO.timeout") Value.VIo(IO.timeout(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.forever") Value.VIo(IO.forever(ioAt(vals, 0))) else if (f == "IO.repeatN") Value.VIo(IO.repeatN(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.retryN") Value.VIo(IO.retryN(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.foreach") Value.VIo(foreachIo(listAt(vals, 0), List.at(vals, 1), env, p, off)) else if (f == "IO.foreachDiscard") Value.VIo(foreachIo(listAt(vals, 0), List.at(vals, 1), env, p, off).map(_ => Value.VUnit)) else if (f == "IO.when") Value.VIo(if (boolOf(List.at(vals, 0))) ioAt(vals, 1) else pureIo(Value.VUnit)) else if (f == "IO.unless") Value.VIo(if (boolOf(List.at(vals, 0))) pureIo(Value.VUnit) else ioAt(vals, 1)) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (f == "IO.println") Value.VIo(printlnIo(strAt(vals, 0))) else if (f == "IO.pure") Value.VPureIo(List.at(vals, 0)) else if (f == "IO.both") Value.VIo(bothIo(ioAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.fail") Value.VIo(failWith(List.at(vals, 0))) else if (f == "IO.attempt") Value.VIo(attemptIo(ioAt(vals, 0))) else if (f == "IO.sleep") Value.VIo(unitIo(IO.sleep(intAt(vals, 0)))) else if (f == "IO.race") Value.VIo(IO.race(ioAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.ensure") Value.VIo(IO.ensure(ioAt(vals, 0), unitOf(ioAt(vals, 1)))) else if (f == "IO.timeout") Value.VIo(IO.timeout(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.forever") Value.VIo(IO.forever(ioAt(vals, 0))) else if (f == "IO.repeatN") Value.VIo(IO.repeatN(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.retryN") Value.VIo(IO.retryN(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.foreach") Value.VIo(foreachIo(listAt(vals, 0), List.at(vals, 1), env, p, off)) else if (f == "IO.foreachDiscard") Value.VIo(foreachIo(listAt(vals, 0), List.at(vals, 1), env, p, off).map(_ => Value.VUnit)) else if (f == "IO.when") ioWhen(boolOf(List.at(vals, 0)), List.at(vals, 1)) else if (f == "IO.unless") ioWhen(!boolOf(List.at(vals, 0)), List.at(vals, 1)) else unsupported(Str.concat("kit ", f), env, p, off)
 
 def ioAt(vals: List[Value], i: Int): IO[Value, Value] =
   ioOf(List.at(vals, i))
@@ -2066,11 +2081,7 @@ def sigFits(sv: Value, name: String, v: Value): Bool =
   }
 
 def sigKind(v: Value): String =
-  v match {
-    case Value.VInt(_) => "int"
-    case Value.VStr(_) => "str"
-    case _ => "value"
-  }
+  propValKind(v)
 
 def sigBump(sv: Value, next: Int, p: EvProg): Value =
   sigAfter(Signal.set(List.at(p.sig, 1), Value.VInt(next + 1)), sv)
@@ -2515,6 +2526,7 @@ def fuzzRel(fn: Value, a: Timeline, b: Timeline, env: EvEnv, p: EvProg, off: Int
 def propForce(v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   v match {
     case Value.VIo(io) => Property.force(io.handleErrorWith(e => IO.fail(errText(e))))
+    case Value.VPureIo(x) => x
     case Value.VErr(_) => v
     case _ => errAt("Property.force needs IO", env, p, off)
   }
@@ -2528,6 +2540,7 @@ def propPred(pred: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
     case Value.VClo(_, _, _) => propPred(apply1(pred, v, env, p, off), v, env, p, off)
     case Value.VFun(_, _) => propPred(apply1(pred, v, env, p, off), v, env, p, off)
     case Value.VIo(_) => propForce(pred, env, p, off)
+    case Value.VPureIo(_) => propForce(pred, env, p, off)
     case Value.VErr(_) => pred
     case _ => errAt("Property.check predicate is not Bool", env, p, off)
   }
@@ -2653,9 +2666,13 @@ def sigTagWriteAt(path: String, ens: List[En]): IO[Unit] =
   if (path == "") IO.pure(()) else Fs.write(path, sigTagText(ens))
 
 def sigTagText(ens: List[En]): String =
-  sigTagsGo(ens, Str.concat(List.join(List.map(["Null", "Bool", "Int", "Float", "Str", "Arr", "Obj"], name => Str.concat("Json.", Str.concat(name, Str.concat("=", Str.fromInt(Emit.ctorTag(ens, "Json", name)))))), """
+  sigTagsGo(ens, Str.concat("""Option.None=0
+Option.Some=1
+Result.Err=0
+Result.Ok=1
+""", Str.concat(List.join(List.map(["Null", "Bool", "Int", "Float", "Str", "Arr", "Obj"], name => Str.concat("Json.", Str.concat(name, Str.concat("=", Str.fromInt(Emit.ctorTag(ens, "Json", name)))))), """
 """), """
-"""))
+""")))
 
 def sigTagsGo(ens: List[En], acc: String): String =
   sigTagsRest(ens, ens, acc)
@@ -2749,10 +2766,16 @@ def claimVerdict(v: Value): Verdict =
   }
 
 def evValue(v: Value): IO[Value] =
-  ioOf(v).handleErrorWith(e => IO.fail(errText(e)))
+  v match {
+    case Value.VPureIo(x) => IO.pure(x)
+    case _ => ioOf(v).handleErrorWith(e => IO.fail(errText(e)))
+  }
 
 def evUnit(v: Value): IO[Unit] =
-  evValue(v).map(_ => ())
+  v match {
+    case Value.VPureIo(_) => IO.pure(())
+    case _ => evValue(v).map(_ => ())
+  }
 
 def errText(e: Value): String =
   e match {

@@ -19586,6 +19586,32 @@ static void test_stamp_loads_reload_code(void) {
   }
 }
 
+static void *mirror_derive_views(void *value, void *env) {
+  int mirrored = getenv("SCUZZ_EVAL_MIRROR") != NULL;
+  (void)value;
+  SzList *xs = sz_list_cons(env, sz_list_nil());
+  if (!mirrored)
+    return xs;
+  void *wrapped = sz_adt_new(sz_eval_value_tag_base + 4, xs);
+  sz_release(xs);
+  return wrapped;
+}
+
+static void *mirror_vcon(const char *en, const char *tag, SzList *fields) {
+  SzString *en_s = sz_string_from_cstr(en);
+  SzString *tag_s = sz_string_from_cstr(tag);
+  SzList *p2 = sz_list_cons(fields, sz_list_nil());
+  SzList *p1 = sz_list_cons(tag_s, p2);
+  SzList *p0 = sz_list_cons(en_s, p1);
+  void *con = sz_adt_new(sz_eval_value_tag_base + 6, p0);
+  sz_release(p0);
+  sz_release(p1);
+  sz_release(p2);
+  sz_release(tag_s);
+  sz_release(en_s);
+  return con;
+}
+
 static void test_mirror_signal_session(void) {
   SzString *name = sz_string_from_cstr("$mirror");
   void *initial = sz_box_i64(1);
@@ -19626,31 +19652,124 @@ static void test_mirror_signal_session(void) {
                 "[{\"id\":0,\"type\":\"int\",\"name\":\"visible\",\"value\":7}]") == 0);
   sz_release(dump);
   sz_signal_int_free(visible);
-  void *view = getenv("SCUZZ_EVAL_MIRROR")
+
+  int mirrored = getenv("SCUZZ_EVAL_MIRROR") != NULL;
+  sz_alloc_stats(&before_bytes, &before_count);
+  void *view = mirrored
                    ? (void *)sz_adt_new(sz_eval_view_tag, NULL)
                    : (void *)sz_view_text("value");
-  SzString *view_name = sz_string_from_cstr("view");
-  SzSignal *view_signal = sz_signal_new(view, 4, view_name);
+  SzString *card_label = sz_string_from_cstr("card");
+  void *card_val = mirrored
+                       ? (void *)sz_adt_new(sz_eval_value_tag_base + 3, card_label)
+                       : (void *)card_label;
+  if (card_val == card_label) sz_retain(card_val);
   SzList *views = sz_list_cons(view, sz_list_nil());
-  void *list = getenv("SCUZZ_EVAL_MIRROR")
+  void *list = mirrored
                    ? (void *)sz_adt_new(sz_eval_value_tag_base + 4, views)
                    : (void *)views;
   if (list == views) sz_retain(list);
-  SzString *list_name = sz_string_from_cstr("views");
-  SzSignal *list_signal = sz_signal_new(list, 4, list_name);
+
+  SzString *shared_name = sz_string_from_cstr("shared");
+  SzSignal *view_signal = sz_signal_new(view, 4, shared_name);
+  SzSignal *list_signal = sz_signal_new(list, mirrored ? 4 : 5, shared_name);
+
+  SzSignalInt *src_int = sz_signal_int(1);
+  SzString *derived_name = sz_string_from_cstr("derived");
+  SzSignal *derived_signal = sz_signal_derive(
+      src_int, mirror_derive_views, view, mirrored ? 4 : 5, derived_name);
+
+  void *tuple_val;
+  if (mirrored) {
+    SzList *t1 = sz_list_cons(view, sz_list_nil());
+    SzList *t0 = sz_list_cons(card_val, t1);
+    tuple_val = sz_adt_new(sz_eval_value_tag_base + 5, t0);
+    sz_release(t0);
+    sz_release(t1);
+  } else {
+    tuple_val = sz_pair_new(card_label, view);
+  }
+  SzString *tuple_name = sz_string_from_cstr("pair");
+  SzSignal *tuple_signal = sz_signal_new(tuple_val, 4, tuple_name);
+
+  void *opt_val;
+  if (mirrored) {
+    SzList *fields = sz_list_cons(view, sz_list_nil());
+    opt_val = mirror_vcon("Option", "Some", fields);
+    sz_release(fields);
+  } else {
+    opt_val = sz_adt_new(1, view);
+  }
+  SzString *opt_name = sz_string_from_cstr("opt");
+  SzSignal *opt_signal = sz_signal_new(opt_val, 4, opt_name);
+
+  void *rec_val;
+  {
+    SzList *f2 = sz_list_cons(list, sz_list_nil());
+    SzList *f1 = sz_list_cons(view, f2);
+    SzList *f0 = sz_list_cons(card_val, f1);
+    rec_val = mirrored ? mirror_vcon("Card", "Card", f0) : sz_adt_new(16, f0);
+    sz_release(f0);
+    sz_release(f1);
+    sz_release(f2);
+  }
+  SzString *rec_name = sz_string_from_cstr("rec");
+  SzSignal *rec_signal = sz_signal_new(rec_val, 4, rec_name);
+
+  void *map_val;
+  if (mirrored) {
+    map_val = sz_adt_new(sz_eval_value_tag_base + 12, view);
+  } else {
+    SzMap *empty = sz_map_empty();
+    map_val = sz_map_set(empty, card_label, view, 1);
+    sz_release(empty);
+  }
+  SzString *map_name = sz_string_from_cstr("map");
+  SzSignal *map_signal = sz_signal_new(map_val, 4, map_name);
+
+  assert(sz_property_signal_list_len(shared_name) == 1);
+  SzString *head0 = sz_property_signal_list_at(shared_name, 0);
+  assert(strcmp(sz_string_cstr(head0), "") == 0);
+  sz_release(head0);
+  assert(sz_property_signal_list_len(derived_name) == 1);
+
   dump = sz_signal_dump_json_string();
-  assert(strstr(sz_string_cstr(dump),
-                "\"name\":\"view\",\"value\":\"<handle>\"") != NULL);
-  assert(strstr(sz_string_cstr(dump),
-                "\"name\":\"views\",\"value\":[\"<handle>\"]") != NULL);
+  const char *expected =
+      "[{\"id\":1,\"type\":\"value\",\"name\":\"shared\",\"value\":\"<handle>\"},"
+      "{\"id\":2,\"type\":\"list\",\"name\":\"shared\",\"value\":[\"<handle>\"]},"
+      "{\"id\":3,\"type\":\"int\",\"name\":\"\",\"value\":1},"
+      "{\"id\":4,\"type\":\"list\",\"name\":\"derived\",\"value\":[\"<handle>\"]},"
+      "{\"id\":5,\"type\":\"value\",\"name\":\"pair\",\"value\":[\"card\",\"<handle>\"]},"
+      "{\"id\":6,\"type\":\"value\",\"name\":\"opt\",\"value\":{\"tag\":1,\"payload\":\"<handle>\"}},"
+      "{\"id\":7,\"type\":\"value\",\"name\":\"rec\",\"value\":{\"tag\":16,\"payload\":[\"card\",\"<handle>\",[\"<handle>\"]]}},"
+      "{\"id\":8,\"type\":\"value\",\"name\":\"map\",\"value\":\"<handle>\"}]";
+  assert(strcmp(sz_string_cstr(dump), expected) == 0);
   sz_release(dump);
-  sz_signal_free(view_signal);
+
+  sz_signal_free(map_signal);
+  sz_signal_free(rec_signal);
+  sz_signal_free(opt_signal);
+  sz_signal_free(tuple_signal);
+  sz_signal_free(derived_signal);
+  sz_signal_int_free(src_int);
   sz_signal_free(list_signal);
-  sz_release(view_name);
-  sz_release(list_name);
+  sz_signal_free(view_signal);
+  sz_release(map_name);
+  sz_release(map_val);
+  sz_release(rec_name);
+  sz_release(rec_val);
+  sz_release(opt_name);
+  sz_release(opt_val);
+  sz_release(tuple_name);
+  sz_release(tuple_val);
+  sz_release(derived_name);
+  sz_release(shared_name);
   sz_release(list);
   sz_release(views);
+  sz_release(card_val);
+  sz_release(card_label);
   sz_release(view);
+  sz_alloc_stats(&after_bytes, &after_count);
+  assert(after_count == before_count && after_bytes == before_bytes);
 }
 
 static void *scope_map_with_cell(void *value, void *env) {
@@ -22209,18 +22328,33 @@ int main(int argc, char **argv) {
     test_mirror_signal_session();
     return 0;
   }
-  for (int mode = 0; mode < 2; mode++) {
-    pid_t mirror = fork();
-    assert(mirror >= 0);
-    if (mirror == 0) {
-      if (mode) setenv("SCUZZ_EVAL_MIRROR", "1", 1);
-      else unsetenv("SCUZZ_EVAL_MIRROR");
-      execl(argv[0], argv[0], "--mirror-session", (char *)NULL);
-      _exit(127);
+  {
+    char tags_path[128];
+    snprintf(tags_path, sizeof tags_path, "/tmp/scuzz_mirror_tags_%d.txt",
+             (int)getpid());
+    FILE *tags_file = fopen(tags_path, "wb");
+    assert(tags_file != NULL);
+    fputs("Card.Card=16\n", tags_file);
+    fclose(tags_file);
+    for (int mode = 0; mode < 2; mode++) {
+      pid_t mirror = fork();
+      assert(mirror >= 0);
+      if (mirror == 0) {
+        if (mode) {
+          setenv("SCUZZ_EVAL_MIRROR", "1", 1);
+          setenv("SCUZZ_EVAL_TAGS", tags_path, 1);
+        } else {
+          unsetenv("SCUZZ_EVAL_MIRROR");
+          unsetenv("SCUZZ_EVAL_TAGS");
+        }
+        execl(argv[0], argv[0], "--mirror-session", (char *)NULL);
+        _exit(127);
+      }
+      int mirror_status;
+      assert(waitpid(mirror, &mirror_status, 0) == mirror);
+      assert(WIFEXITED(mirror_status) && WEXITSTATUS(mirror_status) == 0);
     }
-    int mirror_status;
-    assert(waitpid(mirror, &mirror_status, 0) == mirror);
-    assert(WIFEXITED(mirror_status) && WEXITSTATUS(mirror_status) == 0);
+    remove(tags_path);
   }
   test_control_labels_use_text();
   test_script_scroll_targets_outer_container();

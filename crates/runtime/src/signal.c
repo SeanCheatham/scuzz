@@ -19,6 +19,7 @@ static _Thread_local SzSignalScope *g_signal_scope;
 struct SzSignal {
   void *value;
   int elem_str;
+  int value_cell;
   int hidden;
   uint64_t version;
   SigReg *registry;
@@ -280,13 +281,45 @@ static void eval_tags_load(void) {
   fclose(f);
 }
 
-/* 1 and writes *out when En.Case is in the tags file. Tag 0 is valid. */
+/* 1 and writes *out when En.Case is a built-in or in the tags file. Tag 0 is valid. */
 static int eval_tag_of(const char *en, const char *name, int *out) {
   char key[300];
   const char *p;
   int n;
+  if (!out)
+    return 0;
+  if (en && name) {
+    if (strcmp(en, "Option") == 0) {
+      if (strcmp(name, "None") == 0) {
+        *out = 0;
+        return 1;
+      }
+      if (strcmp(name, "Some") == 0) {
+        *out = 1;
+        return 1;
+      }
+    } else if (strcmp(en, "Result") == 0) {
+      if (strcmp(name, "Err") == 0) {
+        *out = 0;
+        return 1;
+      }
+      if (strcmp(name, "Ok") == 0) {
+        *out = 1;
+        return 1;
+      }
+    } else if (strcmp(en, "Json") == 0) {
+      static const char *const json_cases[] = {
+          "Null", "Bool", "Int", "Float", "Str", "Arr", "Obj"};
+      for (int i = 0; i < 7; i++) {
+        if (strcmp(name, json_cases[i]) == 0) {
+          *out = i;
+          return 1;
+        }
+      }
+    }
+  }
   eval_tags_load();
-  if (!g_eval_tags || !out)
+  if (!g_eval_tags)
     return 0;
   n = snprintf(key, sizeof key, "%s.%s=", en ? en : "", name ? name : "");
   if (n <= 0 || n >= (int)sizeof key)
@@ -381,7 +414,7 @@ static void fputs_mirror_con(FILE *f, const void *value, const void *pay) {
   if (xs->tail->tail->head && sz_rc_kind(xs->tail->tail->head) == SZ_RC_LIST)
     fields = (const SzList *)xs->tail->tail->head;
   if (!eval_tag_of(en, name, &tag)) {
-    fputs_json_value(f, value);
+    fputs("\"<handle>\"", f);
     return;
   }
   fprintf(f, "{\"tag\":%d,\"payload\":", tag);
@@ -411,7 +444,7 @@ static void fputs_mirror_value(FILE *f, const void *value) {
     fputs("null", f);
     return;
   }
-  if (tag == 1 || tag == 2 || tag == 3) {
+  if (tag == 1 || tag == 2 || tag == 3 || tag == 15) {
     fputs_json_value(f, pay);
     return;
   }
@@ -425,6 +458,10 @@ static void fputs_mirror_value(FILE *f, const void *value) {
   }
   if (tag == 6) {
     fputs_mirror_con(f, value, pay);
+    return;
+  }
+  if (tag >= 7) {
+    fputs("\"<handle>\"", f);
     return;
   }
   fputs_json_value(f, value);
@@ -445,6 +482,7 @@ void sz_signal_dump_json(FILE *f) {
   int first = 1;
   fputc('[', f);
   for (r = g_sig_head; r; r = r->next) {
+    const SzSignal *sig = (const SzSignal *)r->sig;
     void *held = NULL;
     int value_list = 0;
     if (r->id < 0)
@@ -452,8 +490,8 @@ void sz_signal_dump_json(FILE *f) {
     if (!first)
       fputc(',', f);
     first = 0;
-    if (r->kind == SIG_VALUE) {
-      held = sz_signal_read((SzSignal *)r->sig);
+    if (sig->value_cell) {
+      held = sz_signal_read((SzSignal *)sig);
       value_list = mirror_list_value(held);
     }
     fprintf(f, "{\"id\":%d,\"type\":\"", r->id);
@@ -464,46 +502,52 @@ void sz_signal_dump_json(FILE *f) {
     fputs("\",\"name\":\"", f);
     sz_json_fputs_escaped(f, r->name);
     fputs("\",\"value\":", f);
-    switch (r->kind) {
-    case SIG_INT:
-      fprintf(f, "%lld",
-              (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
-      break;
-    case SIG_STR:
-      fputc('"', f);
-      sz_json_fputs_escaped(f, sz_signal_str_get((const SzSignalStr *)r->sig));
-      fputc('"', f);
-      break;
-    case SIG_VALUE: {
+    if (sig->value_cell) {
       fputs_mirror_value(f, held);
       sz_release(held);
-      break;
-    }
-    case SIG_LIST: {
-      const SzSignalList *ls = (const SzSignalList *)r->sig;
-      SzList *p = sz_signal_list_get(ls);
-      int first = 1;
-      if (!sig_list_heads_str(p, ls->elem_str)) {
-        if (!p)
-          fputs("[]", f);
-        else
-          fputs_json_value(f, p);
+    } else {
+      switch (r->kind) {
+      case SIG_INT:
+        fprintf(f, "%lld",
+                (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
+        break;
+      case SIG_STR:
+        fputc('"', f);
+        sz_json_fputs_escaped(f, sz_signal_str_get((const SzSignalStr *)r->sig));
+        fputc('"', f);
+        break;
+      case SIG_VALUE: {
+        void *fallback = sz_signal_read((SzSignal *)r->sig);
+        fputs_mirror_value(f, fallback);
+        sz_release(fallback);
         break;
       }
-      fputc('[', f);
-      for (; p; p = p->tail) {
-        if (!first)
-          fputc(',', f);
-        first = 0;
-        fputc('"', f);
-        sz_json_fputs_escaped(f, sig_head_str(p->head)
-                                  ? sz_string_cstr((const SzString *)p->head)
-                                  : "");
-        fputc('"', f);
+      case SIG_LIST: {
+        const SzSignalList *ls = (const SzSignalList *)r->sig;
+        SzList *p = sz_signal_list_get(ls);
+        int first = 1;
+        if (!sig_list_heads_str(p, ls->elem_str)) {
+          if (!p)
+            fputs("[]", f);
+          else
+            fputs_json_value(f, p);
+          break;
+        }
+        fputc('[', f);
+        for (; p; p = p->tail) {
+          if (!first)
+            fputc(',', f);
+          first = 0;
+          fputc('"', f);
+          sz_json_fputs_escaped(f, sig_head_str(p->head)
+                                    ? sz_string_cstr((const SzString *)p->head)
+                                    : "");
+          fputc('"', f);
+        }
+        fputc(']', f);
+        break;
       }
-      fputc(']', f);
-      break;
-    }
+      }
     }
     fputc('}', f);
   }
@@ -546,6 +590,33 @@ SzString *sz_property_signal_str(SzString *name) {
   return sz_string_from_cstr(sz_signal_str_get((const SzSignalStr *)r->sig));
 }
 
+static void *signal_value(SzSignal *s);
+
+static const SzList *sig_list_items(const SzSignal *s) {
+  void *v = signal_value((SzSignal *)s);
+  if (!v)
+    return NULL;
+  if (s->value_cell) {
+    const void *pay =
+        mirror_list_value(v) ? sz_adt_payload((const SzAdt *)v) : NULL;
+    return pay && sz_rc_kind(pay) == SZ_RC_LIST ? (const SzList *)pay : NULL;
+  }
+  return sz_rc_kind(v) == SZ_RC_LIST ? (const SzList *)v : NULL;
+}
+
+static const char *mirror_head_cstr(const void *head) {
+  const void *pay;
+  if (!eval_mirror_on() || !head || sz_rc_kind(head) != SZ_RC_ADT ||
+      eval_value_base() < 0)
+    return NULL;
+  if (sz_adt_tag((const SzAdt *)head) != eval_value_base() + 3)
+    return NULL;
+  pay = sz_adt_payload((const SzAdt *)head);
+  return pay && sz_rc_kind(pay) == SZ_RC_STRING
+             ? sz_string_cstr((const SzString *)pay)
+             : NULL;
+}
+
 int64_t sz_property_signal_list_len(SzString *name) {
   const char *n = name ? sz_string_cstr(name) : "";
   SigReg *r;
@@ -554,11 +625,12 @@ int64_t sz_property_signal_list_len(SzString *name) {
   r = sig_find(SIG_LIST, n);
   if (!r)
     sig_missing(n);
-  return (int64_t)sz_list_len(sz_signal_list_get((const SzSignalList *)r->sig));
+  return (int64_t)sz_list_len(sig_list_items((const SzSignal *)r->sig));
 }
 
 SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   SigReg *r;
+  const SzSignal *sig;
   const SzList *p;
   int64_t i;
   const char *n = name ? sz_string_cstr(name) : "";
@@ -569,8 +641,25 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   r = sig_find(SIG_LIST, n);
   if (!r)
     sig_missing(n);
-  p = sz_signal_list_get((const SzSignalList *)r->sig);
-  if (!sig_list_heads_str(p, ((const SzSignalList *)r->sig)->elem_str))
+  sig = (const SzSignal *)r->sig;
+  p = sig_list_items(sig);
+  if (sig->value_cell) {
+    for (const SzList *q = p; q; q = q->tail) {
+      if (!mirror_head_cstr(q->head))
+        return sz_string_from_cstr("");
+    }
+    i = 0;
+    while (p) {
+      if (i == index) {
+        const char *text = mirror_head_cstr(p->head);
+        return sz_string_from_cstr(text ? text : "");
+      }
+      p = p->tail;
+      i++;
+    }
+    return sz_string_from_cstr("");
+  }
+  if (!sig_list_heads_str(p, sig->elem_str))
     return sz_string_from_cstr("");
   i = 0;
   while (p) {
@@ -621,12 +710,17 @@ static int sig_is_mirror(SzString *name) {
 }
 
 SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name) {
+  SigKind reg_kind = (SigKind)(kind == 5 ? SIG_LIST
+                               : (kind == 4 && mirror_list_value(value))
+                                   ? SIG_LIST
+                                   : kind);
   SzSignal *s = sz_alloc_zero(sizeof(*s));
   sz_retain(value);
   s->value = value;
   s->elem_str = kind == 3;
+  s->value_cell = kind == 4;
   s->hidden = sig_is_mirror(name);
-  sig_register((SigKind)(kind == 5 ? 3 : kind), s, s->hidden);
+  sig_register(reg_kind, s, s->hidden);
   if (name) signal_set_name(s->registry, sz_string_cstr(name));
   return s;
 }
@@ -643,6 +737,18 @@ void *sz_signal_write(SzSignal *s, void *value) {
   sz_retain(value);
   drop_value(s, s->value);
   s->value = value;
+  if (s->value_cell && !s->hidden && mirror_list_value(value) &&
+      s->registry && s->registry->kind != SIG_LIST) {
+    char *saved = s->registry->name[0] ? sz_strdup(s->registry->name) : NULL;
+    signal_remove_name(s->registry);
+    sz_free(s->registry->name);
+    s->registry->name = sz_strdup("");
+    s->registry->kind = SIG_LIST;
+    if (saved) {
+      signal_set_name(s->registry, saved);
+      sz_free(saved);
+    }
+  }
   s->version++;
   if (!s->hidden) g_signal_revision++;
   return NULL;
@@ -650,7 +756,7 @@ void *sz_signal_write(SzSignal *s, void *value) {
 
 SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
                            int64_t kind, SzString *name) {
-  SzSignal *s = sz_signal_new(NULL, kind, name);
+  SzSignal *s = sz_signal_new(NULL, kind, sig_is_mirror(name) ? name : NULL);
   s->map_src = src;
   if (src) {
     s->map_prev = src->map_last_child;
@@ -662,6 +768,10 @@ SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
   sz_retain(env);
   s->map_env = env;
   (void)signal_value(s);
+  if (s->value_cell && mirror_list_value(s->value))
+    s->registry->kind = SIG_LIST;
+  if (name && !s->hidden)
+    signal_set_name(s->registry, sz_string_cstr(name));
   return s;
 }
 
