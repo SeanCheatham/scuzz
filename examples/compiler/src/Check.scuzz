@@ -43,7 +43,25 @@ def envSelfMod(mod: String): List[(String, Ty)] =
   ("self", Type.tParam("A")) :: envMod(mod)
 
 def envBind(n: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (n == "" || n == "_") env else (n, Type.parse(if (ty == "") "A" else ty)) :: env
+  if (n == "" || n == "_") env else (n, Type.parse(if (ty == "") "A" else ty)) :: clearInputVar(n, env)
+
+def inputTag(name: String): String =
+  Str.concat("#input:", name)
+
+def isInputVar(name: String, env: List[(String, Ty)]): Bool =
+  Type.show(lookupEnv(env, inputTag(name))) == "1"
+
+def hasInputVars(env: List[(String, Ty)]): Bool =
+  List.exists(env, entry => Str.startsWith(entry._1, "#input:") && Type.show(lookupEnv(env, entry._1)) == "1")
+
+def clearInputVar(name: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (isInputVar(name, env)) (inputTag(name), Type.tNamed("0")) :: env else env
+
+def markInputBindings(bindings: List[(String, Ty)], env: List[(String, Ty)]): List[(String, Ty)] =
+  if (List.isEmpty(bindings)) env else markInputBinding(List.at(bindings, 0), List.tail(bindings), env)
+
+def markInputBinding(binding: (String, Ty), rest: List[(String, Ty)], env: List[(String, Ty)]): List[(String, Ty)] =
+  markInputBindings(rest, if (binding._1 == "" || binding._1 == "_" || resultCarrierTy(binding._2)) env else (inputTag(binding._1), Type.tNamed("1")) :: env)
 
 def modFile(env: List[(String, Ty)]): String =
   Type.show(getTy(env, "#mod"))
@@ -168,7 +186,7 @@ def ftabOf(ds: List[Fun]): Map[String, List[Fun]] =
   if (List.isEmpty(ds)) Map.empty() else ftabAdd(ftabOf(List.tail(ds)), List.at(ds, 0))
 
 def ftabAdd(m: Map[String, List[Fun]], d: Fun): Map[String, List[Fun]] =
-  Map.set(m, d.name, d :: ftabGet(m, d.name))
+  if (d.mod == "__verify") Map.set(Map.set(m, d.name, d :: ftabGet(m, d.name)), "#verify", [d]) else Map.set(m, d.name, d :: ftabGet(m, d.name))
 
 def ftabGet(t: Map[String, List[Fun]], name: String): List[Fun] =
   Map.get(t, name) match {
@@ -1115,14 +1133,14 @@ def inferLam(ty: String, o: Out): Out =
   if (hasErr(o)) o else okTy(Type.tFun(Type.parse(if (ty == "") "A" else ty), o.ty))
 
 def inferFor(bs: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  inferForGo(bs, body, env, funs, ens, "", span)
+  inferForGo(!isVerifyContext(env, funs) && forHasAnyErasedCheck(bs, body), bs, bs, body, env, funs, ens, "", span)
 
-def inferForGo(bs: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (List.isEmpty(bs)) inferFor2(infer(body, env, funs, ens), errTy) else inferForBind(List.at(bs, 0), List.tail(bs), body, env, funs, ens, errTy, span)
+def inferForGo(checkErased: Bool, allBinds: List[Bind], bs: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (List.isEmpty(bs)) inferFor2(infer(body, env, funs, ens), errTy) else inferForBind(checkErased, allBinds, List.at(bs, 0), List.tail(bs), body, env, funs, ens, errTy, span)
 
-def inferForBind(b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+def inferForBind(checkErased: Bool, allBinds: List[Bind], b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   b match {
-    case Bind(d, name, v) => inferForBind2(d, name, inferBindVal(d, name, v, rest, body, env, funs, ens), rest, body, refineEnv(v, env, funs, ens), funs, ens, errTy, spanPick(exprSpan(env, v), span))
+    case Bind(d, name, v) => inferForBind2(checkErased, allBinds, d, name, v, inferBindVal(d, name, v, rest, body, env, funs, ens), rest, body, refineEnv(v, env, funs, ens), funs, ens, errTy, spanPick(exprSpan(env, v), span))
   }
 
 def inferBindVal(d: Bool, name: String, v: Expr, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
@@ -1480,23 +1498,601 @@ def resultBindUse(bindings: List[(String, Ty)], rest: List[Bind], body: Expr): S
 def bindingNamesErr(bindings: List[(String, Ty)]): String =
   if (List.isEmpty(bindings)) "" else if (List.exists(List.tail(bindings), binding => binding._1 == List.at(bindings, 0)._1)) Str.concat("binding pattern repeats name ", List.at(bindings, 0)._1) else bindingNamesErr(List.tail(bindings))
 
-def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (hasErr(vo)) vo else if (d && !isIo(tyStr(vo))) bad(Str.concat("<- needs IO, got ", tyStr(vo)), span) else inferForBindOwner(ownerPatErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
+def inferForBind2(checkErased: Bool, allBinds: List[Bind], d: Bool, name: String, v: Expr, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (hasErr(vo)) vo else if (d && !isIo(tyStr(vo))) bad(Str.concat("<- needs IO, got ", tyStr(vo)), span) else inferForBindOwner(ownerPatErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens), checkErased, allBinds, d, name, v, vo, rest, body, env, funs, ens, errTy, span)
 
-def inferForBindOwner(err: String, d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (err != "") bad(err, span) else inferForBindResult(resultBindErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), rest, body, ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
+def inferForBindOwner(err: String, checkErased: Bool, allBinds: List[Bind], d: Bool, name: String, v: Expr, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (err != "") bad(err, span) else inferForBindResult(resultBindErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), rest, body, ens), checkErased, allBinds, d, name, v, vo, rest, body, env, funs, ens, errTy, span)
 
-def inferForBindResult(err: String, d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (err != "") bad(err, span) else if (!coverWild(coverClean(name), if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens) && !coverComplete([[name]], [if (d) ioPayload(tyStr(vo)) else tyStr(vo)], ens)) bad("binding pattern does not cover every value; use match", span) else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy, span))
+def inferForBindResult(err: String, checkErased: Bool, allBinds: List[Bind], d: Bool, name: String, v: Expr, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (err != "") bad(err, span) else if (!coverWild(coverClean(name), if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens) && !coverComplete([[name]], [if (d) ioPayload(tyStr(vo)) else tyStr(vo)], ens)) bad("binding pattern does not cover every value; use match", span) else inferForBindLive(if (checkErased) erasedGuardBindErr(allBinds, d, name, v, if (d) ioPayload(tyStr(vo)) else tyStr(vo), rest, body, env, funs, ens) else "", checkErased, allBinds, d, name, v, vo, rest, body, env, funs, ens, errTy, span)
 
-def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens), span)
+def inferForBindLive(err: String, checkErased: Bool, allBinds: List[Bind], d: Bool, name: String, v: Expr, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (err != "") bad(err, erasedGuardSpan(env, v, name, rest, body, span, ens)) else if (d) andBinds(vo, inferForDraw(checkErased, allBinds, name, v, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(checkErased, allBinds, rest, body, bindForWithInput(false, name, v, tyStr(vo), env, funs, ens), funs, ens, errTy, span))
 
-def inferForDraw2(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], u: Out, span: (String, Int)): Out =
-  if (hasErr(u)) u else inferForGo(rest, body, bindFor(true, name, ty, env, ens), funs, ens, tyStr(u), span)
+def inferForDraw(checkErased: Bool, allBinds: List[Bind], name: String, v: Expr, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  inferForDraw2(checkErased, allBinds, name, v, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens), span)
+
+def inferForDraw2(checkErased: Bool, allBinds: List[Bind], name: String, v: Expr, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], u: Out, span: (String, Int)): Out =
+  if (hasErr(u)) u else inferForGo(checkErased, allBinds, rest, body, bindForWithInput(true, name, v, ty, env, funs, ens), funs, ens, tyStr(u), span)
 
 def bindFor(d: Bool, name: String, ty: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   if (name == "_" || name == "") env else bindPat(name, if (d) ioPayload(ty) else ty, env, ens)
+
+def bindForWithInput(d: Bool, name: String, v: Expr, ty: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (name == "_" || name == "") env else if (bindTaintsInput(d, v, env, funs, ens)) markInputBindings(bindPat(name, if (d) ioPayload(ty) else ty, [], ens), bindFor(d, name, ty, env, ens)) else bindFor(d, name, ty, env, ens)
+
+def isVerifyContext(env: List[(String, Ty)], funs: Ftab): Bool =
+  modFile(env) == "__verify" || Map.contains(funs.tab, "#verify")
+
+def forHasAnyErasedCheck(bs: List[Bind], body: Expr): Bool =
+  if (List.isEmpty(bs)) exprHasAnyErasedCheck(body) else forBindHasAnyErasedCheck(List.at(bs, 0), List.tail(bs), body)
+
+def forBindHasAnyErasedCheck(b: Bind, rest: List[Bind], body: Expr): Bool =
+  b match {
+    case Bind(_, _, value) => exprHasAnyErasedCheck(value) || forHasAnyErasedCheck(rest, body)
+  }
+
+def exprHasAnyErasedCheck(e: Expr): Bool =
+  e match {
+    case Expr.EPrint(inner, _) => exprHasAnyErasedCheck(inner)
+    case Expr.ECall(f, args, _) => f == "Property.check" || isErasedPropertyCall(f) || List.exists(args, a => exprHasAnyErasedCheck(a))
+    case Expr.EMethod(recv, name, args, _) => name == "require" || exprHasAnyErasedCheck(recv) || List.exists(args, a => exprHasAnyErasedCheck(a))
+    case Expr.EField(recv, _, _) => exprHasAnyErasedCheck(recv)
+    case Expr.EBin(_, l, r, _) => exprHasAnyErasedCheck(l) || exprHasAnyErasedCheck(r)
+    case Expr.EUn(_, inner, _) => exprHasAnyErasedCheck(inner)
+    case Expr.ELam(_, _, body) => exprHasAnyErasedCheck(body)
+    case Expr.EIf(c, t, el, _) => exprHasAnyErasedCheck(c) || exprHasAnyErasedCheck(t) || exprHasAnyErasedCheck(el)
+    case Expr.EMatch(sc, arms, _) => exprHasAnyErasedCheck(sc) || List.exists(arms, arm => armHasAnyErasedCheck(arm))
+    case Expr.EInterp(_, parts, _) => List.exists(parts, p => exprHasAnyErasedCheck(p))
+    case Expr.EList(xs) => List.exists(xs, x => exprHasAnyErasedCheck(x))
+    case Expr.ETuple(xs) => List.exists(xs, x => exprHasAnyErasedCheck(x))
+    case Expr.ENamed(_, inner) => exprHasAnyErasedCheck(inner)
+    case Expr.EAscribe(inner, _, _) => exprHasAnyErasedCheck(inner)
+    case Expr.EFor(bs, body, _) => forHasAnyErasedCheck(bs, body)
+    case _ => false
+  }
+
+def armHasAnyErasedCheck(arm: Arm): Bool =
+  arm match {
+    case Arm(_, _, body) => exprHasAnyErasedCheck(body)
+  }
+
+def isRewrittenReqBind(d: Bool, name: String, rest: List[Bind], body: Expr): Bool =
+  d && name == "reqok" && List.len(rest) == 1 && isVarNamed(body, "reqv") && isAssertVarBind(List.at(rest, 0), "reqok")
+
+def isAssertVarBind(b: Bind, name: String): Bool =
+  b match {
+    case Bind(d, pat, Expr.ECall(f, args, _)) => d && pat == "_" && f == "Property.assert" && List.len(args) == 2 && isVarNamed(List.at(args, 1), name)
+    case _ => false
+  }
+
+def erasedGuardBindErr(allBinds: List[Bind], d: Bool, pat: String, v: Expr, payloadTy: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (pat == "" || pat == "_" || isVerifyContext(env, funs) || isRewrittenReqBind(d, pat, rest, body)) "" else erasedGuardBindingsErr(allBinds, d, v, bindPat(pat, payloadTy, [], ens), bindTaintsInput(d, v, env, funs, ens), rest, body, env, funs, ens)
+
+def erasedGuardBindingsErr(allBinds: List[Bind], d: Bool, v: Expr, bindings: List[(String, Ty)], tainted: Bool, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  erasedGuardBindingsGo(bindings, nonResultBindNames(bindings), allBinds, d, v, tainted, rest, body, env, funs, ens)
+
+def nonResultBindNames(bindings: List[(String, Ty)]): List[String] =
+  List.map(List.filter(bindings, b => b._1 != "" && b._1 != "_" && !resultCarrierTy(b._2)), b => b._1)
+
+def erasedGuardBindingsGo(bindings: List[(String, Ty)], patNames: List[String], allBinds: List[Bind], d: Bool, v: Expr, tainted: Bool, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (List.isEmpty(bindings)) "" else erasedGuardOneNext(erasedGuardOneErr(List.at(bindings, 0), patNames, allBinds, d, v, tainted, rest, body, env, funs, ens), List.tail(bindings), patNames, allBinds, d, v, tainted, rest, body, env, funs, ens)
+
+def erasedGuardOneNext(err: String, restBindings: List[(String, Ty)], patNames: List[String], allBinds: List[Bind], d: Bool, v: Expr, tainted: Bool, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (err != "") err else erasedGuardBindingsGo(restBindings, patNames, allBinds, d, v, tainted, rest, body, env, funs, ens)
+
+def erasedGuardOneErr(binding: (String, Ty), patNames: List[String], allBinds: List[Bind], d: Bool, v: Expr, tainted: Bool, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (binding._1 == "" || binding._1 == "_" || resultCarrierTy(binding._2)) "" else if (!forLiveReached(rest, body, binding._1)) erasedOnlyNameErr(binding._1, allBinds, d, v, rest, body, env) else if (tainted && forHasErasedGuardOn(rest, body, binding._1) && !forHasLiveGuard(rest, body, patNames, funs, ens)) Str.concat("external input ", Str.concat(binding._1, " is guarded only by erased checks in live code; validate it with if, match, or Result")) else ""
+
+def erasedOnlyNameErr(name: String, allBinds: List[Bind], d: Bool, v: Expr, rest: List[Bind], body: Expr, env: List[(String, Ty)]): String =
+  if (!forUsesInErasedCheck(rest, body, [name])) "" else if (!d && !exprUsesOuterEnv(v, env, []) && !forUsesOutsideKind(rest, body, name, "Property.check") && forCountPropChecks(rest, body, name) >= 2) "" else if (isUiSignalObserver(d, v, name, rest, body)) "" else if (isUnitExpr(body) && !isProcessOrNetExpr(v) && !forUsesOutsideKind(rest, body, name, "Property.assert") && forHasActiveIoStep(allBinds, body)) "" else Str.concat("binding ", Str.concat(name, " is used only in erased checks in live code; validate live values with if, match, or Result"))
+
+def forCountPropChecks(bs: List[Bind], body: Expr, s: String): Int =
+  if (List.isEmpty(bs)) exprCountPropChecks(body, s) else forCountPropChecksBind(List.at(bs, 0), List.tail(bs), body, s)
+
+def forCountPropChecksBind(b: Bind, rest: List[Bind], body: Expr, s: String): Int =
+  b match {
+    case Bind(_, pat, value) => exprCountPropChecks(value, s) + (if (patternBindsName(pat, s)) 0 else forCountPropChecks(rest, body, s))
+  }
+
+def exprCountPropChecks(e: Expr, s: String): Int =
+  e match {
+    case Expr.ECall(f, args, _) => (if (f == "Property.check" && List.len(args) >= 2 && (exprUsesPath(List.at(args, 0), s, [], false) || exprUsesPath(List.at(args, 1), s, [], false))) 1 else 0) + List.foldLeft(args, 0, __tup => __tup match {
+  case (acc, a) => acc + exprCountPropChecks(a, s)
+})
+    case Expr.EMethod(recv, _, args, _) => exprCountPropChecks(recv, s) + List.foldLeft(args, 0, __tup => __tup match {
+  case (acc, a) => acc + exprCountPropChecks(a, s)
+})
+    case Expr.EPrint(inner, _) => exprCountPropChecks(inner, s)
+    case Expr.EField(recv, _, _) => exprCountPropChecks(recv, s)
+    case Expr.EBin(_, l, r, _) => exprCountPropChecks(l, s) + exprCountPropChecks(r, s)
+    case Expr.EUn(_, inner, _) => exprCountPropChecks(inner, s)
+    case Expr.ELam(p, _, body) => if (patternBindsName(p, s)) 0 else exprCountPropChecks(body, s)
+    case Expr.EIf(c, t, el, _) => exprCountPropChecks(c, s) + exprCountPropChecks(t, s) + exprCountPropChecks(el, s)
+    case Expr.EMatch(sc, arms, _) => exprCountPropChecks(sc, s) + List.foldLeft(arms, 0, __tup => __tup match {
+  case (acc, arm) => acc + armCountPropChecks(arm, s)
+})
+    case Expr.EInterp(_, parts, _) => List.foldLeft(parts, 0, __tup => __tup match {
+  case (acc, p) => acc + exprCountPropChecks(p, s)
+})
+    case Expr.EList(xs) => List.foldLeft(xs, 0, __tup => __tup match {
+  case (acc, x) => acc + exprCountPropChecks(x, s)
+})
+    case Expr.ETuple(xs) => List.foldLeft(xs, 0, __tup => __tup match {
+  case (acc, x) => acc + exprCountPropChecks(x, s)
+})
+    case Expr.ENamed(_, inner) => exprCountPropChecks(inner, s)
+    case Expr.EAscribe(inner, _, _) => exprCountPropChecks(inner, s)
+    case Expr.EFor(bs, body, _) => forCountPropChecks(bs, body, s)
+    case _ => 0
+  }
+
+def armCountPropChecks(arm: Arm, s: String): Int =
+  arm match {
+    case Arm(pat, _, body) => if (patternBindsName(pat, s)) 0 else exprCountPropChecks(body, s)
+  }
+
+def isUiSignalObserver(d: Bool, v: Expr, name: String, rest: List[Bind], body: Expr): Bool =
+  !d && isLiveSignalMap(v, rest, body) && !forUsesOutsideUiRequire(rest, body, name)
+
+def isLiveSignalMap(e: Expr, rest: List[Bind], body: Expr): Bool =
+  e match {
+    case Expr.ECall(f, args, _) => f == "Signal.map" && List.len(args) == 2 && signalSrcIsLive(List.at(args, 0), rest, body)
+    case Expr.EAscribe(inner, _, _) => isLiveSignalMap(inner, rest, body)
+    case Expr.ENamed(_, inner) => isLiveSignalMap(inner, rest, body)
+    case _ => false
+  }
+
+def signalSrcIsLive(e: Expr, rest: List[Bind], body: Expr): Bool =
+  e match {
+    case Expr.EVar(n, _) => forLiveReached(rest, body, n)
+    case Expr.EAscribe(inner, _, _) => signalSrcIsLive(inner, rest, body)
+    case Expr.ENamed(_, inner) => signalSrcIsLive(inner, rest, body)
+    case _ => false
+  }
+
+def isUiRunChain(e: Expr): Bool =
+  e match {
+    case Expr.ECall(f, _, _) => f == "Ui.run"
+    case Expr.EMethod(recv, name, _, _) => name == "require" && isUiRunChain(recv)
+    case Expr.EAscribe(inner, _, _) => isUiRunChain(inner)
+    case Expr.ENamed(_, inner) => isUiRunChain(inner)
+    case _ => false
+  }
+
+def forUsesOutsideUiRequire(bs: List[Bind], body: Expr, s: String): Bool =
+  if (List.isEmpty(bs)) exprUsesOutsideUiRequire(body, s) else forUsesOutsideUiRequireBind(List.at(bs, 0), List.tail(bs), body, s)
+
+def forUsesOutsideUiRequireBind(b: Bind, rest: List[Bind], body: Expr, s: String): Bool =
+  b match {
+    case Bind(_, pat, value) => exprUsesOutsideUiRequire(value, s) || !patternBindsName(pat, s) && forUsesOutsideUiRequire(rest, body, s)
+  }
+
+def exprUsesOutsideUiRequire(e: Expr, s: String): Bool =
+  e match {
+    case Expr.EVar(n, _) => n == s
+    case Expr.EPrint(inner, _) => exprUsesOutsideUiRequire(inner, s)
+    case Expr.ECall(_, args, _) => List.exists(args, a => exprUsesOutsideUiRequire(a, s))
+    case Expr.EMethod(recv, name, args, _) => exprUsesOutsideUiRequire(recv, s) || (if (name == "require") !isUiRunChain(recv) && listUsesPath(args, s, [], false) else List.exists(args, a => exprUsesOutsideUiRequire(a, s)))
+    case Expr.EField(recv, _, _) => exprUsesOutsideUiRequire(recv, s)
+    case Expr.EBin(_, l, r, _) => exprUsesOutsideUiRequire(l, s) || exprUsesOutsideUiRequire(r, s)
+    case Expr.EUn(_, inner, _) => exprUsesOutsideUiRequire(inner, s)
+    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprUsesOutsideUiRequire(body, s)
+    case Expr.EIf(c, t, el, _) => exprUsesOutsideUiRequire(c, s) || exprUsesOutsideUiRequire(t, s) || exprUsesOutsideUiRequire(el, s)
+    case Expr.EMatch(sc, arms, _) => exprUsesOutsideUiRequire(sc, s) || List.exists(arms, arm => armUsesOutsideUiRequire(arm, s))
+    case Expr.EInterp(_, parts, _) => List.exists(parts, p => exprUsesOutsideUiRequire(p, s))
+    case Expr.EList(xs) => List.exists(xs, x => exprUsesOutsideUiRequire(x, s))
+    case Expr.ETuple(xs) => List.exists(xs, x => exprUsesOutsideUiRequire(x, s))
+    case Expr.ENamed(_, inner) => exprUsesOutsideUiRequire(inner, s)
+    case Expr.EAscribe(inner, _, _) => exprUsesOutsideUiRequire(inner, s)
+    case Expr.EFor(bs, body, _) => forUsesOutsideUiRequire(bs, body, s)
+    case _ => false
+  }
+
+def armUsesOutsideUiRequire(arm: Arm, s: String): Bool =
+  arm match {
+    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprUsesOutsideUiRequire(body, s) || guard != "" && exprUsesOutsideUiRequire(Parse.parseExprList(Lexer.lex(guard), 0)._1, s))
+  }
+
+def exprUsesAnyAll(e: Expr, names: List[String]): Bool =
+  List.exists(names, n => exprUsesPath(e, n, [], false))
+
+def forUsesInErasedCheck(bs: List[Bind], body: Expr, names: List[String]): Bool =
+  if (List.isEmpty(names)) false else if (List.isEmpty(bs)) exprUsesAnyErased(body, names) else forUsesInErasedBind(List.at(bs, 0), List.tail(bs), body, names)
+
+def forUsesInErasedBind(b: Bind, rest: List[Bind], body: Expr, names: List[String]): Bool =
+  b match {
+    case Bind(d, pat, value) => exprUsesAnyErased(value, names) || forUsesInErasedCheck(rest, body, nextAliasNames(d, pat, value, names))
+  }
+
+def nextAliasNames(d: Bool, pat: String, value: Expr, names: List[String]): List[String] =
+  if (!d && exprUsesAnyAll(value, names)) List.distinct(List.concat(patBoundNames(pat), List.filter(names, n => !patternBindsName(pat, n)))) else List.filter(names, n => !patternBindsName(pat, n))
+
+def exprUsesAnyErased(e: Expr, names: List[String]): Bool =
+  if (List.isEmpty(names)) false else e match {
+  case Expr.EPrint(inner, _) => exprUsesAnyErased(inner, names)
+  case Expr.ECall(f, args, _) => if (f == "Property.check") List.len(args) >= 2 && (exprUsesAnyAll(List.at(args, 0), names) || exprUsesAnyAll(List.at(args, 1), names)) || List.len(args) >= 3 && exprUsesAnyErased(List.at(args, 2), names) else if (isErasedPropertyCall(f)) List.exists(args, a => exprUsesAnyAll(a, names)) else List.exists(args, a => exprUsesAnyErased(a, names))
+  case Expr.EMethod(recv, name, args, _) => exprUsesAnyErased(recv, names) || (if (name == "require") List.exists(args, a => exprUsesAnyAll(a, names)) else List.exists(args, a => exprUsesAnyErased(a, names)))
+  case Expr.EField(recv, _, _) => exprUsesAnyErased(recv, names)
+  case Expr.EBin(_, l, r, _) => exprUsesAnyErased(l, names) || exprUsesAnyErased(r, names)
+  case Expr.EUn(_, inner, _) => exprUsesAnyErased(inner, names)
+  case Expr.ELam(p, _, body) => exprUsesAnyErased(body, List.filter(names, n => !patternBindsName(p, n)))
+  case Expr.EIf(c, t, el, _) => exprUsesAnyErased(c, names) || exprUsesAnyErased(t, names) || exprUsesAnyErased(el, names)
+  case Expr.EMatch(sc, arms, _) => exprUsesAnyErased(sc, names) || List.exists(arms, arm => armUsesAnyErased(arm, names))
+  case Expr.EInterp(_, parts, _) => List.exists(parts, p => exprUsesAnyErased(p, names))
+  case Expr.EList(xs) => List.exists(xs, x => exprUsesAnyErased(x, names))
+  case Expr.ETuple(xs) => List.exists(xs, x => exprUsesAnyErased(x, names))
+  case Expr.ENamed(_, inner) => exprUsesAnyErased(inner, names)
+  case Expr.EAscribe(inner, _, _) => exprUsesAnyErased(inner, names)
+  case Expr.EFor(bs, body, _) => forUsesInErasedCheck(bs, body, names)
+  case _ => false
+}
+
+def armUsesAnyErased(arm: Arm, names: List[String]): Bool =
+  arm match {
+    case Arm(pat, guard, body) => exprUsesAnyErased(body, List.filter(names, n => !patternBindsName(pat, n))) || guard != "" && exprUsesAnyErased(Parse.parseExprList(Lexer.lex(guard), 0)._1, List.filter(names, n => !patternBindsName(pat, n)))
+  }
+
+def isUnitExpr(e: Expr): Bool =
+  e match {
+    case Expr.EUnit => true
+    case Expr.EAscribe(inner, _, _) => isUnitExpr(inner)
+    case Expr.ENamed(_, inner) => isUnitExpr(inner)
+    case _ => false
+  }
+
+def forLiveReached(bs: List[Bind], body: Expr, s: String): Bool =
+  forLiveReachedList(bs, body, [s])
+
+def forLiveReachedList(bs: List[Bind], body: Expr, names: List[String]): Bool =
+  if (List.isEmpty(names)) false else if (List.isEmpty(bs)) exprUsesAnyLive(body, names) else forLiveReachedBind(List.at(bs, 0), List.tail(bs), body, names)
+
+def forLiveReachedBind(b: Bind, rest: List[Bind], body: Expr, names: List[String]): Bool =
+  b match {
+    case Bind(d, pat, value) => if (d || pat == "_" || pat == "") exprUsesAnyLive(value, names) || forLiveReachedList(rest, body, List.filter(names, n => !patternBindsName(pat, n))) else forLiveReachedList(rest, body, nextGuardNames(false, pat, value, names))
+  }
+
+def forHasActiveIoStep(bs: List[Bind], body: Expr): Bool =
+  if (List.isEmpty(bs)) false else forBindIsActiveIo(List.at(bs, 0), List.tail(bs), body) || forHasActiveIoStep(List.tail(bs), body)
+
+def forBindIsActiveIo(b: Bind, rest: List[Bind], body: Expr): Bool =
+  b match {
+    case Bind(d, pat, v) => d && !isPropAssertExpr(v) && !(isExternalInputExpr(v) && !patHasLiveUse(pat, rest, body))
+  }
+
+def isPropAssertExpr(e: Expr): Bool =
+  e match {
+    case Expr.ECall(f, _, _) => f == "Property.assert"
+    case Expr.EAscribe(inner, _, _) => isPropAssertExpr(inner)
+    case Expr.ENamed(_, inner) => isPropAssertExpr(inner)
+    case _ => false
+  }
+
+def patHasLiveUse(pat: String, rest: List[Bind], body: Expr): Bool =
+  List.exists(bindPat(pat, "", [], []), nb => nb._1 != "" && nb._1 != "_" && forLiveReached(rest, body, nb._1))
+
+def patBoundNames(pat: String): List[String] =
+  List.map(List.filter(bindPat(pat, "", [], []), b => b._1 != "" && b._1 != "_"), b => b._1)
+
+def exprUsesOuterEnv(e: Expr, env: List[(String, Ty)], shadowed: List[String]): Bool =
+  e match {
+    case Expr.EVar(n, _) => !List.contains(shadowed, n) && !Str.startsWith(n, "#") && Type.show(lookupEnv(env, n)) != ""
+    case Expr.EPrint(inner, _) => exprUsesOuterEnv(inner, env, shadowed)
+    case Expr.ECall(_, args, _) => List.exists(args, a => exprUsesOuterEnv(a, env, shadowed))
+    case Expr.EMethod(recv, _, args, _) => exprUsesOuterEnv(recv, env, shadowed) || List.exists(args, a => exprUsesOuterEnv(a, env, shadowed))
+    case Expr.EField(recv, _, _) => exprUsesOuterEnv(recv, env, shadowed)
+    case Expr.EBin(_, l, r, _) => exprUsesOuterEnv(l, env, shadowed) || exprUsesOuterEnv(r, env, shadowed)
+    case Expr.EUn(_, inner, _) => exprUsesOuterEnv(inner, env, shadowed)
+    case Expr.ELam(p, _, body) => exprUsesOuterEnv(body, env, List.concat(patBoundNames(p), shadowed))
+    case Expr.EIf(c, t, el, _) => exprUsesOuterEnv(c, env, shadowed) || exprUsesOuterEnv(t, env, shadowed) || exprUsesOuterEnv(el, env, shadowed)
+    case Expr.EMatch(sc, arms, _) => exprUsesOuterEnv(sc, env, shadowed) || List.exists(arms, arm => armUsesOuterEnv(arm, env, shadowed))
+    case Expr.EInterp(_, parts, _) => List.exists(parts, p => exprUsesOuterEnv(p, env, shadowed))
+    case Expr.EList(xs) => List.exists(xs, x => exprUsesOuterEnv(x, env, shadowed))
+    case Expr.ETuple(xs) => List.exists(xs, x => exprUsesOuterEnv(x, env, shadowed))
+    case Expr.ENamed(_, inner) => exprUsesOuterEnv(inner, env, shadowed)
+    case Expr.EAscribe(inner, _, _) => exprUsesOuterEnv(inner, env, shadowed)
+    case Expr.EFor(bs, body, _) => forUsesOuterEnv(bs, body, env, shadowed)
+    case _ => false
+  }
+
+def armUsesOuterEnv(arm: Arm, env: List[(String, Ty)], shadowed: List[String]): Bool =
+  arm match {
+    case Arm(pat, guard, body) => exprUsesOuterEnv(body, env, List.concat(patBoundNames(pat), shadowed)) || guard != "" && exprUsesOuterEnv(Parse.parseExprList(Lexer.lex(guard), 0)._1, env, List.concat(patBoundNames(pat), shadowed))
+  }
+
+def forUsesOuterEnv(bs: List[Bind], body: Expr, env: List[(String, Ty)], shadowed: List[String]): Bool =
+  if (List.isEmpty(bs)) exprUsesOuterEnv(body, env, shadowed) else forUsesOuterBind(List.at(bs, 0), List.tail(bs), body, env, shadowed)
+
+def forUsesOuterBind(b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], shadowed: List[String]): Bool =
+  b match {
+    case Bind(_, pat, value) => exprUsesOuterEnv(value, env, shadowed) || forUsesOuterEnv(rest, body, env, List.concat(patBoundNames(pat), shadowed))
+  }
+
+def forUsesOutsideKind(bs: List[Bind], body: Expr, s: String, kind: String): Bool =
+  if (List.isEmpty(bs)) exprUsesOutsideKind(body, s, kind) else forUsesOutsideBind(List.at(bs, 0), List.tail(bs), body, s, kind)
+
+def forUsesOutsideBind(b: Bind, rest: List[Bind], body: Expr, s: String, kind: String): Bool =
+  b match {
+    case Bind(_, pat, value) => exprUsesOutsideKind(value, s, kind) || !patternBindsName(pat, s) && forUsesOutsideKind(rest, body, s, kind)
+  }
+
+def exprUsesOutsideKind(e: Expr, s: String, kind: String): Bool =
+  e match {
+    case Expr.EVar(n, _) => n == s
+    case Expr.EPrint(inner, _) => exprUsesOutsideKind(inner, s, kind)
+    case Expr.ECall(f, args, _) => callUsesOutsideKind(f, args, s, kind)
+    case Expr.EMethod(recv, name, args, _) => exprUsesOutsideKind(recv, s, kind) || (if (name == "require") listUsesPath(args, s, [], false) else List.exists(args, a => exprUsesOutsideKind(a, s, kind)))
+    case Expr.EField(recv, _, _) => exprUsesOutsideKind(recv, s, kind)
+    case Expr.EBin(_, l, r, _) => exprUsesOutsideKind(l, s, kind) || exprUsesOutsideKind(r, s, kind)
+    case Expr.EUn(_, inner, _) => exprUsesOutsideKind(inner, s, kind)
+    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprUsesOutsideKind(body, s, kind)
+    case Expr.EIf(c, t, el, _) => exprUsesOutsideKind(c, s, kind) || exprUsesOutsideKind(t, s, kind) || exprUsesOutsideKind(el, s, kind)
+    case Expr.EMatch(sc, arms, _) => exprUsesOutsideKind(sc, s, kind) || List.exists(arms, arm => armUsesOutsideKind(arm, s, kind))
+    case Expr.EInterp(_, parts, _) => List.exists(parts, p => exprUsesOutsideKind(p, s, kind))
+    case Expr.EList(xs) => List.exists(xs, x => exprUsesOutsideKind(x, s, kind))
+    case Expr.ETuple(xs) => List.exists(xs, x => exprUsesOutsideKind(x, s, kind))
+    case Expr.ENamed(_, inner) => exprUsesOutsideKind(inner, s, kind)
+    case Expr.EAscribe(inner, _, _) => exprUsesOutsideKind(inner, s, kind)
+    case Expr.EFor(bs, body, _) => forUsesOutsideKind(bs, body, s, kind)
+    case _ => false
+  }
+
+def armUsesOutsideKind(arm: Arm, s: String, kind: String): Bool =
+  arm match {
+    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprUsesOutsideKind(body, s, kind) || guard != "" && exprUsesOutsideKind(Parse.parseExprList(Lexer.lex(guard), 0)._1, s, kind))
+  }
+
+def callUsesOutsideKind(f: String, args: List[Expr], s: String, kind: String): Bool =
+  if (f == "Property.check") (if (kind == "Property.check") false else List.len(args) >= 2 && (exprUsesPath(List.at(args, 0), s, [], false) || exprUsesPath(List.at(args, 1), s, [], false))) || List.len(args) >= 3 && exprUsesOutsideKind(List.at(args, 2), s, kind) else if (f == "Property.assert") if (kind == "Property.assert") false else listUsesPath(args, s, [], false) else if (isErasedPropertyCall(f)) listUsesPath(args, s, [], false) else List.exists(args, a => exprUsesOutsideKind(a, s, kind))
+
+def isProcessOrNetCall(f: String): Bool =
+  f == "Sys.args" || f == "Sys.getenv" || f == "Sys.read" || f == "Sys.readLine" || f == "Sys.childRead" || f == "Sys.exec" || Str.startsWith(f, "Net.http") || f == "Net.tcpRead" || f == "Net.udpRecv"
+
+def isExternalInputCall(f: String): Bool =
+  f == "Fs.read" || isProcessOrNetCall(f)
+
+def isProcessOrNetExpr(e: Expr): Bool =
+  e match {
+    case Expr.ECall(f, args, _) => isProcessOrNetCall(f) || isWrappedInputCall(f, args, true)
+    case Expr.EMethod(recv, name, args, _) => (name == "map" || name == "handleErrorWith" || name == "flatMap") && isProcessOrNetExpr(recv) || name == "flatMap" && List.exists(args, a => lamBodyInput(a, true))
+    case Expr.EAscribe(inner, _, _) => isProcessOrNetExpr(inner)
+    case Expr.ENamed(_, inner) => isProcessOrNetExpr(inner)
+    case _ => false
+  }
+
+def isExternalInputExpr(e: Expr): Bool =
+  e match {
+    case Expr.ECall(f, args, _) => isExternalInputCall(f) || isWrappedInputCall(f, args, false)
+    case Expr.EMethod(recv, name, args, _) => (name == "map" || name == "handleErrorWith" || name == "flatMap") && isExternalInputExpr(recv) || name == "flatMap" && List.exists(args, a => lamBodyInput(a, false))
+    case Expr.EAscribe(inner, _, _) => isExternalInputExpr(inner)
+    case Expr.ENamed(_, inner) => isExternalInputExpr(inner)
+    case _ => false
+  }
+
+def isWrappedInputCall(f: String, args: List[Expr], procOnly: Bool): Bool =
+  if (f == "IO.both" || f == "IO.race") List.exists(args, a => if (procOnly) isProcessOrNetExpr(a) else isExternalInputExpr(a)) else if ((f == "IO.timeout" || f == "IO.retryN") && List.len(args) == 2) if (procOnly) isProcessOrNetExpr(List.at(args, 1)) else isExternalInputExpr(List.at(args, 1)) else if (f == "IO.ensure" && List.len(args) == 2) if (procOnly) isProcessOrNetExpr(List.at(args, 0)) else isExternalInputExpr(List.at(args, 0)) else if (f == "IO.foreach" && List.len(args) == 2) lamBodyInput(List.at(args, 1), procOnly) else false
+
+def lamBodyInput(e: Expr, procOnly: Bool): Bool =
+  e match {
+    case Expr.ELam(_, _, body) => if (procOnly) isProcessOrNetExpr(body) else isExternalInputExpr(body)
+    case _ => false
+  }
+
+def bindTaintsInput(d: Bool, v: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Bool =
+  if (d) isExternalInputExpr(v) else hasInputVars(env) && bindTaintsPure(v, List.distinct(exprInputVars(v, env, [])), funs, ens)
+
+def bindTaintsPure(v: Expr, vars: List[String], funs: Ftab, ens: List[En]): Bool =
+  !List.isEmpty(vars) && !exprHasLiveGuard(v, vars, funs, ens)
+
+def exprInputVars(e: Expr, env: List[(String, Ty)], shadowed: List[String]): List[String] =
+  e match {
+    case Expr.EVar(n, _) => if (!List.contains(shadowed, n) && isInputVar(n, env)) [n] else []
+    case Expr.EPrint(inner, _) => exprInputVars(inner, env, shadowed)
+    case Expr.ECall(f, args, _) => if (f == "Property.check") if (List.len(args) >= 3) exprInputVars(List.at(args, 2), env, shadowed) else [] else if (isErasedPropertyCall(f)) [] else List.flatMap(args, a => exprInputVars(a, env, shadowed))
+    case Expr.EMethod(recv, name, args, _) => List.concat(exprInputVars(recv, env, shadowed), if (name == "require") [] else List.flatMap(args, a => exprInputVars(a, env, shadowed)))
+    case Expr.EField(recv, _, _) => exprInputVars(recv, env, shadowed)
+    case Expr.EBin(_, l, r, _) => List.concat(exprInputVars(l, env, shadowed), exprInputVars(r, env, shadowed))
+    case Expr.EUn(_, inner, _) => exprInputVars(inner, env, shadowed)
+    case Expr.ELam(p, _, body) => exprInputVars(body, env, List.concat(patBoundNames(p), shadowed))
+    case Expr.EIf(c, t, el, _) => List.concat(exprInputVars(c, env, shadowed), List.concat(exprInputVars(t, env, shadowed), exprInputVars(el, env, shadowed)))
+    case Expr.EMatch(sc, arms, _) => List.concat(exprInputVars(sc, env, shadowed), List.flatMap(arms, arm => armInputVars(arm, env, shadowed)))
+    case Expr.EInterp(_, parts, _) => List.flatMap(parts, p => exprInputVars(p, env, shadowed))
+    case Expr.EList(xs) => List.flatMap(xs, x => exprInputVars(x, env, shadowed))
+    case Expr.ETuple(xs) => List.flatMap(xs, x => exprInputVars(x, env, shadowed))
+    case Expr.ENamed(_, inner) => exprInputVars(inner, env, shadowed)
+    case Expr.EAscribe(inner, _, _) => exprInputVars(inner, env, shadowed)
+    case Expr.EFor(bs, body, _) => forInputVars(bs, body, env, shadowed)
+    case _ => []
+  }
+
+def armInputVars(arm: Arm, env: List[(String, Ty)], shadowed: List[String]): List[String] =
+  arm match {
+    case Arm(pat, guard, body) => List.concat(exprInputVars(body, env, List.concat(patBoundNames(pat), shadowed)), if (guard == "") [] else exprInputVars(Parse.parseExprList(Lexer.lex(guard), 0)._1, env, List.concat(patBoundNames(pat), shadowed)))
+  }
+
+def forInputVars(bs: List[Bind], body: Expr, env: List[(String, Ty)], shadowed: List[String]): List[String] =
+  if (List.isEmpty(bs)) exprInputVars(body, env, shadowed) else forInputVarsBind(List.at(bs, 0), List.tail(bs), body, env, shadowed)
+
+def forInputVarsBind(b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], shadowed: List[String]): List[String] =
+  b match {
+    case Bind(_, pat, value) => List.concat(exprInputVars(value, env, shadowed), forInputVars(rest, body, env, List.concat(patBoundNames(pat), shadowed)))
+  }
+
+def forHasErasedGuardOn(bs: List[Bind], body: Expr, s: String): Bool =
+  if (List.isEmpty(bs)) exprHasErasedGuardOn(body, s) else forHasErasedGuardBind(List.at(bs, 0), List.tail(bs), body, s)
+
+def forHasErasedGuardBind(b: Bind, rest: List[Bind], body: Expr, s: String): Bool =
+  b match {
+    case Bind(_, pat, value) => exprHasErasedGuardOn(value, s) || !patternBindsName(pat, s) && forHasErasedGuardOn(rest, body, s)
+  }
+
+def exprHasErasedGuardOn(e: Expr, s: String): Bool =
+  e match {
+    case Expr.EPrint(inner, _) => exprHasErasedGuardOn(inner, s)
+    case Expr.ECall(f, args, _) => callHasErasedGuardOn(f, args, s)
+    case Expr.EMethod(recv, name, args, _) => methodHasErasedGuardOn(recv, name, args, s)
+    case Expr.EField(recv, _, _) => exprHasErasedGuardOn(recv, s)
+    case Expr.EBin(_, l, r, _) => exprHasErasedGuardOn(l, s) || exprHasErasedGuardOn(r, s)
+    case Expr.EUn(_, inner, _) => exprHasErasedGuardOn(inner, s)
+    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprHasErasedGuardOn(body, s)
+    case Expr.EIf(c, t, el, _) => exprHasErasedGuardOn(c, s) || exprHasErasedGuardOn(t, s) || exprHasErasedGuardOn(el, s)
+    case Expr.EMatch(sc, arms, _) => exprHasErasedGuardOn(sc, s) || List.exists(arms, arm => armHasErasedGuardOn(arm, s))
+    case Expr.EInterp(_, parts, _) => List.exists(parts, p => exprHasErasedGuardOn(p, s))
+    case Expr.EList(xs) => List.exists(xs, x => exprHasErasedGuardOn(x, s))
+    case Expr.ETuple(xs) => List.exists(xs, x => exprHasErasedGuardOn(x, s))
+    case Expr.ENamed(_, inner) => exprHasErasedGuardOn(inner, s)
+    case Expr.EAscribe(inner, _, _) => exprHasErasedGuardOn(inner, s)
+    case Expr.EFor(bs, body, _) => forHasErasedGuardOn(bs, body, s)
+    case _ => false
+  }
+
+def armHasErasedGuardOn(arm: Arm, s: String): Bool =
+  arm match {
+    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprHasErasedGuardOn(body, s) || guard != "" && exprHasErasedGuardOn(Parse.parseExprList(Lexer.lex(guard), 0)._1, s))
+  }
+
+def callHasErasedGuardOn(f: String, args: List[Expr], s: String): Bool =
+  if (f == "Property.check") List.len(args) >= 2 && (exprUsesPath(List.at(args, 0), s, [], false) || exprUsesPath(List.at(args, 1), s, [], false)) || List.len(args) >= 3 && exprHasErasedGuardOn(List.at(args, 2), s) else if (f == "Property.assume" || f == "Property.assert") listUsesPath(args, s, [], false) else List.exists(args, a => exprHasErasedGuardOn(a, s))
+
+def methodHasErasedGuardOn(recv: Expr, name: String, args: List[Expr], s: String): Bool =
+  if (name == "require") listUsesPath(args, s, [], false) || requireLamInspectsRecv(args) && recvDirectUses(recv, s) || exprHasErasedGuardOn(recv, s) else exprHasErasedGuardOn(recv, s) || List.exists(args, a => exprHasErasedGuardOn(a, s))
+
+def requireLamInspectsRecv(args: List[Expr]): Bool =
+  if (List.isEmpty(args)) false else predIsLam(stripNamed(List.at(args, List.len(args) - 1)))
+
+def predIsLam(e: Expr): Bool =
+  e match {
+    case Expr.ELam(_, _, _) => true
+    case Expr.EAscribe(inner, _, _) => predIsLam(inner)
+    case _ => false
+  }
+
+def recvDirectUses(e: Expr, s: String): Bool =
+  e match {
+    case Expr.EVar(n, _) => n == s
+    case Expr.EField(recv, _, _) => recvDirectUses(recv, s)
+    case Expr.ECall(f, args, _) => f != "Ui.run" && List.exists(args, a => recvDirectUses(a, s))
+    case Expr.EMethod(recv, name, args, _) => recvDirectUses(recv, s) || name != "require" && List.exists(args, a => recvDirectUses(a, s))
+    case Expr.EBin(_, l, r, _) => recvDirectUses(l, s) || recvDirectUses(r, s)
+    case Expr.EUn(_, inner, _) => recvDirectUses(inner, s)
+    case Expr.EInterp(_, parts, _) => List.exists(parts, p => recvDirectUses(p, s))
+    case Expr.EList(xs) => List.exists(xs, x => recvDirectUses(x, s))
+    case Expr.ETuple(xs) => List.exists(xs, x => recvDirectUses(x, s))
+    case Expr.ENamed(_, inner) => recvDirectUses(inner, s)
+    case Expr.EAscribe(inner, _, _) => recvDirectUses(inner, s)
+    case _ => false
+  }
+
+def exprUsesAnyLive(e: Expr, names: List[String]): Bool =
+  List.exists(names, n => exprUsesPath(e, n, [], true))
+
+def forHasLiveGuard(bs: List[Bind], body: Expr, names: List[String], funs: Ftab, ens: List[En]): Bool =
+  if (List.isEmpty(names)) false else if (List.isEmpty(bs)) exprHasLiveGuard(body, names, funs, ens) else forHasLiveGuardBind(List.at(bs, 0), List.tail(bs), body, names, funs, ens)
+
+def forHasLiveGuardBind(b: Bind, rest: List[Bind], body: Expr, names: List[String], funs: Ftab, ens: List[En]): Bool =
+  b match {
+    case Bind(d, pat, value) => exprHasLiveGuard(value, names, funs, ens) || forHasLiveGuard(rest, body, nextGuardNames(d, pat, value, names), funs, ens)
+  }
+
+def nextGuardNames(d: Bool, pat: String, value: Expr, names: List[String]): List[String] =
+  if (!d && exprUsesAnyLive(value, names)) List.distinct(List.concat(patBoundNames(pat), List.filter(names, n => !patternBindsName(pat, n)))) else List.filter(names, n => !patternBindsName(pat, n))
+
+def exprHasLiveGuard(e: Expr, names: List[String], funs: Ftab, ens: List[En]): Bool =
+  if (List.isEmpty(names)) false else e match {
+  case Expr.EPrint(inner, _) => exprHasLiveGuard(inner, names, funs, ens)
+  case Expr.ECall(f, args, _) => callHasLiveGuard(f, args, names, funs, ens)
+  case Expr.EMethod(recv, name, args, _) => exprHasLiveGuard(recv, names, funs, ens) || name != "require" && List.exists(args, a => exprHasLiveGuard(a, names, funs, ens))
+  case Expr.EField(recv, _, _) => exprHasLiveGuard(recv, names, funs, ens)
+  case Expr.EBin(_, l, r, _) => exprHasLiveGuard(l, names, funs, ens) || exprHasLiveGuard(r, names, funs, ens)
+  case Expr.EUn(_, inner, _) => exprHasLiveGuard(inner, names, funs, ens)
+  case Expr.ELam(p, _, body) => exprHasLiveGuard(body, List.filter(names, n => !patternBindsName(p, n)), funs, ens)
+  case Expr.EIf(c, t, el, _) => exprUsesAnyLive(c, names) || exprHasLiveGuard(c, names, funs, ens) || exprHasLiveGuard(t, names, funs, ens) || exprHasLiveGuard(el, names, funs, ens)
+  case Expr.EMatch(sc, arms, _) => exprUsesAnyLive(sc, names) && matchBranches(arms, ens) || exprHasLiveGuard(sc, names, funs, ens) || List.exists(arms, arm => armHasLiveGuard(arm, names, funs, ens))
+  case Expr.EInterp(_, parts, _) => List.exists(parts, p => exprHasLiveGuard(p, names, funs, ens))
+  case Expr.EList(xs) => List.exists(xs, x => exprHasLiveGuard(x, names, funs, ens))
+  case Expr.ETuple(xs) => List.exists(xs, x => exprHasLiveGuard(x, names, funs, ens))
+  case Expr.ENamed(_, inner) => exprHasLiveGuard(inner, names, funs, ens)
+  case Expr.EAscribe(inner, _, _) => exprHasLiveGuard(inner, names, funs, ens)
+  case Expr.EFor(bs, body, _) => forHasLiveGuard(bs, body, names, funs, ens)
+  case _ => false
+}
+
+def matchBranches(arms: List[Arm], ens: List[En]): Bool =
+  List.len(arms) >= 2 || List.exists(arms, arm => armBranches(arm, ens))
+
+def armBranches(arm: Arm, ens: List[En]): Bool =
+  arm match {
+    case Arm(pat, guard, _) => guard != "" || !coverWild(coverClean(pat), "", ens)
+  }
+
+def armHasLiveGuard(arm: Arm, names: List[String], funs: Ftab, ens: List[En]): Bool =
+  arm match {
+    case Arm(pat, guard, body) => armGuardUsesLive(guard, List.filter(names, n => !patternBindsName(pat, n))) || exprHasLiveGuard(body, List.filter(names, n => !patternBindsName(pat, n)), funs, ens)
+  }
+
+def armGuardUsesLive(guard: String, names: List[String]): Bool =
+  guard != "" && exprUsesAnyLive(Parse.parseExprList(Lexer.lex(guard), 0)._1, names)
+
+def callHasLiveGuard(f: String, args: List[Expr], names: List[String], funs: Ftab, ens: List[En]): Bool =
+  if (f == "Property.check") List.len(args) >= 3 && exprHasLiveGuard(List.at(args, 2), names, funs, ens) else if (isErasedPropertyCall(f)) false else if ((f == "IO.when" || f == "IO.unless") && !List.isEmpty(args) && exprUsesAnyLive(List.at(args, 0), names)) true else if (callValidatesInput(f, funs) && List.exists(args, a => exprUsesAnyLive(a, names))) true else List.exists(args, a => exprHasLiveGuard(a, names, funs, ens))
+
+def callValidatesInput(f: String, funs: Ftab): Bool =
+  if (f == "IO.attempt") false else if (f == "Clock.parse") true else if (isKit(f, funs)) kitReturnsResult(kitOf(funs, f).ret) else userFunReturnsResult(ftabGet(funs.tab, f))
+
+def kitReturnsResult(ret: Ty): Bool =
+  resultCarrierTy(ret) || Type.appName(ret) == "IO" && List.exists(Type.appArgs(ret), a => resultCarrierTy(a))
+
+def userFunReturnsResult(ds: List[Fun]): Bool =
+  !List.isEmpty(ds) && List.forall(ds, d => funRetHasResult(d.ret))
+
+def funRetHasResult(ret: String): Bool =
+  resultCarrierTy(Type.parse(ret)) || isIo(ret) && resultCarrierTy(Type.parse(ioPayload(ret)))
+
+def erasedGuardSpan(env: List[(String, Ty)], v: Expr, pat: String, rest: List[Bind], body: Expr, fallback: (String, Int), ens: List[En]): (String, Int) =
+  spanPick(exprSpan(env, v), spanPick((modFile(env), erasedCheckOffBinds(rest, body, patBoundNames(pat))), fallback))
+
+def erasedCheckOffBinds(bs: List[Bind], body: Expr, names: List[String]): Int =
+  if (List.isEmpty(bs)) erasedCheckOffExpr(body, names) else erasedCheckOffBind(List.at(bs, 0), List.tail(bs), body, names)
+
+def erasedCheckOffBind(b: Bind, rest: List[Bind], body: Expr, names: List[String]): Int =
+  b match {
+    case Bind(_, pat, value) => spanOrOff(erasedCheckOffExpr(value, names), erasedCheckOffBinds(rest, body, List.filter(names, n => !patternBindsName(pat, n))))
+  }
+
+def spanOrOff(a: Int, b: Int): Int =
+  if (a >= 0) a else b
+
+def erasedCheckOffExpr(e: Expr, names: List[String]): Int =
+  if (List.isEmpty(names)) 0 - 1 else e match {
+  case Expr.ECall(f, args, off) => if ((f == "Property.check" || isErasedPropertyCall(f)) && List.exists(names, n => listUsesPath(args, n, [], false))) off else erasedCheckOffList(args, names)
+  case Expr.EMethod(recv, name, args, off) => if (name == "require" && List.exists(names, n => listUsesPath(args, n, [], false) || exprUsesPath(recv, n, [], false))) off else spanOrOff(erasedCheckOffExpr(recv, names), erasedCheckOffList(args, names))
+  case Expr.EPrint(inner, _) => erasedCheckOffExpr(inner, names)
+  case Expr.EField(recv, _, _) => erasedCheckOffExpr(recv, names)
+  case Expr.EBin(_, l, r, _) => spanOrOff(erasedCheckOffExpr(l, names), erasedCheckOffExpr(r, names))
+  case Expr.EUn(_, inner, _) => erasedCheckOffExpr(inner, names)
+  case Expr.ELam(p, _, body) => erasedCheckOffExpr(body, List.filter(names, n => !patternBindsName(p, n)))
+  case Expr.EIf(c, t, el, _) => spanOrOff(erasedCheckOffExpr(c, names), spanOrOff(erasedCheckOffExpr(t, names), erasedCheckOffExpr(el, names)))
+  case Expr.EMatch(sc, arms, _) => spanOrOff(erasedCheckOffExpr(sc, names), erasedCheckOffArms(arms, names))
+  case Expr.EInterp(_, parts, _) => erasedCheckOffList(parts, names)
+  case Expr.EList(xs) => erasedCheckOffList(xs, names)
+  case Expr.ETuple(xs) => erasedCheckOffList(xs, names)
+  case Expr.ENamed(_, inner) => erasedCheckOffExpr(inner, names)
+  case Expr.EAscribe(inner, _, _) => erasedCheckOffExpr(inner, names)
+  case Expr.EFor(bs, body, _) => erasedCheckOffBinds(bs, body, names)
+  case _ => 0 - 1
+}
+
+def erasedCheckOffList(xs: List[Expr], names: List[String]): Int =
+  if (List.isEmpty(xs)) 0 - 1 else spanOrOff(erasedCheckOffExpr(List.at(xs, 0), names), erasedCheckOffList(List.tail(xs), names))
+
+def erasedCheckOffArms(arms: List[Arm], names: List[String]): Int =
+  if (List.isEmpty(arms)) 0 - 1 else spanOrOff(erasedCheckOffArm(List.at(arms, 0), names), erasedCheckOffArms(List.tail(arms), names))
+
+def erasedCheckOffArm(arm: Arm, names: List[String]): Int =
+  arm match {
+    case Arm(pat, _, body) => erasedCheckOffExpr(body, List.filter(names, n => !patternBindsName(pat, n)))
+  }
 
 def refineEnv(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   e match {
