@@ -53,9 +53,9 @@ Complete one slice before starting the next slice.
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.
 
 Use the [recovery comparison](gaps.md#formal-verification) to measure author effort.
-Extend checks for external writes during recovery under the stated ownership limits.
+Recovery and Undo checks cover external writes under the stated ownership limits.
 Select further relation checks from demonstrated application gaps.
-Keep wider incomplete scopes explicit.
+Keep concurrent race windows and wider incomplete scopes explicit.
 Keep formal methods optional until they pass the product method gate.
 
 ## Formal verification methods
