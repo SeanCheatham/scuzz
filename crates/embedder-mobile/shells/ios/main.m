@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "scuzz_mobile.h"
 
@@ -59,6 +60,8 @@ static void *scuzz_app_thread(void *unused) {
     NSArray *dirs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
     NSString *docs = dirs.firstObject;
+    if (docs.length > 0)
+      (void)chdir(docs.fileSystemRepresentation);
     NSString *dump =
         [docs stringByAppendingPathComponent:@"debug.json"];
     NSString *record = [docs stringByAppendingPathComponent:@"record.json"];

@@ -1449,6 +1449,16 @@ int sz_view_slider_set_at(SzView *view, float x) {
   return 1;
 }
 
+void sz_view_slider_release(SzView *view) {
+  if (!view || view->kind != SZ_VIEW_SLIDER) return;
+  for (SzView *p = view->parent; p; p = p->parent) {
+    if (p->kind == SZ_VIEW_INK_WELL && p->on_tap) {
+      p->on_tap(p, p->tap_env);
+      break;
+    }
+  }
+}
+
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder) {
   SzView *v = view_new(SZ_VIEW_TEXT_FIELD);
   const char *s;
@@ -10492,7 +10502,11 @@ int sz_view_a11y_action(SzView *root, const SzA11yRequest *request) {
       break;
     case SZ_A11Y_SET_VALUE:
       if (view->kind == SZ_VIEW_SPLIT) result = split_set_fraction(view, request->value);
-      else { sz_signal_int_set(view->sig_int, slider_value(view, request->value)); result = 1; }
+      else {
+        sz_signal_int_set(view->sig_int, slider_value(view, request->value));
+        sz_view_slider_release(view);
+        result = 1;
+      }
       break;
     }
   }

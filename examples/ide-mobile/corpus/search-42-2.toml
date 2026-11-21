@@ -1,0 +1,4 @@
+[fuzz]
+schedule_seed = "2"
+fault_seed = "1"
+events = ["drive blindLaneProjection 0 0"]

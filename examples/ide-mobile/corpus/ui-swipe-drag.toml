@@ -1,0 +1,7 @@
+[fuzz]
+events = [
+  "drag 195 608 215 608",
+  "drag 195 608 315 608",
+  "drag 195 608 75 608",
+  "tap button:Sync",
+]

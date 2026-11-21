@@ -575,6 +575,8 @@ SzView *sz_view_find(SzView *root, uintptr_t id);
 int sz_view_is_tap_target(const SzView *view);
 /* Write the nearest allowed step from x. Return 1 for a slider. */
 int sz_view_slider_set_at(SzView *view, float x);
+/* Run the nearest enclosing ink-well tap handler after slider release. */
+void sz_view_slider_release(SzView *view);
 
 /* Layout + hit-test (also run inside pump / inject). */
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme);

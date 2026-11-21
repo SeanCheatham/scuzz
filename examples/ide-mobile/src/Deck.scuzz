@@ -1,0 +1,315 @@
+record FilePair(path: String, content: String)
+
+record CardItem(id: String, objective: String, baseline: String, after: String, flip: Int, workload: String, step: Int, changes: List[String], before: List[FilePair], proposed: List[FilePair])
+
+record SteerRow(seq: Int, id: String, prompt: String, baseline: String, status: String)
+
+record OutboxAction(id: String, kind: String, card: String, baseline: String, reason: String, prompt: String)
+
+record Pairing(host: String, port: Int, token: String)
+
+record Snapshot(baseline: String, cursor: String, revision: Int, objective: String, cards: List[CardItem], steer: List[SteerRow])
+
+record Receipt(id: String, kind: String, card: String, status: String, baseline: String, replayed: Bool)
+
+record BatchReply(baseline: String, cursor: String, revision: Int, results: List[Receipt])
+
+record ClientState(clientId: String, nextSeq: Int, pairing: Pairing, snapshot: Snapshot, outbox: List[OutboxAction], syncStatus: String, alert: String)
+
+def emptySnapshot(): Snapshot =
+  Snapshot("", "", 0, "", [], [])
+
+def defaultPairing(): Pairing =
+  Pairing("127.0.0.1", 8787, "")
+
+def initialState(clientId: String, pairing: Pairing): ClientState =
+  ClientState(sanitizeClientId(clientId), 1, pairing, emptySnapshot(), [], if (validToken(pairing.token)) "Ready" else "Unpaired", "")
+
+def sanitizeClientId(raw: String): String =
+  if (Str.matches(raw, "^[A-Za-z0-9_-]{1,32}$")) raw else "mob"
+
+def validToken(tok: String): Bool =
+  Str.matches(tok, "^[A-Za-z0-9_-]{16,128}$")
+
+def validHost(host: String): Bool =
+  Str.matches(host, "^[A-Za-z0-9._-]+$")
+
+def validPort(port: Int): Bool =
+  port >= 1 && port <= 65535
+
+def validHex(s: String): Bool =
+  Str.matches(s, "^[0-9a-f]{64}$")
+
+def validActionId(s: String): Bool =
+  Str.matches(s, "^[A-Za-z0-9_-]{1,128}$")
+
+def validReason(reason: String): Bool =
+  reason == "" || reason == "no-visible-difference" || reason == "need-another-scenario" || reason == "outside-my-goal"
+
+def skipReasonOf(index: Int): String =
+  if (index == 1) "no-visible-difference" else if (index == 2) "need-another-scenario" else if (index == 3) "outside-my-goal" else ""
+
+def parsePairing(hostRaw: String, portRaw: String, tokenRaw: String): Result[String, Pairing] =
+  for {
+    host = Str.trim(hostRaw)
+    tok = Str.trim(tokenRaw)
+    portRes = Str.parseInt(Str.trim(portRaw))
+  } yield portRes match {
+  case Result.Err(_) => Result.Err("Port must be 1..65535")
+  case Result.Ok(port) => if (!validHost(host)) Result.Err("Host is invalid") else if (!validPort(port)) Result.Err("Port must be 1..65535") else if (!validToken(tok)) Result.Err("Bearer token must be 16..128 URL-safe chars") else Result.Ok(Pairing(host, port, tok))
+}
+
+def endpointUrl(pairing: Pairing): Result[String, String] =
+  if (!validHost(pairing.host)) Result.Err("Host is invalid") else if (!validPort(pairing.port)) Result.Err("Port must be 1..65535") else if (!validToken(pairing.token)) Result.Err("Pair bearer token first") else Result.Ok(Str.concat("http://", Str.concat(pairing.host, Str.concat(":", Str.concat(Str.fromInt(pairing.port), "/v1/ide/sync")))))
+
+def authHeaders(token: String): Map[String, String] =
+  Map.set(Map.set(Map.empty(), "Authorization", Str.concat("Bearer ", token)), "Content-Type", "application/json")
+
+def decidedCardIds(outbox: List[OutboxAction]): List[String] =
+  List.map(List.filter(outbox, a => a.kind == "accept" || a.kind == "reject" || a.kind == "skip"), a => a.card)
+
+def visibleCards(st: ClientState): List[CardItem] =
+  for {
+    decided = decidedCardIds(st.outbox)
+  } yield List.filter(st.snapshot.cards, c => !List.contains(decided, c.id))
+
+def laneFiles(card: CardItem, lane: Int): List[FilePair] =
+  if (lane == 0 == (card.flip == 1)) card.proposed else card.before
+
+def laneKind(card: CardItem, lane: Int): String =
+  if (lane == 0 == (card.flip == 1)) "accept" else "reject"
+
+def formatFiles(files: List[FilePair]): String =
+  if (List.isEmpty(files)) "(no file changes)" else List.join(List.map(files, f => Str.concat(f.path, Str.concat("""
+""", f.content))), """
+---
+""")
+
+def nextActionId(st: ClientState): String =
+  Str.concat(st.clientId, Str.concat("-", Str.fromInt(st.nextSeq)))
+
+def queueCardAction(st: ClientState, kind: String, reason: String): ClientState =
+  List.head(visibleCards(st)) match {
+    case None => st
+    case Some(card) => for {
+  useReason = if (kind == "skip" && validReason(reason)) reason else ""
+  act = OutboxAction(nextActionId(st), kind, card.id, card.baseline, useReason, "")
+} yield st.copy(nextSeq = st.nextSeq + 1, outbox = List.append(st.outbox, act))
+  }
+
+def queueLaneChoice(st: ClientState, lane: Int): ClientState =
+  List.head(visibleCards(st)) match {
+    case None => st
+    case Some(card) => queueCardAction(st, laneKind(card, lane), "")
+  }
+
+def applySwipeDelta(st: ClientState, delta: Int): ClientState =
+  if (delta >= 60) queueCardAction(st, "accept", "") else if (delta <= -60) queueCardAction(st, "reject", "") else st
+
+def queueSteer(st: ClientState, rawPrompt: String): Result[String, ClientState] =
+  for {
+    prompt = Str.trim(rawPrompt)
+  } yield if (prompt == "") Result.Err("Enter a steer prompt") else if (Str.len(prompt) > 512) Result.Err("Steer prompt exceeds 512 bytes") else for {
+  act = OutboxAction(nextActionId(st), "steer", "", st.snapshot.baseline, "", prompt)
+} yield Result.Ok(st.copy(nextSeq = st.nextSeq + 1, outbox = List.append(st.outbox, act)))
+
+def steerLines(st: ClientState): List[String] =
+  for {
+    local = List.map(List.filter(st.outbox, a => a.kind == "steer"), a => Str.concat("[outbox] ", a.prompt))
+    remote = List.map(st.snapshot.steer, s => Str.concat("[#", Str.concat(Str.fromInt(s.seq), Str.concat(" ", Str.concat(s.status, Str.concat("] ", s.prompt))))))
+  } yield List.concat(local, remote)
+
+def nextBatch(outbox: List[OutboxAction]): List[OutboxAction] =
+  List.take(outbox, 64)
+
+private def jsonText(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(s) => s
+    case Result.Err(e) => e
+  }
+
+private def jField(obj: Json, key: String): Json =
+  Json.field(obj, key) match {
+    case Result.Ok(v) => v
+    case Result.Err(_) => Json.Null()
+  }
+
+def encodeActionWire(a: OutboxAction): Json =
+  for {
+    base = [("id", Json.Str(a.id)), ("kind", Json.Str(a.kind))]
+    withCard = if (a.kind == "steer") List.append(base, ("prompt", Json.Str(a.prompt))) else List.append(base, ("card", Json.Str(a.card)))
+    withBase = if (validHex(a.baseline)) List.append(withCard, ("baseline", Json.Str(a.baseline))) else withCard
+    withReason = if (a.kind == "skip" && a.reason != "") List.append(withBase, ("reason", Json.Str(a.reason))) else withBase
+  } yield Json.Obj(withReason)
+
+def encodeBatch(batch: List[OutboxAction]): String =
+  jsonText(Json.Obj([("v", Json.Int(1)), ("actions", Json.Arr(List.map(batch, a => encodeActionWire(a))))]))
+
+private def decodeFilePairs(j: Json): List[FilePair] =
+  List.map(List.filter(Json.arr(j), x => Json.isObj(x) && Json.getStr(x, "path", "") != ""), x => FilePair(Json.getStr(x, "path", ""), Json.getStr(x, "content", "")))
+
+private def decodeChanges(j: Json): List[String] =
+  List.filter(List.map(Json.arr(j), x => if (Json.isStr(x)) Json.strOr(x, "") else Json.getStr(x, "section", "")), s => s != "")
+
+private def decodeCard(j: Json): Option[CardItem] =
+  for {
+    id = Json.getStr(j, "id", "")
+    base = Json.getStr(j, "baseline", "")
+    after = Json.getStr(j, "after", "")
+    q = jField(j, "question")
+    flip = if (Json.getInt(j, "flip", 0) == 1) 1 else 0
+  } yield if (!Json.isObj(j) || !validHex(id) || !validHex(base)) None else Some(CardItem(id, Json.getStr(j, "objective", ""), base, after, flip, Json.getStr(q, "workload", "idle"), Json.getInt(q, "step", 0), decodeChanges(jField(j, "changes")), decodeFilePairs(jField(j, "before")), decodeFilePairs(jField(j, "proposed"))))
+
+private def collectCards(xs: List[Json]): List[CardItem] =
+  List.foldLeft(xs, [], __tup => __tup match {
+  case (acc, raw) => decodeCard(raw) match {
+  case Some(c) => List.append(acc, c)
+  case None => acc
+}
+})
+
+private def decodeSteerRow(j: Json): Option[SteerRow] =
+  for {
+    prompt = Json.getStr(j, "prompt", "")
+    seq = Json.getInt(j, "seq", 0)
+  } yield if (!Json.isObj(j) || prompt == "" || seq <= 0) None else Some(SteerRow(seq, Json.getStr(j, "id", ""), prompt, Json.getStr(j, "baseline", ""), Json.getStr(j, "status", "queued")))
+
+private def collectSteers(xs: List[Json]): List[SteerRow] =
+  List.foldLeft(xs, [], __tup => __tup match {
+  case (acc, raw) => decodeSteerRow(raw) match {
+  case Some(s) => List.append(acc, s)
+  case None => acc
+}
+})
+
+def decodeSnapshot(raw: String): Result[String, Snapshot] =
+  Json.parse(raw) match {
+    case Result.Err(_) => Result.Err("Invalid snapshot JSON")
+    case Result.Ok(doc) => for {
+  v = Json.getInt(doc, "v", 0)
+  base = Json.getStr(doc, "baseline", "")
+  cursor = Json.getStr(doc, "cursor", "")
+  rev = Json.getInt(doc, "revision", -1)
+} yield if (!Json.isObj(doc) || v != 1 || !validHex(base) || !validHex(cursor) || rev < 0 || !Json.isArr(jField(doc, "cards")) || !Json.isArr(jField(doc, "steer"))) Result.Err("Invalid snapshot schema") else Result.Ok(Snapshot(base, cursor, rev, Json.getStr(doc, "objective", ""), collectCards(Json.arr(jField(doc, "cards"))), collectSteers(Json.arr(jField(doc, "steer")))))
+  }
+
+private def decodeReceipts(rows: List[Json], sent: List[OutboxAction], acc: List[Receipt]): Result[String, List[Receipt]] =
+  (List.head(rows), List.head(sent)) match {
+    case (None, None) => Result.Ok(acc)
+    case (Some(r), Some(exp)) => for {
+  id = Json.getStr(r, "id", "")
+  status = Json.getStr(r, "status", "")
+  base = Json.getStr(r, "baseline", "")
+  ok = Json.isObj(r) && Json.getInt(r, "v", 0) == 1 && id == exp.id && status != "" && validHex(base)
+} yield if (!ok) Result.Err("Invalid batch receipt") else decodeReceipts(List.tail(rows), List.tail(sent), List.append(acc, Receipt(id, Json.getStr(r, "kind", exp.kind), Json.getStr(r, "card", exp.card), status, base, Json.getBool(r, "replayed", false))))
+    case _ => Result.Err("Invalid batch receipt")
+  }
+
+def decodeBatchReply(raw: String, sent: List[OutboxAction]): Result[String, BatchReply] =
+  Json.parse(raw) match {
+    case Result.Err(_) => Result.Err("Invalid batch JSON")
+    case Result.Ok(doc) => for {
+  v = Json.getInt(doc, "v", 0)
+  base = Json.getStr(doc, "baseline", "")
+  cursor = Json.getStr(doc, "cursor", "")
+  rev = Json.getInt(doc, "revision", -1)
+  resField = jField(doc, "results")
+  rows = Json.arr(resField)
+} yield if (!Json.isObj(doc) || v != 1 || !validHex(base) || !validHex(cursor) || rev < 0 || !Json.isArr(resField) || List.len(rows) != List.len(sent)) Result.Err("Invalid batch schema") else decodeReceipts(rows, sent, []) match {
+  case Result.Err(e) => Result.Err(e)
+  case Result.Ok(receipts) => Result.Ok(BatchReply(base, cursor, rev, receipts))
+}
+  }
+
+private def conflictAlerts(results: List[Receipt]): List[String] =
+  List.foldLeft(results, [], __tup => __tup match {
+  case (acc, r) => if (r.status == "stale") List.append(acc, Str.concat("stale baseline (", Str.concat(Str.take(r.card, 8), ")"))) else if (r.status == "dirty") List.append(acc, Str.concat("dirty workspace (", Str.concat(Str.take(r.card, 8), ")"))) else acc
+})
+
+private def mergeAlert(prev: String, notices: List[String]): String =
+  if (List.isEmpty(notices)) prev else for {
+  fresh = Str.concat("Conflict: ", List.join(notices, ", "))
+} yield if (prev == "" || Str.startsWith(prev, "401 ")) fresh else Str.concat(prev, Str.concat("; ", fresh))
+
+def applyBatchReply(st: ClientState, sent: List[OutboxAction], reply: BatchReply): ClientState =
+  for {
+    sentIds = List.map(sent, a => a.id)
+    sentCards = decidedCardIds(sent)
+    remOutbox = List.filter(st.outbox, a => !List.contains(sentIds, a.id))
+    remCards = List.filter(st.snapshot.cards, c => !List.contains(sentCards, c.id))
+    snap = st.snapshot.copy(baseline = reply.baseline, cursor = reply.cursor, revision = reply.revision, cards = remCards)
+    notices = conflictAlerts(reply.results)
+  } yield st.copy(snapshot = snap, outbox = remOutbox, syncStatus = Str.concat("Flushed rev ", Str.fromInt(reply.revision)), alert = mergeAlert(st.alert, notices))
+
+def applySnapshot(st: ClientState, snap: Snapshot): ClientState =
+  st.copy(snapshot = snap, syncStatus = Str.concat("Synced rev ", Str.fromInt(snap.revision)))
+
+def applyHttpError(st: ClientState, code: Int): ClientState =
+  if (code == 401) st.copy(syncStatus = "401 unauthorized", alert = "401 unauthorized: check bearer token; outbox kept") else st.copy(syncStatus = Str.concat("Sync HTTP ", Str.fromInt(code)))
+
+def applyOffline(st: ClientState): ClientState =
+  st.copy(syncStatus = "Offline")
+
+private def encodeFilePairs(files: List[FilePair]): Json =
+  Json.Arr(List.map(files, f => Json.Obj([("path", Json.Str(f.path)), ("content", Json.Str(f.content))])))
+
+private def encodeCard(c: CardItem): Json =
+  Json.Obj([("id", Json.Str(c.id)), ("objective", Json.Str(c.objective)), ("baseline", Json.Str(c.baseline)), ("after", Json.Str(c.after)), ("flip", Json.Int(c.flip)), ("question", Json.Obj([("workload", Json.Str(c.workload)), ("step", Json.Int(c.step))])), ("changes", Json.Arr(List.map(c.changes, s => Json.Str(s)))), ("before", encodeFilePairs(c.before)), ("proposed", encodeFilePairs(c.proposed))])
+
+private def encodeSteerRow(s: SteerRow): Json =
+  Json.Obj([("seq", Json.Int(s.seq)), ("id", Json.Str(s.id)), ("prompt", Json.Str(s.prompt)), ("baseline", Json.Str(s.baseline)), ("status", Json.Str(s.status))])
+
+private def encodeOutboxItem(a: OutboxAction): Json =
+  Json.Obj([("id", Json.Str(a.id)), ("kind", Json.Str(a.kind)), ("card", Json.Str(a.card)), ("baseline", Json.Str(a.baseline)), ("reason", Json.Str(a.reason)), ("prompt", Json.Str(a.prompt))])
+
+private def decodeOutboxItem(j: Json): Option[OutboxAction] =
+  for {
+    id = Json.getStr(j, "id", "")
+    kind = Json.getStr(j, "kind", "")
+    card = Json.getStr(j, "card", "")
+    base = Json.getStr(j, "baseline", "")
+    reason = Json.getStr(j, "reason", "")
+    prompt = Json.getStr(j, "prompt", "")
+    okKind = kind == "accept" && validHex(card) && validHex(base) || kind == "reject" && validHex(card) && (base == "" || validHex(base)) || kind == "skip" && validHex(card) && (base == "" || validHex(base)) && validReason(reason) || kind == "steer" && prompt != "" && Str.len(prompt) <= 512 && (base == "" || validHex(base))
+  } yield if (!Json.isObj(j) || !validActionId(id) || !okKind) None else Some(OutboxAction(id, kind, card, base, reason, prompt))
+
+private def decodeOutboxAll(xs: List[Json], acc: List[OutboxAction]): Result[String, List[OutboxAction]] =
+  List.head(xs) match {
+    case None => Result.Ok(acc)
+    case Some(raw) => decodeOutboxItem(raw) match {
+  case None => Result.Err("Invalid saved outbox")
+  case Some(a) => decodeOutboxAll(List.tail(xs), List.append(acc, a))
+}
+  }
+
+def encodeState(st: ClientState): String =
+  for {
+    pairJson = Json.Obj([("host", Json.Str(st.pairing.host)), ("port", Json.Int(st.pairing.port)), ("token", Json.Str(st.pairing.token))])
+    snapJson = Json.Obj([("baseline", Json.Str(st.snapshot.baseline)), ("cursor", Json.Str(st.snapshot.cursor)), ("revision", Json.Int(st.snapshot.revision)), ("objective", Json.Str(st.snapshot.objective)), ("cards", Json.Arr(List.map(st.snapshot.cards, c => encodeCard(c)))), ("steer", Json.Arr(List.map(st.snapshot.steer, s => encodeSteerRow(s))))])
+    doc = Json.Obj([("v", Json.Int(1)), ("client_id", Json.Str(st.clientId)), ("next_seq", Json.Int(st.nextSeq)), ("pairing", pairJson), ("snapshot", snapJson), ("outbox", Json.Arr(List.map(st.outbox, a => encodeOutboxItem(a)))), ("sync_status", Json.Str(st.syncStatus)), ("alert", Json.Str(st.alert))])
+  } yield jsonText(doc)
+
+def decodeState(raw: String): Result[String, ClientState] =
+  Json.parse(raw) match {
+    case Result.Err(_) => Result.Err("Invalid saved state JSON")
+    case Result.Ok(doc) => for {
+  v = Json.getInt(doc, "v", 0)
+  cid = Json.getStr(doc, "client_id", "")
+  seq = Json.getInt(doc, "next_seq", 0)
+  pObj = jField(doc, "pairing")
+  host = Json.getStr(pObj, "host", "")
+  port = Json.getInt(pObj, "port", 0)
+  tok = Json.getStr(pObj, "token", "")
+  sObj = jField(doc, "snapshot")
+  sBase = Json.getStr(sObj, "baseline", "")
+  sCur = Json.getStr(sObj, "cursor", "")
+  sRev = Json.getInt(sObj, "revision", -1)
+  outField = jField(doc, "outbox")
+  baseValid = (sBase == "" || validHex(sBase)) && (sCur == "" || validHex(sCur)) && sRev >= 0
+  pairValid = Json.isObj(pObj) && validHost(host) && validPort(port) && (tok == "" || validToken(tok))
+} yield if (!Json.isObj(doc) || v != 1 || !Str.matches(cid, "^[A-Za-z0-9_-]{1,32}$") || seq < 1 || !pairValid || !Json.isObj(sObj) || !baseValid || !Json.isArr(jField(sObj, "cards")) || !Json.isArr(jField(sObj, "steer")) || !Json.isArr(outField)) Result.Err("Invalid saved state schema") else decodeOutboxAll(Json.arr(outField), []) match {
+  case Result.Err(e) => Result.Err(e)
+  case Result.Ok(outbox) => Result.Ok(ClientState(cid, seq, Pairing(host, port, tok), Snapshot(sBase, sCur, sRev, Json.getStr(sObj, "objective", ""), collectCards(Json.arr(jField(sObj, "cards"))), collectSteers(Json.arr(jField(sObj, "steer")))), outbox, Json.getStr(doc, "sync_status", "Ready"), Json.getStr(doc, "alert", "")))
+}
+  }
+

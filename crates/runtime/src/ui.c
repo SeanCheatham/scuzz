@@ -2015,8 +2015,13 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     }
     if (session->pointer_slider) {
       SzView *sl = session->pointer_slider;
-      sz_view_slider_set_at(sl, event->x);
+      if (sz_view_kind(sl) == SZ_VIEW_SPLIT)
+        sz_view_split_set_at(sl, event->x);
+      else
+        sz_view_slider_set_at(sl, event->x);
       session_set_last_hit(session, event->x, event->y, sl);
+      if (sz_view_kind(sl) == SZ_VIEW_SLIDER)
+        sz_view_slider_release(sl);
       session->pointer_slider = NULL;
       session->pointer_field = NULL;
       session_mark_dirty(session);
