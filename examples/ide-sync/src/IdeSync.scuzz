@@ -121,25 +121,25 @@ def checkInside(root: String, path: String): IO[Unit] =
 def storage(root: String): String =
   Fs.join(root, ".scuzz/ide")
 
-private def cardFile(root: String, id: String): String =
+def cardFile(root: String, id: String): String =
   Fs.join(Fs.join(Fs.join(storage(root), "cards"), id), "card.json")
 
-private def recordPath(root: String, name: String): String =
+def recordPath(root: String, name: String): String =
   Fs.join(Fs.join(storage(root), "records"), Str.concat(name, ".json"))
 
 private def actionPath(root: String, id: String): String =
   Fs.join(Fs.join(Fs.join(storage(root), "sync"), "actions"), Str.concat(id, ".json"))
 
-private def steerPath(root: String): String =
+def steerPath(root: String): String =
   Fs.join(storage(root), "steer.json")
 
 private def tokenPath(root: String): String =
   Fs.join(storage(root), "sync-token.txt")
 
-private def readOptional(path: String): IO[String] =
+def readOptional(path: String): IO[String] =
   Fs.exists(path).flatMap(hit => if (hit == 0) IO.pure("") else Fs.read(path))
 
-private def parseStored(raw: String, label: String): IO[Json] =
+def parseStored(raw: String, label: String): IO[Json] =
   Json.parse(raw) match {
     case Result.Ok(j) => if (Json.isObj(j)) IO.pure(j) else IO.fail(label)
     case Result.Err(_) => IO.fail(label)
@@ -229,13 +229,13 @@ def recover(root: String): IO[Unit] =
     _ <- if (raw == "") IO.pure(()) else parseStored(raw, "recovery conflict: invalid journal").flatMap(op => finish(root, op))
   } yield ()
 
-private def readSteer(root: String): IO[List[Json]] =
+def readSteer(root: String): IO[List[Json]] =
   readOptional(steerPath(root)).flatMap(raw => if (raw == "") IO.pure([]) else parseStored(raw, "invalid steer store").flatMap(doc => for {
   arr = field(doc, "items")
   _ <- need(Json.getInt(doc, "v", 0) == 1 && Json.isArr(arr), "invalid steer store")
 } yield Json.arr(arr)))
 
-private def readDirties(root: String): IO[List[String]] =
+def readDirties(root: String): IO[List[String]] =
   readOptional(Fs.join(storage(root), "dirty.json")).flatMap(raw => if (raw == "") IO.pure([]) else Json.parse(raw) match {
   case Result.Err(_) => IO.fail("invalid dirty buffer file")
   case Result.Ok(arr) => if (!Json.isArr(arr) || !List.forall(Json.arr(arr), item => Json.isStr(item))) IO.fail("invalid dirty buffer file") else IO.pure(List.map(Json.arr(arr), item => Json.strOr(item, "")))
@@ -246,7 +246,7 @@ private def validCard(c: Json, id: String, base: String, disk: List[(String, Str
     props = pairs(field(c, "proposed"))
   } yield str(c, "id") == id && str(c, "status") == "ready" && str(c, "a") == base && setHash(pairs(field(c, "baseline"))) == base && sourceSetOk(props) && str(c, "b") == setHash(applyPaths(disk, props))
 
-private def cardDecided(root: String, id: String): IO[Bool] =
+def cardDecided(root: String, id: String): IO[Bool] =
   for {
     choice <- Fs.exists(recordPath(root, id))
     accepted <- Fs.exists(recordPath(root, Str.concat("accept-", id)))
@@ -281,7 +281,7 @@ private def readyCards(root: String, base: String, disk: List[(String, String)])
 private def recordCount(root: String): IO[Int] =
   Fs.list(Fs.join(storage(root), "records")).map(ents => List.len(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".json"))))
 
-private def sessionObjective(root: String): IO[String] =
+def sessionObjective(root: String): IO[String] =
   readOptional(Fs.join(storage(root), "session.json")).flatMap(raw => if (raw == "") IO.pure("") else parseStored(raw, "invalid session").map(s => str(s, "objective")))
 
 private def snapshotCursor(base: String, rev: Int, cards: List[Json], steers: List[Json]): String =
@@ -293,10 +293,12 @@ def snapshot(root: String): IO[Json] =
     disk <- own(root)
     base = setHash(disk)
     cards <- readyCards(root, base, disk)
-    steers <- readSteer(root)
+    rawSteers <- readSteer(root)
+    steers <- IdeLoop.recoverSteerItems(root, rawSteers)
     queued = List.filter(steers, s => str(s, "status") == "queued")
+    settled = List.len(List.filter(steers, s => str(s, "status") != "queued"))
     recs <- recordCount(root)
-    rev = recs + List.len(steers)
+    rev = recs + List.len(steers) + settled
     objective <- sessionObjective(root)
     cursor = snapshotCursor(base, rev, cards, queued)
   } yield Json.Obj([("v", Json.Int(1)), ("baseline", Json.Str(base)), ("cursor", Json.Str(cursor)), ("revision", Json.Int(rev)), ("objective", Json.Str(objective)), ("cards", Json.Arr(cards)), ("steer", Json.Arr(queued))])
@@ -327,7 +329,7 @@ private def decisionReceipt(action: SyncAction, status: String, base: String): J
   } yield Json.Obj(if (action.kind == "skip") List.append(core, ("reason", Json.Str(action.reason))) else core)
 
 private def loadReadyCard(root: String, cardId: String): IO[Option[Json]] =
-  readOptional(cardFile(root, cardId)).flatMap(raw => if (raw == "") IO.pure(Option.None) else parseStored(raw, "invalid card").map(c => if (str(c, "id") == cardId && str(c, "status") == "ready") Option.Some(c) else Option.None))
+  readOptional(cardFile(root, cardId)).flatMap(raw => if (raw == "") IO.pure(Option.None) else parseStored(raw, "invalid card").map(c => if (str(c, "id") == cardId && (str(c, "status") == "ready" || str(c, "status") == "stale")) Option.Some(c) else Option.None))
 
 private def existingDecisionOwner(root: String, cardId: String): IO[(Bool, String)] =
   for {

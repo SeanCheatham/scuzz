@@ -1803,8 +1803,8 @@ assert sync["mutate"]["survived"] == 0
 assert sync["mutate"]["invalid"] == 0
 assert sync["mutate"]["incomplete"] == 0
 assert sync["coverage"]["reached"] == sync["coverage"]["total"]
-assert {"unauthorizedMissing", "unauthorizedWrongToken", "offlineBatchReplay", "staleBetaAfterAlpha", "competingAcceptRace", "recoverAcceptJournal"} <= set(sync["breadth"]["claimed"]["driveHas"])
-assert {"ws/src/Main.scuzz", "ws/.scuzz/ide/journal.json", "ws/.scuzz/ide/steer.json"} <= set(sync["breadth"]["claimed"]["fileSame"])
+assert {"unauthorizedMissing", "unauthorizedWrongToken", "offlineBatchReplay", "staleBetaAfterAlpha", "competingAcceptRace", "recoverAcceptJournal", "mobileSteerGenerateAndServe", "acceptAdvancesAndRetiresStale", "dirtyBlocksAndPreservesSteer", "crashActiveSteerRecovery", "verifierGateRejections"} <= set(sync["breadth"]["claimed"]["driveHas"])
+assert {"ws/src/Main.scuzz", "ws/.scuzz/ide/journal.json", "ws/.scuzz/ide/steer.json", "ws-gen/src/Main.scuzz", "ws-adv/src/Main.scuzz", "ws-gen-dirty/src/Main.scuzz", "ws-gen-crash/src/Main.scuzz"} <= set(sync["breadth"]["claimed"]["fileSame"])
 PY_IDE_SYNC
 if ! fuzz --live --replay examples/ide-sync/live.toml examples/ide-sync | tee /tmp/scuzz-ide-sync-live.log | grep "fuzz replay ok" >/dev/null; then
   echo "examples/ide-sync: live loopback replay failed" && exit 1
@@ -1888,6 +1888,155 @@ with tempfile.TemporaryDirectory(prefix="scuzz-ide-serve-") as tmp:
         if proc2.poll() is None:
             proc2.kill()
             proc2.wait()
+
+    (root / "src/Main.scuzz").write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", "v1")\n\n@main def main: IO[Unit] =\n  step()\n')
+    (root / "smoke.scuzz_scenario").write_text(
+        'def setup(): IO[Unit] =\n  Fs.write("out.txt", "init")\n\n'
+        'def runStep(): IO[Unit] =\n  Main.step()\n'
+    )
+    (root / "smoke.scuzz_verify").write_text(
+        'def writesVersion(t: Timeline): Verdict =\n'
+        '  Verdict.every(t, i => !Timeline.driveHas(t, i, "runStep") || Timeline.fileTextIs(t, i, "out.txt", "v1") || Timeline.fileTextIs(t, i, "out.txt", "v2") || Timeline.fileTextIs(t, i, "out.txt", "v3"))\n'
+    )
+    (root / "corpus").mkdir()
+    (root / "corpus/run.toml").write_text('[fuzz]\nevents = ["drive runStep"]\n')
+    fmt_run = subprocess.run([cli, "fmt", str(root)], capture_output=True, text=True, timeout=30)
+    assert fmt_run.returncode == 0, (fmt_run.stdout, fmt_run.stderr)
+
+    proc3 = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(port), "--once", str(root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        time.sleep(0.1)
+        steer_body = json.dumps({"v": 1, "id": "st-1", "kind": "steer", "prompt": "switch output to v2"}).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/ide/sync",
+            data=steer_body,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+            post_doc = json.loads(resp.read().decode())
+            assert post_doc["results"][0]["status"] == "queued", post_doc
+        out3, err3 = proc3.communicate(timeout=10)
+        assert proc3.returncode == 0, (proc3.returncode, out3, err3)
+    finally:
+        if proc3.poll() is None:
+            proc3.kill()
+            proc3.wait()
+
+    bad_dir = root / "build/proposals/01-bad/src"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "Main.scuzz").write_text("@main def main: IO[Unit] =\n  123\n")
+    good_dir = root / "build/proposals/02-good/src"
+    good_dir.mkdir(parents=True)
+    (good_dir / "Main.scuzz").write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", "v2")\n\n@main def main: IO[Unit] =\n  step()\n')
+
+    crank = subprocess.run(
+        [cli, "ide", "crank", "--rounds", "2", str(root)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert crank.returncode == 0, (crank.returncode, crank.stdout, crank.stderr)
+    crank_lines = [ln for ln in crank.stdout.splitlines() if ln.strip().startswith("{")]
+    assert crank_lines, crank.stdout
+    crank_doc = json.loads(crank_lines[-1])
+    assert crank_doc["published"] == 1 and crank_doc["rejected"] == 1, crank_doc
+
+    proc4 = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(port), "--once", str(root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        time.sleep(0.1)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/ide/sync",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+            feed_doc = json.loads(resp.read().decode())
+            assert len(feed_doc["cards"]) == 1 and feed_doc["cards"][0]["proposal"] == "02-good", feed_doc
+            assert feed_doc["steer"] == [], feed_doc
+        out4, err4 = proc4.communicate(timeout=10)
+        assert proc4.returncode == 0, (proc4.returncode, out4, err4)
+    finally:
+        if proc4.poll() is None:
+            proc4.kill()
+            proc4.wait()
+
+    gen_dir = root / "build/proposals/03-gen/src"
+    gen_dir.mkdir(parents=True)
+    (gen_dir / "Main.scuzz").write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", "v3")\n\n@main def main: IO[Unit] =\n  step()\n')
+
+    proc5 = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(port), "--generate", "--rounds", "1", str(root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        card_id = feed_doc["cards"][0]["id"]
+        base_v1 = feed_doc["baseline"]
+        accept_batch = json.dumps({
+            "v": 1,
+            "actions": [
+                {"id": "acc-1", "kind": "accept", "card": card_id, "baseline": base_v1},
+                {"id": "st-2", "kind": "steer", "prompt": "switch output to v3"},
+            ],
+        }).encode()
+        deadline = time.monotonic() + 10.0
+        posted = False
+        while not posted:
+            assert proc5.poll() is None, proc5.communicate()
+            assert time.monotonic() < deadline, "timed out posting accept+steer to serve --generate"
+            try:
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/v1/ide/sync",
+                    data=accept_batch,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    assert resp.status == 200
+                    batch_doc = json.loads(resp.read().decode())
+                    assert [r["status"] for r in batch_doc["results"]] == ["applied", "queued"], batch_doc
+                    posted = True
+            except urllib.error.URLError:
+                time.sleep(0.05)
+
+        deadline = time.monotonic() + 20.0
+        ready_v3 = None
+        while ready_v3 is None:
+            assert proc5.poll() is None, proc5.communicate()
+            assert time.monotonic() < deadline, "timed out waiting for background --generate card"
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/ide/sync",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                doc5 = json.loads(resp.read().decode())
+                if doc5["cards"] and doc5["cards"][0]["proposal"] == "03-gen":
+                    ready_v3 = doc5
+                else:
+                    time.sleep(0.1)
+        assert ready_v3["baseline"] != base_v1, ready_v3
+        assert ready_v3["steer"] == [], ready_v3
+    finally:
+        if proc5.poll() is None:
+            proc5.terminate()
+            try:
+                proc5.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc5.kill()
+                proc5.wait()
 PY_IDE_SERVE_CLI
 
 rm -f examples/ide-mobile/.scuzz/mutate.results

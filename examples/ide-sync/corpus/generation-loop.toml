@@ -1,0 +1,9 @@
+[fuzz]
+events = [
+  "drive mobileSteerGenerateAndServe",
+  "drive acceptAdvancesAndRetiresStale",
+  "drive dirtyBlocksAndPreservesSteer",
+  "drive crashActiveSteerRecovery",
+  "drive crashActiveSteerRecovery",
+  "drive verifierGateRejections",
+]

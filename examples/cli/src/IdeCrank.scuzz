@@ -1,0 +1,208 @@
+import IdeLoop.GenContext
+import IdeLoop.Candidate
+import IdeLoop.VerifyInput
+import IdeLoop.VerifyEvidence
+import IdeLoop.RoundResult
+
+private def claimedPath(root: String, name: String): String =
+  Fs.join(Fs.join(Fs.join(IdeSync.storage(root), "sync"), "claimed"), Str.concat(name, ".json"))
+
+private def readProposalFiles(dir: String): IO[List[(String, String)]] =
+  for {
+    ents <- Fs.list(Fs.join(dir, "src")).handleErrorWith(_ => IO.pure([]: List[(String, Bool)]))
+    names = List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".scuzz")), e => e._1))
+    loaded <- IO.foreach(names, n => Fs.read(Fs.join(Fs.join(dir, "src"), n)).map(body => (Fs.join("src", n), body)))
+  } yield loaded
+
+private def findUnclaimedInbox(root: String, names: List[String]): IO[Option[Candidate]] =
+  if (List.isEmpty(names)) IO.pure(Option.None) else for {
+  name = List.at(names, 0)
+  claimed <- Fs.exists(claimedPath(root, name))
+  found <- if (claimed != 0) findUnclaimedInbox(root, List.tail(names)) else for {
+  files <- readProposalFiles(Fs.join(Fs.join(root, "build/proposals"), name))
+  _ <- Fs.mkdirs(Fs.dirname(claimedPath(root, name)))
+  _ <- Fs.write(claimedPath(root, name), IdeSync.text(Json.Obj([("v", Json.Int(1)), ("proposal", Json.Str(name))])))
+} yield Option.Some(IdeLoop.Candidate(name, "inbox", files))
+} yield found
+
+private def claimInbox(root: String): IO[Option[Candidate]] =
+  for {
+    ents <- Fs.list(Fs.join(root, "build/proposals")).handleErrorWith(_ => IO.pure([]: List[(String, Bool)]))
+    names = List.sort(List.map(List.filter(ents, e => e._2 && IdeSync.validActionId(e._1)), e => e._1))
+    picked <- findUnclaimedInbox(root, names)
+  } yield picked
+
+private def proposeModel(ctx: GenContext, modelId: String, allowDownload: Bool): IO[Result[String, Candidate]] =
+  (for {
+  compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+  bounded = Str.take(ctx.prompt, 512)
+  request <- Proposal.make(ctx.root, bounded, ctx.allowed, compiler, ctx.feedback)
+  _ <- Fs.mkdirs(Fs.join(ctx.root, "build/ide"))
+  _ <- Fs.write(Fs.join(ctx.root, "build/ide/request.json"), Proposal.text(request))
+  measured <- Generate.generate(request, modelId, allowDownload, msg => Generate.progress(msg), reply => Generate.saveMeasurement(ctx.root, request, Json.Obj([("response", reply)])))
+  _ <- Generate.saveMeasurement(ctx.root, request, measured)
+  reply = Proposal.field(measured, "reply")
+  files = Proposal.pairs(Proposal.field(reply, "files"))
+  name = Str.concat("local-", Str.take(Proposal.str(request, "request"), 12))
+} yield Result.Ok(IdeLoop.Candidate(name, modelId, files))).handleErrorWith(err => IO.pure(Result.Err(err)))
+
+def proposeStep(ctx: GenContext, modelId: String, allowDownload: Bool): IO[Result[String, Candidate]] =
+  claimInbox(ctx.root).flatMap(inbox => inbox match {
+  case Option.Some(cand) => IO.pure(Result.Ok(cand))
+  case Option.None => proposeModel(ctx, modelId, allowDownload)
+})
+
+private def formattedAll(files: List[(String, String)]): Bool =
+  List.forall(files, f => for {
+  p = Parse.parse(Lexer.lex(f._2))
+} yield !Parse.hasParseError(p) && Parse.pretty(p) == f._2)
+
+private def rmTree(path: String): IO[Unit] =
+  Fs.list(path).flatMap(ents => IO.foreachDiscard(ents, e => if (e._2) rmTree(Fs.join(path, e._1)) else Fs.delete(Fs.join(path, e._1))).flatMap(_ => Fs.delete(path))).handleErrorWith(_ => Fs.delete(path).handleErrorWith(_ => IO.pure(())))
+
+private def resolveManifestDeps(root: String, toml: String): IO[String] =
+  for {
+    deps = Manifest.parse(toml).deps
+    pairs <- IO.foreach(deps, d => Fs.canonicalize(Fs.join(root, d._2)).handleErrorWith(_ => IO.pure(Fs.join(root, d._2))).map(abs => (d._2, abs)))
+  } yield List.foldLeft(pairs, toml, p => Str.replace(p._1, Str.concat("\"", Str.concat(p._2._1, "\"")), Str.concat("\"", Str.concat(p._2._2, "\""))))
+
+private def copyTopFiles(root: String, stage: String): IO[Unit] =
+  for {
+    ents <- Fs.list(root)
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    resolvedToml <- resolveManifestDeps(root, toml)
+    _ <- Fs.write(Fs.join(stage, "scuzz.toml"), resolvedToml)
+    keep = List.map(List.filter(ents, e => !e._2 && (Drive.isVerify(e._1) || Drive.isScenario(e._1))), e => e._1)
+    _ <- IO.foreachDiscard(keep, name => Fs.read(Fs.join(root, name)).flatMap(body => Fs.write(Fs.join(stage, name), body)))
+    cEnts <- Fs.list(Fs.join(root, "corpus")).handleErrorWith(_ => IO.pure([]: List[(String, Bool)]))
+    tomlNames = List.map(List.filter(cEnts, e => !e._2 && Str.endsWith(e._1, ".toml")), e => e._1)
+    _ <- if (List.isEmpty(tomlNames)) IO.pure(()) else Fs.mkdirs(Fs.join(stage, "corpus")).flatMap(_ => IO.foreachDiscard(tomlNames, n => Fs.read(Fs.join(Fs.join(root, "corpus"), n)).flatMap(body => Fs.write(Fs.join(Fs.join(stage, "corpus"), n), body))))
+  } yield ()
+
+private def stageAndFuzz(root: String, after: List[(String, String)]): IO[(Bool, Int, String)] =
+  for {
+    nonce <- Uuid.v4()
+    stage = Fs.join(Fs.join(root, "build/ide"), Str.concat("verify-", Str.take(nonce, 12)))
+    _ <- rmTree(stage)
+    out <- IO.ensure(for {
+  _ <- Fs.mkdirs(Fs.join(stage, "src"))
+  _ <- copyTopFiles(root, stage)
+  _ <- IO.foreachDiscard(after, f => Fs.write(Fs.join(stage, f._1), f._2))
+  ran <- IO.attempt(Drive.fuzzDir(stage, Fs.join(stage, "build"), 8, 1, "", false, false, false, false, false, false))
+  summaryRaw <- IdeSync.readOptional(Fs.join(stage, "build/fuzz/summary.json"))
+} yield ran match {
+  case Result.Err(err) => (false, 0, err)
+  case Result.Ok(_) => Json.parse(summaryRaw) match {
+  case Result.Err(_) => (false, 0, "missing-fuzz-summary")
+  case Result.Ok(doc) => for {
+  ok = Json.getBool(IdeSync.field(doc, "fuzz"), "ok", false)
+  survived = Json.getInt(IdeSync.field(doc, "mutate"), "survived", 0)
+} yield (ok, survived, if (ok) "" else "fuzz-campaign-failed")
+}
+}, rmTree(stage))
+  } yield out
+
+private def workPath(w: Json, side: String): String =
+  IdeSync.str(IdeSync.field(w, "timelines"), side)
+
+private def reportValid(doc: Json): Bool =
+  for {
+    review = IdeSync.field(doc, "review")
+    search = IdeSync.field(doc, "search")
+    rows = Json.arr(IdeSync.field(doc, "workloads"))
+  } yield IdeSync.str(doc, "kind") == "diff" && Json.getBool(review, "complete", false) && Json.getInt(search, "ran", -1) == 32 && List.nonEmpty(rows) && List.forall(rows, w => Json.isNull(IdeSync.field(w, "why_b")))
+
+def verifyLive(root: String, disk: List[(String, String)], after: List[(String, String)]): IO[VerifyEvidence] =
+  if (!formattedAll(after)) IO.pure(IdeLoop.VerifyEvidence(false, "candidate-syntax-or-format-error", "", 0, "", "", [], 0, 0, 0)) else for {
+  toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+  deps = Manifest.parse(toml).deps
+  ownDisk = List.map(disk, f => (Str.dropRight(Fs.basename(f._1), 6), f._2))
+  ownAfter = List.map(after, f => (Str.dropRight(Fs.basename(f._1), 6), f._2))
+  diskMods <- Drive.collectDeps(root, deps, ownDisk)
+  afterMods <- Drive.collectDeps(root, deps, ownAfter)
+  cli <- Sys.getenv("SCUZZ_EXECUTABLE")
+  compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+  ctxHash = Hash.sha256(Str.concat(compiler, IdeSync.setHash(disk)))
+  diffRes <- IO.attempt(Diff.reviewSets(root, toml, diskMods, afterMods, 1, 32, cli, ctxHash))
+  ev <- diffRes match {
+  case Result.Err(err) => IO.pure(IdeLoop.VerifyEvidence(false, err, "", 0, "", "", [], 0, 0, 0))
+  case Result.Ok(_) => for {
+  raw <- IdeSync.readOptional(Fs.join(root, "build/ide/report.json"))
+  parsed = Json.parse(raw)
+  out <- parsed match {
+  case Result.Err(_) => IO.pure(IdeLoop.VerifyEvidence(false, "invalid-diff-report", "", 0, "", "", [], 0, 0, 0))
+  case Result.Ok(doc) => if (!reportValid(doc)) IO.pure(IdeLoop.VerifyEvidence(false, "incomplete-diff-review", "", 0, "", "", [], 0, 0, 0)) else for {
+  counts = IdeSync.field(doc, "counts")
+  regressed = Json.getInt(counts, "regressed", 0) + Json.getInt(counts, "unrunnable", 0)
+  rows = Json.arr(IdeSync.field(doc, "workloads"))
+  changedRows = List.filter(rows, w => IdeSync.str(w, "class") == "diverged" || IdeSync.str(w, "class") == "fixed")
+  diverged = List.len(changedRows)
+  done <- if (regressed > 0) IO.pure(IdeLoop.VerifyEvidence(true, "", "", 0, "", "", [], diverged, regressed, 0)) else if (diverged == 0) IO.pure(IdeLoop.VerifyEvidence(true, "", "", 0, "", "", [], 0, 0, 0)) else for {
+  chosen = List.at(changedRows, 0)
+  tlAPath = Fs.join(Fs.join(root, "build/ide"), workPath(chosen, "a"))
+  tlBPath = Fs.join(Fs.join(root, "build/ide"), workPath(chosen, "b"))
+  tlA <- IdeSync.readOptional(tlAPath)
+  tlB <- IdeSync.readOptional(tlBPath)
+  delta = IdeSync.field(chosen, "delta")
+  rawStep = Json.getInt(delta, "first", 0)
+  step = if (rawStep < 0) 0 else rawStep
+  changes = Json.arr(IdeSync.field(delta, "changes"))
+  fuzzRes <- stageAndFuzz(root, after)
+} yield IdeLoop.VerifyEvidence(fuzzRes._1, fuzzRes._3, IdeSync.str(chosen, "label"), step, tlA, tlB, changes, diverged, regressed, fuzzRes._2)
+} yield done
+}
+} yield out
+}
+} yield ev
+
+private def isPublished(r: RoundResult): Bool =
+  r.status == "published"
+
+private def isRejected(r: RoundResult): Bool =
+  r.status == "rejected"
+
+private def isStepped(r: RoundResult): Bool =
+  r.status != "idle" && r.status != "dirty"
+
+private def roundJson(r: RoundResult): Json =
+  Json.Obj([("status", Json.Str(r.status)), ("card", Json.Str(r.cardId)), ("steer_id", Json.Str(r.steerId)), ("baseline", Json.Str(r.baseline)), ("diagnostic", Json.Str(r.diagnostic))])
+
+private def summaryJson(results: List[RoundResult], base: String): Json =
+  Json.Obj([("v", Json.Int(1)), ("baseline", Json.Str(base)), ("rounds", Json.Int(List.len(results))), ("published", Json.Int(List.len(List.filter(results, r => isPublished(r))))), ("rejected", Json.Int(List.len(List.filter(results, r => isRejected(r))))), ("results", Json.Arr(List.map(results, r => roundJson(r))))])
+
+def verifyStep(v: VerifyInput): IO[VerifyEvidence] =
+  verifyLive(v.root, v.disk, v.after)
+
+def runCrank(path: String, rounds: Int, modelId: String, allowDownload: Bool): IO[Unit] =
+  for {
+    hasToml <- Fs.exists(Fs.join(path, "scuzz.toml"))
+    _ <- if (hasToml != 0) IO.pure(()) else IO.fail(Str.concat("scuzz ide crank: scuzz.toml not found in ", path))
+    results <- IdeLoop.crankRounds(path, rounds, c => proposeStep(c, modelId, allowDownload), v => verifyStep(v))
+    disk <- IdeSync.own(path)
+    _ <- IO.println(IdeSync.text(summaryJson(results, IdeSync.setHash(disk))))
+  } yield ()
+
+private def backgroundLoop(path: String, maxRounds: Int, done: Int, modelId: String, allowDownload: Bool): IO[Unit] =
+  if (maxRounds > 0 && done >= maxRounds) IO.pure(()) else for {
+  res <- IO.attempt(IdeLoop.crankOne(path, c => proposeStep(c, modelId, allowDownload), v => verifyStep(v)))
+  stepped = res match {
+  case Result.Ok(r) => isStepped(r)
+  case Result.Err(_) => false
+}
+  nextDone = if (stepped) done + 1 else done
+  _ <- if (maxRounds > 0 && nextDone >= maxRounds) IO.pure(()) else IO.sleep(if (stepped) 25 else 250).flatMap(_ => backgroundLoop(path, maxRounds, nextDone, modelId, allowDownload))
+} yield ()
+
+def runServe(path: String, port: Int, token: String, once: Bool, generate: Bool, rounds: Int, modelId: String, allowDownload: Bool): IO[Unit] =
+  for {
+    hasToml <- Fs.exists(Fs.join(path, "scuzz.toml"))
+    _ <- if (hasToml != 0) IO.pure(()) else IO.fail(Str.concat("scuzz ide serve: scuzz.toml not found in ", path))
+    tok <- IdeSync.ensureToken(path, token)
+    _ <- IO.println(Str.concat("scuzz ide serve ", Str.concat(path, Str.concat(" on http://0.0.0.0:", Str.concat(Str.fromInt(port), "/v1/ide/sync")))))
+    _ <- IO.println(Str.concat("pairing bearer token: ", tok))
+    _ <- if (!generate) if (once) Net.serveOnce(port, req => IdeSync.handle(path, tok, req)) else IdeSync.run(path, port, tok) else if (once) IdeLoop.crankRounds(path, if (rounds > 0) rounds else 1, c => proposeStep(c, modelId, allowDownload), v => verifyStep(v)).flatMap(_ => Net.serveOnce(port, req => IdeSync.handle(path, tok, req))) else for {
+  worker <- Fiber.fork(backgroundLoop(path, rounds, 0, modelId, allowDownload))
+  _ <- IO.ensure(IdeSync.run(path, port, tok), Fiber.interrupt(worker))
+} yield ()
+  } yield ()
+

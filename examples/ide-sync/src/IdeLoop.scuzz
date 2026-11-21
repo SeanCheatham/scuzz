@@ -1,0 +1,222 @@
+record Preference(decision: String, card: String, proposal: String, reason: String, paths: List[String], time: Int)
+
+record AutoNote(decision: String, diagnostic: String, source: List[(String, String)], time: Int)
+
+record GenContext(root: String, baseline: String, objective: String, prompt: String, steerId: String, steerPrompt: String, steerAttempts: Int, allowed: List[String], sources: List[(String, String)], preferences: List[Preference], notes: List[AutoNote], feedback: List[Json])
+
+record Candidate(name: String, generator: String, files: List[(String, String)])
+
+record VerifyInput(root: String, disk: List[(String, String)], after: List[(String, String)])
+
+record VerifyEvidence(ok: Bool, diagnostic: String, workload: String, step: Int, tlA: String, tlB: String, changes: List[Json], diverged: Int, regressed: Int, mutationSurvived: Int)
+
+record RoundResult(status: String, cardId: String, steerId: String, baseline: String, diagnostic: String)
+
+def maxSteerAttempts(): Int =
+  2
+
+def flipOf(cardId: String): Int =
+  Str.charAt(cardId, 0) % 2
+
+def decisionLabel(raw: String): String =
+  if (raw == "baseline") "reject" else if (raw == "abstain") "skip" else raw
+
+def prefJson(p: Preference): Json =
+  Json.Obj([("kind", Json.Str("preference")), ("decision", Json.Str(p.decision)), ("card", Json.Str(p.card)), ("proposal", Json.Str(p.proposal)), ("reason", Json.Str(p.reason)), ("paths", Json.Arr(List.map(p.paths, s => Json.Str(s)))), ("time", Json.Int(p.time))])
+
+def noteJson(n: AutoNote): Json =
+  Json.Obj([("kind", Json.Str("automatic")), ("decision", Json.Str(n.decision)), ("diagnostic", Json.Str(n.diagnostic)), ("source", IdeSync.pairsJson(n.source)), ("time", Json.Int(n.time))])
+
+def buildFeedback(prefs: List[Preference], steerId: String, steerPrompt: String, steerAttempts: Int, notes: List[AutoNote]): List[Json] =
+  for {
+    prefItems = List.map(prefs, p => prefJson(p))
+    steerItems = if (steerId == "") []: List[Json] else [Json.Obj([("kind", Json.Str("steer")), ("id", Json.Str(steerId)), ("prompt", Json.Str(steerPrompt)), ("attempts", Json.Int(steerAttempts))])]
+    noteItems = List.map(notes, n => noteJson(n))
+  } yield List.concat(List.concat(prefItems, steerItems), noteItems)
+
+private def prefLine(p: Preference): String =
+  Str.concat(p.decision, Str.concat(":", Str.concat(p.proposal, if (p.reason == "") "" else Str.concat("#", p.reason))))
+
+def composePrompt(objective: String, steerPrompt: String, prefs: List[Preference]): String =
+  for {
+    head = if (objective == "") steerPrompt else if (steerPrompt == "") objective else Str.concat(objective, Str.concat(" | steer: ", steerPrompt))
+  } yield if (List.isEmpty(prefs)) head else Str.concat(head, Str.concat(" | prefs: ", List.join(List.map(prefs, p => prefLine(p)), ",")))
+
+def verifiedPass(ev: VerifyEvidence): (Bool, String) =
+  if (!ev.ok) (false, if (ev.diagnostic == "") "candidate-check-failed" else ev.diagnostic) else if (ev.regressed > 0) (false, "candidate-regressed") else if (ev.mutationSurvived > 0) (false, "mutation-survived") else if (ev.diverged <= 0) (false, "no-observed-difference") else if (ev.workload == "" || ev.step < 0 || ev.tlA == "" || ev.tlB == "") (false, "incomplete-evidence") else (true, "")
+
+private def writeSteerItems(root: String, items: List[Json]): IO[Unit] =
+  Fs.write(IdeSync.steerPath(root), IdeSync.text(Json.Obj([("v", Json.Int(1)), ("items", Json.Arr(items))])))
+
+private def cardIds(root: String): IO[List[String]] =
+  Fs.list(Fs.join(IdeSync.storage(root), "cards")).map(ents => List.sort(List.map(List.filter(ents, e => e._2 && IdeSync.validHex(e._1)), e => e._1)))
+
+private def cardForSteer(root: String, steerId: String): IO[String] =
+  for {
+    ids <- cardIds(root)
+    matches <- IO.foreach(ids, id => IdeSync.readOptional(IdeSync.cardFile(root, id)).flatMap(raw => if (raw == "") IO.pure("") else IdeSync.parseStored(raw, "invalid card").map(c => if (IdeSync.str(c, "steer_id") == steerId && (IdeSync.str(c, "status") == "ready" || IdeSync.str(c, "status") == "stale")) id else "")))
+    found = List.head(List.filter(matches, m => m != ""))
+  } yield found match {
+  case Option.Some(id) => id
+  case Option.None => ""
+}
+
+def recoverSteerItems(root: String, items: List[Json]): IO[List[Json]] =
+  for {
+    active = List.filter(items, s => IdeSync.str(s, "status") == "active")
+    out <- if (List.isEmpty(active)) IO.pure(items) else for {
+  cards <- IO.foreach(active, s => cardForSteer(root, IdeSync.str(s, "id")).map(cid => (IdeSync.str(s, "id"), cid)))
+  fixed = List.map(items, s => List.head(List.filter(cards, p => p._1 == IdeSync.str(s, "id"))) match {
+  case Option.None => s
+  case Option.Some(pair) => if (pair._2 != "") Json.set(Json.set(s, "status", Json.Str("consumed")), "card", Json.Str(pair._2)) else Json.set(s, "status", Json.Str("queued"))
+})
+  _ <- writeSteerItems(root, fixed)
+} yield fixed
+  } yield out
+
+def recoverSteer(root: String): IO[Unit] =
+  IdeSync.readSteer(root).flatMap(items => recoverSteerItems(root, items)).map(_ => ())
+
+private def updateSteerItem(root: String, steerId: String, f: Json => Json): IO[Unit] =
+  if (steerId == "") IO.pure(()) else IdeSync.readSteer(root).flatMap(items => writeSteerItems(root, List.map(items, s => if (IdeSync.str(s, "id") == steerId) f(s) else s)))
+
+def retireStaleCards(root: String, base: String): IO[Int] =
+  for {
+    ids <- cardIds(root)
+    counts <- IO.foreach(ids, id => for {
+  decided <- IdeSync.cardDecided(root, id)
+  raw <- IdeSync.readOptional(IdeSync.cardFile(root, id))
+  changed <- if (raw == "" || decided) IO.pure(0) else IdeSync.parseStored(raw, "invalid card").flatMap(c => if (IdeSync.str(c, "status") == "ready" && IdeSync.str(c, "a") != base) Fs.write(IdeSync.cardFile(root, id), IdeSync.text(Json.set(c, "status", Json.Str("stale")))).map(_ => 1) else IO.pure(0))
+} yield changed)
+  } yield List.foldLeft(counts, 0, p => p._1 + p._2)
+
+private def recordRegion(r: Json): List[String] =
+  for {
+    reg = List.map(Json.arr(IdeSync.field(r, "region")), p => Json.strOr(p, ""))
+  } yield if (List.nonEmpty(reg)) reg else List.map(Json.arr(IdeSync.field(r, "writes")), w => IdeSync.str(w, "path"))
+
+private def prefTime(p: Preference): Int =
+  p.time
+
+private def noteTime(n: AutoNote): Int =
+  n.time
+
+def extractPreferences(records: List[Json]): List[Preference] =
+  List.takeRight(List.sortBy(List.map(List.filter(records, r => IdeSync.str(r, "kind") != "automatic"), r => Preference(decisionLabel(IdeSync.str(r, "decision")), IdeSync.str(r, "card"), IdeSync.str(r, "proposal"), IdeSync.str(r, "reason"), recordRegion(r), Json.getInt(r, "time", 0))), p => prefTime(p)), 8)
+
+def extractAutoNotes(records: List[Json], base: String): List[AutoNote] =
+  List.takeRight(List.sortBy(List.map(List.filter(records, r => Json.getInt(r, "v", 0) == 1 && IdeSync.str(r, "kind") == "automatic" && IdeSync.str(r, "a") == base), r => AutoNote(IdeSync.str(r, "decision"), IdeSync.str(r, "diagnostic"), IdeSync.pairs(IdeSync.field(r, "source")), Json.getInt(r, "time", 0))), n => noteTime(n)), 3)
+
+private def loadRecords(root: String): IO[List[Json]] =
+  for {
+    ents <- Fs.list(Fs.join(IdeSync.storage(root), "records"))
+    names = List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".json")), e => e._1))
+    rows <- IO.foreach(names, n => Fs.read(Fs.join(Fs.join(IdeSync.storage(root), "records"), n)).flatMap(raw => IdeSync.parseStored(raw, "invalid record")))
+  } yield rows
+
+private def sessionAllowed(root: String, disk: List[(String, String)]): IO[List[String]] =
+  for {
+    diskPaths = List.map(disk, f => f._1)
+    raw <- IdeSync.readOptional(Fs.join(IdeSync.storage(root), "session.json"))
+    allowed <- if (raw == "") IO.pure(diskPaths) else IdeSync.parseStored(raw, "invalid session").map(s => for {
+  configured = List.filter(List.distinct(List.map(Json.arr(IdeSync.field(s, "allowed")), j => Json.strOr(j, ""))), p => IdeSync.safePath(p))
+} yield if (List.isEmpty(configured)) diskPaths else configured)
+  } yield allowed
+
+private def seenAfterHashes(root: String, records: List[Json], base: String): IO[List[String]] =
+  for {
+    recHashes = List.map(List.filter(records, r => IdeSync.str(r, "a") == base), r => IdeSync.str(r, "b"))
+    ids <- cardIds(root)
+    cardHashes <- IO.foreach(ids, id => IdeSync.readOptional(IdeSync.cardFile(root, id)).flatMap(raw => if (raw == "") IO.pure("") else IdeSync.parseStored(raw, "invalid card").map(c => if (IdeSync.str(c, "a") == base) IdeSync.str(c, "b") else "")))
+  } yield List.concat(recHashes, cardHashes)
+
+private def rejectCandidate(root: String, base: String, afterHash: String, steerId: String, steerAttempts: Int, files: List[(String, String)], decision: String, diag: String): IO[RoundResult] =
+  for {
+    now <- Clock.monotonic()
+    nonce <- Uuid.v4()
+    autoId = Str.concat("auto-", nonce)
+    rec = Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("automatic")), ("decision", Json.Str(decision)), ("diagnostic", Json.Str(diag)), ("a", Json.Str(base)), ("b", Json.Str(afterHash)), ("steer_id", Json.Str(steerId)), ("source", IdeSync.pairsJson(files)), ("time", Json.Int(now))])
+    _ <- Fs.write(IdeSync.recordPath(root, autoId), IdeSync.text(rec))
+    nextAttempts = steerAttempts + 1
+    nextStatus = if (nextAttempts >= maxSteerAttempts()) "exhausted" else "queued"
+    _ <- updateSteerItem(root, steerId, s => Json.set(Json.set(Json.set(s, "status", Json.Str(nextStatus)), "attempts", Json.Int(nextAttempts)), "error", Json.Str(diag)))
+  } yield RoundResult("rejected", "", steerId, base, diag)
+
+private def publishVerified(root: String, disk: List[(String, String)], base: String, afterHash: String, objective: String, steerId: String, steerPrompt: String, steerAttempts: Int, cand: Candidate, ev: VerifyEvidence): IO[RoundResult] =
+  for {
+    nowDisk <- IdeSync.own(root)
+    nowBase = IdeSync.setHash(nowDisk)
+    nowDirties <- IdeSync.readDirties(root)
+    res <- if (nowBase != base) updateSteerItem(root, steerId, s => Json.set(s, "status", Json.Str("queued"))).flatMap(_ => retireStaleCards(root, nowBase)).map(_ => RoundResult("stale-baseline", "", steerId, nowBase, "baseline-advanced")) else if (List.exists(cand.files, f => List.contains(nowDirties, f._1))) updateSteerItem(root, steerId, s => Json.set(s, "status", Json.Str("queued"))).map(_ => RoundResult("dirty", "", steerId, base, "dirty-target")) else for {
+  now <- Clock.monotonic()
+  nonce <- Uuid.v4()
+  cardId = Hash.sha256(nonce)
+  dir = Fs.join(Fs.join(IdeSync.storage(root), "cards"), cardId)
+  cardObj = if (objective == "") steerPrompt else objective
+  pub = IdeSync.text(Json.Obj([("generator", Json.Str(cand.generator)), ("steer_id", Json.Str(steerId))]))
+  work = Json.Obj([("label", Json.Str(ev.workload)), ("class", Json.Str("diverged")), ("why_a", Json.Null()), ("why_b", Json.Null()), ("delta", Json.Obj([("changes", Json.Arr(ev.changes))])), ("timelines", Json.Obj([("a", Json.Str("tl-a.txt")), ("b", Json.Str("tl-b.txt"))]))])
+  cardDoc = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(cardId)), ("proposal", Json.Str(cand.name)), ("publication", Json.Str(pub)), ("objective", Json.Str(cardObj)), ("steer_id", Json.Str(steerId)), ("steer_prompt", Json.Str(steerPrompt)), ("baseline", IdeSync.pairsJson(disk)), ("proposed", IdeSync.pairsJson(cand.files)), ("a", Json.Str(base)), ("b", Json.Str(afterHash)), ("flip", Json.Int(flipOf(cardId))), ("started", Json.Int(now)), ("ready", Json.Int(now)), ("status", Json.Str("ready")), ("question", Json.Obj([("workload", Json.Str(ev.workload)), ("step", Json.Int(ev.step))])), ("evidence", Json.Obj([("workloads", Json.Arr([work]))]))])
+  _ <- Fs.mkdirs(dir)
+  _ <- Fs.write(Fs.join(dir, "tl-a.txt"), ev.tlA)
+  _ <- Fs.write(Fs.join(dir, "tl-b.txt"), ev.tlB)
+  _ <- Fs.write(Fs.join(dir, "card.json"), IdeSync.text(cardDoc))
+  _ <- updateSteerItem(root, steerId, s => Json.set(Json.set(Json.set(Json.set(s, "status", Json.Str("consumed")), "card", Json.Str(cardId)), "consumed_baseline", Json.Str(base)), "attempts", Json.Int(steerAttempts + 1)))
+} yield RoundResult("published", cardId, steerId, base, "")
+  } yield res
+
+def crankOne(root: String, propose: GenContext => IO[Result[String, Candidate]], verify: VerifyInput => IO[VerifyEvidence]): IO[RoundResult] =
+  for {
+    _ <- IdeSync.recover(root)
+    _ <- recoverSteer(root)
+    disk <- IdeSync.own(root)
+    base = IdeSync.setHash(disk)
+    _ <- retireStaleCards(root, base)
+    dirties <- IdeSync.readDirties(root)
+    allowed <- sessionAllowed(root, disk)
+    cleanAllowed = List.filter(allowed, p => !List.contains(dirties, p))
+    out <- if (List.isEmpty(cleanAllowed)) IO.pure(RoundResult("dirty", "", "", base, "dirty-workspace")) else for {
+  steers <- IdeSync.readSteer(root)
+  queuedOpt = List.head(List.filter(steers, s => IdeSync.str(s, "status") == "queued"))
+  objective <- IdeSync.sessionObjective(root)
+  steerMeta = queuedOpt match {
+  case Option.None => ("", "", 0)
+  case Option.Some(s) => (IdeSync.str(s, "id"), IdeSync.str(s, "prompt"), Json.getInt(s, "attempts", 0))
+}
+  steerId = steerMeta._1
+  steerPrompt = steerMeta._2
+  steerAttempts = steerMeta._3
+  res <- if (steerId == "" && objective == "") IO.pure(RoundResult("idle", "", "", base, "no-objective")) else for {
+  _ <- updateSteerItem(root, steerId, s => Json.set(s, "status", Json.Str("active")))
+  records <- loadRecords(root)
+  prefs = extractPreferences(records)
+  notes = extractAutoNotes(records, base)
+  seen <- seenAfterHashes(root, records, base)
+  ctx = GenContext(root, base, objective, composePrompt(objective, steerPrompt, prefs), steerId, steerPrompt, steerAttempts, cleanAllowed, disk, prefs, notes, buildFeedback(prefs, steerId, steerPrompt, steerAttempts, notes))
+  candRes <- propose(ctx)
+  step <- candRes match {
+  case Result.Err(err) => rejectCandidate(root, base, "", steerId, steerAttempts, [], "candidate-failed", if (err == "") "generator-failed" else err)
+  case Result.Ok(cand) => if (!IdeSync.sourceSetOk(cand.files) || !List.forall(cand.files, f => List.contains(cleanAllowed, f._1))) rejectCandidate(root, base, "", steerId, steerAttempts, [], "candidate-failed", "invalid-candidate-files") else for {
+  after = IdeSync.applyPaths(disk, cand.files)
+  afterHash = IdeSync.setHash(after)
+  checked <- if (afterHash == base) rejectCandidate(root, base, afterHash, steerId, steerAttempts, cand.files, "unchanged-source", "unchanged-source") else if (List.contains(seen, afterHash)) rejectCandidate(root, base, afterHash, steerId, steerAttempts, cand.files, "duplicate-source", "duplicate-source") else verify(VerifyInput(root, disk, after)).flatMap(ev => verifiedPass(ev) match {
+  case (false, why) => rejectCandidate(root, base, afterHash, steerId, steerAttempts, cand.files, if (why == "no-observed-difference") "no-observed-difference" else "candidate-failed", why)
+  case (true, _) => publishVerified(root, disk, base, afterHash, objective, steerId, steerPrompt, steerAttempts, cand, ev)
+})
+} yield checked
+}
+} yield step
+} yield res
+  } yield out
+
+private def roundStops(r: RoundResult): Bool =
+  r.status == "idle" || r.status == "dirty"
+
+private def crankLoop(root: String, steps: List[Int], propose: GenContext => IO[Result[String, Candidate]], verify: VerifyInput => IO[VerifyEvidence], acc: List[RoundResult]): IO[List[RoundResult]] =
+  steps match {
+    case [] => IO.pure(List.reverse(acc))
+    case _ :: rest => crankOne(root, propose, verify).flatMap(r => if (roundStops(r)) IO.pure(List.reverse(r :: acc)) else crankLoop(root, rest, propose, verify, r :: acc))
+  }
+
+def crankRounds(root: String, rounds: Int, propose: GenContext => IO[Result[String, Candidate]], verify: VerifyInput => IO[VerifyEvidence]): IO[List[RoundResult]] =
+  crankLoop(root, List.range(0, rounds), propose, verify, [])
+
