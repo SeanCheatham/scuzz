@@ -378,3 +378,28 @@ oracle revealIsolatesNextCardFlip(decidedFlip: Int, nextFlip: Int): Bool =
     reveal = Deck.revealText("baseline chosen", Cards.str(decidedCard, "proposal"), Main.cardProposalSide(decidedCard))
   } yield reveal == Deck.revealText("baseline chosen", "p-decided", if (dBit == 1) "Left" else "Right") && !Str.contains(reveal, Cards.str(nextCard, "proposal"))
 
+def ruleReviewSectionDisplaysFiniteFraming(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 3 || Timeline.a11yHas(t, i, "text:Rule review") && Timeline.a11yHas(t, i, "text:Keep rule suggestions separate from behavior choices. Finite workload evidence is not a universal proof.") && Timeline.a11yHas(t, i, "outlined:Import rule draft"))
+
+def installRuleRequiresVerifiedDraft(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.a11yHas(t, i, "button:Install rule") || Timeline.signalInt(t, i, "ruleVerified") == 1 && Timeline.signalStrHas(t, i, "ruleCard", "\"status\":\"verified\"") && Timeline.a11yHas(t, i, "outlined:Reject rule") && Timeline.a11yHas(t, i, "text:Verified on finite required workloads and supporting witness. Not a universal proof."))
+
+def afterSuggestRuleOpensRuleReview(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Suggest rule", "text:Rule review")
+
+def ruleReviewContract(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "ruleReviewFlow") || Timeline.signalInt(t, i, "ruleReviewBound") == 1)
+
+oracle behaviorAndRuleOperationsStaySeparated(beforeExists: Bool): Bool =
+  for {
+    cid = Hash.sha256("sep-op")
+    verifyWrite = Json.Obj([("path", Json.Str("rules.scuzz_verify")), ("before", Json.Str(if (beforeExists) """def a(t: Timeline): Verdict =
+  Verdict.ok()
+""" else "")), ("before_exists", Json.Bool(beforeExists)), ("after", Json.Str("def b(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n")), ("after_exists", Json.Bool(true))])
+    sourceWrite = Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("x")), ("before_exists", Json.Bool(true)), ("after", Json.Str("y")), ("after_exists", Json.Bool(true))])
+    badAccept = Json.Obj([("operation", Json.Str(Str.concat("accept-", cid))), ("card", Json.Str(cid)), ("decision", Json.Str("accept")), ("writes", Json.Arr([verifyWrite]))])
+    badInstall = Json.Obj([("operation", Json.Str(Str.concat("install-rule-", cid))), ("card", Json.Str(cid)), ("decision", Json.Str("install-rule")), ("writes", Json.Arr([sourceWrite]))])
+    goodInstall = Json.Obj([("operation", Json.Str(Str.concat("install-rule-", cid))), ("card", Json.Str(cid)), ("decision", Json.Str("install-rule")), ("writes", Json.Arr([verifyWrite]))])
+    undoInstall = Cards.undoOperation(goodInstall, 30)
+  } yield !Cards.validOperation(badAccept) && !Cards.validOperation(badInstall) && Cards.validOperation(goodInstall) && Cards.validAccepted(goodInstall) && Cards.validOperation(undoInstall)
+

@@ -225,9 +225,7 @@ Keep these gaps open until the corresponding runtime behavior and platform check
 
 ### Rule review
 
-There is no explicit claim suggestion or installation path from a preference. A finite witness cannot establish a universal rule. Rule installation needs protection against weakening existing claims and against stale source.
-
-**Proof:** Gate 3. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
+`examples/editor` offers an explicit `Suggest rule` action for a recorded `accept` or `baseline` choice. External mode exports `.scuzz/ide/rule-request.json` and `build/ide/rule-request.json` with `"kind": "rule"` and imports matching rule publications from `build/proposals/`. Local model mode generates a rule draft under the session request limit. A rule draft can add one root `*.scuzz_verify` file or append `Timeline => Verdict` claims to one existing root `*.scuzz_verify` file without altering existing definitions or `*.scuzz_scenario`. A dedicated `Rule review` card shows the target verify file, claim source, supporting witness, replayed workload scope, and finite-evidence notice. Verification checks syntax, preserved claim definitions, typechecking, all required workloads, the supporting witness, and `Verdict.afterHit` and `Verdict.onHit` trigger reach before marking a draft verified. `Install rule` revalidates dirty buffers and frozen package and verify inputs, writes through `.scuzz/ide/journal.json`, supports restart recovery and `Undo`, and invalidates queued behavior cards. Hermetic `TestRuntime` claims, ASan corpus replay, and Headless UI checks cover preference selection, rule rejection, existing-claim preservation, untriggered-claim rejection, stale-input and dirty-buffer refusal, crash recovery, `Undo`, and later proposal enforcement. Human usefulness and measured rule adoption remain open.
 
 ### Verification scope and application correctness
 

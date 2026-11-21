@@ -87,18 +87,29 @@ Address abstention feedback without treating abstention as rejection: """, List.
 Do not repeat undone acceptances: """, List.join(undoItems, ", "))
   } yield Str.concat(steerLine, Str.concat(prefLine, Str.concat(abstainLine, undoLine)))
 
-def messages(request: Json): Json =
+def ruleTargetPaths(request: Json): List[String] =
   for {
-    feedback = Json.arr(Proposal.field(request, "feedback"))
-    latest = List.getOrElse(feedback, List.len(feedback) - 1, Json.Null())
-    decision = Proposal.str(latest, "decision")
-    task = if (decision == "candidate-failed") "Correct the latest candidate. Preserve its intended small addition and satisfy the reported diagnostic and fixed checks. Change the source that causes the failure. For a callback with multiple actions, put those actions in a named def before main. Replace the callback body with a call to that def. Do not use a lambda statement block such as => { ... }. If the failed block spans more than three lines, select the complete file as search and supply the complete corrected file as replacement. Remove all parts of the failed block." else if (Str.startsWith(decision, "duplicate") || decision == "no-observed-difference" || decision == "unchanged-source") "Select a different small useful addition. The latest candidate is excluded. Do not repeat it." else "Select and implement one small useful addition toward the objective. Preserve the current behavior and fixed checks."
-    sources = workingSources(request)
-    correcting = sources != Proposal.pairs(Proposal.field(request, "sources"))
-    history = if (correcting) Json.Arr(List.map(feedback, f => Json.remove(f, "source"))) else Proposal.field(request, "feedback")
-    input = Json.Obj([("objective", Proposal.field(request, "objective")), ("task", Json.Str(task)), ("sources", Proposal.pairsJson(sources)), ("baseline_sources", if (correcting) Proposal.field(request, "sources") else Json.Null()), ("allowed", Proposal.field(request, "allowed")), ("checks", Proposal.field(request, "checks")), ("feedback", history), ("limits", Json.Obj([("files", Json.Int(3)), ("source_bytes", Json.Int(65536))]))])
-    guidance = feedbackGuidance(feedback)
-  } yield Json.Arr([Json.Obj([("role", Json.Str("system")), ("content", Json.Str(Str.concat("Return one JSON object with change and edits. First state one small change in change. Use one short sentence. Then supply only the edits for that change. Each edit has path, search, and replacement. Make one to three edits. search must equal one complete source block from the allowed anchors. replacement contains the new complete source block, with source indentation. Keep existing source in the replacement when it still applies. Use a unique anchor once. Apply edits to sources. For a correction, sources contains the failed candidate and baseline_sources contains the unchanged working tree. Correct sources and preserve the baseline behavior. Scuzz supplies all unchanged source and publication metadata. Do not repeat source above or below the selected block. To insert a helper before main, select the @main def line. Put the helper source before that same @main def line in replacement. Keep the existing main body unchanged.\nExample: insert a draft signal and add an input. Use anchors from the actual source.\n{\"change\":\"Add one message input.\",\"edits\":[{\"path\":\"src/Main.scuzz\",\"search\":\"    count = Signal.make(0)\",\"replacement\":\"    count = Signal.make(0)\\n    draft = Signal.make(\\\"\\\")\"},{\"path\":\"src/Main.scuzz\",\"search\":\"    _ <- Ui.run(_ => View.column([View.text(\\\"Counter\\\"), View.bindText(label), View.button(\\\"+1\\\", _ => Signal.set(count, Signal.get(count) + 1))]))\",\"replacement\":\"    _ <- Ui.run(_ => View.column([View.text(\\\"Counter\\\"), View.bindText(label), View.button(\\\"+1\\\", _ => Signal.set(count, Signal.get(count) + 1)), View.textField(draft, \\\"Message\\\")]))\"}]}\n", Proposal.instructions())))]), Json.Obj([("role", Json.Str("user")), ("content", Json.Str(Str.concat(Models.text(input), Str.concat("""
+    existing = List.map(Proposal.pairs(Proposal.field(request, "verify_files")), f => f._1)
+    fresh = if (List.contains(existing, "rules.scuzz_verify")) "preference_rules.scuzz_verify" else "rules.scuzz_verify"
+  } yield List.distinct(List.concat(existing, [fresh]))
+
+def ruleMessages(request: Json): Json =
+  for {
+    input = Json.Obj([("objective", Proposal.field(request, "objective")), ("task", Json.Str("Draft one Timeline => Verdict claim supported by the recorded human preference and its finite witness. Keep all existing definitions unchanged.")), ("sources", Proposal.field(request, "sources")), ("verify_files", Proposal.field(request, "verify_files")), ("checks", Proposal.field(request, "checks")), ("preference", Proposal.field(request, "preference")), ("witness", Proposal.field(request, "witness")), ("allowed_verify_files", Json.Arr(List.map(ruleTargetPaths(request), p => Json.Str(p)))), ("limits", Json.Obj([("files", Json.Int(1)), ("source_bytes", Json.Int(65536))]))])
+  } yield Json.Arr([Json.Obj([("role", Json.Str("system")), ("content", Json.Str(Str.concat("Return one JSON object with summary, path, and claim. State the checkable rule in summary in one short sentence. Select path from allowed_verify_files. Supply only the new Timeline => Verdict claim definition in claim. If path already exists, Scuzz appends claim after the existing definitions without altering them. Every declared trigger must fire on the required workloads or supporting witness.\nExample:\n{\"summary\":\"Keep Counter visible on the timeline.\",\"path\":\"rules.scuzz_verify\",\"claim\":\"def counterVisible(t: Timeline): Verdict =\\n  Verdict.alwaysHas(t, \\\"text:Counter\\\")\"}\n", Proposal.ruleInstructions())))]), Json.Obj([("role", Json.Str("user")), ("content", Json.Str(Models.text(input)))])])
+
+def messages(request: Json): Json =
+  if (Proposal.str(request, "kind") == "rule") ruleMessages(request) else for {
+  feedback = Json.arr(Proposal.field(request, "feedback"))
+  latest = List.getOrElse(feedback, List.len(feedback) - 1, Json.Null())
+  decision = Proposal.str(latest, "decision")
+  task = if (decision == "candidate-failed") "Correct the latest candidate. Preserve its intended small addition and satisfy the reported diagnostic and fixed checks. Change the source that causes the failure. For a callback with multiple actions, put those actions in a named def before main. Replace the callback body with a call to that def. Do not use a lambda statement block such as => { ... }. If the failed block spans more than three lines, select the complete file as search and supply the complete corrected file as replacement. Remove all parts of the failed block." else if (Str.startsWith(decision, "duplicate") || decision == "no-observed-difference" || decision == "unchanged-source") "Select a different small useful addition. The latest candidate is excluded. Do not repeat it." else "Select and implement one small useful addition toward the objective. Preserve the current behavior and fixed checks."
+  sources = workingSources(request)
+  correcting = sources != Proposal.pairs(Proposal.field(request, "sources"))
+  history = if (correcting) Json.Arr(List.map(feedback, f => Json.remove(f, "source"))) else Proposal.field(request, "feedback")
+  input = Json.Obj([("objective", Proposal.field(request, "objective")), ("task", Json.Str(task)), ("sources", Proposal.pairsJson(sources)), ("baseline_sources", if (correcting) Proposal.field(request, "sources") else Json.Null()), ("allowed", Proposal.field(request, "allowed")), ("checks", Proposal.field(request, "checks")), ("feedback", history), ("limits", Json.Obj([("files", Json.Int(3)), ("source_bytes", Json.Int(65536))]))])
+  guidance = feedbackGuidance(feedback)
+} yield Json.Arr([Json.Obj([("role", Json.Str("system")), ("content", Json.Str(Str.concat("Return one JSON object with change and edits. First state one small change in change. Use one short sentence. Then supply only the edits for that change. Each edit has path, search, and replacement. Make one to three edits. search must equal one complete source block from the allowed anchors. replacement contains the new complete source block, with source indentation. Keep existing source in the replacement when it still applies. Use a unique anchor once. Apply edits to sources. For a correction, sources contains the failed candidate and baseline_sources contains the unchanged working tree. Correct sources and preserve the baseline behavior. Scuzz supplies all unchanged source and publication metadata. Do not repeat source above or below the selected block. To insert a helper before main, select the @main def line. Put the helper source before that same @main def line in replacement. Keep the existing main body unchanged.\nExample: insert a draft signal and add an input. Use anchors from the actual source.\n{\"change\":\"Add one message input.\",\"edits\":[{\"path\":\"src/Main.scuzz\",\"search\":\"    count = Signal.make(0)\",\"replacement\":\"    count = Signal.make(0)\\n    draft = Signal.make(\\\"\\\")\"},{\"path\":\"src/Main.scuzz\",\"search\":\"    _ <- Ui.run(_ => View.column([View.text(\\\"Counter\\\"), View.bindText(label), View.button(\\\"+1\\\", _ => Signal.set(count, Signal.get(count) + 1))]))\",\"replacement\":\"    _ <- Ui.run(_ => View.column([View.text(\\\"Counter\\\"), View.bindText(label), View.button(\\\"+1\\\", _ => Signal.set(count, Signal.get(count) + 1)), View.textField(draft, \\\"Message\\\")]))\"}]}\n", Proposal.instructions())))]), Json.Obj([("role", Json.Str("user")), ("content", Json.Str(Str.concat(Models.text(input), Str.concat("""
 """, Str.concat(task, Str.concat(guidance, if (decision == "candidate-failed") Str.concat("""
 Correct this diagnostic: """, Proposal.str(latest, "diagnostic")) else ""))))))])])
 
@@ -123,13 +134,34 @@ def anchors(request: Json, path: String): List[String] =
 """))))
   } yield if (source == "") [""] else List.distinct(List.concat(List.filter(blocks, block => Str.trim(block) != "" && List.len(Str.split(source, block)) == 2), if (Proposal.str(List.getOrElse(Json.arr(Proposal.field(request, "feedback")), List.len(Json.arr(Proposal.field(request, "feedback"))) - 1, Json.Null()), "decision") == "candidate-failed") [source] else []))
 
-def schema(request: Json): Json =
+def ruleSchema(request: Json): Json =
   for {
-    allowed = List.map(Json.arr(Proposal.field(request, "allowed")), p => Json.strOr(p, ""))
-    searches = Json.Arr(List.map(List.distinct(List.flatten(List.map(allowed, p => anchors(request, p)))), line => Json.Str(line)))
-    item = Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("path"), Json.Str("search"), Json.Str("replacement")])), ("properties", Json.Obj([("path", Json.Obj([("type", Json.Str("string")), ("enum", Proposal.field(request, "allowed"))])), ("search", Json.Obj([("type", Json.Str("string")), ("enum", searches)])), ("replacement", Json.Obj([("type", Json.Str("string"))]))]))])
-    edits = Json.Obj([("type", Json.Str("array")), ("minItems", Json.Int(1)), ("maxItems", Json.Int(3)), ("items", item)])
-  } yield Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("change"), Json.Str("edits")])), ("properties", Json.Obj([("change", Json.Obj([("type", Json.Str("string"))])), ("edits", edits)]))])
+    targets = Json.Arr(List.map(ruleTargetPaths(request), p => Json.Str(p)))
+  } yield Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("summary"), Json.Str("path"), Json.Str("claim")])), ("properties", Json.Obj([("summary", Json.Obj([("type", Json.Str("string"))])), ("path", Json.Obj([("type", Json.Str("string")), ("enum", targets)])), ("claim", Json.Obj([("type", Json.Str("string"))]))]))])
+
+def schema(request: Json): Json =
+  if (Proposal.str(request, "kind") == "rule") ruleSchema(request) else for {
+  allowed = List.map(Json.arr(Proposal.field(request, "allowed")), p => Json.strOr(p, ""))
+  searches = Json.Arr(List.map(List.distinct(List.flatten(List.map(allowed, p => anchors(request, p)))), line => Json.Str(line)))
+  item = Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("path"), Json.Str("search"), Json.Str("replacement")])), ("properties", Json.Obj([("path", Json.Obj([("type", Json.Str("string")), ("enum", Proposal.field(request, "allowed"))])), ("search", Json.Obj([("type", Json.Str("string")), ("enum", searches)])), ("replacement", Json.Obj([("type", Json.Str("string"))]))]))])
+  edits = Json.Obj([("type", Json.Str("array")), ("minItems", Json.Int(1)), ("maxItems", Json.Int(3)), ("items", item)])
+} yield Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("change"), Json.Str("edits")])), ("properties", Json.Obj([("change", Json.Obj([("type", Json.Str("string"))])), ("edits", edits)]))])
+
+def ruleFiles(request: Json, body: Json): IO[List[(String, String)]] =
+  for {
+    _ <- Models.need(Proposal.keys(body, ["summary", "path", "claim"]) && Proposal.stringValue(Proposal.field(body, "summary")) && Str.byteLen(Proposal.str(body, "summary")) > 0 && Str.byteLen(Proposal.str(body, "summary")) <= 240 && Proposal.stringValue(Proposal.field(body, "path")) && Proposal.stringValue(Proposal.field(body, "claim")), "invalid generated rule reply fields")
+    path = Proposal.str(body, "path")
+    claim = Proposal.str(body, "claim")
+    _ <- Models.need(Proposal.safeVerifyPath(path) && List.contains(ruleTargetPaths(request), path) && Str.byteLen(Str.trim(claim)) > 0, "invalid generated rule path or claim")
+    existing = Proposal.pairs(Proposal.field(request, "verify_files"))
+    prior = List.getOrElse(List.map(existing, f => f._2), List.indexOf(List.map(existing, f => f._1), path), "")
+    combined = if (prior == "") claim else Str.concat(prior, Str.concat("""
+""", claim))
+    parsed = Parse.parseFile(Str.dropRight(path, 13), combined)
+    formatted = if (Parse.hasParseError(parsed)) combined else Parse.pretty(parsed)
+    files = [(path, formatted)]
+    _ <- Models.need(Proposal.ruleSetOk(files), "generated rule exceeds verify limits")
+  } yield files
 
 def applyEdits(source: String, edits: List[Json]): IO[String] =
   if (List.isEmpty(edits)) IO.pure(source) else for {
@@ -179,8 +211,9 @@ def complete(p: Process, request: Json, m: Model, saveReply: Json => IO[Unit]): 
     content = Proposal.str(message, "content")
     _ <- Models.need(content != "" && !Str.contains(content, "<think>"), "scuzz generate: candidate failed: inference returned reasoning instead of proposal source")
     body <- Proposal.parse(content, 131072).handleErrorWith(e => IO.fail(Str.concat("scuzz generate: candidate failed: ", e)))
-    files <- editedFiles(request, body).handleErrorWith(e => IO.fail(Str.concat("scuzz generate: candidate failed: ", e)))
-    reply = Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("behavior")), ("generator", Json.Str(m.id)), ("files", Proposal.pairsJson(files))])
+    isRule = Proposal.str(request, "kind") == "rule"
+    files <- (if (isRule) ruleFiles(request, body) else editedFiles(request, body)).handleErrorWith(e => IO.fail(Str.concat("scuzz generate: candidate failed: ", e)))
+    reply = if (isRule) Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("rule")), ("witness", Json.Str(Proposal.str(Proposal.field(request, "witness"), "id"))), ("generator", Json.Str(m.id)), ("files", Proposal.pairsJson(files))]) else Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("behavior")), ("generator", Json.Str(m.id)), ("files", Proposal.pairsJson(files))])
     _ <- Proposal.response(reply, request).handleErrorWith(e => IO.fail(Str.concat(e, Str.concat(": ", Str.take(content, 4096)))))
     pid <- Fs.read(Fs.join(p.dir, "pid"))
     rss <- Models.run(Str.concat("ps -o rss= -p ", Str.fromInt(Str.toInt(Str.trim(pid), 0)))).handleErrorWith(_ => IO.pure("0"))
