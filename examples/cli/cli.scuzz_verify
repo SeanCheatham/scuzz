@@ -38,7 +38,7 @@ oracle cliInvalidFormatting(): Bool =
 """, "def f(): Int = for { record = 1 } yield record", "@main def main: IO[Unit] = for { record <- IO.pure(1) } yield ()", "def f(): Int = for { n = } yield n", "def f(): Int = 1 +", "def f(): List[Int] = List.map([1], n => record)", "def f(): Int = n.", "def f(): Int = (1:)", "def f(): Int = ((n:) => n)(1)", "def f(): Int = ((record, n) => n)((1, 2))", "def f(record: Int): Int = 1", "record Item(record: Int)", "record record(value: Int)", """enum record:
   case Good""", """trait record:
   def f(): Int""", "type record = Int", "@main def record: IO[Unit] = IO.println(1)", "def f(x: Int = ): Int = 1", "def f(x: Int where ): Int = 1", "def f(): Int = 1 match { case n if => n }", """trait Item:
-  def f(x: Int where ): Int"""]
+  def f(x: Int where ): Int""", "private oracle hidden(): Bool = true", "import Domain.", "def f(): Int = (1 + 2", "impl Show for :\n  def show(): String = \"x\""]
   } yield List.forall(invalid, source => Cli.fmtSrc(source) == source && Lsp.formatJson(source) == "[]")
 
 oracle cliValidFormatting(): Bool =
@@ -48,10 +48,15 @@ oracle cliValidFormatting(): Bool =
 
 oracle cliSyntaxDiagnostics(): Bool =
   for {
-    invalid = ["record record(value: Int)", """enum record:
-  case Good""", """trait record:
-  def f(): Int""", "type record = Int", "def f(x: Int = ): Int = 1", "def f(x: Int where ): Int = 1"]
-  } yield List.forall(invalid, source => Str.contains(Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)]), "\"file\":\"Broken.scuzz\"") && Str.contains(Check.humanFiles([("Good", "def good(): Int = 1"), ("Broken", source)]), "Broken.scuzz:1:1: error:"))
+    cases = [("record record(value: Int)", 1, 8, 1, 14), ("""enum record:
+  case Good""", 1, 6, 1, 12), ("""trait record:
+  def f(): Int""", 1, 7, 1, 13), ("type record = Int", 1, 6, 1, 12), ("def f(x: Int = ): Int = 1", 1, 16, 1, 17), ("def f(x: Int where ): Int = 1", 1, 20, 1, 21), ("private oracle hidden(): Bool = true", 1, 9, 1, 15), ("""import Domain
+def f(): Int = 1""", 2, 1, 2, 4), ("@main def record: IO[Unit] = IO.println(1)", 1, 11, 1, 17), ("def f(): Int = 1 match { case n if => n }", 1, 36, 1, 38), ("def f(): Int = (1 + 2", 1, 22, 1, 23), ("""def broken(): Int = 1
+)
+""", 2, 1, 2, 2)]
+  } yield List.forall(cases, c => c match {
+  case (source, line, col, eline, ecol) => Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)]) == Str.concat("[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":\"Broken.scuzz\",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}]")))))))) && Check.humanFiles([("Good", "def good(): Int = 1"), ("Broken", source)]) == Str.concat("Broken.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), ": error: unexpected token")))) && Str.contains(Lsp.publishDiags("file:///tmp/Broken.scuzz", Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)])), Str.concat("{\"range\":{\"start\":{\"line\":", Str.concat(Str.fromInt(line - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(col - 1), Str.concat("},\"end\":{\"line\":", Str.concat(Str.fromInt(eline - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(ecol - 1), "}}")))))))))
+})
 
 oracle cliIdemFmt(): Bool =
   Main.cliIdem(Main.a1("fmt"))

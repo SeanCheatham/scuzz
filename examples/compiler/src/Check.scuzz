@@ -2998,10 +2998,7 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   }
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
-  checkParsedProg(p, checkSourceProg(p, stems, Resolve.sourceError(p)))
-
-def checkParsedProg(p: Prog, checked: Out): Out =
-  if (hasErr(checked) || !Parse.hasParseError(p)) checked else bad("unexpected token", noSpan())
+  if (Parse.hasParseError(p)) bad("unexpected token", noSpan()) else checkSourceProg(p, stems, Resolve.sourceError(p))
 
 def checkSourceProg(p: Prog, stems: List[String], err: String): Out =
   if (err != "") bad(err, noSpan()) else checkResolvedProg(Resolve.prog(p), stems)
@@ -3632,6 +3629,21 @@ def mainToken(src: String, off: Int): Bool =
 def pairToken(s: String): Bool =
   s == "::" || s == "=>" || s == "==" || s == "!=" || s == "<-" || s == "<=" || s == "<<" || s == ">=" || s == ">>" || s == "&&" || s == "||"
 
+def parseTokenEnd(src: String, off: Int): Int =
+  if (off < 0 || off >= Str.len(src)) off else parseTokenEndCh(src, off, Str.charAt(src, off))
+
+def parseTokenEndCh(src: String, off: Int, c: Int): Int =
+  if (c == 34) if (off + 2 < Str.len(src) && Str.charAt(src, off + 1) == 34 && Str.charAt(src, off + 2) == 34) skipTriple(src, off + 3) else skipStr(src, off + 1) else if (c == 64 && mainToken(src, off)) off + 5 else if (c == 115 && off + 1 < Str.len(src) && Str.charAt(src, off + 1) == 34) interpEnd(src, off) else if (c >= 48 && c <= 57) numberEnd(src, off) else if (isIdentCh(c)) skipIdent(src, off) else if (off + 1 < Str.len(src) && pairToken(Str.slice(src, off, off + 2))) off + 2 else off + 1
+
+def parseLocOf(src: String, off: Int): (Int, Int, Int, Int) =
+  if (off < 0 || src == "") (1, 1, 1, 1) else parseLocOf2(fastLineIndex(src), src, off)
+
+def parseLocOf2(starts: LineIndex, src: String, off: Int): (Int, Int, Int, Int) =
+  locOf3(lineColIdx(starts, src, off), lineColIdx(starts, src, parseTokenEnd(src, off)))
+
+def diagLocOf(o: Out, src: String, off: Int): (Int, Int, Int, Int) =
+  if (o.err == "unexpected token") parseLocOf(src, off) else locOf(src, off)
+
 def locOf(src: String, off: Int): (Int, Int, Int, Int) =
   locOfIdx(fastLineIndex(src), src, off)
 
@@ -3684,13 +3696,19 @@ def parseErrorSourceSpan(files: List[(String, String)], o: Out): (String, Int) =
   if (o.err == "unexpected token" && o.span == noSpan()) parseErrorFileSpan(files) else o.span
 
 def parseErrorFileSpan(files: List[(String, String)]): (String, Int) =
-  if (List.isEmpty(files)) noSpan() else List.at(files, 0) match {
-  case (stem, source) => if (Parse.hasParseError(Parse.parse(Lexer.lex(source)))) (stem, 0) else parseErrorFileSpan(List.tail(files))
-}
+  if (List.isEmpty(files)) noSpan() else parseErrorFileHit(List.at(files, 0), List.tail(files))
+
+def parseErrorFileHit(file: (String, String), rest: List[(String, String)]): (String, Int) =
+  file match {
+    case (stem, source) => parseErrorFileOff(stem, Parse.parseErrorOff(source), rest)
+  }
+
+def parseErrorFileOff(stem: String, off: Int, rest: List[(String, String)]): (String, Int) =
+  if (off >= 0) (stem, off) else parseErrorFileSpan(rest)
 
 def diagJsonSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
   sp match {
-    case (stem, off) => diagJson2(o, fileOf(stem), locOf(srcOfStem(files, stem), off))
+    case (stem, off) => diagJson2(o, fileOf(stem), diagLocOf(o, srcOfStem(files, stem), off))
   }
 
 def diagJson2(o: Out, file: String, loc: (Int, Int, Int, Int)): String =
@@ -3801,7 +3819,7 @@ def humanLine(files: List[(String, String)], o: Out): String =
 
 def humanLineSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
   sp match {
-    case (stem, off) => humanLine2(o, fileOf(stem), locOf(srcOfStem(files, stem), off))
+    case (stem, off) => humanLine2(o, fileOf(stem), diagLocOf(o, srcOfStem(files, stem), off))
   }
 
 def humanLine2(o: Out, file: String, loc: (Int, Int, Int, Int)): String =

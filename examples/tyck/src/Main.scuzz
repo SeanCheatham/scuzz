@@ -593,7 +593,42 @@ def ioTypeCompatibility(): Bool =
   Type.eqStr("IO[Int]", "IO[String, Int]") && !Type.eqStr("IO[String]", "IO[String, Int]") && !Type.eqStr("IO[Int]", "IO[Int, String]") && !Type.eqStr("IO[String, Int]", "IO[Bool, Int]") && rejects("def wrong(x: IO[String]): IO[String, Int] = x", "does not match declared")
 
 def tyckParse(): Bool =
-  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && invalidTokens() && stringDelimiters() && interpolationTypes() && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && invalidTokens() && stringDelimiters() && interpolationTypes() && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && parseErrorSpans() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+
+def wantParseSpan(file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
+  Str.concat("[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":", Str.concat(Check.jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}]"))))))))))
+
+def checkParseSpan(src: String, line: Int, col: Int, eline: Int, ecol: Int): Bool =
+  Check.check(src) == wantParseSpan("Main.scuzz", line, col, eline, ecol) && Check.humanFiles([("Main", src)]) == Str.concat("Main.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), ": error: unexpected token"))))
+
+def parseErrorSpans(): Bool =
+  parseDeclSpans() && parseParamSpans() && parseSyntaxSpans() && parseMultiFileSpans()
+
+def parseDeclSpans(): Bool =
+  checkParseSpan("def record(): Int = 1", 1, 5, 1, 11) && checkParseSpan("def f() = 1", 1, 9, 1, 10) && checkParseSpan("def f(): = 1", 1, 10, 1, 11) && checkParseSpan("def f(): Int 1", 1, 14, 1, 15) && checkParseSpan("def f[record](): Int = 1", 1, 7, 1, 13) && checkParseSpan("oracle record(): Bool = true", 1, 8, 1, 14) && checkParseSpan("oracle hidden(n: Int): Bool =", 1, 30, 1, 31) && checkParseSpan("private oracle hidden(): Bool = true", 1, 9, 1, 15) && checkParseSpan("private def record(): Int = 1", 1, 13, 1, 19) && checkParseSpan("""enum record:
+  case Good""", 1, 6, 1, 12) && checkParseSpan("""enum E
+  case Good""", 2, 3, 2, 7) && checkParseSpan("""enum E:
+  case case""", 2, 8, 2, 12) && checkParseSpan("record record(value: Int)", 1, 8, 1, 14) && checkParseSpan("record Item private", 1, 20, 1, 21) && checkParseSpan("record Item(record: Int)", 1, 13, 1, 19) && checkParseSpan("type record = Int", 1, 6, 1, 12) && checkParseSpan("type Bad =", 1, 11, 1, 12) && checkParseSpan("""trait record:
+  def f(): Int""", 1, 7, 1, 13) && checkParseSpan("impl Show Point:\n  def show(): String = \"x\"", 1, 11, 1, 16) && checkParseSpan("impl Show for :\n  def show(): String = \"x\"", 1, 15, 1, 16) && checkParseSpan("import record.Item", 1, 8, 1, 14) && checkParseSpan("""import Domain
+def f(): Int = 1""", 2, 1, 2, 4) && checkParseSpan("import Domain.", 1, 15, 1, 16) && checkParseSpan("import Domain.Item as record", 1, 23, 1, 29) && checkParseSpan("@main record: IO[Unit] = IO.pure(())", 1, 7, 1, 13) && checkParseSpan("@main def record: IO[Unit] = IO.println(1)", 1, 11, 1, 17) && checkParseSpan("@main def main(): IO[Unit] = IO.pure(())", 1, 15, 1, 16)
+
+def parseParamSpans(): Bool =
+  checkParseSpan("def setup(:", 1, 11, 1, 12) && checkParseSpan("def f(record: Int): Int = 1", 1, 7, 1, 13) && checkParseSpan("def f(x Int): Int = 1", 1, 9, 1, 12) && checkParseSpan("def f(x: ): Int = 1", 1, 10, 1, 11) && checkParseSpan("def f(x: Int: Int = 1", 1, 13, 1, 14) && checkParseSpan("def f(x: Int = ): Int = 1", 1, 16, 1, 17) && checkParseSpan("def f(x: Int where ): Int = 1", 1, 20, 1, 21) && checkParseSpan("""trait Item:
+  def f(x: Int where ): Int""", 2, 22, 2, 23)
+
+def parseSyntaxSpans(): Bool =
+  checkParseSpan("def f(): Int = 1 match { case n if => n }", 1, 36, 1, 38) && checkParseSpan("def f(): Int = 1 match { case n n }", 1, 33, 1, 34) && checkParseSpan("def f(): Int = (1 + 2", 1, 22, 1, 23) && checkParseSpan("def f(): List[Int] = [1, 2", 1, 27, 1, 28) && checkParseSpan("def f(): Int = Str.len(\"hi\"", 1, 28, 1, 29) && checkParseSpan("def f(): Int = for { x = 1", 1, 27, 1, 28) && checkParseSpan("def f(): Int = 1 match { case _ => 1", 1, 37, 1, 38) && checkParseSpan("def wrong(): String = \"open", 1, 23, 1, 28) && checkParseSpan("def wrong(): String = s\"${1 2}\"", 1, 29, 1, 30) && checkParseSpan("""def broken(): Int = 1
+)
+""", 2, 1, 2, 2)
+
+def parseMultiFileSpans(): Bool =
+  Check.checkFiles([("Good", """def good(): Int = 1
+"""), ("Broken", """def good2(): Int = 2
+record record(value: Int)
+""")]) == wantParseSpan("Broken.scuzz", 2, 8, 2, 14) && Check.humanFiles([("Good", """def good(): Int = 1
+"""), ("Broken", """def good2(): Int = 2
+record record(value: Int)
+""")]) == "Broken.scuzz:2:8: error: unexpected token"
 
 def stringDelimiters(): Bool =
   rejects("def wrong(): String = \"open", "unexpected token") && rejects("def wrong(): String = \"open\\\"", "unexpected token") && rejects("def wrong(): String = \"\"\"open", "unexpected token") && rejects("def wrong(): String = s\"open", "unexpected token") && rejects("def wrong(): String = s\"${1", "unexpected token") && rejects("def wrong(): String = s\"${\"open", "unexpected token") && Check.check("def right(): String = \"closed\"") == "[]" && Check.check("def right(): String = \"\"\"closed\"\"\"") == "[]" && Check.check("def right(): String = s\"${\"closed\"}\"") == "[]"
