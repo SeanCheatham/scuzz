@@ -2011,25 +2011,25 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     }
     if (session->pointer_slider) {
       if (sz_view_kind(session->pointer_slider) == SZ_VIEW_SPLIT)
-        sz_view_split_set_at(session->pointer_slider, event->x);
+        sz_view_split_set_at_xy(session->pointer_slider, event->x, event->y);
       else
-        sz_view_slider_set_at(session->pointer_slider, event->x);
+        sz_view_slider_set_at_xy(session->pointer_slider, event->x, event->y);
       session_mark_dirty(session);
     } else if (session->pointer_field) {
       (void)sz_view_edit_extend_to_xy(session->pointer_field, event->x,
                                       event->y);
       session_mark_dirty(session);
     } else if (session->pointer_scroll) {
-      float scale = sz_view_paint_scale(session->pointer_scroll);
-      if (!(scale > 0)) return 1;
+      float ldx = dx, ldy = dy;
+      if (!sz_view_layout_delta(session->pointer_scroll, &ldx, &ldy)) return 1;
       /* Finger movement changes the scroll offset in layout coordinates. */
       if (sz_view_scroll_is_h(session->pointer_scroll)) {
-        if (dx > 0.5f || dx < -0.5f) {
-          sz_view_scroll_by(session->pointer_scroll, -dx / scale);
+        if (ldx > 0.5f || ldx < -0.5f) {
+          sz_view_scroll_by(session->pointer_scroll, -ldx);
           session_mark_dirty(session);
         }
-      } else if (dy > 0.5f || dy < -0.5f) {
-        sz_view_scroll_by(session->pointer_scroll, -dy / scale);
+      } else if (ldy > 0.5f || ldy < -0.5f) {
+        sz_view_scroll_by(session->pointer_scroll, -ldy);
         session_mark_dirty(session);
       }
     }
@@ -2258,8 +2258,9 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
                                          event->dx, event->dy);
     if (!scroll)
       return 0;
-    float scale = sz_view_paint_scale(scroll);
-    if (scale > 0) (void)sz_view_scroll_pan(scroll, event->dx / scale, event->dy / scale);
+    float ldx = event->dx, ldy = event->dy;
+    if (sz_view_layout_delta(scroll, &ldx, &ldy))
+      (void)sz_view_scroll_pan(scroll, ldx, ldy);
     session_mark_dirty(session);
     return 1;
   case SZ_INPUT_LIFECYCLE:

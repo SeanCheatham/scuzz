@@ -275,17 +275,18 @@ var Module = {
     const baselines = new Map();
     const live = new Set();
     const positions = new Map();
+    const rotates = [];
     frame.items.forEach(item => {
       live.add(item.id);
       let node = Module.nodes.get(item.id);
-      const kind = item.tooltip ? 'tooltip' : item.scaleGroup ? 'scale' : item.group ? 'group' : item.lines ? 'text' : item.route !== null ? 'link' : String(item.role);
+      const kind = item.tooltip ? 'tooltip' : item.scaleGroup ? 'scale' : item.rotateGroup ? 'rotate' : item.group ? 'group' : item.lines ? 'text' : item.route !== null ? 'link' : String(item.role);
       if (node && node.kind !== kind) { node.remove(); Module.nodes.delete(item.id); node = null; }
       if (!node) {
         node = item.tooltip || item.lines || item.group ? document.createElement('div') : Module.makeControl(item);
         node.kind = kind; node.dataset.view = item.id;
         node.id = 'view-' + item.id;
         if (item.group) node.className = 'semantic-group';
-        if (item.scaleGroup) {
+        if (item.scaleGroup || item.rotateGroup) {
           node.childContainer = document.createElement('div');
           Object.assign(node.childContainer.style, {position: 'absolute', left: '0px', top: '0px', transformOrigin: '0 0'});
           node.append(node.childContainer);
@@ -330,6 +331,15 @@ var Module = {
           const [cx, cy, cw, ch] = item.clip;
           return `polygon(${cx / scale}px ${cy / scale}px,${(cx + cw) / scale}px ${cy / scale}px,${(cx + cw) / scale}px ${(cy + ch) / scale}px,${cx / scale}px ${(cy + ch) / scale}px)`;
         })() : '';
+      } else if (item.rotateGroup) {
+        node.style.left = -ox / scale + 'px'; node.style.top = -oy / scale + 'px';
+        node.style.width = node.style.height = '1px';
+        node.childContainer.style.transform = 'none';
+        node.style.clipPath = item.clip ? (() => {
+          const [cx, cy, cw, ch] = item.clip;
+          return `polygon(${cx / scale}px ${cy / scale}px,${(cx + cw) / scale}px ${cy / scale}px,${(cx + cw) / scale}px ${(cy + ch) / scale}px,${cx / scale}px ${(cy + ch) / scale}px)`;
+        })() : '';
+        rotates.push(node);
       } else if (item.group) {
         node.hidden = item.hidden;
         node.style.zIndex = item.role === 56 ? '2' : '';
@@ -490,6 +500,14 @@ var Module = {
         if (item.inline) node.style.clipPath = '';
       }
     });
+    for (const node of rotates) {
+      const {degrees, x, y} = node.item.rotateGroup;
+      const angle = ((degrees % 360) + 360) % 360;
+      const cs = angle === 0 ? 1 : angle === 90 ? 0 : angle === 180 ? -1 : angle === 270 ? 0 : Math.cos(angle * Math.PI / 180);
+      const sn = angle === 0 ? 0 : angle === 90 ? 1 : angle === 180 ? 0 : angle === 270 ? -1 : Math.sin(angle * Math.PI / 180);
+      const px = x / scale, py = y / scale;
+      node.childContainer.style.transform = `matrix(${cs},${sn},${-sn},${cs},${px - cs * px + sn * py},${py - sn * px - cs * py})`;
+    }
     for (const [id, node] of Module.nodes) if (!live.has(id)) { node.remove(); Module.nodes.delete(id); }
     const modal = frame.items.find(item => item.group && item.role === 43)?.id || 0;
     if (modal !== Module.modalId || (focused && focused !== Module.canvas && focused !== layer && document.activeElement !== focused)) {

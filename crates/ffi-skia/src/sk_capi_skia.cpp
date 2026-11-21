@@ -328,6 +328,21 @@ int scuzz_skia_canvas_scale(void *canvas, float factor, float pivot_x, float piv
   return 1;
 }
 
+int scuzz_skia_canvas_rotate(void *canvas, float degrees, float pivot_x, float pivot_y) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  if (!c || !c->raw || !std::isfinite(degrees) ||
+      !std::isfinite(pivot_x) || !std::isfinite(pivot_y)) return 0;
+  float angle = std::fmod(degrees, 360.f);
+  if (angle < 0.f) angle += 360.f;
+  SkMatrix local;
+  local.setRotate(angle, pivot_x, pivot_y);
+  SkMatrix matrix = c->raw->getTotalMatrix();
+  matrix.preConcat(local);
+  if (!local.isFinite() || !matrix.isFinite()) return 0;
+  c->raw->setMatrix(matrix);
+  return 1;
+}
+
 void scuzz_skia_canvas_clip_rect(void *canvas, float x, float y, float w,
                                  float h) {
   auto *c = static_cast<CapCanvas *>(canvas);

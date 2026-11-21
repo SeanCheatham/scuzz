@@ -54,6 +54,10 @@ int sk_canvas_scale(SkCanvas *canvas, float factor, float pivot_x, float pivot_y
   return scuzz_skia_canvas_scale(canvas, factor, pivot_x, pivot_y);
 }
 
+int sk_canvas_rotate(SkCanvas *canvas, float degrees, float pivot_x, float pivot_y) {
+  return scuzz_skia_canvas_rotate(canvas, degrees, pivot_x, pivot_y);
+}
+
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
   scuzz_skia_canvas_clip_rect(canvas, x, y, w, h);
 }

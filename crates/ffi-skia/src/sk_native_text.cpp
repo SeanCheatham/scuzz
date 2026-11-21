@@ -78,10 +78,10 @@ struct Point { double x, y; };
 struct Edge { Point a, b; };
 struct Outline {
   std::vector<Edge> edges;
-  double x, y, scale;
+  double x, y, a, b;
   int x0, y0, x1, y1;
 
-  Point point(float a, float b) const { return {x + a * scale, y - b * scale}; }
+  Point point(float gx, float gy) const { return {x + gx * a + gy * b, y + gx * b - gy * a}; }
 
   void line(Point a, Point b) {
     if (a.y == b.y || std::max(a.y, b.y) <= y0 || std::min(a.y, b.y) >= y1) return;
@@ -247,14 +247,19 @@ void sk_native_text_span_metrics(SkTextRange range, float size, int style, float
   if (descent) *descent = d;
 }
 
-void sk_native_text_draw(SkTextRange range, float size, int style, double x, double y, double scale,
+void sk_native_text_draw(SkTextRange range, float size, int style, double x, double y, double scale, double b,
                          int x0, int y0, int x1, int y1, SkTextCoverage emit, void *data) {
-  if (!emit || x0 >= x1 || y0 >= y1 || !(scale > 0.) || !std::isfinite(scale) || !std::isfinite(x) || !std::isfinite(y)) return;
+  double det = scale * scale + b * b;
+  if (!emit || x0 >= x1 || y0 >= y1 || !(det > 0.) || !std::isfinite(det) ||
+      !std::isfinite(scale) || !std::isfinite(b) || !std::isfinite(x) || !std::isfinite(y)) return;
   auto shaped = shape_span(range, size, style);
   for (size_t i = 0; i < shaped.glyphs.size(); i++) {
     hb_font_t *font = font_for(shaped.fonts[i], style);
-    Outline outline{{}, x + shaped.positions[i].x * scale, y + shaped.positions[i].y * scale,
-                     font_scale(font, size) * scale, x0, y0, x1, y1};
+    double gy = shaped.positions[i].y;
+    double gs = font_scale(font, size);
+    Outline outline{{}, x + shaped.positions[i].x * scale - gy * b,
+                     y + shaped.positions[i].x * b + gy * scale,
+                     gs * scale, gs * b, x0, y0, x1, y1};
     if (!std::isfinite(outline.x) || !std::isfinite(outline.y)) continue;
     hb_font_draw_glyph(font, shaped.glyphs[i], draw_functions(), &outline);
     raster(outline, emit, data);

@@ -2465,6 +2465,38 @@ assert "button:+1" not in d["triggers"]["never"], d["triggers"]
 PY
   "$SCUZZ" run --target headless --exec "" /tmp/scuzz-v0app
   test -f /tmp/scuzz-v0app/build/snapshot.png
+  rm -rf /tmp/scuzz-v0rot
+  "$SCUZZ" new --ui --path /tmp scuzz-v0rot
+  cat > /tmp/scuzz-v0rot/src/Main.scuzz <<'SCUZZ_ROT'
+@main def main: IO[Unit] =
+  for {
+    angle = Signal.make(0)
+    visible = Signal.make(1)
+    name = Signal.make("Kept")
+    _ <- Ui.run(_ => View.column([View.button("Turn", _ => Signal.set(angle, 90)), View.checkbox(visible, "Show"), View.visibility(visible, View.rotate(90, View.rotate(-90, View.animatedRotation(angle, 4, View.semantics("Spin", View.textField(name, "Label"))))))]))
+  } yield ()
+SCUZZ_ROT
+  cat > /tmp/scuzz-v0rot/scuzz-v0rot.scuzz_verify <<'SCUZZ_ROT_VERIFY'
+def startsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "angle") == 0 && Timeline.signalInt(t, i, "visible") == 1 && Timeline.signalStrHas(t, i, "name", "Kept"))
+
+def turnSetsAngle(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Turn", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "angle") == 90
+})
+
+def visibleRotationTarget(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "visible") == 0 || Timeline.a11yHas(t, i, s"target:rotation:Spin=${Timeline.signalInt(t, i, "angle")}") && Timeline.a11yHas(t, i, "textfield:Label"))
+SCUZZ_ROT_VERIFY
+  cat > /tmp/scuzz-v0rot/corpus/plus.toml <<'SCUZZ_ROT_CORPUS'
+[fuzz]
+events = ["tap button:Turn", "pump 2", "tap checkbox:Show", "tap checkbox:Show"]
+SCUZZ_ROT_CORPUS
+  "$SCUZZ" fmt /tmp/scuzz-v0rot
+  "$SCUZZ" check /tmp/scuzz-v0rot
+  "$SCUZZ" fuzz --iterations 2 /tmp/scuzz-v0rot
+  "$SCUZZ" run --target headless --exec "" /tmp/scuzz-v0rot
+  test -f /tmp/scuzz-v0rot/build/snapshot.png
 }
 
 slice_desktop() {
@@ -2581,7 +2613,88 @@ build = package / 'build'
 source = build / 'fuzz/ev'
 ui = name in ('editor', 'layout', 'list', 'controls', 'split', 'choices', 'disclosure', 'inline', 'tooltips', 'shaping', 'themes', 'text', 'measured', 'select', 'motion')
 cases = {
-    'motion': [('scale-baseline', [
+    'motion': [('rotation-baseline', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-pending', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-retarget', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 3},
+        {'op': 'tap', 'id': 'button:Turn counter'},
+        {'op': 'pump', 'k': 1},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-flip', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Flip rotation'},
+        {'op': 'pump', 'k': 8},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-full', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Full turn'},
+        {'op': 'pump', 'k': 8},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-reset', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept rotation input'},
+        {'op': 'tap', 'id': 'button:Rotation add'},
+        {'op': 'tap', 'id': 'button:Reset rotation'},
+        {'op': 'pump', 'k': 8},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-hidden', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 2},
+        {'op': 'tap', 'id': 'checkbox:Show rotation content'},
+        {'op': 'tap', 'id': 'button:Turn counter'},
+        {'op': 'pump', 'k': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation content'},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-reduced', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 2},
+        {'op': 'reduceMotion', 'value': True},
+        {'op': 'pump', 'k': 1}]),
+        ('rotation-retained', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 8},
+        {'op': 'text', 'i': 1, 'value': 'Kept rotation input'},
+        {'op': 'tap', 'id': 'button:Rotation add'},
+        {'op': 'tap', 'id': 'button:Turn counter'},
+        {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-device', [
+        {'op': 'resize', 'width': 360, 'height': 2000, 'scale': 2},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'}]),
+        ('rotation-paused-target', [
+        {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+        {'op': 'pump', 'k': 2},
+        {'op': 'lifecycle', 'phase': 'pause'},
+        {'op': 'tap', 'id': 'button:Turn counter'},
+        {'op': 'pump', 'k': 3}]),
+        ('scale-baseline', [
         {'op': 'resize', 'width': 640, 'height': 2000, 'scale': 1},
         {'op': 'tap', 'id': 'checkbox:Show scale sample'},
         {'op': 'lifecycle', 'phase': 'pause'}]),
@@ -3338,6 +3451,45 @@ for label, events in cases:
         evaluated = json.loads((output / 'eval.json').read_text())
         for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y'):
             assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
+        if label.startswith('rotation-'):
+            import math
+            transition = next(item for item in native['transitions'] if item['kind'] == 'rotation')
+            expected = {'rotation-baseline': (0, 0, 0), 'rotation-pending': (23, 90, 6), 'rotation-retarget': (19, -90, 7),
+                'rotation-flip': (180, 180, 0), 'rotation-full': (360, 360, 0), 'rotation-reset': (0, 0, 0),
+                'rotation-hidden': (-90, -90, 0), 'rotation-reduced': (90, 90, 0),
+                'rotation-retained': (45, -90, 6), 'rotation-device': (23, 90, 6),
+                'rotation-paused-target': (23, -90, 8)}[label]
+            assert tuple(transition[key] for key in ('value', 'target', 'remaining')) == expected, transition
+            values = {item.get('name'): item.get('value') for item in native['signals']}
+            assert values['rotationValue'] == expected[1], values
+            retained = label in ('rotation-reset', 'rotation-retained')
+            assert values['rotationName'] == ('Kept rotation input' if retained else 'Retained rotation input'), values
+            assert values['rotationCount'] == (1 if retained else 0), values
+            fields = [item for item in native['fields'] if item['label'] == 'Rotation name']
+            assert len(fields) == 1, native['fields']
+            button = next(item for item in native['taps'] if item['label'] == 'Rotation add')
+            toggle = next(item for item in native['taps'] if item['label'] == 'Show rotation content')
+            if label == 'rotation-baseline': rotation_button_width = button['w']
+            deg = expected[0]
+            if deg % 90 == 0:
+                q = ((deg % 360) + 360) % 360
+                a = 1.0 if q == 0 else (-1.0 if q == 180 else 0.0)
+                b = 1.0 if q == 90 else (-1.0 if q == 270 else 0.0)
+            else:
+                rad = math.radians(deg)
+                a, b = math.cos(rad), math.sin(rad)
+            pivot_x, pivot_y = 172.0, toggle['y'] + 200.0
+            corners = [(pivot_x + dx * a - dy * b, pivot_y + dx * b + dy * a)
+                       for dx in (-60.0, -60.0 + rotation_button_width) for dy in (0.0, 40.0)]
+            bx0 = min(cx for cx, _ in corners)
+            bx1 = max(cx for cx, _ in corners)
+            by0 = min(cy for _, cy in corners)
+            by1 = max(cy for _, cy in corners)
+            assert abs(button['x'] - bx0) < .003 and abs(button['y'] - by0) < .003, (button, bx0, by0)
+            assert abs(button['w'] - (bx1 - bx0)) < .003 and abs(button['h'] - (by1 - by0)) < .003, (button, bx1 - bx0, by1 - by0)
+            assert native['reducedMotion'] == (label == 'rotation-reduced'), native
+            print(f'motion {label}: exact rotation, targets, displayed control bounds, and retained input pass', flush=True)
+            continue
         if label.startswith('scale-'):
             transition = next(item for item in native['transitions'] if item['kind'] == 'scale')
             expected = {'scale-baseline': (100, 100, 0), 'scale-pending': (125, 200, 6), 'scale-retarget': (127, 50, 7),
@@ -4303,6 +4455,7 @@ PY_RANGE
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' content-motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' position-motion
   node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' scale-motion
+  node crates/embedder-web/test.cjs "$web_tmp/motion output/package/web" '' rotation-motion
   python3 - "$web_tmp/size limit" <<'PY_SIZE_LIMIT'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])

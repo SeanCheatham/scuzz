@@ -18,7 +18,7 @@ void sk_native_text_span_metrics(SkTextRange range, float size, int style,
 /* Coverage rows use device coordinates inside the supplied clip. */
 typedef void (*SkTextCoverage)(void *data, int x, int y, int count, const uint8_t *coverage);
 void sk_native_text_draw(SkTextRange range, float size, int style,
-                         double x, double y, double scale,
+                         double x, double y, double a, double b,
                          int x0, int y0, int x1, int y1,
                          SkTextCoverage coverage, void *data);
 

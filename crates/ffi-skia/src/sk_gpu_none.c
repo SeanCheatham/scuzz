@@ -42,6 +42,14 @@ void sk_gpu_fill_rect(SkGpuTarget *target, int x0, int y0, int x1, int y1,
   (void)a;
 }
 
+void sk_gpu_fill_poly(SkGpuTarget *target, const double *xy, int count,
+                      int cx0, int cy0, int cx1, int cy1, uint8_t r, uint8_t g,
+                      uint8_t b, uint8_t a) {
+  (void)target; (void)xy; (void)count;
+  (void)cx0; (void)cy0; (void)cx1; (void)cy1;
+  (void)r; (void)g; (void)b; (void)a;
+}
+
 const uint8_t *sk_gpu_read(SkGpuTarget *target, size_t *out_size) {
   (void)target;
   if (out_size)
@@ -58,6 +66,13 @@ void sk_gpu_draw_image(SkGpuTarget *target, const void *image, double x, double 
                        double w, double h, float opacity,
                        int cx0, int cy0, int cx1, int cy1) {
   (void)target; (void)image; (void)x; (void)y; (void)w; (void)h;
+  (void)opacity; (void)cx0; (void)cy0; (void)cx1; (void)cy1;
+}
+
+void sk_gpu_draw_image_poly(SkGpuTarget *target, const void *image,
+                            const double *xyuv, int count, float opacity,
+                            int cx0, int cy0, int cx1, int cy1) {
+  (void)target; (void)image; (void)xyuv; (void)count;
   (void)opacity; (void)cx0; (void)cy0; (void)cx1; (void)cy1;
 }
 

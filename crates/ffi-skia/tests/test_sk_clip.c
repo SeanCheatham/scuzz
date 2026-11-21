@@ -213,6 +213,142 @@ static void check_scale(int gpu) {
   sk_surface_unref(surface);
 }
 
+static void check_rotate(int gpu) {
+  SkSurface *surface = gpu ? sk_surface_make_gpu_n32_premul(64, 64)
+                           : sk_surface_make_raster_n32_premul(64, 64);
+  assert(surface);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  SkPaint *paint = sk_paint_new();
+  assert(canvas && paint);
+  sk_paint_set_color(paint, sk_color_rgba(255, 0, 0, 255));
+
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_rotate(canvas, 90, 16, 16));
+  sk_canvas_draw_rect(canvas, 12, 8, 8, 4, paint);
+  check_box(surface, 20, 12, 24, 20, 255);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_rotate(canvas, 90, 16, 16));
+  sk_canvas_draw_rect(canvas, 12, 8, 8, 4, paint);
+  check_box(surface, 12, 20, 20, 24, 255);
+  sk_canvas_restore(canvas);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_draw_rect(canvas, 12, 8, 8, 4, paint);
+  check_box(surface, 20, 12, 24, 20, 255);
+  sk_canvas_restore(canvas);
+
+  const float counter_angles[] = {-90, 270, -450};
+  for (size_t i = 0; i < sizeof counter_angles / sizeof counter_angles[0]; i++) {
+    sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+    sk_canvas_save(canvas);
+    assert(sk_canvas_rotate(canvas, counter_angles[i], 16, 16));
+    sk_canvas_draw_rect(canvas, 12, 8, 8, 4, paint);
+    check_box(surface, 8, 12, 12, 20, 255);
+    sk_canvas_restore(canvas);
+  }
+
+  /* Ancestor clip stays in device coordinates. Child clip rotates. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  sk_canvas_clip_rect(canvas, 18, 14, 5, 4);
+  assert(sk_canvas_rotate(canvas, 90, 16, 16));
+  sk_canvas_clip_rect(canvas, 12, 8, 8, 4);
+  sk_canvas_draw_rect(canvas, 0, 0, 64, 64, paint);
+  check_box(surface, 20, 14, 23, 18, 255);
+  sk_canvas_restore(canvas);
+
+  /* Non-cardinal rotation fills the rotated quad and obeys clips. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  sk_canvas_clip_rect(canvas, 0, 0, 32, 64);
+  assert(sk_canvas_rotate(canvas, 45, 32, 32));
+  sk_canvas_clip_rect(canvas, 22, 22, 20, 20);
+  sk_canvas_draw_rect(canvas, 0, 0, 64, 64, paint);
+  sk_canvas_restore(canvas);
+  const uint8_t *data = pixels(surface);
+  assert(data[(32 * 64 + 30) * 4] == 255 && data[(32 * 64 + 30) * 4 + 3] == 255);
+  assert(data[(20 * 64 + 30) * 4] == 255 && data[(20 * 64 + 30) * 4 + 3] == 255);
+  assert(data[(23 * 64 + 23) * 4 + 3] == 0);
+  assert(data[(32 * 64 + 34) * 4 + 3] == 0);
+
+  /* Layer alpha composites rotated content once. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_rotate(canvas, 90, 16, 16));
+  assert(sk_canvas_save_layer_alpha(canvas, 128));
+  sk_canvas_draw_rect(canvas, 12, 8, 8, 4, paint);
+  sk_canvas_restore(canvas);
+  check_box(surface, 20, 12, 24, 20, 128);
+  sk_canvas_restore(canvas);
+
+  /* Invalid rotations leave the matrix unchanged. */
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_rotate(canvas, 90, 16, 16));
+  assert(!sk_canvas_rotate(canvas, NAN, 0, 0));
+  assert(!sk_canvas_rotate(canvas, INFINITY, 0, 0));
+  assert(!sk_canvas_rotate(canvas, -INFINITY, 0, 0));
+  assert(!sk_canvas_rotate(canvas, 90, NAN, 0));
+  assert(!sk_canvas_rotate(canvas, 90, 0, INFINITY));
+  assert(!sk_canvas_rotate(canvas, 90, FLT_MAX, FLT_MAX));
+  sk_canvas_draw_rect(canvas, 12, 8, 8, 4, paint);
+  check_box(surface, 20, 12, 24, 20, 255);
+  sk_canvas_restore(canvas);
+  assert(!sk_canvas_rotate(NULL, 90, 0, 0));
+
+  uint8_t image_pixels[8 * 4];
+  for (int i = 0; i < 8; i++) {
+    image_pixels[i * 4] = i < 4 ? 255 : 0;
+    image_pixels[i * 4 + 1] = 0;
+    image_pixels[i * 4 + 2] = i < 4 ? 0 : 255;
+    image_pixels[i * 4 + 3] = 255;
+  }
+  SkImage *image = sk_image_make_rgba(image_pixels, 8, 1);
+  assert(image);
+  sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+  sk_canvas_save(canvas);
+  assert(sk_canvas_rotate(canvas, 90, 32, 32));
+  sk_canvas_draw_image(canvas, image, 16, 24, 32, 16, .5f);
+  sk_canvas_restore(canvas);
+  data = pixels(surface);
+  for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+    const uint8_t *p = data + (y * 64 + x) * 4;
+    int inside = x >= 24 && x < 40 && y >= 16 && y < 48;
+    assert(abs(p[3] - (inside ? 128 : 0)) <= 1);
+    if (inside && y <= 25) assert(p[0] >= 127 && p[2] == 0);
+    if (inside && y >= 38) assert(p[0] == 0 && p[2] >= 127);
+  }
+
+  sk_paint_set_text_size(paint, 14);
+  const float angles[] = {90, 180, 45};
+  for (size_t i = 0; i < sizeof angles / sizeof angles[0]; i++) {
+    sk_canvas_clear(canvas, sk_color_rgba(0, 0, 0, 0));
+    sk_canvas_save(canvas);
+    assert(sk_canvas_rotate(canvas, angles[i], 32, 32));
+    sk_canvas_draw_string(canvas, "AB", 20, 36, paint);
+    sk_canvas_restore(canvas);
+    data = pixels(surface);
+    int ink = 0, min_x = 64, max_x = 0, min_y = 64, max_y = 0;
+    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+      if (data[(y * 64 + x) * 4 + 3] > 32) {
+        ink++;
+        if (x < min_x) min_x = x;
+        if (x > max_x) max_x = x;
+        if (y < min_y) min_y = y;
+        if (y > max_y) max_y = y;
+      }
+    }
+    assert(ink > 20);
+    if (angles[i] == 90) assert(max_y - min_y > max_x - min_x);
+    if (angles[i] == 180) assert(max_x - min_x > max_y - min_y);
+  }
+
+  sk_image_unref(image);
+  sk_paint_delete(paint);
+  sk_surface_unref(surface);
+}
+
 int main(void) {
   SkSurface *surf = sk_surface_make_raster_n32_premul(32, 32);
   SkCanvas *canvas;
@@ -320,8 +456,12 @@ int main(void) {
   sk_paint_delete(paint);
   sk_surface_unref(surf);
   check_scale(0);
+  check_rotate(0);
   const char *backend = getenv("SCUZZ_SKIA");
-  if (backend && !strcmp(backend, "gpu")) check_scale(1);
-  puts("ffi-skia clip and scale tests ok");
+  if (backend && !strcmp(backend, "gpu")) {
+    check_scale(1);
+    check_rotate(1);
+  }
+  puts("ffi-skia clip, scale, and rotate tests ok");
   return 0;
 }

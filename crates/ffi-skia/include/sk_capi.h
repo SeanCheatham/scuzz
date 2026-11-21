@@ -65,6 +65,9 @@ void sk_canvas_restore(SkCanvas *canvas);
 /* Compose a nonnegative uniform scale about this point. Save and restore
  * include the scale. Return 0 for invalid or nonfinite matrix values. */
 int sk_canvas_scale(SkCanvas *canvas, float factor, float pivot_x, float pivot_y);
+/* Compose a clockwise rotation in degrees about this point. Save and restore
+ * include the rotation. Return 0 for invalid or nonfinite matrix values. */
+int sk_canvas_rotate(SkCanvas *canvas, float degrees, float pivot_x, float pivot_y);
 /* Intersect the current clip with this rect. */
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h);
 

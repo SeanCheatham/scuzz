@@ -17,7 +17,6 @@ Select work from these application needs:
    Complete keyboard behavior for remaining composite controls.
    Add editable option search when an application needs it.
 2. Add wider font coverage, other contextual scripts across font changes, and bidi caret affinity.
-3. Rotation transitions with replay and cancellation.
 
 Use working applications to check each capability.
 Check native and evaluator behavior with the same inputs.

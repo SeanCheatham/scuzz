@@ -30,15 +30,20 @@ struct SkPaint {
 };
 
 typedef struct {
+  double inv_a, inv_b, tx, ty, x0, y0, x1, y1;
+} SwRotClip;
+
+typedef struct {
   int x0;
   int y0;
   int x1;
   int y1;
+  int rclip_n;
   uint8_t *pixels;
   SkGpuTarget *target;
   uint8_t alpha;
   int layer;
-  float scale, tx, ty;
+  float a, b, tx, ty;
 } SwSave;
 
 struct SkCanvas {
@@ -47,7 +52,10 @@ struct SkCanvas {
   int clip_y0;
   int clip_x1;
   int clip_y1;
-  float scale, tx, ty;
+  float a, b, tx, ty;
+  SwRotClip *rclips;
+  int rclip_n;
+  int rclip_cap;
   SwSave *saves; /* heap; grows on demand */
   int save_n;
   int save_cap;
@@ -84,7 +92,7 @@ SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
     return NULL;
   }
   s->canvas.surface = s;
-  s->canvas.scale = 1.f;
+  s->canvas.a = 1.f;
   s->canvas.clip_x0 = 0;
   s->canvas.clip_y0 = 0;
   s->canvas.clip_x1 = width;
@@ -112,7 +120,7 @@ SkSurface *sk_surface_make_gpu_n32_premul(int width, int height) {
   s->gpu = 1;
   s->target = target;
   s->canvas.surface = s;
-  s->canvas.scale = 1.f;
+  s->canvas.a = 1.f;
   s->canvas.clip_x0 = 0;
   s->canvas.clip_y0 = 0;
   s->canvas.clip_x1 = width;
@@ -127,6 +135,7 @@ void sk_surface_unref(SkSurface *surface) {
     sk_canvas_restore(&surface->canvas);
   if (surface->gpu)
     sk_gpu_target_free(surface->target);
+  free(surface->canvas.rclips);
   free(surface->canvas.saves);
   free(surface->pixels);
   free(surface);
@@ -159,12 +168,25 @@ const uint8_t *sk_surface_peek_pixels(const SkSurface *surface, size_t *out_size
   return surface->pixels;
 }
 
+static int sw_in_rclips(const SkCanvas *canvas, double px, double py) {
+  for (int i = 0; i < canvas->rclip_n; i++) {
+    const SwRotClip *rc = &canvas->rclips[i];
+    double ux = px - rc->tx, uy = py - rc->ty;
+    double lx = rc->inv_a * ux + rc->inv_b * uy;
+    double ly = -rc->inv_b * ux + rc->inv_a * uy;
+    if (!(lx >= rc->x0 && lx < rc->x1 && ly >= rc->y0 && ly < rc->y1)) return 0;
+  }
+  return 1;
+}
+
 static void put_pixel(SkSurface *s, int x, int y, SkColor color) {
   uint8_t *p;
   if (!s || x < 0 || y < 0 || x >= s->width || y >= s->height)
     return;
   if (x < s->canvas.clip_x0 || y < s->canvas.clip_y0 || x >= s->canvas.clip_x1 ||
       y >= s->canvas.clip_y1)
+    return;
+  if (s->canvas.rclip_n > 0 && !sw_in_rclips(&s->canvas, x + .5, y + .5))
     return;
   p = s->pixels + ((size_t)y * (size_t)s->width + (size_t)x) * 4;
   if (color.a == 255) {
@@ -234,35 +256,165 @@ static int sw_floor_int(double v) {
   return (double)i > v ? i - 1 : i;
 }
 
+static int sw_ceil_int(double v) {
+  if (!(v > (double)INT_MIN)) return INT_MIN;
+  if (v >= (double)INT_MAX) return INT_MAX;
+  int i = (int)v;
+  return (double)i < v ? i + 1 : i;
+}
+
+static double sw_det(const SkCanvas *canvas) {
+  return (double)canvas->a * canvas->a + (double)canvas->b * canvas->b;
+}
+
+static void sw_quad_bounds(const SkCanvas *canvas, double x, double y, double w, double h,
+                           double *min_x, double *min_y, double *max_x, double *max_y) {
+  const double cx[4] = {x, x + w, x + w, x};
+  const double cy[4] = {y, y, y + h, y + h};
+  for (int i = 0; i < 4; i++) {
+    double px = (double)canvas->a * cx[i] - (double)canvas->b * cy[i] + canvas->tx;
+    double py = (double)canvas->b * cx[i] + (double)canvas->a * cy[i] + canvas->ty;
+    if (i == 0 || px < *min_x) *min_x = px;
+    if (i == 0 || py < *min_y) *min_y = py;
+    if (i == 0 || px > *max_x) *max_x = px;
+    if (i == 0 || py > *max_y) *max_y = py;
+  }
+}
+
+typedef struct { double x, y, u, v; } SwVert;
+
+static int sw_clip_plane(const SwVert *in, int in_n, SwVert *out,
+                         double nx, double ny, double d) {
+  if (in_n < 3) return 0;
+  int out_n = 0;
+  SwVert prev = in[in_n - 1];
+  double prev_dist = nx * prev.x + ny * prev.y - d;
+  for (int i = 0; i < in_n; i++) {
+    SwVert cur = in[i];
+    double cur_dist = nx * cur.x + ny * cur.y - d;
+    if ((prev_dist >= 0.) != (cur_dist >= 0.)) {
+      double denom = prev_dist - cur_dist;
+      double t = denom != 0. ? prev_dist / denom : 0.;
+      if (t < 0.) t = 0.;
+      if (t > 1.) t = 1.;
+      if (out_n < 64) {
+        out[out_n++] = (SwVert){
+          prev.x + (cur.x - prev.x) * t,
+          prev.y + (cur.y - prev.y) * t,
+          prev.u + (cur.u - prev.u) * t,
+          prev.v + (cur.v - prev.v) * t,
+        };
+      }
+    }
+    if (cur_dist >= 0. && out_n < 64) out[out_n++] = cur;
+    prev = cur;
+    prev_dist = cur_dist;
+  }
+  return out_n >= 3 ? out_n : 0;
+}
+
+static int sw_clip_quad(const SkCanvas *canvas, double x, double y, double w, double h,
+                        int sx0, int sy0, int sx1, int sy1, SwVert out[64]) {
+  SwVert buf[64];
+  const double cx[4] = {x, x + w, x + w, x};
+  const double cy[4] = {y, y, y + h, y + h};
+  const double cu[4] = {0., 1., 1., 0.};
+  const double cv[4] = {0., 0., 1., 1.};
+  int n = 4;
+  for (int i = 0; i < 4; i++) {
+    out[i] = (SwVert){
+      (double)canvas->a * cx[i] - (double)canvas->b * cy[i] + canvas->tx,
+      (double)canvas->b * cx[i] + (double)canvas->a * cy[i] + canvas->ty,
+      cu[i], cv[i],
+    };
+  }
+  for (int i = 0; i < canvas->rclip_n && n >= 3; i++) {
+    const SwRotClip *rc = &canvas->rclips[i];
+    double bx = rc->inv_a * rc->tx + rc->inv_b * rc->ty;
+    double by = -rc->inv_b * rc->tx + rc->inv_a * rc->ty;
+    n = sw_clip_plane(out, n, buf, rc->inv_a, rc->inv_b, bx + rc->x0);
+    n = sw_clip_plane(buf, n, out, -rc->inv_a, -rc->inv_b, -(bx + rc->x1));
+    n = sw_clip_plane(out, n, buf, -rc->inv_b, rc->inv_a, by + rc->y0);
+    n = sw_clip_plane(buf, n, out, rc->inv_b, -rc->inv_a, -(by + rc->y1));
+  }
+  n = sw_clip_plane(out, n, buf, 1., 0., sx0);
+  n = sw_clip_plane(buf, n, out, -1., 0., -sx1);
+  n = sw_clip_plane(out, n, buf, 0., 1., sy0);
+  return sw_clip_plane(buf, n, out, 0., -1., -sy1);
+}
+
 static void sw_draw_rect(SkCanvas *canvas, double x, double y, double w, double h,
                          const SkPaint *paint) {
   int x0, y0, x1, y1, ix, iy;
-  if (!canvas || !canvas->surface || !paint || !(w > 0) || !(h > 0) || !(canvas->scale > 0))
+  double det;
+  if (!canvas || !canvas->surface || !paint || !(w > 0) || !(h > 0))
     return;
-  x0 = sw_floor_int((double)x * canvas->scale + canvas->tx);
-  y0 = sw_floor_int((double)y * canvas->scale + canvas->ty);
-  x1 = sw_floor_int(((double)x + w) * canvas->scale + canvas->tx);
-  y1 = sw_floor_int(((double)y + h) * canvas->scale + canvas->ty);
-  if (x0 < canvas->clip_x0) x0 = canvas->clip_x0;
-  if (y0 < canvas->clip_y0) y0 = canvas->clip_y0;
-  if (x1 > canvas->clip_x1) x1 = canvas->clip_x1;
-  if (y1 > canvas->clip_y1) y1 = canvas->clip_y1;
-  if (x0 < 0) x0 = 0;
-  if (y0 < 0) y0 = 0;
-  if (x1 > canvas->surface->width) x1 = canvas->surface->width;
-  if (y1 > canvas->surface->height) y1 = canvas->surface->height;
-  if (x0 >= x1 || y0 >= y1) return;
-  if (canvas->surface->gpu) {
-    sk_gpu_fill_rect(canvas->surface->target, x0, y0, x1, y1, canvas->clip_x0,
-                     canvas->clip_y0, canvas->clip_x1, canvas->clip_y1,
-                     paint->color.r, paint->color.g, paint->color.b,
-                     paint->color.a);
+  det = sw_det(canvas);
+  if (!(det > 0.) || !isfinite(det)) return;
+  int sx0 = canvas->clip_x0 > 0 ? canvas->clip_x0 : 0;
+  int sy0 = canvas->clip_y0 > 0 ? canvas->clip_y0 : 0;
+  int sx1 = canvas->clip_x1 < canvas->surface->width ? canvas->clip_x1 : canvas->surface->width;
+  int sy1 = canvas->clip_y1 < canvas->surface->height ? canvas->clip_y1 : canvas->surface->height;
+  if (sx0 >= sx1 || sy0 >= sy1) return;
+  if ((canvas->a == 0.f || canvas->b == 0.f) && canvas->rclip_n == 0) {
+    double min_x, min_y, max_x, max_y;
+    sw_quad_bounds(canvas, x, y, w, h, &min_x, &min_y, &max_x, &max_y);
+    x0 = sw_floor_int(min_x);
+    y0 = sw_floor_int(min_y);
+    x1 = sw_floor_int(max_x);
+    y1 = sw_floor_int(max_y);
+    if (x0 < sx0) x0 = sx0;
+    if (y0 < sy0) y0 = sy0;
+    if (x1 > sx1) x1 = sx1;
+    if (y1 > sy1) y1 = sy1;
+    if (x0 >= x1 || y0 >= y1) return;
+    if (canvas->surface->gpu) {
+      sk_gpu_fill_rect(canvas->surface->target, x0, y0, x1, y1, canvas->clip_x0,
+                       canvas->clip_y0, canvas->clip_x1, canvas->clip_y1,
+                       paint->color.r, paint->color.g, paint->color.b,
+                       paint->color.a);
+      return;
+    }
+    cpu_paint_ops++;
+    for (iy = y0; iy < y1; iy++)
+      for (ix = x0; ix < x1; ix++)
+        put_pixel(canvas->surface, ix, iy, paint->color);
     return;
   }
+  if (canvas->surface->gpu) {
+    SwVert poly[64];
+    double xy[64 * 2];
+    int n = sw_clip_quad(canvas, x, y, w, h, sx0, sy0, sx1, sy1, poly);
+    if (n < 3) return;
+    for (int i = 0; i < n; i++) { xy[i * 2] = poly[i].x; xy[i * 2 + 1] = poly[i].y; }
+    sk_gpu_fill_poly(canvas->surface->target, xy, n, canvas->clip_x0,
+                     canvas->clip_y0, canvas->clip_x1, canvas->clip_y1,
+                     paint->color.r, paint->color.g, paint->color.b, paint->color.a);
+    return;
+  }
+  double min_x, min_y, max_x, max_y;
+  sw_quad_bounds(canvas, x, y, w, h, &min_x, &min_y, &max_x, &max_y);
+  x0 = sw_floor_int(min_x);
+  y0 = sw_floor_int(min_y);
+  x1 = sw_ceil_int(max_x);
+  y1 = sw_ceil_int(max_y);
+  if (x0 < sx0) x0 = sx0;
+  if (y0 < sy0) y0 = sy0;
+  if (x1 > sx1) x1 = sx1;
+  if (y1 > sy1) y1 = sy1;
+  if (x0 >= x1 || y0 >= y1) return;
   cpu_paint_ops++;
-  for (iy = y0; iy < y1; iy++)
-    for (ix = x0; ix < x1; ix++)
-      put_pixel(canvas->surface, ix, iy, paint->color);
+  double inv_a = canvas->a / det, inv_b = canvas->b / det;
+  for (iy = y0; iy < y1; iy++) {
+    double uy = (iy + .5) - canvas->ty;
+    for (ix = x0; ix < x1; ix++) {
+      double ux = (ix + .5) - canvas->tx;
+      double lx = inv_a * ux + inv_b * uy;
+      double ly = -inv_b * ux + inv_a * uy;
+      if (lx >= x && lx < x + w && ly >= y && ly < y + h)
+        put_pixel(canvas->surface, ix, iy, paint->color);
+    }
+  }
 }
 
 void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
@@ -275,12 +427,46 @@ int sk_canvas_scale(SkCanvas *canvas, float factor, float pivot_x, float pivot_y
       !isfinite(pivot_x) || !isfinite(pivot_y)) return 0;
   double local_x = (double)pivot_x * (1. - factor);
   double local_y = (double)pivot_y * (1. - factor);
-  double scale = (double)canvas->scale * factor;
-  double tx = canvas->tx + canvas->scale * local_x;
-  double ty = canvas->ty + canvas->scale * local_y;
+  double a = (double)canvas->a * factor;
+  double b = (double)canvas->b * factor;
+  double tx = canvas->tx + (double)canvas->a * local_x - (double)canvas->b * local_y;
+  double ty = canvas->ty + (double)canvas->b * local_x + (double)canvas->a * local_y;
   if (fabs(local_x) > FLT_MAX || fabs(local_y) > FLT_MAX ||
-      scale > FLT_MAX || fabs(tx) > FLT_MAX || fabs(ty) > FLT_MAX) return 0;
-  canvas->scale = (float)scale;
+      fabs(a) > FLT_MAX || fabs(b) > FLT_MAX || fabs(tx) > FLT_MAX || fabs(ty) > FLT_MAX) return 0;
+  canvas->a = (float)a;
+  canvas->b = (float)b;
+  canvas->tx = (float)tx;
+  canvas->ty = (float)ty;
+  return 1;
+}
+
+static void sw_sincos_deg(double degrees, double *out_cos, double *out_sin) {
+  double angle = fmod(degrees, 360.);
+  if (angle < 0.) angle += 360.;
+  if (angle == 0.) { *out_cos = 1.; *out_sin = 0.; return; }
+  if (angle == 90.) { *out_cos = 0.; *out_sin = 1.; return; }
+  if (angle == 180.) { *out_cos = -1.; *out_sin = 0.; return; }
+  if (angle == 270.) { *out_cos = 0.; *out_sin = -1.; return; }
+  double rad = angle * (3.14159265358979323846 / 180.);
+  *out_cos = cos(rad);
+  *out_sin = sin(rad);
+}
+
+int sk_canvas_rotate(SkCanvas *canvas, float degrees, float pivot_x, float pivot_y) {
+  if (!canvas || canvas->save_dropped || !isfinite(degrees) ||
+      !isfinite(pivot_x) || !isfinite(pivot_y)) return 0;
+  double cs, sn;
+  sw_sincos_deg(degrees, &cs, &sn);
+  double local_x = (double)pivot_x - (cs * pivot_x - sn * pivot_y);
+  double local_y = (double)pivot_y - (sn * pivot_x + cs * pivot_y);
+  double a = (double)canvas->a * cs - (double)canvas->b * sn;
+  double b = (double)canvas->b * cs + (double)canvas->a * sn;
+  double tx = canvas->tx + (double)canvas->a * local_x - (double)canvas->b * local_y;
+  double ty = canvas->ty + (double)canvas->b * local_x + (double)canvas->a * local_y;
+  if (fabs(local_x) > FLT_MAX || fabs(local_y) > FLT_MAX ||
+      fabs(a) > FLT_MAX || fabs(b) > FLT_MAX || fabs(tx) > FLT_MAX || fabs(ty) > FLT_MAX) return 0;
+  canvas->a = (float)a;
+  canvas->b = (float)b;
   canvas->tx = (float)tx;
   canvas->ty = (float)ty;
   return 1;
@@ -297,8 +483,8 @@ static int sw_save(SkCanvas *canvas) {
   }
   SwSave *top = &canvas->saves[canvas->save_n++];
   *top = (SwSave){.x0 = canvas->clip_x0, .y0 = canvas->clip_y0,
-    .x1 = canvas->clip_x1, .y1 = canvas->clip_y1,
-    .scale = canvas->scale, .tx = canvas->tx, .ty = canvas->ty};
+    .x1 = canvas->clip_x1, .y1 = canvas->clip_y1, .rclip_n = canvas->rclip_n,
+    .a = canvas->a, .b = canvas->b, .tx = canvas->tx, .ty = canvas->ty};
   return 1;
 }
 
@@ -330,7 +516,8 @@ void sk_canvas_restore(SkCanvas *canvas) {
   SwSave top = canvas->saves[--canvas->save_n];
   canvas->clip_x0 = top.x0; canvas->clip_y0 = top.y0;
   canvas->clip_x1 = top.x1; canvas->clip_y1 = top.y1;
-  canvas->scale = top.scale; canvas->tx = top.tx; canvas->ty = top.ty;
+  canvas->rclip_n = top.rclip_n;
+  canvas->a = top.a; canvas->b = top.b; canvas->tx = top.tx; canvas->ty = top.ty;
   if (!top.layer) return;
   SkSurface *s = canvas->surface;
   uint8_t *pixels = s->pixels;
@@ -358,17 +545,37 @@ void sk_canvas_restore(SkCanvas *canvas) {
 
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
   int x0, y0, x1, y1;
+  double det, min_x, min_y, max_x, max_y;
   if (!canvas)
     return;
-  if (!(w > 0.f) || !(h > 0.f) || !(canvas->scale > 0.f)) {
+  det = sw_det(canvas);
+  if (!(w > 0.f) || !(h > 0.f) || !(det > 0.) || !isfinite(det)) {
     canvas->clip_x1 = canvas->clip_x0;
     canvas->clip_y1 = canvas->clip_y0;
     return;
   }
-  x0 = sw_floor_int((double)x * canvas->scale + canvas->tx);
-  y0 = sw_floor_int((double)y * canvas->scale + canvas->ty);
-  x1 = sw_floor_int(((double)x + w) * canvas->scale + canvas->tx);
-  y1 = sw_floor_int(((double)y + h) * canvas->scale + canvas->ty);
+  sw_quad_bounds(canvas, x, y, w, h, &min_x, &min_y, &max_x, &max_y);
+  x0 = sw_floor_int(min_x);
+  y0 = sw_floor_int(min_y);
+  if (canvas->a == 0.f || canvas->b == 0.f) {
+    x1 = sw_floor_int(max_x);
+    y1 = sw_floor_int(max_y);
+  } else {
+    x1 = sw_ceil_int(max_x);
+    y1 = sw_ceil_int(max_y);
+    if (canvas->rclip_n >= canvas->rclip_cap) {
+      int cap = canvas->rclip_cap ? canvas->rclip_cap * 2 : 8;
+      SwRotClip *grown = realloc(canvas->rclips, (size_t)cap * sizeof *grown);
+      if (grown) { canvas->rclips = grown; canvas->rclip_cap = cap; }
+    }
+    if (canvas->rclip_n < canvas->rclip_cap) {
+      canvas->rclips[canvas->rclip_n++] = (SwRotClip){
+        .inv_a = canvas->a / det, .inv_b = canvas->b / det,
+        .tx = canvas->tx, .ty = canvas->ty,
+        .x0 = x, .y0 = y, .x1 = (double)x + w, .y1 = (double)y + h,
+      };
+    }
+  }
   if (x0 > canvas->clip_x0)
     canvas->clip_x0 = x0;
   if (y0 > canvas->clip_y0)
@@ -438,7 +645,7 @@ EM_JS(float, web_text_width, (const char *text, int bytes, float size, int style
   return context.measureText(shaped).width * scale;
 });
 
-EM_JS(void, web_text_pixels, (const char *text, float size, float factor, int style, int width, int height, float x, float y, uint8_t *pixels, int rtl, int force, int joins, int arabic), {
+EM_JS(void, web_text_pixels, (const char *text, float size, float ca, float cb, float ox, float oy, int style, int width, int height, float x, float y, uint8_t *pixels, int rtl, int force, int joins, int arabic), {
   const scale = Module.scuzzTextScale || 1;
   const canvas = Module.scuzzTextCanvas;
   canvas.width = width;
@@ -446,12 +653,17 @@ EM_JS(void, web_text_pixels, (const char *text, float size, float factor, int st
   const context = canvas.getContext('2d', {willReadFrequently: true});
   context.direction = rtl ? 'rtl' : 'ltr'; context.textAlign = 'left';
   context.font = ((style & 2) ? "italic " : "") + ((style & 1) ? "bold " : "") + size / scale + 'px ' + (arabic ? '"Arabic context"' : Module.scuzzFontStack);
-  const matrix = scale * factor;
-  context.setTransform(matrix, 0, 0, matrix, 0, 0);
   context.fillStyle = '#ffffff';
   const source = UTF8ToString(Number(text));
   const shaped = force ? Module.scuzzShapingSource(source, rtl, joins) : source;
-  context.fillText(shaped, x / matrix, y / matrix);
+  if (cb === 0 && ca > 0) {
+    const matrix = scale * ca;
+    context.setTransform(matrix, 0, 0, matrix, 0, 0);
+    context.fillText(shaped, x / matrix, y / matrix);
+  } else {
+    context.setTransform(scale * ca, scale * cb, -scale * cb, scale * ca, ox, oy);
+    context.fillText(shaped, x / scale, y / scale);
+  }
   HEAPU8.set(context.getImageData(0, 0, width, height).data, Number(pixels));
 });
 #endif
@@ -614,11 +826,17 @@ static void native_text_coverage(void *data, int x, int y, int count, const uint
   NativeTextPaint *paint = data;
   SkSurface *surface = paint->canvas->surface;
   for (int i = 0; i < count;) {
+    if (paint->canvas->rclip_n > 0 && !sw_in_rclips(paint->canvas, x + i + .5, y + .5)) {
+      i++;
+      continue;
+    }
     SkColor color = paint->color;
     color.a = (uint8_t)((unsigned)color.a * coverage[i] / 255);
     if (surface->gpu) {
       int end = i + 1;
-      while (end < count && coverage[end] == coverage[i]) end++;
+      while (end < count && coverage[end] == coverage[i] &&
+             (paint->canvas->rclip_n == 0 || sw_in_rclips(paint->canvas, x + end + .5, y + .5)))
+        end++;
       if (color.a) sk_gpu_fill_rect(surface->target, x + i, y, x + end, y + 1,
         paint->canvas->clip_x0, paint->canvas->clip_y0, paint->canvas->clip_x1, paint->canvas->clip_y1,
         color.r, color.g, color.b, color.a);
@@ -636,15 +854,20 @@ static void draw_native_span(SkCanvas *canvas, SkTextRange range, float x, float
   if (!canvas->surface->gpu) cpu_paint_ops++;
   NativeTextPaint data = {canvas, paint->color};
   sk_native_text_draw(range, paint->text_size, style,
-    (double)x * canvas->scale + canvas->tx, (double)y * canvas->scale + canvas->ty, canvas->scale,
+    (double)x * canvas->a - (double)y * canvas->b + canvas->tx,
+    (double)x * canvas->b + (double)y * canvas->a + canvas->ty,
+    canvas->a, canvas->b,
     canvas->clip_x0, canvas->clip_y0, canvas->clip_x1, canvas->clip_y1, native_text_coverage, &data);
 }
 #endif
 
 static void draw_styled_string(SkCanvas *canvas, const char *text, float x, float y,
                                 const SkPaint *paint, int style, int direction, int joins, int arabic) {
-  if (!canvas || !canvas->surface || !paint || !text || !(canvas->scale > 0.f) || !isfinite(x) || !isfinite(y))
+  double det;
+  if (!canvas || !canvas->surface || !paint || !text || !isfinite(x) || !isfinite(y))
     return;
+  det = sw_det(canvas);
+  if (!(det > 0.) || !isfinite(det)) return;
 #ifndef __EMSCRIPTEN__
   (void)direction; (void)joins; (void)arabic;
   draw_native_span(canvas, sk_text_range(text, strlen(text)), x, y, paint, style);
@@ -657,23 +880,54 @@ static void draw_styled_string(SkCanvas *canvas, const char *text, float x, floa
     float advance_width = web_text_width(text, (int)strlen(text), size, style, rtl, force, joins, arabic);
     float metrics[2];
     web_span_metrics(text, (int)strlen(text), size, style, rtl, force, joins, arabic, metrics);
-    float ascent = metrics[0] * canvas->scale, descent = metrics[1] * canvas->scale;
-    advance_width *= canvas->scale;
-    x = (float)((double)x * canvas->scale + canvas->tx);
-    y = (float)((double)y * canvas->scale + canvas->ty);
-    float render_size = size * canvas->scale;
-    if (!isfinite(render_size) || !isfinite(x) || !isfinite(y)) return;
-    int left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(x - render_size)));
-    int right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(x + advance_width + render_size)));
-    /* Scale the coverage margin with the glyphs. */
-    float margin = fmaxf(1.f, canvas->scale);
-    int top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(y - ascent) - margin));
-    int bottom = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, ceilf(y + descent) + margin));
+    int left, right, top, bottom;
+    float draw_x, draw_y, ox = 0.f, oy = 0.f;
+    if (canvas->b == 0.f && canvas->a > 0.f) {
+      float factor = canvas->a;
+      float ascent = metrics[0] * factor, descent = metrics[1] * factor;
+      advance_width *= factor;
+      draw_x = (float)((double)x * factor + canvas->tx);
+      draw_y = (float)((double)y * factor + canvas->ty);
+      float render_size = size * factor;
+      if (!isfinite(render_size) || !isfinite(draw_x) || !isfinite(draw_y)) return;
+      left = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, floorf(draw_x - render_size)));
+      right = (int)fmaxf(canvas->clip_x0, fminf(canvas->clip_x1, ceilf(draw_x + advance_width + render_size)));
+      float margin = fmaxf(1.f, factor);
+      top = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, floorf(draw_y - ascent) - margin));
+      bottom = (int)fmaxf(canvas->clip_y0, fminf(canvas->clip_y1, ceilf(draw_y + descent) + margin));
+      draw_x -= left;
+      draw_y -= top;
+    } else {
+      double scale = sqrt(det);
+      double render_size = size * scale;
+      if (!isfinite(render_size)) return;
+      double margin = fmax(1., 2. / scale);
+      double min_x, min_y, max_x, max_y;
+      sw_quad_bounds(canvas, (double)x - size, (double)y - metrics[0] - margin,
+                     (double)advance_width + 2. * size, (double)metrics[0] + metrics[1] + 2. * margin,
+                     &min_x, &min_y, &max_x, &max_y);
+      left = sw_floor_int(min_x);
+      right = sw_ceil_int(max_x);
+      top = sw_floor_int(min_y);
+      bottom = sw_ceil_int(max_y);
+      if (left < canvas->clip_x0) left = canvas->clip_x0;
+      if (right > canvas->clip_x1) right = canvas->clip_x1;
+      if (top < canvas->clip_y0) top = canvas->clip_y0;
+      if (bottom > canvas->clip_y1) bottom = canvas->clip_y1;
+      if (left < 0) left = 0;
+      if (top < 0) top = 0;
+      if (right > canvas->surface->width) right = canvas->surface->width;
+      if (bottom > canvas->surface->height) bottom = canvas->surface->height;
+      ox = canvas->tx - left;
+      oy = canvas->ty - top;
+      draw_x = x;
+      draw_y = y;
+    }
     int width = right - left, height = bottom - top;
     if (width < 1 || height < 1) return;
     uint8_t *pixels = malloc((size_t)width * height * 4);
     if (!pixels) return;
-    web_text_pixels(text, size, canvas->scale, style, width, height, x - left, y - top, pixels, rtl, force, joins, arabic);
+    web_text_pixels(text, size, canvas->a, canvas->b, ox, oy, style, width, height, draw_x, draw_y, pixels, rtl, force, joins, arabic);
     for (int row = 0; row < height; row++) {
       for (int col = 0; col < width; col++) {
         SkColor color = paint->color;
@@ -1015,42 +1269,111 @@ int sk_image_height(const SkImage *image) { return image ? image->height : 0; }
 
 void sk_canvas_draw_image(SkCanvas *canvas, const SkImage *image, float x,
                           float y, float w, float h, float opacity) {
+  double det;
   if (!canvas || !canvas->surface || !image || !(w > 0.f) || !(h > 0.f) ||
       !(opacity > 0.f) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h))
     return;
-  if (!(canvas->scale > 0.f)) return;
-  double dx = (double)x * canvas->scale + canvas->tx;
-  double dy = (double)y * canvas->scale + canvas->ty;
-  double dw = (double)w * canvas->scale, dh = (double)h * canvas->scale;
+  det = sw_det(canvas);
+  if (!(det > 0.) || !isfinite(det)) return;
   if (opacity > 1.f)
     opacity = 1.f;
-  if (canvas->surface->gpu) {
-    SkImage *cached = (SkImage *)image;
-    if (!cached->gpu_image)
-      cached->gpu_image = sk_gpu_image_new(image->pixels, image->width, image->height);
-    sk_gpu_draw_image(canvas->surface->target, cached->gpu_image, dx, dy, dw, dh,
-                       opacity, canvas->clip_x0, canvas->clip_y0,
-                       canvas->clip_x1, canvas->clip_y1);
+  if (canvas->b == 0.f && canvas->a > 0.f && canvas->rclip_n == 0) {
+    double dx = (double)x * canvas->a + canvas->tx;
+    double dy = (double)y * canvas->a + canvas->ty;
+    double dw = (double)w * canvas->a, dh = (double)h * canvas->a;
+    if (canvas->surface->gpu) {
+      SkImage *cached = (SkImage *)image;
+      if (!cached->gpu_image)
+        cached->gpu_image = sk_gpu_image_new(image->pixels, image->width, image->height);
+      sk_gpu_draw_image(canvas->surface->target, cached->gpu_image, dx, dy, dw, dh,
+                         opacity, canvas->clip_x0, canvas->clip_y0,
+                         canvas->clip_x1, canvas->clip_y1);
+      return;
+    }
+    SkSurface *surface = canvas->surface;
+    double left = fmax(0., fmax(canvas->clip_x0, dx));
+    double top = fmax(0., fmax(canvas->clip_y0, dy));
+    double right = fmin(surface->width, fmin(canvas->clip_x1, dx + dw));
+    double bottom = fmin(surface->height, fmin(canvas->clip_y1, dy + dh));
+    if (!(right > left) || !(bottom > top))
+      return;
+    int x0 = (int)ceil(left - 0.5), y0 = (int)ceil(top - 0.5);
+    int x1 = (int)ceil(right - 0.5), y1 = (int)ceil(bottom - 0.5);
+    cpu_paint_ops++;
+    for (int py = y0; py < y1; py++) {
+      float sy = fminf(image->height - 1.f, fmaxf(0.f, (py + 0.5 - dy) * image->height / dh - 0.5f));
+      int iy = (int)sy, jy = iy + 1 < image->height ? iy + 1 : iy;
+      float fy = sy - iy;
+      for (int px = x0; px < x1; px++) {
+        float sx = fminf(image->width - 1.f, fmaxf(0.f, (px + 0.5 - dx) * image->width / dw - 0.5f));
+        int ix = (int)sx, jx = ix + 1 < image->width ? ix + 1 : ix;
+        float fx = sx - ix;
+        const uint8_t *a = image->pixels + ((size_t)iy * image->width + ix) * 4;
+        const uint8_t *b = image->pixels + ((size_t)iy * image->width + jx) * 4;
+        const uint8_t *c = image->pixels + ((size_t)jy * image->width + ix) * 4;
+        const uint8_t *d = image->pixels + ((size_t)jy * image->width + jx) * 4;
+        uint8_t rgba[4];
+        for (int channel = 0; channel < 4; channel++) {
+          float upper = a[channel] + (b[channel] - a[channel]) * fx;
+          float lower = c[channel] + (d[channel] - c[channel]) * fx;
+          rgba[channel] = (uint8_t)((upper + (lower - upper) * fy) * opacity + 0.5f);
+        }
+        uint8_t *pixel = surface->pixels + ((size_t)py * surface->width + px) * 4;
+        unsigned inverse = 255u - rgba[3];
+        for (int channel = 0; channel < 4; channel++)
+          pixel[channel] = (uint8_t)(rgba[channel] + (pixel[channel] * inverse + 127u) / 255u);
+      }
+    }
     return;
   }
   SkSurface *surface = canvas->surface;
-  double left = fmax(0., fmax(canvas->clip_x0, dx));
-  double top = fmax(0., fmax(canvas->clip_y0, dy));
-  double right = fmin(surface->width, fmin(canvas->clip_x1, dx + dw));
-  double bottom = fmin(surface->height, fmin(canvas->clip_y1, dy + dh));
-  if (!(right > left) || !(bottom > top))
+  int sx0 = canvas->clip_x0 > 0 ? canvas->clip_x0 : 0;
+  int sy0 = canvas->clip_y0 > 0 ? canvas->clip_y0 : 0;
+  int sx1 = canvas->clip_x1 < surface->width ? canvas->clip_x1 : surface->width;
+  int sy1 = canvas->clip_y1 < surface->height ? canvas->clip_y1 : surface->height;
+  if (sx0 >= sx1 || sy0 >= sy1) return;
+  if (surface->gpu) {
+    SkImage *cached = (SkImage *)image;
+    if (!cached->gpu_image)
+      cached->gpu_image = sk_gpu_image_new(image->pixels, image->width, image->height);
+    SwVert poly[64];
+    double xyuv[64 * 4];
+    int n = sw_clip_quad(canvas, x, y, w, h, sx0, sy0, sx1, sy1, poly);
+    if (n < 3) return;
+    for (int i = 0; i < n; i++) {
+      xyuv[i * 4] = poly[i].x;
+      xyuv[i * 4 + 1] = poly[i].y;
+      xyuv[i * 4 + 2] = poly[i].u;
+      xyuv[i * 4 + 3] = poly[i].v;
+    }
+    sk_gpu_draw_image_poly(surface->target, cached->gpu_image, xyuv, n, opacity,
+                           canvas->clip_x0, canvas->clip_y0, canvas->clip_x1, canvas->clip_y1);
     return;
-  int x0 = (int)ceil(left - 0.5), y0 = (int)ceil(top - 0.5);
-  int x1 = (int)ceil(right - 0.5), y1 = (int)ceil(bottom - 0.5);
+  }
+  double min_x, min_y, max_x, max_y;
+  sw_quad_bounds(canvas, x, y, w, h, &min_x, &min_y, &max_x, &max_y);
+  int x0 = sw_floor_int(min_x), y0 = sw_floor_int(min_y);
+  int x1 = sw_ceil_int(max_x), y1 = sw_ceil_int(max_y);
+  if (x0 < sx0) x0 = sx0;
+  if (y0 < sy0) y0 = sy0;
+  if (x1 > sx1) x1 = sx1;
+  if (y1 > sy1) y1 = sy1;
+  if (x0 >= x1 || y0 >= y1) return;
   cpu_paint_ops++;
+  double inv_a = canvas->a / det, inv_b = canvas->b / det;
   for (int py = y0; py < y1; py++) {
-    float sy = fminf(image->height - 1.f, fmaxf(0.f, (py + 0.5 - dy) * image->height / dh - 0.5f));
-    int iy = (int)sy, jy = iy + 1 < image->height ? iy + 1 : iy;
-    float fy = sy - iy;
+    double uy = (py + .5) - canvas->ty;
     for (int px = x0; px < x1; px++) {
-      float sx = fminf(image->width - 1.f, fmaxf(0.f, (px + 0.5 - dx) * image->width / dw - 0.5f));
+      if (canvas->rclip_n > 0 && !sw_in_rclips(canvas, px + .5, py + .5)) continue;
+      double ux = (px + .5) - canvas->tx;
+      double lx = inv_a * ux + inv_b * uy;
+      double ly = -inv_b * ux + inv_a * uy;
+      if (!(lx >= x && lx < (double)x + w && ly >= y && ly < (double)y + h)) continue;
+      float sx = fminf(image->width - 1.f, fmaxf(0.f, (float)((lx - x) * image->width / w - .5)));
+      float sy = fminf(image->height - 1.f, fmaxf(0.f, (float)((ly - y) * image->height / h - .5)));
       int ix = (int)sx, jx = ix + 1 < image->width ? ix + 1 : ix;
-      float fx = sx - ix;
+      int iy = (int)sy, jy = iy + 1 < image->height ? iy + 1 : iy;
+      float fx = sx - ix, fy = sy - iy;
       const uint8_t *a = image->pixels + ((size_t)iy * image->width + ix) * 4;
       const uint8_t *b = image->pixels + ((size_t)iy * image->width + jx) * 4;
       const uint8_t *c = image->pixels + ((size_t)jy * image->width + ix) * 4;

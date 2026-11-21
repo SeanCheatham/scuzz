@@ -406,6 +406,31 @@ void sk_gpu_fill_rect(SkGpuTarget *target, int x0, int y0, int x1, int y1,
   draw_verts(verts, 6, col, a == 255);
 }
 
+void sk_gpu_fill_poly(SkGpuTarget *target, const double *xy, int count,
+                      int cx0, int cy0, int cx1, int cy1, uint8_t r, uint8_t g,
+                      uint8_t b, uint8_t a) {
+  float verts[64 * 6];
+  float col[4];
+  if (!target || !xy || count < 3 || count > 64 || a == 0 || !gpu_ready())
+    return;
+  bind_target(target);
+  if (!set_scissor(target, cx0, cy0, cx1, cy1))
+    return;
+  float x0 = (float)(xy[0] / target->w * 2. - 1.);
+  float y0 = (float)(1. - xy[1] / target->h * 2.);
+  int n = 0;
+  for (int i = 1; i + 1 < count; i++) {
+    verts[n++] = x0;
+    verts[n++] = y0;
+    verts[n++] = (float)(xy[i * 2] / target->w * 2. - 1.);
+    verts[n++] = (float)(1. - xy[i * 2 + 1] / target->h * 2.);
+    verts[n++] = (float)(xy[(i + 1) * 2] / target->w * 2. - 1.);
+    verts[n++] = (float)(1. - xy[(i + 1) * 2 + 1] / target->h * 2.);
+  }
+  premul(r, g, b, a, col);
+  draw_verts(verts, n / 2, col, a == 255);
+}
+
 const uint8_t *sk_gpu_read(SkGpuTarget *target, size_t *out_size) {
   size_t nbytes;
   size_t stride;
@@ -568,6 +593,36 @@ void sk_gpu_draw_image(SkGpuTarget *target, const void *image, double x,
                        double y, double w, double h, float opacity,
                        int cx0, int cy0, int cx1, int cy1) {
   gpu_draw_texture(target, image, x, y, w, h, opacity, cx0, cy0, cx1, cy1, 0);
+}
+
+void sk_gpu_draw_image_poly(SkGpuTarget *target, const void *image,
+                            const double *xyuv, int count, float opacity,
+                            int cx0, int cy0, int cx1, int cy1) {
+  float positions[64 * 2], uv[64 * 2];
+  if (!target || !image || !xyuv || count < 3 || count > 64 ||
+      !(opacity > 0.f) || !gpu_ready() || !image_program())
+    return;
+  bind_target(target);
+  if (!set_scissor(target, cx0, cy0, cx1, cy1))
+    return;
+  for (int i = 0; i < count; i++) {
+    positions[i * 2] = (float)(xyuv[i * 4] / target->w * 2. - 1.);
+    positions[i * 2 + 1] = (float)(1. - xyuv[i * 4 + 1] / target->h * 2.);
+    uv[i * 2] = (float)xyuv[i * 4 + 2];
+    uv[i * 2 + 1] = (float)xyuv[i * 4 + 3];
+  }
+  glUseProgram(g_image_prog);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, *(const GLuint *)image);
+  glUniform1i(g_image_texture, 0);
+  glUniform1f(g_image_opacity, opacity > 1.f ? 1.f : opacity);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  glEnableVertexAttribArray((GLuint)g_image_ndc);
+  glEnableVertexAttribArray((GLuint)g_image_uv);
+  glVertexAttribPointer((GLuint)g_image_ndc, 2, GL_FLOAT, GL_FALSE, 0, positions);
+  glVertexAttribPointer((GLuint)g_image_uv, 2, GL_FLOAT, GL_FALSE, 0, uv);
+  glDrawArrays(GL_TRIANGLE_FAN, 0, count);
 }
 
 void sk_gpu_draw_target(SkGpuTarget *target, const SkGpuTarget *source, float opacity,

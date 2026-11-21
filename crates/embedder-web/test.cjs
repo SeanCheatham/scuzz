@@ -1383,6 +1383,116 @@ async function checkScaleMotion(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkRotationMotion(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: {width: mobile ? 390 : 640, height: 2000},
+      deviceScaleFactor: mobile ? 2 : 1, hasTouch: mobile, isMobile: mobile, reducedMotion: 'no-preference'});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.stack));
+    await openMotionPage(page, url);
+    const state = () => page.evaluate(() => Module.webFrame.transitions.find(item => item.kind === 'rotation'));
+    const advance = async count => {
+      const frames = [];
+      for (let i = 0; i < count; i++) {
+        const deadline = Date.now() + 30000;
+        while (!await page.evaluate(() => {
+          const before = Module.webFrame; window.motionStep(); return before !== Module.webFrame;
+        })) {
+          assert(Date.now() < deadline, 'rotation transition paints a frame');
+          await page.waitForTimeout(10);
+        }
+        frames.push(await state());
+      }
+      return frames;
+    };
+    const click = name => page.getByRole('button', {name, exact: true}).evaluate(node => node.click());
+    const pointer = async (x, y) => {
+      if (mobile) await page.touchscreen.tap(x, y); else await page.mouse.click(x, y);
+    };
+    const name = page.getByRole('textbox', {name: 'Rotation name', exact: true});
+    const group = page.getByRole('group', {name: 'Rotation bounds', exact: true});
+    const scene = page.getByRole('group', {name: 'Rotation scene', exact: true});
+    const add = page.getByRole('button', {name: 'Rotation add', exact: true});
+    const after = page.getByRole('main', {name: 'Application', exact: true}).getByText('After rotation sample', {exact: true});
+    const show = page.getByRole('checkbox', {name: 'Show rotation content', exact: true});
+    await page.getByRole('checkbox', {name: 'Show rotation sample', exact: true}).evaluate(node => node.click());
+    await advance(1);
+    assert.deepEqual([(await state()).value, (await state()).remaining], [0, 0]);
+    const origin = await scene.boundingBox(), below = await after.boundingBox(), firstButton = await add.boundingBox();
+    const geometry = async degrees => {
+      const rad = degrees * Math.PI / 180;
+      const q = ((Math.round(degrees) % 360) + 360) % 360;
+      const a = degrees % 90 === 0 ? (q === 0 ? 1 : q === 180 ? -1 : 0) : Math.cos(rad);
+      const b = degrees % 90 === 0 ? (q === 90 ? 1 : q === 270 ? -1 : 0) : Math.sin(rad);
+      const c = Math.abs(a), s = Math.abs(b);
+      const w = 120 * c + 80 * s, h = 120 * s + 80 * c;
+      const x = origin.x + 160 - w / 2, y = origin.y + 120 - h / 2;
+      const box = await group.boundingBox(), field = await name.boundingBox();
+      assert(Math.abs(box.x - x) < .05 && Math.abs(box.y - y) < .05, JSON.stringify({box, x, y, degrees}));
+      assert(Math.abs(box.width - w) < .05 && Math.abs(box.height - h) < .05, JSON.stringify({box, w, h, degrees}));
+      const fw = 120 * c + 40 * s, fh = 120 * s + 40 * c;
+      assert(Math.abs(field.width - fw) < .05 && Math.abs(field.height - fh) < .05, JSON.stringify({field, fw, fh, degrees}));
+      assert(Math.abs((await after.boundingBox()).y - below.y) < .01, 'rotation preserves surrounding layout');
+      const px = origin.x + 160 + 57 * a - 37 * b, py = origin.y + 120 + 57 * b + 37 * a;
+      const pixel = await page.evaluate(({x, y}) => {
+        const scale = Module.webFrame.scale;
+        return Array.from(Module.canvas.getContext('2d').getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data);
+      }, {x: px, y: py});
+      assert.deepEqual(pixel, [225, 235, 245, 255]);
+    };
+    await geometry(0);
+    await name.fill('Kept rotation input');
+    await name.evaluate(node => { node.setSelectionRange(2, 5); node.dispatchEvent(new Event('select')); });
+    const original = await name.elementHandle();
+    await click('Turn clockwise');
+    const turn = [];
+    for (let i = 0; i < 3; i++) {
+      const frame = (await advance(1))[0]; turn.push([frame.value, frame.remaining]);
+      await geometry(frame.value);
+    }
+    assert.deepEqual(turn, [[11, 7], [23, 6], [34, 5]]);
+    assert(await name.evaluate(node => document.activeElement === node));
+    assert.deepEqual(await name.evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ['Kept rotation input', 2, 5]);
+    await click('Turn counter');
+    const counter = await advance(8);
+    assert.deepEqual(counter.map(frame => frame.value), [19, 3, -13, -28, -44, -59, -75, -90]);
+    await geometry(-90);
+    assert(await original.evaluate(node => node === document.querySelector('input[aria-label="Rotation name"]')));
+    await pointer(firstButton.x + 6, firstButton.y + 20);
+    await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Rotation count: 0')));
+    const current = await add.boundingBox();
+    await pointer(current.x + current.width / 2, current.y + current.height / 2); await advance(1);
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Rotation count: 1')));
+    await click('Flip rotation'); await advance(8); await geometry(180);
+    await click('Reset rotation'); await advance(8); await geometry(0);
+    assert.equal(await name.inputValue(), 'Kept rotation input');
+    await click('Turn clockwise'); await advance(2);
+    const frozen = await state(); await page.waitForTimeout(100);
+    assert.deepEqual(await state(), frozen, 'elapsed time does not advance rotation');
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.equal(await state(), undefined); assert.equal(await name.count(), 0);
+    await click('Turn clockwise'); await advance(1);
+    await show.evaluate(node => node.click()); await advance(1);
+    assert.deepEqual([(await state()).value, (await state()).remaining], [90, 0]);
+    await geometry(90); assert.equal(await name.inputValue(), 'Kept rotation input');
+    await click('Turn counter'); await advance(2);
+    await page.evaluate(() => {
+      window.motionPreferenceChange = undefined;
+      Module.motionPreference.addEventListener('change', () => window.motionPreferenceChange = Module.motionPreference.matches, {once: true});
+    });
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.evaluate(() => window.motionBrowserFrame());
+    await page.waitForFunction(() => window.motionPreferenceChange === true);
+    await advance(1);
+    assert.deepEqual([(await state()).value, (await state()).remaining], [-90, 0]);
+    assert((await state()).suppressed); await geometry(-90);
+    assert.deepEqual(errors, []);
+    console.log(`web rotation motion: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkPositionMotion(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -2983,7 +3093,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'scale-glyph' ? checkScaleGlyph : process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'scale-glyph' ? checkScaleGlyph : process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'rotation-motion' ? checkRotationMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

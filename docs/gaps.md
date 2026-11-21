@@ -189,7 +189,10 @@ Native and browser checks cover nested scales, clips, glyphs, source limits, and
 Zero scale excludes paint, input, focus, and accessibility. Child state remains available.
 Browser checks compare glyph coverage with a separate Canvas reference at six scales.
 Native and evaluator replays compare exact scale timelines, claims, and control bounds.
-Rotation transitions remain open.
+Rotation transitions use the shared pump clock and keep layout and text wrapping unchanged.
+Native and browser checks cover nested rotations, clips, glyphs, source limits, and displayed input bounds.
+Native and evaluator replays compare exact rotation timelines, claims, and control bounds.
+Real-device rotation checks remain open.
 Linux Desktop reads the Settings portal motion preference and receives live changes.
 A private bus check covers initial values, invalid signals, foreign senders, stale replies, and service restart.
 Recordings include the initial session preference before live input.
