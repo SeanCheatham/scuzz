@@ -1,0 +1,3 @@
+[fuzz]
+fault_seed = "fs:fail:2"
+events = ["tap choicechip:Tasks", "tap button:Rename", "tap button:Save"]

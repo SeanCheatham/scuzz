@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap outlined:Settings", "tap inkwell:face", "tap switchtile:Quiet", "tap radiotile:Night", "tap choicechip:Grid", "tap fab:+", "tap expansion:More", "tap iconbutton:i", "tap actionchip:Go", "tap textbutton:Kit", "tap outlined:Edit"]

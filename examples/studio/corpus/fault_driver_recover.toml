@@ -1,0 +1,3 @@
+[fuzz]
+fault_seed = "fs:fail:3"
+events = ["drive renameItem oat", "drive addItem bread"]

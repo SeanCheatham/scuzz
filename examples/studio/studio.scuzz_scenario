@@ -1,18 +1,35 @@
+private def finishStore(res: Result[String, String]): Unit =
+  res match {
+    case Result.Ok(_) => ()
+    case Result.Err(_) => ()
+  }
+
 def setup(): IO[Unit] =
-  IO.pure(())
+  for {
+    _ <- Fs.mkdirs("/tmp")
+    _ <- Fs.write("/tmp/scuzz_studio.txt", """milk
+""")
+    _ <- Fs.write("/tmp/scuzz_studio_drv.txt", """milk
+""")
+    _ <- Fs.write("/tmp/scuzz_studio_oracle.txt", """milk
+""")
+  } yield ()
+
+def faults(): List[String] =
+  ["fs"]
 
 def addItem(s: String): IO[Unit] =
-  IO.pure(Tasks.noteAdd(s))
+  Tasks.updateFile("/tmp/scuzz_studio_drv.txt", xs => Tasks.addTo(xs, s)).map(res => finishStore(res))
 
 def renameItem(s: String): IO[Unit] =
-  IO.pure(Tasks.noteRename(s))
+  Tasks.updateFile("/tmp/scuzz_studio_drv.txt", xs => Tasks.renameFirst(xs, s)).map(res => finishStore(res))
 
 def deleteItem(s: String): IO[Unit] =
-  IO.pure(Tasks.noteDel(s))
+  Tasks.updateFile("/tmp/scuzz_studio_drv.txt", xs => Tasks.deleteLabel(xs, s)).map(res => finishStore(res))
 
 def flipItem(s: String): IO[Unit] =
-  IO.pure(Tasks.noteFlip(s))
+  Tasks.updateFile("/tmp/scuzz_studio_drv.txt", xs => Tasks.flipLabel(xs, s)).map(res => finishStore(res))
 
 def clearItems(): IO[Unit] =
-  IO.pure(Tasks.noteClear())
+  Tasks.saveFile("/tmp/scuzz_studio_drv.txt", Tasks.clearAll([])).map(res => finishStore(res))
 
