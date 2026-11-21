@@ -118,8 +118,8 @@ Browser checks cover combobox relations, active options, keys, wheel input, touc
 Physical-device and real screen-reader checks for select controls remain open.
 Reactive option checks cover replacement, empty lists, recovery, retained fields, and stale pointer input.
 Editable options and full Unicode case folding remain open.
-Compiled UI corpus replay under ASan remains open.
-The runtime C sanitizer suite checks UI constructors and input.
+Compiled UI corpus replay under ASan covers Headless with portable software paint.
+Prebuilt Skia and GPU backends remain uninstrumented.
 Expansion checks cover header input, body conditions, nested fields, focus return, and linked browser regions.
 Physical-device and real screen-reader checks for expansion controls remain open.
 Tooltip checks cover focus, hover, popup input, Escape, composition, clipping, themes, and browser descriptions.

@@ -13,6 +13,11 @@ SKIA_HDR_URL := $(shell awk -F= '/^hdr_url=/{print substr($$0,9); exit}' "$(PIN)
 INCLUDES := -Iinclude -Isrc
 SRC := src/image.c src/image_dec.c src/sk_sw.c src/png_enc.c src/sk_mono.c src/sk_color.c
 OBJ := $(SRC:src/%.c=build/%.o)
+ASAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address -fno-omit-frame-pointer
+ASAN_TEXT_FLAGS := -O1 -g -fsanitize=address -fno-omit-frame-pointer
+ASAN_SRC := $(SRC) src/sk_gpu_none.c
+ASAN_OBJ := $(ASAN_SRC:src/%.c=build/asan/%.o)
+ASAN_TEXT_OBJS := build/asan/harfbuzz.o build/asan/sheenbidi.o build/asan/fonts.o build/asan/sk_native_text.o
 TEXT_DIR ?= build
 TEXT_FLAGS ?=
 # Escape spaces in targets. Quote output paths in recipes.
@@ -28,7 +33,7 @@ SB_REV := $(shell awk -F= '/^sheenbidi_revision=/{print $$2; exit}' "$(PIN)")
 SB_SHA := $(shell awk -F= '/^sheenbidi_sha256=/{print $$2; exit}' "$(PIN)")
 SB_DIR := build/sheenbidi
 
-.PHONY: all clean test portable-text lib lib-skia lib-sk-sw lib-gpu ensure-prebuilt ensure-fonts
+.PHONY: all clean test portable-text lib lib-asan lib-asan-text lib-skia lib-sk-sw lib-gpu ensure-prebuilt ensure-fonts
 
 all: lib
 
@@ -36,6 +41,9 @@ portable-text: $(TEXT_OBJS) $(HB_DIR)/HarfBuzz-LICENSE
 
 build:
 	mkdir -p build
+
+build/asan:
+	mkdir -p $@
 
 # Default: pinned Skia prebuilt (fetch if needed). Opt out with SCUZZ_SKIA=sk_sw.
 # SCUZZ_SKIA=gpu: OpenGL raster. No CPU paint buffer. Peek reads the framebuffer.
@@ -77,6 +85,15 @@ build/image.o build/image_dec.o: src/image_dec.h
 build/image_dec.o: src/stb_image.h
 
 build/sk_sw.o: src/sk_native_text.h
+
+build/asan/%.o: src/%.c include/sk_capi.h include/sk_text.h src/png_enc.h src/sk_gpu.h src/sk_utf8.h | build/asan
+	$(CC) $(ASAN_CFLAGS) $(INCLUDES) -c $< -o $@
+
+build/asan/image.o build/asan/image_dec.o: src/image_dec.h
+
+build/asan/image_dec.o: src/stb_image.h
+
+build/asan/sk_sw.o: src/sk_native_text.h
 
 $(TEXT_TARGET_DIR)/sk_native_text.o: src/sk_native_text.cpp src/sk_native_text.h src/sk_text_shape.h $(HB_DIR)/.stamp $(SB_DIR)/.stamp
 	@mkdir -p "$(TEXT_DIR)"
@@ -163,6 +180,22 @@ lib-sk-sw: $(OBJ) $(TEXT_OBJS) build/sk_gpu_none.o | build
 	rm -f build/libsk_capi.a; \
 	ar rcs build/libsk_capi.a $(OBJ) $(TEXT_OBJS) build/sk_gpu_none.o; \
 	echo sk_sw > build/sk_capi_backend
+
+lib-asan-text:
+	+@$(MAKE) --no-print-directory portable-text TEXT_DIR=build/asan CFLAGS='$(ASAN_CFLAGS)' TEXT_FLAGS='$(ASAN_TEXT_FLAGS)'
+
+# Build portable software paint and text with AddressSanitizer.
+# Keep build/libsk_capi.a and build/sk_capi_backend unchanged.
+lib-asan: $(ASAN_OBJ) lib-asan-text
+	@if [ -f build/asan/libsk_capi.a ]; then \
+	  fresh=1; \
+	  for o in $(ASAN_OBJ) $(ASAN_TEXT_OBJS); do \
+	    if [ $$o -nt build/asan/libsk_capi.a ]; then fresh=0; fi; \
+	  done; \
+	  if [ $$fresh -eq 1 ]; then exit 0; fi; \
+	fi; \
+	rm -f build/asan/libsk_capi.a; \
+	ar rcs build/asan/libsk_capi.a $(ASAN_OBJ) $(ASAN_TEXT_OBJS)
 
 lib-gpu: $(OBJ) $(TEXT_OBJS) build/sk_gpu.o | build
 	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx gpu build/sk_capi_backend; then \

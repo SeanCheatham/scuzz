@@ -4174,15 +4174,35 @@ SzVerdict *sz_verdict_ok(void) {
   return &ok;
 }
 
+typedef struct SzVerdictNode {
+  SzVerdict verdict;
+  char *owned_why;
+  struct SzVerdictNode *next;
+} SzVerdictNode;
+
+static SzVerdictNode *g_verdicts;
+
+static void verdicts_free(void) {
+  while (g_verdicts) {
+    SzVerdictNode *next = g_verdicts->next;
+    free(g_verdicts->owned_why);
+    free(g_verdicts);
+    g_verdicts = next;
+  }
+}
+
 SzVerdict *sz_verdict_fail(int64_t index, const char *why) {
   /* Plain malloc: judge-side memory must not perturb app heap accounting. */
-  SzVerdict *v = (SzVerdict *)malloc(sizeof(SzVerdict));
-  if (!v)
+  SzVerdictNode *n = (SzVerdictNode *)malloc(sizeof(SzVerdictNode));
+  if (!n)
     sz_panic("verdict: out of memory");
-  v->valid = 0;
-  v->index = index;
-  v->why = why;
-  return v;
+  n->owned_why = why ? tl_copy(why) : NULL;
+  n->verdict.valid = 0;
+  n->verdict.index = index;
+  n->verdict.why = n->owned_why;
+  n->next = g_verdicts;
+  g_verdicts = n;
+  return &n->verdict;
 }
 
 SzVerdict *sz_verdict_and(SzVerdict *a, SzVerdict *b) {
@@ -4707,6 +4727,7 @@ int sz_judge_rel_main(const char *spec) {
     fprintf(stderr, "scuzz: %s\n", msg);
     fails++;
   }
+  verdicts_free();
   sz_timeline_free(a);
   sz_timeline_free(b);
   free(copy);
@@ -5308,6 +5329,7 @@ static void verdict_msg(char *buf, size_t cap, const char *name,
 static void claim_fail_verdict(const char *name, const SzVerdict *v) {
   char buf[256];
   verdict_msg(buf, sizeof buf, name, v);
+  verdicts_free();
   fprintf(stderr, "scuzz: %s\n", buf);
   rejection_record(buf);
   sz_panic(buf);
@@ -5394,6 +5416,7 @@ void sz_property_session_end(void) {
       continue;
     claim_fail_verdict(g_verify[i].name, v);
   }
+  verdicts_free();
   tl_restore_clear();
 }
 
@@ -5424,6 +5447,7 @@ void sz_property_session_reset(void) {
   }
   g_response_n = 0;
   verify_clear();
+  verdicts_free();
   tl_free_states();
   free(g_last_drive);
   g_last_drive = NULL;

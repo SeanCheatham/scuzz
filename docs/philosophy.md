@@ -520,7 +520,7 @@ An exhaustive application check must retain every scheduler choice for exact rep
 
   GPU pixels stay within a channel tolerance of `sk_sw`.
 
-- **ASan replay.** `scuzz fuzz --asan` replays the corpus (`--iterations 0`) or one `--replay` file on the compiled binary under AddressSanitizer. Leak and use-after-free reports fail the probe. Search and mutation stay off. A `[ui]` package is rejected. Linux ASan probes skip the 512 MiB virtual memory limit because AddressSanitizer needs a large virtual address space.
+- **ASan replay.** `scuzz fuzz --asan` replays the corpus (`--iterations 0`) or one `--replay` file on the compiled binary under AddressSanitizer. Leak and use-after-free reports fail the probe. Search and mutation stay off. A `[ui]` package links sanitized runtime, portable software paint, and native embedder archives on Headless. Prebuilt Skia and GPU backends stay outside this path. Linux ASan probes skip the 512 MiB virtual memory limit because AddressSanitizer needs a large virtual address space.
 
 - **Behavioral diff.** `scuzz diff [REV] [PATH]` compares a git revision with the working tree. `REV` defaults to `HEAD`. The CLI is the only caller of `git`. It checks out `REV` in a detached worktree under `build/delta/`. The same compiler builds both sides into `build/delta/a` and `build/delta/b`. Both sides run hermetically under TestRuntime.
 

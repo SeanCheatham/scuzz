@@ -30,7 +30,7 @@ SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/str
 BUILDDIR ?= build
 OBJ := $(SRC:src/%.c=$(BUILDDIR)/%.o) $(BUILDDIR)/image_dec.o
 
-.PHONY: all clean test test-asan test-ubsan lib lib-asan ffi-skia
+.PHONY: all clean test test-asan test-ubsan lib lib-asan lib-ui-asan ffi-skia ffi-skia-asan embedder-asan mobile-asan
 
 all: lib
 
@@ -122,6 +122,18 @@ lib-asan:
 		echo "lib-asan: AddressSanitizer not supported by $(CC) on this host" >&2; \
 		exit 1; \
 	fi
+
+ffi-skia-asan:
+	+@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib-asan CC=$(CC)
+
+embedder-asan:
+	+@$(MAKE) --no-print-directory -C $(EMBEDDER) lib-asan CC=$(CC)
+
+mobile-asan:
+	+@$(MAKE) --no-print-directory -C $(MOBILE) lib-asan CC=$(CC)
+
+lib-ui-asan: lib-asan
+	+@$(MAKE) --no-print-directory ffi-skia-asan embedder-asan mobile-asan
 
 test-asan:
 	@asan_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/scuzz-asan.XXXXXX") || exit 1; \

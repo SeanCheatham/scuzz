@@ -57,14 +57,29 @@ def asanExeName(outDir: String, name: String): String =
 def rtLibAsan(h: String): String =
   crateAt(h, "crates/runtime/build/asan/libscuzz_rt.a")
 
+def skiaLibAsan(h: String): String =
+  crateAt(h, "crates/ffi-skia/build/asan/libsk_capi.a")
+
+def deskLibAsan(h: String): String =
+  crateAt(h, "crates/embedder-desktop/build/asan/libscuzz_embedder.a")
+
+def mobLibAsan(h: String): String =
+  crateAt(h, "crates/embedder-mobile/build/asan/libscuzz_mobile.a")
+
 def makeLineAsan(h: String): String =
   Str.concat("make -C ", Str.concat(shQuote(crateAt(h, "crates/runtime")), Str.concat(" lib-asan ", Str.concat(makeJobs(), " CC=clang"))))
+
+def makeLineUiAsan(h: String): String =
+  Str.concat("make -C ", Str.concat(shQuote(crateAt(h, "crates/runtime")), Str.concat(" lib-ui-asan ", Str.concat(makeJobs(), " CC=clang"))))
 
 def linkLineAsan(clang: String, ll: String, lib: String, exe: String): String =
   Str.concat(clang, Str.concat(asanFlags(), Str.concat(" -Wno-override-module ", Str.concat(shQuote(ll), Str.concat(" ", Str.concat(shQuote(lib), Str.concat(" -lpthread -lssl -lcrypto -o ", shQuote(exe))))))))
 
 def linkLineAsanMac(clang: String, ll: String, lib: String, exe: String): String =
   Str.concat(clang, Str.concat(asanFlags(), Str.concat(" -Wno-override-module ", Str.concat(shQuote(ll), Str.concat(" ", Str.concat(shQuote(lib), Str.concat(" -framework CoreFoundation -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o ", shQuote(exe))))))))
+
+def linkLineAsanUi(clang: String, ll: String, lib: String, exe: String, h: String, mac: Bool): String =
+  Str.concat(clang, Str.concat(asanFlags(), Str.concat(" -Wno-override-module ", Str.concat(shQuote(ll), Str.concat(" ", Str.concat(shQuote(lib), Str.concat(" ", Str.concat(shQuote(skiaLibAsan(h)), Str.concat(uiFlags1(mac), Str.concat(forceLoad(mac, deskLibAsan(h)), Str.concat(uiFlags2(mac), Str.concat(forceLoad(mac, mobLibAsan(h)), Str.concat(uiFlags3(false, mac), shQuote(exe))))))))))))))
 
 def crateHome(): IO[String] =
   Sys.getenv("SCUZZ_HOME").flatMap(h => crateHomeAt(h))
@@ -160,20 +175,17 @@ def ensureRtMade(h: String): IO[Unit] =
 def ensureRtMadeAt(h: String, quiet: Bool): IO[Unit] =
   ensureCrateAt(h, "crates/runtime", "runtime", quiet)
 
-def ensureAsanRt(): IO[Unit] =
-  ensureAsanRtAt(false)
+def ensureAsanRt(hasUi: Bool, quiet: Bool): IO[Unit] =
+  crateHome().flatMap(h => runLine(if (hasUi) makeLineUiAsan(h) else makeLineAsan(h)).flatMap(r => ensureCrateGotAt(r, "asan", quiet)))
 
-def ensureAsanRtAt(quiet: Bool): IO[Unit] =
-  crateHome().flatMap(h => runLine(makeLineAsan(h)).flatMap(r => ensureCrateGotAt(r, "asan", quiet)))
+def linkAsanExe(hasUi: Bool, dir: String, name: String): IO[(Int, String, String)] =
+  crateHome().flatMap(h => hostMac().flatMap(mac => linkAsanExeAt(hasUi, dir, name, h, mac)))
 
-def linkAsanExe(dir: String, name: String): IO[(Int, String, String)] =
-  crateHome().flatMap(h => hostMac().flatMap(mac => linkAsanExeAt(dir, name, h, mac)))
-
-def linkAsanExeAt(dir: String, name: String, h: String, mac: Bool): IO[(Int, String, String)] =
-  runLine(if (mac) linkLineAsanMac("clang", llName(dir, name), rtLibAsan(h), asanExeName(dir, name)) else linkLineAsan("clang", llName(dir, name), rtLibAsan(h), asanExeName(dir, name)))
+def linkAsanExeAt(hasUi: Bool, dir: String, name: String, h: String, mac: Bool): IO[(Int, String, String)] =
+  runLine(if (hasUi) linkLineAsanUi("clang", llName(dir, name), rtLibAsan(h), asanExeName(dir, name), h, mac) else if (mac) linkLineAsanMac("clang", llName(dir, name), rtLibAsan(h), asanExeName(dir, name)) else linkLineAsan("clang", llName(dir, name), rtLibAsan(h), asanExeName(dir, name)))
 
 def fuzzAsanPrepare(job: FuzzJob): IO[Unit] =
-  ensureAsanRtAt(job.quiet).flatMap(_ => linkAsanExe(job.outDir, job.name).flatMap(r => linkOnlyGotAt(r, job.quiet).flatMap(_ => linkAsanExe(joinSlash(job.outDir, "live"), job.name).flatMap(r2 => linkOnlyGotAt(r2, job.quiet)))))
+  ensureAsanRt(job.hasUi, job.quiet).flatMap(_ => linkAsanExe(job.hasUi, job.outDir, job.name).flatMap(r => linkOnlyGotAt(r, job.quiet).flatMap(_ => linkAsanExe(job.hasUi, joinSlash(job.outDir, "live"), job.name).flatMap(r2 => linkOnlyGotAt(r2, job.quiet)))))
 
 def ensureUiAll(h: String): IO[Unit] =
   ensureUiAllAt(h, false)
@@ -1485,7 +1497,7 @@ def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, rep
   manNeed(m).flatMap(_ => fuzzManGate(m, dir, outDir, iterations, seed, replay, files, ens, noFailFast, oracles, differential, live, asan, session, quiet))
 
 def fuzzManGate(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], ens: List[En], noFailFast: Bool, oracles: Bool, differential: Bool, live: Bool, asan: Bool, session: Bool, quiet: Bool): IO[Unit] =
-  if (live && m.hasUi) failAt(quiet, "--live does not run a [ui] package", "scuzz fuzz") else if (session && m.hasUi) failAt(quiet, "--session does not run a [ui] package", "scuzz fuzz") else if (asan && m.hasUi) failAt(quiet, "--asan does not run a [ui] package", "scuzz fuzz") else fuzzEngine(m.hasUi, quiet).flatMap(eng => Ref.of(("", 0, false)).flatMap(srv => fuzzReadScenario(dir).flatMap(scn => fuzzMan2(FuzzJob(dir, outDir, if (asan) asanExeName(outDir, m.name) else exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, fuzzUseEv(live || asan || session, eng._1), if (live || asan || session) "" else eng._2, srv, Verify.scenarioFaults(scn), live, asan, session, quiet), replay))))
+  if (live && m.hasUi) failAt(quiet, "--live does not run a [ui] package", "scuzz fuzz") else if (session && m.hasUi) failAt(quiet, "--session does not run a [ui] package", "scuzz fuzz") else (if (live || asan || session) IO.pure((false, "")) else fuzzEngine(m.hasUi, quiet)).flatMap(eng => Ref.of(("", 0, false)).flatMap(srv => fuzzReadScenario(dir).flatMap(scn => fuzzMan2(FuzzJob(dir, outDir, if (asan) asanExeName(outDir, m.name) else exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, fuzzUseEv(live || asan || session, eng._1), if (live || asan || session) "" else eng._2, srv, Verify.scenarioFaults(scn), live, asan, session, quiet), replay))))
 
 def fuzzEngine(hasUi: Bool, quiet: Bool): IO[(Bool, String)] =
   Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (e == "compiled") IO.pure((false, "")) else if (!hasUi) Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))) else Sys.getenv("SCUZZ_EXECUTABLE").flatMap(scuzz => uiHostExeAt(scuzz, quiet)).flatMap(exe => if (exe == "") IO.pure((false, "")) else IO.pure((true, exe))))
@@ -1668,7 +1680,7 @@ def fuzzLivePaint(job: FuzzJob): IO[Unit] =
   Fs.mkdirs(joinSlash(joinSlash(job.outDir, "fuzz"), "live")).flatMap(_ => if (job.hasUi) fuzzLivePaintUi(job) else fuzzLivePaintIo(job))
 
 def fuzzLivePaintIo(job: FuzzJob): IO[Unit] =
-  runProbeAt(job.asan, Str.concat(asanEnv(job.asan), Str.concat(testEnv(), Str.concat(fuzzReachEnv("SCUZZ_", job.outDir), fuzzLiveExe(job))))).flatMap(r => fuzzLivePaintIoGot(job, r))
+  runProbeAt(job.asan, Str.concat(asanEnv(job.asan), Str.concat(testEnv(), Str.concat(fuzzReachEnv("SCUZZ_", job.outDir), shQuote(fuzzLiveExe(job)))))).flatMap(r => fuzzLivePaintIoGot(job, r))
 
 def fuzzLivePaintIoGot(job: FuzzJob, r: (Int, String, String)): IO[Unit] =
   r match {
@@ -1676,10 +1688,10 @@ def fuzzLivePaintIoGot(job: FuzzJob, r: (Int, String, String)): IO[Unit] =
   }
 
 def fuzzLivePaintUi(job: FuzzJob): IO[Unit] =
-  Fs.exists(joinSlash(job.dir, "sample.txt")).flatMap(hit => fuzzLivePaintUiGo(job, if (hit != 0) Str.concat(" ", joinSlash(job.dir, "sample.txt")) else ""))
+  Fs.exists(joinSlash(job.dir, "sample.txt")).flatMap(hit => fuzzLivePaintUiGo(job, if (hit != 0) Str.concat(" ", shQuote(joinSlash(job.dir, "sample.txt"))) else ""))
 
 def fuzzLivePaintUiGo(job: FuzzJob, arg: String): IO[Unit] =
-  runProbe(Str.concat(fuzzSplitEnv(true, fuzzLiveDump(job), fuzzLiveTl(job), job.uiEnv, job.outDir), Str.concat(fuzzLiveExe(job), arg))).flatMap(r => fuzzLivePaintUiGot(job, r))
+  runProbeAt(job.asan, Str.concat(asanEnv(job.asan), Str.concat(fuzzSplitEnv(true, fuzzLiveDump(job), fuzzLiveTl(job), job.uiEnv, job.outDir), Str.concat(shQuote(fuzzLiveExe(job)), arg)))).flatMap(r => fuzzLivePaintUiGot(job, r))
 
 def fuzzLiveDump(job: FuzzJob): String =
   joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.json")
@@ -1723,7 +1735,7 @@ def fuzzTlPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "timeline.txt")
 
 def fuzzSplitRun(job: FuzzJob): IO[Unit] =
-  fuzzProbeClear(job.outDir).flatMap(_ => fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir), job.uiEnv, job.outDir, job.quiet).flatMap(cv => fuzzSplitRunGo(job, cv)))
+  fuzzProbeClear(job.outDir).flatMap(_ => fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir), job.uiEnv, job.outDir, job.asan, job.quiet).flatMap(cv => fuzzSplitRunGo(job, cv)))
 
 def fuzzSplitRunGo(job: FuzzJob, cv: Int): IO[Unit] =
   if (cv != 0) IO.fail(fuzzProbeError("fuzz probe failed before any event", cv)) else fuzzReadOr(fuzzDumpPath(job.outDir)).flatMap(dump => fuzzSplitViews(job, dump))
@@ -1731,11 +1743,11 @@ def fuzzSplitRunGo(job: FuzzJob, cv: Int): IO[Unit] =
 def fuzzSplitViews(job: FuzzJob, dump: String): IO[Unit] =
   if (!dumpHasView(dump)) failAt(job.quiet, "fuzz verify graph produced no view tree", "scuzz fuzz") else fuzzHasSim(job.dir).flatMap(sim => if (sim) IO.pure(()) else fuzzSplitCmp(job))
 
-def fuzzSplitProbe(exe: String, hasUi: Bool, dump: String, tl: String, uiEnv: String, outDir: String, quiet: Bool): IO[Int] =
-  runProbe(Str.concat(fuzzSplitEnv(hasUi, dump, tl, uiEnv, outDir), exe)).flatMap(r => fuzzProbeCodeIoAt(r, quiet))
+def fuzzSplitProbe(exe: String, hasUi: Bool, dump: String, tl: String, uiEnv: String, outDir: String, asan: Bool, quiet: Bool): IO[Int] =
+  runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzSplitEnv(hasUi, dump, tl, uiEnv, outDir), shQuote(exe)))).flatMap(r => fuzzProbeCodeIoAt(r, quiet))
 
 def fuzzSplitEnv(hasUi: Bool, dump: String, tl: String, uiEnv: String, outDir: String): String =
-  Str.concat(testEnv(), Str.concat(if (hasUi) uiEnv else "", Str.concat(Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " ")), Str.concat(fuzzTlEnv("SCUZZ_", tl), fuzzReachEnv("SCUZZ_", outDir)))))
+  Str.concat(testEnv(), Str.concat(if (hasUi) uiEnv else "", Str.concat(kv("SCUZZ_", "FUZZ_DUMP", dump), Str.concat(fuzzTlEnv("SCUZZ_", tl), fuzzReachEnv("SCUZZ_", outDir)))))
 
 def fuzzSplitCmp(job: FuzzJob): IO[Unit] =
   fuzzReadOr(fuzzDumpPath(job.outDir)).flatMap(vd => fuzzReadOr(joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.json")).flatMap(ld => fuzzReadOr(fuzzTlPath(job.outDir)).flatMap(vt => fuzzReadOr(joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "timeline.txt")).flatMap(lt => fuzzSplitEq(job, ld, vd, lt, vt)))))
@@ -2191,7 +2203,7 @@ def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun, uiEnv: 
   fuzzProbeRunAt(exe, hasUi, outDir, run, uiEnv, live, asan, session, false)
 
 def fuzzProbeRunAt(exe: String, hasUi: Bool, outDir: String, run: FuzzRun, uiEnv: String, live: Bool, asan: Bool, session: Bool, quiet: Bool): IO[Int] =
-  fuzzProbeClear(outDir).flatMap(_ => runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, run.picks, outDir, uiEnv, live, session), exe))).flatMap(r => fuzzProbeCodeIoAt(r, quiet)))
+  fuzzProbeClear(outDir).flatMap(_ => runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, run.picks, outDir, uiEnv, live, session), shQuote(exe)))).flatMap(r => fuzzProbeCodeIoAt(r, quiet)))
 
 def fuzzProbeJob(job: FuzzJob, run: FuzzRun): IO[Int] =
   if (!job.ev) fuzzProbeRunAt(job.exe, job.hasUi, job.outDir, run, job.uiEnv, job.live, job.asan, job.session, job.quiet) else fuzzProbeClear(job.outDir).flatMap(_ => evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", job.hasUi, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, job.uiEnv, false, false)).flatMap(code => IO.pure(code)))
@@ -2201,7 +2213,7 @@ def kv(pre: String, key: String, val: String): String =
 """))) else Str.concat(pre, Str.concat(key, Str.concat("=", Str.concat(shQuote(val), " "))))
 
 def asanEnv(asan: Bool): String =
-  if (!asan) "" else "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 "
+  if (!asan) "" else "SCUZZ_SKIA=sk_sw ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 "
 
 def uiEnvFor(pre: String, uiEnv: String): String =
   if (pre == "") shellToReq(uiEnv) else uiEnv
@@ -2551,7 +2563,7 @@ def fuzzProbeAt(job: FuzzJob, exe: String, mutDir: String, script: String, sched
   Fs.mkdirs(joinSlash(mutDir, "fuzz")).flatMap(_ => Fs.write(joinSlash(mutDir, "rejection.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "replay.toml"), Verify.reproText(sched, fault, picks, Verify.linesOf(script))).flatMap(_ => Fs.write(joinSlash(mutDir, "drive.json"), Verify.scriptJson(script)).flatMap(_ => fuzzProbeAtRun(job, exe, mutDir, script, sched, fault, picks).flatMap(code => fuzzIdleRead(mutDir, code)))))))
 
 def fuzzProbeAtRun(job: FuzzJob, exe: String, mutDir: String, script: String, sched: String, fault: String, picks: List[String]): IO[Int] =
-  if (job.ev) evProbe(job, exe, fuzzProbeAtEnv("", job, mutDir, script, sched, fault, picks)) else runProbe(Str.concat(fuzzProbeAtEnv("SCUZZ_", job, mutDir, script, sched, fault, picks), exe)).flatMap(r => Fs.write(joinSlash(mutDir, "probe.log"), Str.concat(r._2, r._3)).map(_ => r._1))
+  if (job.ev) evProbe(job, exe, fuzzProbeAtEnv("", job, mutDir, script, sched, fault, picks)) else runProbeAt(job.asan, Str.concat(asanEnv(job.asan), Str.concat(fuzzProbeAtEnv("SCUZZ_", job, mutDir, script, sched, fault, picks), shQuote(exe)))).flatMap(r => Fs.write(joinSlash(mutDir, "probe.log"), Str.concat(r._2, r._3)).map(_ => r._1))
 
 def fuzzProbeAtEnv(pre: String, job: FuzzJob, mutDir: String, script: String, sched: String, fault: String, picks: List[String]): String =
   Str.concat(kv(pre, "REJECTION_DUMP", joinSlash(mutDir, "rejection.txt")), Str.concat(fuzzProbeEnv(pre, job.hasUi, joinSlash(mutDir, "drive.json"), joinSlash(mutDir, "dump.json"), script != "", sched, fault, picks, mutDir, job.uiEnv, false, false), fuzzTlEnv(pre, joinSlash(mutDir, "timeline.txt"))))
