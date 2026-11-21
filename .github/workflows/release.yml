@@ -151,6 +151,10 @@ jobs:
           sudo apt-get install -y clang make pkg-config libdbus-1-dev libx11-dev \
             zlib1g-dev libbz2-dev libssl-dev
 
+      - name: Install OpenSSL
+        if: runner.os == 'macOS'
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+
       - name: Package release + install-from-tarball smoke
         env:
           SCUZZ_VERSION: ${{ needs.prepare.outputs.tag }}
