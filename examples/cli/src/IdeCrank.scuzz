@@ -88,7 +88,7 @@ private def stageAndFuzz(root: String, after: List[(String, String)]): IO[(Bool,
   _ <- Fs.mkdirs(Fs.join(stage, "src"))
   _ <- copyTopFiles(root, stage)
   _ <- IO.foreachDiscard(after, f => Fs.write(Fs.join(stage, f._1), f._2))
-  ran <- IO.attempt(Drive.fuzzDir(stage, Fs.join(stage, "build"), 8, 1, "", false, false, false, false, false, false))
+  ran <- IO.attempt(Drive.fuzzDirAt(stage, Fs.join(stage, "build"), 8, 1, "", false, false, false, false, false, false, true))
   summaryRaw <- IdeSync.readOptional(Fs.join(stage, "build/fuzz/summary.json"))
 } yield ran match {
   case Result.Err(err) => (false, 0, err)
@@ -123,7 +123,7 @@ def verifyLive(root: String, disk: List[(String, String)], after: List[(String, 
   cli <- Sys.getenv("SCUZZ_EXECUTABLE")
   compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
   ctxHash = Hash.sha256(Str.concat(compiler, IdeSync.setHash(disk)))
-  diffRes <- IO.attempt(Diff.reviewSets(root, toml, diskMods, afterMods, 1, 32, cli, ctxHash))
+  diffRes <- IO.attempt(Diff.reviewSetsAt(root, toml, diskMods, afterMods, 1, 32, cli, ctxHash, true))
   ev <- diffRes match {
   case Result.Err(err) => IO.pure(IdeLoop.VerifyEvidence(false, err, "", 0, "", "", [], 0, 0, 0))
   case Result.Ok(_) => for {
@@ -168,19 +168,24 @@ private def roundJson(r: RoundResult): Json =
   Json.Obj([("status", Json.Str(r.status)), ("card", Json.Str(r.cardId)), ("steer_id", Json.Str(r.steerId)), ("baseline", Json.Str(r.baseline)), ("diagnostic", Json.Str(r.diagnostic))])
 
 private def summaryJson(results: List[RoundResult], base: String): Json =
-  Json.Obj([("v", Json.Int(1)), ("baseline", Json.Str(base)), ("rounds", Json.Int(List.len(results))), ("published", Json.Int(List.len(List.filter(results, r => isPublished(r))))), ("rejected", Json.Int(List.len(List.filter(results, r => isRejected(r))))), ("results", Json.Arr(List.map(results, r => roundJson(r))))])
+  Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("ide-crank")), ("ok", Json.Bool(true)), ("status", Json.Str("passed")), ("baseline", Json.Str(base)), ("rounds", Json.Int(List.len(results))), ("published", Json.Int(List.len(List.filter(results, r => isPublished(r))))), ("rejected", Json.Int(List.len(List.filter(results, r => isRejected(r))))), ("results", Json.Arr(List.map(results, r => roundJson(r))))])
+
+private def errorJson(kind: String, err: String): Json =
+  Json.Obj([("v", Json.Int(1)), ("kind", Json.Str(kind)), ("ok", Json.Bool(false)), ("status", Json.Str("failed")), ("error", Json.Str(err))])
 
 def verifyStep(v: VerifyInput): IO[VerifyEvidence] =
   verifyLive(v.root, v.disk, v.after)
 
-def runCrank(path: String, rounds: Int, modelId: String, allowDownload: Bool): IO[Unit] =
-  for {
-    hasToml <- Fs.exists(Fs.join(path, "scuzz.toml"))
-    _ <- if (hasToml != 0) IO.pure(()) else IO.fail(Str.concat("scuzz ide crank: scuzz.toml not found in ", path))
-    results <- IdeLoop.crankRounds(path, rounds, c => proposeStep(c, modelId, allowDownload), v => verifyStep(v))
-    disk <- IdeSync.own(path)
-    _ <- IO.println(IdeSync.text(summaryJson(results, IdeSync.setHash(disk))))
-  } yield ()
+def runCrank(path: String, rounds: Int, modelId: String, allowDownload: Bool, json: Bool): IO[Unit] =
+  IO.attempt(for {
+  hasToml <- Fs.exists(Fs.join(path, "scuzz.toml"))
+  _ <- if (hasToml != 0) IO.pure(()) else IO.fail(Str.concat("scuzz ide crank: scuzz.toml not found in ", path))
+  results <- IdeLoop.crankRounds(path, rounds, c => proposeStep(c, modelId, allowDownload), v => verifyStep(v))
+  disk <- IdeSync.own(path)
+} yield summaryJson(results, IdeSync.setHash(disk))).flatMap(res => res match {
+  case Result.Ok(doc) => IO.println(IdeSync.text(doc))
+  case Result.Err(err) => if (json) IO.println(IdeSync.text(errorJson("ide-crank", err))).flatMap(_ => IO.fail(err)) else IO.fail(err)
+})
 
 private def backgroundLoop(path: String, maxRounds: Int, done: Int, modelId: String, allowDownload: Bool): IO[Unit] =
   if (maxRounds > 0 && done >= maxRounds) IO.pure(()) else for {
@@ -193,13 +198,16 @@ private def backgroundLoop(path: String, maxRounds: Int, done: Int, modelId: Str
   _ <- if (maxRounds > 0 && nextDone >= maxRounds) IO.pure(()) else IO.sleep(if (stepped) 25 else 250).flatMap(_ => backgroundLoop(path, maxRounds, nextDone, modelId, allowDownload))
 } yield ()
 
-def runServe(path: String, port: Int, token: String, once: Bool, generate: Bool, rounds: Int, modelId: String, allowDownload: Bool): IO[Unit] =
+private def serveReadyJson(path: String, port: Int, tok: String, once: Bool, generate: Bool): Json =
+  Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("ide-serve")), ("ok", Json.Bool(true)), ("status", Json.Str("listening")), ("path", Json.Str(path)), ("port", Json.Int(port)), ("url", Json.Str(Str.concat("http://0.0.0.0:", Str.concat(Str.fromInt(port), "/v1/ide/sync")))), ("token", Json.Str(tok)), ("once", Json.Bool(once)), ("generate", Json.Bool(generate))])
+
+def runServe(path: String, port: Int, token: String, once: Bool, generate: Bool, rounds: Int, modelId: String, allowDownload: Bool, json: Bool): IO[Unit] =
   for {
     hasToml <- Fs.exists(Fs.join(path, "scuzz.toml"))
-    _ <- if (hasToml != 0) IO.pure(()) else IO.fail(Str.concat("scuzz ide serve: scuzz.toml not found in ", path))
+    missErr = Str.concat("scuzz ide serve: scuzz.toml not found in ", path)
+    _ <- if (hasToml != 0) IO.pure(()) else if (json) IO.println(IdeSync.text(errorJson("ide-serve", missErr))).flatMap(_ => IO.fail(missErr)) else IO.fail(missErr)
     tok <- IdeSync.ensureToken(path, token)
-    _ <- IO.println(Str.concat("scuzz ide serve ", Str.concat(path, Str.concat(" on http://0.0.0.0:", Str.concat(Str.fromInt(port), "/v1/ide/sync")))))
-    _ <- IO.println(Str.concat("pairing bearer token: ", tok))
+    _ <- if (json) IO.println(IdeSync.text(serveReadyJson(path, port, tok, once, generate))) else IO.println(Str.concat("scuzz ide serve ", Str.concat(path, Str.concat(" on http://0.0.0.0:", Str.concat(Str.fromInt(port), "/v1/ide/sync"))))).flatMap(_ => IO.println(Str.concat("pairing bearer token: ", tok)))
     _ <- if (!generate) if (once) Net.serveOnce(port, req => IdeSync.handle(path, tok, req)) else IdeSync.run(path, port, tok) else if (once) IdeLoop.crankRounds(path, if (rounds > 0) rounds else 1, c => proposeStep(c, modelId, allowDownload), v => verifyStep(v)).flatMap(_ => Net.serveOnce(port, req => IdeSync.handle(path, tok, req))) else for {
   worker <- Fiber.fork(backgroundLoop(path, rounds, 0, modelId, allowDownload))
   _ <- IO.ensure(IdeSync.run(path, port, tok), Fiber.interrupt(worker))

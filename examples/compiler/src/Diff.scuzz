@@ -91,7 +91,7 @@ def sideFiles(dir: String, outDir: String, iterations: Int, seed: Int, toml: Str
     srv <- Ref.of(("", 0, false))
     cacheUse <- Ref.of((0, 0))
     _ <- clear(pdir)
-  } yield DiffSide(FuzzJob(dir, pdir, Drive.exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, false, "", srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens), "", cacheUse)
+  } yield DiffSide(FuzzJob(dir, pdir, Drive.exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, false, "", srv, Verify.scenarioFaults(scn), false, false, false, true), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens), "", cacheUse)
 
 def build(toml: String, files: List[(String, String)], outDir: String, m: Man): IO[Unit] =
   Drive.fpText(toml, files).flatMap(fp => Drive.fuzzReadOr(stampPath(outDir)).flatMap(old => Fs.exists(Drive.exeName(outDir, m.name)).flatMap(hit => if (old == fp && hit != 0) IO.pure(()) else buildFresh(toml, files, outDir, m, fp))))
@@ -109,6 +109,9 @@ def clear(probe: String): IO[Unit] =
   IO.foreachDiscard(Drive.fuzzCoveragePath(probe) :: Drive.fuzzClassPath(probe) :: Drive.fuzzSometimesPath(probe) :: Drive.fuzzTriggerPath(probe) :: Drive.fuzzVariedPath(probe) :: Drive.fuzzClaimPath(probe) :: Drive.fuzzSchedPicksPath(probe) :: Drive.fuzzDistancePath(probe) :: Verify.noStr(), p => Fs.write(p, ""))
 
 def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: List[(String, String)], seed: Int, iterations: Int, scuzz: String, context: String): IO[Unit] =
+  reviewSetsAt(dir, toml, rawA, rawB, seed, iterations, scuzz, context, false)
+
+def reviewSetsAt(dir: String, toml: String, rawA: List[(String, String)], rawB: List[(String, String)], seed: Int, iterations: Int, scuzz: String, context: String, quiet: Bool): IO[Unit] =
   for {
     m = Manifest.parse(toml)
     _ <- Drive.manNeed(m)
@@ -121,10 +124,10 @@ def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: Li
     vers <- Drive.fuzzVerSrcs(dir)
     diagnostic = Check.humanFilesOwn(rawB, stems)
     _ <- if (diagnostic == "scuzz check ok") IO.pure(()) else IO.fail(Str.concat("scuzz check: ", diagnostic))
-    _ <- Drive.checkFmtGo(false, rawB, List.filter(rawB, f => List.contains(stems, f._1)), stems, vers, Map.empty())
+    _ <- if (quiet) Drive.checkFmtQuiet(rawB, List.filter(rawB, f => List.contains(stems, f._1)), stems, vers, Map.empty()) else Drive.checkFmtGo(false, rawB, List.filter(rawB, f => List.contains(stems, f._1)), stems, vers, Map.empty())
     filesA <- Drive.fuzzCollectFiles(dir, rawA)
     filesB <- Drive.fuzzCollectFiles(dir, rawB)
-    host <- if (m.hasUi) Drive.uiHostExe(scuzz) else IO.pure(scuzz)
+    host <- if (m.hasUi) Drive.uiHostExeAt(scuzz, quiet) else IO.pure(scuzz)
     _ <- if (m.hasUi && host == "") IO.fail("scuzz ide: no headless host for a [ui] package") else IO.pure(())
     baseline <- sideEv(dir, Drive.joinSlash(root, "a"), seed, m, filesA, host)
     cache = if (Str.matches(context, "^[a-f0-9]{64}$")) Drive.joinSlash(root, Drive.joinSlash("baseline", baselineKey(context, toml, filesA, host, seed))) else ""
@@ -145,7 +148,7 @@ def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: Li
     scope <- reviewScope(a, b, runs, rows, hunt, iterations)
     report = withReview(reportJson("buffers", "", a.job.dir, b.job.dir, rows, agg, iterations, seed, hunt, true), scope)
     _ <- Fs.write(Drive.joinSlash(root, "report.json"), Str.concat(report, Verify.nl()))
-    _ <- IO.println(human("buffers", "", dir, root, rows, agg, hunt))
+    _ <- Drive.sayAt(quiet, human("buffers", "", dir, root, rows, agg, hunt))
   } yield ()
 
 def reviewScope(a: DiffSide, b: DiffSide, runs: List[FuzzRun], rows: List[DiffRow], h: DiffHunt, iterations: Int): IO[Json] =
@@ -186,7 +189,7 @@ def sideEv(dir: String, outDir: String, seed: Int, m: Man, files: List[(String, 
     srv <- Ref.of(("", 0, false))
     cacheUse <- Ref.of((0, 0))
     _ <- clear(pdir)
-  } yield DiffSide(FuzzJob(dir, pdir, "", m.name, m.hasUi, 0, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, true, host, srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens), "", cacheUse)
+  } yield DiffSide(FuzzJob(dir, pdir, "", m.name, m.hasUi, 0, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, true, host, srv, Verify.scenarioFaults(scn), false, false, false, true), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens), "", cacheUse)
 
 def evWhy(code: Int, err: String): String =
   if (code == 3) "check failed" else why(code, err)

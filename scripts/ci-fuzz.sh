@@ -1937,25 +1937,25 @@ with tempfile.TemporaryDirectory(prefix="scuzz-ide-serve-") as tmp:
     (good_dir / "Main.scuzz").write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", "v2")\n\n@main def main: IO[Unit] =\n  step()\n')
 
     crank = subprocess.run(
-        [cli, "ide", "crank", "--rounds", "2", str(root)],
+        [cli, "ide", "crank", "--rounds", "2", "--message-format=json", str(root)],
         capture_output=True,
         text=True,
         timeout=120,
     )
     assert crank.returncode == 0, (crank.returncode, crank.stdout, crank.stderr)
-    crank_lines = [ln for ln in crank.stdout.splitlines() if ln.strip().startswith("{")]
-    assert crank_lines, crank.stdout
-    crank_doc = json.loads(crank_lines[-1])
+    assert len(crank.stdout.splitlines()) == 1, crank.stdout
+    crank_doc = json.loads(crank.stdout)
     assert crank_doc["published"] == 1 and crank_doc["rejected"] == 1, crank_doc
 
     proc4 = subprocess.Popen(
-        [cli, "ide", "serve", "--port", str(port), "--once", str(root)],
+        [cli, "ide", "serve", "--port", str(port), "--once", "--message-format=json", str(root)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     try:
-        time.sleep(0.1)
+        listen_doc = json.loads(proc4.stdout.readline())
+        assert listen_doc["status"] == "listening" and listen_doc["port"] == port, listen_doc
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/ide/sync",
             headers={"Authorization": f"Bearer {token}"},
@@ -1966,7 +1966,7 @@ with tempfile.TemporaryDirectory(prefix="scuzz-ide-serve-") as tmp:
             assert len(feed_doc["cards"]) == 1 and feed_doc["cards"][0]["proposal"] == "02-good", feed_doc
             assert feed_doc["steer"] == [], feed_doc
         out4, err4 = proc4.communicate(timeout=10)
-        assert proc4.returncode == 0, (proc4.returncode, out4, err4)
+        assert proc4.returncode == 0 and out4 == "", (proc4.returncode, out4, err4)
     finally:
         if proc4.poll() is None:
             proc4.kill()
