@@ -167,6 +167,7 @@ Every candidate passes `scuzz check`, `scuzz fuzz`, `scuzz diff`, and mutation c
 `scuzz ide serve` exposes the card feed, idempotent decisions, and steer prompts over local Wi-Fi HTTP with a bearer pairing token.
 `examples/ide-mobile` runs the native mobile review client on Headless, Desktop, iOS, and Android as peers.
 The client prefetches verified cards on local Wi-Fi, records swipe accept, swipe reject, skip, and short steer prompts in `.scuzz/ide-mobile/state.json`, and flushes its FIFO outbox on the next Wi-Fi connection.
+`examples/editor` folds bounded choices, abstention reasons, and Undo state into exported and local requests, shows isolated post-choice reveals with region focus controls, and reports an auditable local session summary.
 Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
 Implement the remaining slices in order.
@@ -176,15 +177,7 @@ Keep those unknowns explicit in `gaps.md`.
 
 ## Implementation gates
 
-### 1. Learn from local choices
-
-Send bounded recent preferences, abstention reasons, and Undo results with local model requests and exported generation requests. Keep candidate rationale hidden before a blind choice. Show the reveal and a short result after the choice. Let the developer retain region focus or select another region.
-
-Add a local session summary. Report accepted choices, baseline choices, abstentions by reason, automatic exclusions, duplicates, Undo, readiness time, and review time. For the first metric, count an acceptance as retained only when it is not undone and its touched files still match its accepted bytes at session end. Report this as a conservative source measure. It does not establish that later edits preserve or remove the intended behavior. Calculate retained acceptances per active review minute. Active review time starts when a ready card appears and ends at its choice or abstention. Exclude paused time and generation waits. Report waiting time separately. Keep source hashes so this measure is auditable. Do not add telemetry or model training.
-
-**Gate:** Skip does not become a negative preference. Automatic exclusions do not count as human choices. Undo and later replacement change the retention result. The next request reflects the current baseline and bounded feedback. Session records reproduce the displayed totals. A reveal cannot expose the next card's lane mapping.
-
-### 2. Offer a rule from a preference
+### 1. Offer a rule from a preference
 
 Add an explicit Suggest rule action for a recorded choice. Use the same local model path or external import with a rule request kind. External mode exports the rule request and waits for a matching published draft. A rule response contains added claim source and the supporting witness identity. It can add a root `*.scuzz_verify` file or add claims to one existing verify file. It cannot alter existing definitions or the scenario.
 
@@ -192,7 +185,7 @@ Show rule source and the witness in a separate rule review. Check and replay all
 
 **Gate:** A behavior choice never writes verification source. Rule installation needs its own action. A rejected rule changes no file. A weakened existing claim is rejected. An untriggered new claim cannot be offered as verified. Installation and Undo preserve existing claims and recover after interruption. The installed rule constrains a later behavior proposal. Finite evidence does not become a universal proof label.
 
-### 3. Prove and refine the complete session
+### 2. Prove and refine the complete session
 
 Use existing examples for the proof. Exercise one UI objective and one IO objective in scratch workspaces. Include generation, candidate checks, a short witness, each lane choice, abstention, next-baseline generation, Undo, rule review, restart, and a session summary. Include invalid, stale, and interrupted operations. Keep the simulation proof hermetic. Add live finite Headless proofs for the real local process, private HTTP, and filesystem paths.
 
