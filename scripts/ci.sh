@@ -1472,9 +1472,18 @@ print("UI lifecycle: evaluator and compiled JSON snapshots match; active state a
 PYUILIFECYCLE
   # Fixed catalog inspection and bounded private transport use no weights.
   python3 - <<'PYGENERATION'
-import hashlib, json, os, pathlib, shutil, signal, subprocess, time
+import hashlib, json, os, pathlib, shutil, signal, socket, subprocess, time
 repo = pathlib.Path.cwd()
 cli = pathlib.Path(os.environ["SCUZZ"])
+next_port = 18000
+def free_port():
+ global next_port
+ while next_port < 26000:
+  p = next_port; next_port += 1
+  with socket.socket() as s:
+   try: s.bind(("127.0.0.1", p)); return str(p)
+   except OSError: continue
+ raise RuntimeError("no free port in 18000..25999")
 root = repo / "scratchpad/generation-contract"
 shutil.rmtree(root, ignore_errors=True)
 (root / "src").mkdir(parents=True)
@@ -1557,15 +1566,15 @@ def transport(): IO[Unit] =
     root <- Sys.getenv("GENERATION_PROOF_ROOT")
     mode <- Sys.getenv("GENERATION_PROOF_MODE")
     id <- Sys.getenv("GENERATION_PROOF_MODEL")
-    port <- Random.nextInt(20000)
+    port <- Sys.getenv("GENERATION_PROOF_PORT")
     key <- Uuid.v4()
     dir = Fs.join(root, "owned")
     _ <- Fs.mkdirs(dir)
     exited <- Ref.of(false)
     script = Fs.join(root, "server.py")
-    command = List.join(["exec python3", Models.quote(script), Models.quote(key), Str.fromInt(port + 30000), Models.quote(mode), Models.quote(Fs.join(dir, "pid"))], " ")
+    command = List.join(["exec python3", Models.quote(script), Models.quote(key), port, Models.quote(mode), Models.quote(Fs.join(dir, "pid"))], " ")
     job <- Fiber.fork(IO.ensure(Sys.exec(command).map(_ => ()), Ref.set(exited, true)))
-    process = Generate.Process(job, exited, Str.concat("http://127.0.0.1:", Str.fromInt(port + 30000)), key, dir, "cpu")
+    process = Generate.Process(job, exited, Str.concat("http://127.0.0.1:", port), key, dir, "cpu")
     model <- Models.select(id)
     request = Json.Obj([("request", Json.Str("controlled")), ("baseline", Json.Str(Hash.sha256("baseline"))), ("kind", Json.Str("behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz")])), ("sources", Proposal.pairsJson([("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)")]))])
     result <- IO.ensure(IO.attempt(IO.timeout(if (mode == "timeout") 500 else 5000, Generate.ready(process).flatMap(_ => Generate.complete(process, request, model, _ => IO.pure(()))))), Generate.stop(process))
@@ -1577,7 +1586,7 @@ def transport(): IO[Unit] =
   } yield ()
 ''')
 # Build once. Each native run owns a fresh process and private key.
-subprocess.run([str(cli), "run", str(root)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="ok", GENERATION_PROOF_MODEL="qwen3.5-4b"), check=True, timeout=240, stdout=subprocess.DEVNULL)
+subprocess.run([str(cli), "run", str(root)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="ok", GENERATION_PROOF_MODEL="qwen3.5-4b", GENERATION_PROOF_PORT=free_port()), check=True, timeout=240, stdout=subprocess.DEVNULL)
 exe = root / "build/generation-contract"
 subprocess.run([str(exe)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="request", COMMAND_PROOF_COMPILER=hashlib.sha256(cli.read_bytes()).hexdigest()), check=True, timeout=30)
 request = json.loads((root / "build/command-request.json").read_text())
@@ -1611,7 +1620,7 @@ try:
  for model in ("qwen3.5-4b", "qwen3.5-9b"):
   for sig in (signal.SIGINT, signal.SIGTERM):
    (root / "pid").unlink(missing_ok=True)
-   runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="interrupt", GENERATION_PROOF_MODEL=model)
+   runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="interrupt", GENERATION_PROOF_MODEL=model, GENERATION_PROOF_PORT=free_port())
    child = subprocess.Popen([str(exe)], env=runenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
    try:
     deadline = time.monotonic()+5
@@ -1632,7 +1641,7 @@ try:
  for model in ("qwen3.5-4b", "qwen3.5-9b"):
   for mode in ("ok", "stale", "truncated", "reasoning", "context", "timeout"):
    (root / "pid").unlink(missing_ok=True)
-   runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE=mode, GENERATION_PROOF_MODEL=model)
+   runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE=mode, GENERATION_PROOF_MODEL=model, GENERATION_PROOF_PORT=free_port())
    subprocess.run([str(exe)], env=runenv, check=True, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
    pid = int((root / "pid").read_text())
    deadline = time.monotonic()+2
@@ -1647,10 +1656,19 @@ print("Generation: offline catalog, finite command refusals, both controlled pro
 PYGENERATION
   # Controlled artifacts exercise the shared finite command without weights.
   python3 - <<'PYGENCOMMAND'
-import hashlib, io, json, os, pathlib, platform, re, shlex, shutil, signal, subprocess, tarfile, tempfile, time
+import hashlib, io, json, os, pathlib, platform, re, shlex, shutil, signal, socket, subprocess, tarfile, tempfile, time
 
 repo = pathlib.Path.cwd()
 cli = pathlib.Path(os.environ["SCUZZ"])
+next_port = 18500
+def free_port():
+ global next_port
+ while next_port < 26000:
+  p = next_port; next_port += 1
+  with socket.socket() as s:
+   try: s.bind(('127.0.0.1', p)); return str(p)
+   except OSError: continue
+ raise RuntimeError('no free port in 18500..25999')
 root = pathlib.Path(tempfile.mkdtemp(prefix='scuzz-gate3-command-live-')).resolve()
 generation = root / 'generation'
 shutil.copytree(repo / 'examples/editor/generation', generation, ignore=shutil.ignore_patterns('build'))
@@ -1701,6 +1719,10 @@ for count, digest in ((2740937888, '00fe7986ff5f6b463e62455821146049db6f93136039
  source = source.replace(str(count), str(len(weights))).replace(digest, hashlib.sha256(weights).hexdigest())
 source = re.sub(r'Backend\("([^"]+)", "([^"]+)", [0-9]+, "[a-f0-9]+"\)', lambda m: 'Backend("' + m[1] + '", "' + m[2] + '", ' + str(len(artifact)) + ', "' + hashlib.sha256(artifact).hexdigest() + '")', source)
 models.write_text(source)
+generate = generation / 'src/Generate.scuzz'
+gen_source = generate.read_text()
+assert 'port <- Random.nextInt(30000)' in gen_source and 'port + 30000' in gen_source
+generate.write_text(gen_source.replace('port <- Random.nextInt(30000)', 'port <- Sys.getenv("CONTROLLED_PORT").map(s => Str.toInt(s, 0))').replace('port + 30000', 'port'))
 cache = root / 'cache'
 backend_platform = platform.system() + '-' + platform.machine()
 if backend_platform in ('Linux-x86_64', 'Linux-aarch64'): backend_platform += '-vulkan'
@@ -1743,7 +1765,7 @@ exe = root / 'build/controlled-command'
 unrelated = subprocess.Popen(['sleep','120'])
 try:
  for model in ('qwen3.5-4b','qwen3.5-9b'):
-  result = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model), check=True, capture_output=True, text=True, timeout=30)
+  result = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_PORT=free_port()), check=True, capture_output=True, text=True, timeout=30)
   output = json.loads(result.stdout)
   assert output['result']=='published' and output['model']==model and output['behavioral_review']=='pending' and not output['accepted']
   candidate = target / 'candidate'
@@ -1761,7 +1783,7 @@ try:
  for model in ('qwen3.5-4b','qwen3.5-9b'):
   for sig in (signal.SIGINT, signal.SIGTERM):
    (root / 'received').unlink(missing_ok=True)
-   child = subprocess.Popen([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+   child = subprocess.Popen([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang', CONTROLLED_PORT=free_port()), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
    try:
     deadline = time.monotonic()+10
     while not (root / 'received').exists() and time.monotonic()<deadline:
@@ -1781,7 +1803,7 @@ try:
    assert not (target / 'candidate').exists() and (target / 'src/Main.scuzz').read_bytes()==original
    assert not list((cache/'scuzz/requests').iterdir()) and unrelated.poll() is None
   (root / 'received').unlink(missing_ok=True)
-  timed = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang', CONTROLLED_TIMEOUT='yes'), capture_output=True, text=True, timeout=10)
+  timed = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang', CONTROLLED_TIMEOUT='yes', CONTROLLED_PORT=free_port()), capture_output=True, text=True, timeout=10)
   assert timed.returncode != 0 and not timed.stdout and 'timeout' in timed.stderr and (root / 'received').exists(), (model,timed.returncode,timed.stderr)
   pid = int((root / 'pid').read_text())
   try: os.kill(pid,0)
