@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap choicechip:Tasks", "tap button:Rename", "type 0 bread", "tap button:Add", "tap button:Done", "tap button:Save", "tap button:Save"]

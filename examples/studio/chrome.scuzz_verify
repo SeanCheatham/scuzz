@@ -1,29 +1,91 @@
 def chrome(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Home") && Timeline.a11yHas(t, i, "choicechip:Tasks") && Timeline.a11yHas(t, i, "choicechip:Preferences") && Timeline.a11yHas(t, i, "semantics:Index book"))
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Home") && Timeline.a11yHas(t, i, "choicechip:Tasks") && Timeline.a11yHas(t, i, "choicechip:Preferences") && Timeline.a11yHas(t, i, "semantics:Index book") && !Timeline.a11yHas(t, i, "placeholder:"))
 
 def activeSection(t: Timeline): Verdict =
   Verdict.every(t, i => if (Timeline.signalInt(t, i, "page") == 0) (if (Timeline.signalInt(t, i, "homeTab") == 0) Timeline.a11yHas(t, i, "button:+1") else Timeline.a11yHas(t, i, "tabpanel:Status")) && !Timeline.a11yHas(t, i, "button:Add") && !Timeline.a11yHas(t, i, "checktile:Star") else if (Timeline.signalInt(t, i, "page") == 1) Timeline.a11yHas(t, i, "button:Add") && Timeline.a11yHas(t, i, "button:Clear") && !Timeline.a11yHas(t, i, "button:+1") && !Timeline.a11yHas(t, i, "tabpanel:Status") && !Timeline.a11yHas(t, i, "checktile:Star") else Timeline.a11yHas(t, i, "checktile:Star") && Timeline.a11yHas(t, i, "switchtile:Quiet") && !Timeline.a11yHas(t, i, "button:Add") && !Timeline.a11yHas(t, i, "button:+1"))
 
 def appBar(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "appbar:App bar") && Timeline.a11yHas(t, i, "heading:1") && Timeline.a11yHas(t, i, "textbutton:Open tasks") && Timeline.a11yHas(t, i, "outlined:Settings"))
+  Verdict.and(Verdict.every(t, i => Timeline.a11yHas(t, i, "appbar:App bar") && Timeline.a11yHas(t, i, "heading:1") && Timeline.a11yHas(t, i, "textbutton:Open tasks") && Timeline.a11yHas(t, i, "outlined:Settings")), Verdict.and(Verdict.onHit(t, "textbutton:Open tasks", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "page") == 1
+}), Verdict.onHit(t, "outlined:Settings", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "page") == 2
+})))
 
 def activeTab(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || (if (Timeline.signalInt(t, i, "homeTab") == 0) Timeline.a11yHas(t, i, "tabpanel:Counter") && !Timeline.a11yHas(t, i, "tabpanel:Status") else Timeline.a11yHas(t, i, "tabpanel:Status") && !Timeline.a11yHas(t, i, "button:+1")))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || (if (Timeline.signalInt(t, i, "homeTab") == 0) Timeline.a11yHas(t, i, "tabpanel:Counter") && !Timeline.a11yHas(t, i, "tabpanel:Status") else Timeline.a11yHas(t, i, "tabpanel:Status") && !Timeline.a11yHas(t, i, "button:+1") && Timeline.a11yHas(t, i, Str.concat("slider:Volume=", Str.fromInt(Timeline.signalInt(t, i, "level")))) && Timeline.a11yHas(t, i, Str.concat("progress:Level=", Str.fromInt(Timeline.signalInt(t, i, "level"))))))
 
 def tasksIsTheList(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 1 || Timeline.a11yHas(t, i, "button:Add") && Timeline.a11yHas(t, i, "button:Clear") && Timeline.a11yHas(t, i, "textfield:item") && !Timeline.a11yHas(t, i, "chip:Pin") && !Timeline.a11yHas(t, i, "switch:On") && !Timeline.a11yHas(t, i, "actionchip:Go") && !Timeline.a11yHas(t, i, "filterchip:Tag") && !Timeline.a11yHas(t, i, "inputchip:In") && !Timeline.a11yHas(t, i, "choicechip:Day") && !Timeline.a11yHas(t, i, "iconbutton:i") && !Timeline.a11yHas(t, i, "outlined:Edit") && !Timeline.a11yHas(t, i, "circular:") && !Timeline.a11yHas(t, i, "navtile:"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 1 || Timeline.a11yHas(t, i, "button:Add") && Timeline.a11yHas(t, i, "button:Clear") && Timeline.a11yHas(t, i, "textfield:item") && !Timeline.a11yHas(t, i, "chip:Pin") && !Timeline.a11yHas(t, i, "switch:On") && !Timeline.a11yHas(t, i, "actionchip:Go") && !Timeline.a11yHas(t, i, "filterchip:Tag") && !Timeline.a11yHas(t, i, "inputchip:In") && !Timeline.a11yHas(t, i, "choicechip:Day") && !Timeline.a11yHas(t, i, "iconbutton:i") && !Timeline.a11yHas(t, i, "outlined:Edit") && !Timeline.a11yHas(t, i, "textbutton:Kit") && !Timeline.a11yHas(t, i, "circular:") && !Timeline.a11yHas(t, i, "navtile:"))
+
+private def checkPrefBoundsAt(t: Timeline, i: Int): Bool =
+  for {
+    lvl = Timeline.signalInt(t, i, "level")
+    live = Timeline.signalInt(t, i, "live")
+    pin = Timeline.signalInt(t, i, "pin")
+    more = Timeline.signalInt(t, i, "more")
+    star = Timeline.signalInt(t, i, "star")
+    quiet = Timeline.signalInt(t, i, "quiet")
+    mode = Timeline.signalInt(t, i, "mode")
+    seg = Timeline.signalInt(t, i, "seg")
+    inBounds = lvl >= 0 && lvl <= 100 && (live == 0 || live == 1) && (pin == 0 || pin == 1) && (more == 0 || more == 1) && (star == 0 || star == 1) && (quiet == 0 || quiet == 1) && (mode == 0 || mode == 1) && (seg == 0 || seg == 1)
+    initOk = i != 0 || lvl == 40 && live == 0 && pin == 0 && more == 0 && star == 0 && quiet == 0 && mode == 0 && seg == 0
+  } yield inBounds && initOk
+
+def preferencesDefaultsAndBounds(t: Timeline): Verdict =
+  Verdict.every(t, i => checkPrefBoundsAt(t, i))
+
+private def checkPrefViewAt(t: Timeline, i: Int): Bool =
+  if (Timeline.signalInt(t, i, "page") != 2) true else for {
+  lvl = Timeline.signalInt(t, i, "level")
+  live = Timeline.signalInt(t, i, "live")
+  pin = Timeline.signalInt(t, i, "pin")
+  more = Timeline.signalInt(t, i, "more")
+  star = Timeline.signalInt(t, i, "star")
+  quiet = Timeline.signalInt(t, i, "quiet")
+  mode = Timeline.signalInt(t, i, "mode")
+  seg = Timeline.signalInt(t, i, "seg")
+  summaryOk = Timeline.a11yHas(t, i, if (mode == 1) "text:Theme: Night" else "text:Theme: Day") && Timeline.a11yHas(t, i, if (seg == 1) "text:Layout: Grid" else "text:Layout: List") && Timeline.a11yHas(t, i, if (quiet == 1) "text:Quiet: On" else "text:Quiet: Off")
+  tilesOk = Timeline.a11yHas(t, i, s"checktile:Star=$star") && Timeline.a11yHas(t, i, s"switchtile:Quiet=$quiet") && Timeline.a11yHas(t, i, s"radiotile:Night=$mode") && seg == 0 == Timeline.a11yHas(t, i, "choicechip:List=1") && seg == 1 == Timeline.a11yHas(t, i, "choicechip:Grid=1") && lvl != 0 == Timeline.a11yHas(t, i, "inkwell:face")
+  moreOk = if (more == 0) !Timeline.a11yHas(t, i, "textbutton:Kit") && !Timeline.a11yHas(t, i, "outlined:Edit") else Timeline.a11yHas(t, i, s"circular:Level=$lvl") && Timeline.a11yHas(t, i, s"switch:On=$live") && Timeline.a11yHas(t, i, s"chip:Pin=$pin") && Timeline.a11yHas(t, i, s"filterchip:Tag=$star") && Timeline.a11yHas(t, i, s"inputchip:In=$star") && mode == 0 == Timeline.a11yHas(t, i, "choicechip:Day=1") && Timeline.a11yHas(t, i, "textbutton:Kit") && Timeline.a11yHas(t, i, "outlined:Edit") && Timeline.a11yHas(t, i, "iconbutton:i") && Timeline.a11yHas(t, i, "actionchip:Go")
+} yield summaryOk && tilesOk && moreOk
+
+def preferencesSignalsMatchControls(t: Timeline): Verdict =
+  Verdict.every(t, i => checkPrefViewAt(t, i))
+
+private def checkFabHit(t: Timeline, before: Int, after: Int): Bool =
+  for {
+    prev = Timeline.signalInt(t, before, "level")
+    want = if (prev + 10 > 100) 100 else prev + 10
+  } yield Timeline.signalInt(t, after, "level") == want
+
+def preferencesActionsUpdateSignals(t: Timeline): Verdict =
+  Verdict.and(Verdict.onHit(t, "inkwell:face", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "star") != Timeline.signalInt(t, before, "star")
+}), Verdict.and(Verdict.onHit(t, "fab:+", pair => pair match {
+  case (before, after) => checkFabHit(t, before, after)
+}), Verdict.and(Verdict.onHit(t, "expansion:More", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "more") != Timeline.signalInt(t, before, "more")
+}), Verdict.and(Verdict.onHit(t, "iconbutton:i", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "pin") != Timeline.signalInt(t, before, "pin")
+}), Verdict.and(Verdict.onHit(t, "actionchip:Go", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "live") == 1
+}), Verdict.and(Verdict.onHit(t, "textbutton:Kit", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "level") == 40 && Timeline.signalInt(t, after, "live") == 0 && Timeline.signalInt(t, after, "pin") == 0 && Timeline.signalInt(t, after, "star") == 0 && Timeline.signalInt(t, after, "quiet") == 0 && Timeline.signalInt(t, after, "mode") == 0 && Timeline.signalInt(t, after, "seg") == 0
+}), Verdict.onHit(t, "outlined:Edit", pair => pair match {
+  case (_, after) => Timeline.signalInt(t, after, "page") == 1
+})))))))
 
 def staticTreeWaits(t: Timeline): Verdict =
   Verdict.every(t, i => i != 0 || !Timeline.a11yHas(t, i, "motion:"))
 
 def buttonPressSteps(t: Timeline): Verdict =
   Verdict.onHit(t, "button:+1", __tup => __tup match {
-  case (before, after) => Timeline.a11yHas(t, after, "motion:press:+1=4")
+  case (_, after) => Timeline.a11yHas(t, after, "motion:press:+1=4")
 })
 
 def tabChangeSteps(t: Timeline): Verdict =
   Verdict.onHit(t, "tab:Status", __tup => __tup match {
-  case (before, after) => Timeline.a11yHas(t, after, "motion:tab:Tabs=4") && Timeline.a11yHas(t, after, "motion:appear:Status=4")
+  case (_, after) => Timeline.a11yHas(t, after, "motion:tab:Tabs=4") && Timeline.a11yHas(t, after, "motion:appear:Status=4")
 })
 
 def listInsertSteps(t: Timeline): Verdict =

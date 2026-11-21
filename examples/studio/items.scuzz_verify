@@ -4,19 +4,130 @@ oracle parseRoundTrip(s: String): Bool =
 oracle flipTwice(s: String): Bool =
   Tasks.flipDone(Tasks.flipDone(s)) == s
 
+oracle saveLoadRoundTrip(a: String, b: String): Bool =
+  for {
+    xs0 = [Tasks.Item(0, "milk")]
+    xs1 = Tasks.addTo(xs0, a)
+    xs2 = Tasks.renameFirst(xs1, b)
+    xs3 = Tasks.flipLabel(xs2, "milk")
+  } yield Tasks.loadItems(Tasks.saveItems(xs3)) == xs3
+
+private def checkOracleLoaded(expected: List[Tasks.Item], loaded: List[Tasks.Item]): Bool =
+  loaded == expected || loaded == [Tasks.Item(0, "milk")]
+
+private def checkOracleUpdated(expected: List[Tasks.Item], res: Result[String, String]): Bool =
+  res match {
+    case Result.Ok(body) => Tasks.loadItems(body) == expected && checkOracleLoaded(expected, Property.force(Tasks.loadInitial("/tmp/scuzz_studio_oracle.txt")))
+    case Result.Err(err) => err != ""
+  }
+
+private def checkOracleSaved(added: List[Tasks.Item], res: Result[String, String]): Bool =
+  res match {
+    case Result.Ok(body) => Tasks.loadItems(body) == added && checkOracleUpdated(Tasks.flipLabel(added, "milk"), Property.force(Tasks.updateFile("/tmp/scuzz_studio_oracle.txt", xs => Tasks.flipLabel(xs, "milk"))))
+    case Result.Err(err) => err != ""
+  }
+
+private def checkMissingUpdate(res: Result[String, String]): Bool =
+  res match {
+    case Result.Ok(_) => false
+    case Result.Err(err) => err != ""
+  }
+
+oracle fileStoreRoundTrip(s: String): Bool =
+  for {
+    seed = [Tasks.Item(0, "milk")]
+    added = Tasks.addTo(seed, s)
+    missingOk = Property.force(Tasks.loadInitial("/missing/scuzz_oracle.txt")) == seed
+    missingUpdateOk = checkMissingUpdate(Property.force(Tasks.updateFile("/missing/scuzz_oracle.txt", xs => xs)))
+    savedOk = checkOracleSaved(added, Property.force(Tasks.saveFile("/tmp/scuzz_studio_oracle.txt", added)))
+  } yield missingOk && missingUpdateOk && savedOk
+
+oracle preferenceAndPathRules(): Bool =
+  for {
+    defaultPath = Tasks.resolvePath("")
+    customPath = Tasks.resolvePath("/tmp/custom.txt")
+    toggled0 = Tasks.toggleBit(0)
+    toggled1 = Tasks.toggleBit(1)
+    clampedLo = Tasks.clampLevel(-5)
+    clampedHi = Tasks.clampLevel(150)
+    stepped = Tasks.stepLevel(40)
+    steppedCap = Tasks.stepLevel(95)
+    modes = Tasks.modeLabel(0) == "Theme: Day" && Tasks.modeLabel(1) == "Theme: Night"
+    layouts = Tasks.layoutLabel(0) == "Layout: List" && Tasks.layoutLabel(1) == "Layout: Grid"
+    quiets = Tasks.quietLabel(0) == "Quiet: Off" && Tasks.quietLabel(1) == "Quiet: On"
+    cleaned = Tasks.cleanLine(""" a
+rb """) == "a rb" && Tasks.cleanLabel("###milk") == "milk" && Tasks.cleanLabel("###") == ""
+    openAdded = Tasks.addOpen([], "#bread") == [Tasks.Item(0, "bread")] && List.isEmpty(Tasks.addOpen([], "###"))
+    rows = Tasks.loadListRows([]) == ["milk"] && Tasks.loadList("") == ["milk"] && Tasks.saveBody([]) == ""
+  } yield defaultPath == "/tmp/scuzz_studio.txt" && customPath == "/tmp/custom.txt" && toggled0 == 1 && toggled1 == 0 && clampedLo == 0 && clampedHi == 100 && stepped == 50 && steppedCap == 100 && modes && layouts && quiets && cleaned && openAdded && rows
+
 def doneShowsUndo(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Done", "button:Undo")
 
-def saveWritesPath(t: Timeline): Verdict =
+private def seedMilk(): String =
+  """milk
+"""
+
+private def driverRan(t: Timeline, i: Int): Bool =
+  Timeline.driveHas(t, i, "addItem") || Timeline.driveHas(t, i, "renameItem") || Timeline.driveHas(t, i, "deleteItem") || Timeline.driveHas(t, i, "flipItem") || Timeline.driveHas(t, i, "clearItems")
+
+private def checkSaveHit(t: Timeline, after: Int): Bool =
+  for {
+    last = Timeline.len(t) - 1
+    wrote = Timeline.exists(t, k => k >= after && Timeline.effectHas(t, k, "Fs.write bytes=21"))
+    settled = Timeline.signalInt(t, last, "saving") == 0
+    err = Timeline.signalInt(t, last, "saveErr")
+    emptyItems = Timeline.signalListLen(t, last, "items") == 0
+    exactSample = !(Timeline.signalListLen(t, last, "items") == 2 && Timeline.a11yHas(t, last, "listtile:oat") && Timeline.a11yHas(t, last, "listtile:bread") && Timeline.a11yHas(t, last, "button:Undo") && !Timeline.a11yHas(t, last, "listtile:milk")) || Timeline.fileTextIs(t, last, "/tmp/scuzz_studio.txt", """#oat milk
+bread
+""")
+    okBranch = err == 0 && Timeline.signalStrHas(t, last, "saveStatus", "Saved") && exactSample && (if (emptyItems) Timeline.fileTextIs(t, last, "/tmp/scuzz_studio.txt", "") else !Timeline.fileTextIs(t, last, "/tmp/scuzz_studio.txt", ""))
+    errBranch = err == 1 && Timeline.faultKindHas(t, last, "kind=fs") && Timeline.signalStrHas(t, last, "saveStatus", "Save failed") && (Timeline.faultKindHas(t, last, "after=1") || Timeline.fileSame(t, 0, last, "/tmp/scuzz_studio.txt") && Timeline.fileTextIs(t, last, "/tmp/scuzz_studio.txt", seedMilk()))
+  } yield Timeline.signalInt(t, after, "saving") == 1 && Timeline.signalStrHas(t, after, "saveStatus", "Saving") && wrote && settled && (okBranch || errBranch)
+
+def saveWritesOrPreservesFile(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Save", __tup => __tup match {
-  case (before, after) => Timeline.effectHas(t, Timeline.len(t) - 1, "Fs.write bytes=21")
+  case (_, after) => checkSaveHit(t, after)
 })
+
+def unhitSaveKeepsSeedFile(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.exists(t, j => j <= i && Timeline.effectHas(t, j, "Fs.write bytes=21")) || Timeline.fileTextIs(t, i, "/tmp/scuzz_studio.txt", seedMilk()) && Timeline.fileSame(t, 0, i, "/tmp/scuzz_studio.txt"))
+
+private def checkSaveState(t: Timeline, i: Int): Bool =
+  for {
+    saving = Timeline.signalInt(t, i, "saving")
+    err = Timeline.signalInt(t, i, "saveErr")
+    page = Timeline.signalInt(t, i, "page")
+    validCodes = (saving == 0 || saving == 1) && (err == 0 || err == 1)
+    statusOk = saving == 1 == Timeline.signalStrHas(t, i, "saveStatus", "Saving") && (saving == 0 && err == 1) == Timeline.signalStrHas(t, i, "saveStatus", "Save failed") && (Timeline.signalStrHas(t, i, "saveStatus", "Ready") || Timeline.signalStrHas(t, i, "saveStatus", "Saving") || Timeline.signalStrHas(t, i, "saveStatus", "Saved") || Timeline.signalStrHas(t, i, "saveStatus", "Save failed"))
+    visibleOnTasks = page != 1 || Timeline.a11yHas(t, i, "text:Ready") || Timeline.a11yHas(t, i, "text:Saving") || Timeline.a11yHas(t, i, "text:Saved") || Timeline.a11yHas(t, i, "text:Save failed")
+  } yield validCodes && statusOk && visibleOnTasks
+
+def saveStateStaysConsistent(t: Timeline): Verdict =
+  Verdict.every(t, i => checkSaveState(t, i))
+
+private def checkDriverStep(t: Timeline, a: Int, b: Int): Bool =
+  for {
+    sameDrv = Timeline.fileSame(t, a, b, "/tmp/scuzz_studio_drv.txt")
+    wroteDrv = Timeline.effectHas(t, b, "Fs.write bytes=25")
+    fsFault = Timeline.faultKindHas(t, b, "kind=fs")
+    afterFault = Timeline.faultKindHas(t, b, "after=1")
+    clearStep = Timeline.driveHas(t, b, "clearItems") && wroteDrv
+    clearOk = !clearStep || Timeline.fileTextIs(t, b, "/tmp/scuzz_studio_drv.txt", "") || fsFault && !afterFault && sameDrv
+  } yield (sameDrv || driverRan(t, b) && wroteDrv) && (wroteDrv || sameDrv) && clearOk
+
+def scenarioDriversPersistAndRecover(t: Timeline): Verdict =
+  Verdict.and(Verdict.every(t, i => i != 0 || Timeline.fileTextIs(t, i, "/tmp/scuzz_studio_drv.txt", seedMilk()) && Timeline.fileTextIs(t, i, "/tmp/scuzz_studio.txt", seedMilk())), Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => checkDriverStep(t, a, b)
+}))
 
 def undoOnlyAfterDone(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.a11yHas(t, i, "button:Undo") || Timeline.exists(t, j => j <= i && Timeline.lastHitHas(t, j, "button:Done")))
 
 def clearEmpties(t: Timeline): Verdict =
-  Verdict.or(Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Clear")), Verdict.any(t, i => Timeline.lastHitHas(t, i, "button:Clear") && Timeline.exists(t, j => j >= i && !Timeline.a11yHas(t, j, "listtile:"))))
+  Verdict.and(Verdict.onHit(t, "button:Clear", __tup => __tup match {
+  case (_, after) => Timeline.signalListLen(t, after, "items") == 0
+}), Verdict.or(Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Clear")), Verdict.any(t, i => Timeline.lastHitHas(t, i, "button:Clear") && Timeline.exists(t, j => j >= i && !Timeline.a11yHas(t, j, "listtile:")))))
 
 def delDropsOne(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Del", __tup => __tup match {
@@ -38,10 +149,10 @@ oracle flipDoneTwice(): Bool =
   Tasks.flipDone(Tasks.flipDone("#milk")) == "#milk" && Tasks.flipDone(Tasks.flipDone("milk")) == "milk"
 
 oracle itemStates(): Bool =
-  Tasks.itemDone("#milk") == 1 && Tasks.itemDone("milk") == 0 && Tasks.itemLabel("#milk") == "milk"
+  Tasks.itemDone("#milk") == 1 && Tasks.itemDone("milk") == 0 && Tasks.itemLabel("#milk") == "milk" && Tasks.flipItem(Tasks.Item(0, "milk")) == Tasks.Item(1, "milk") && Tasks.flipItem(Tasks.Item(1, "milk")) == Tasks.Item(0, "milk") && Tasks.addTo([], "#milk") == [Tasks.Item(1, "milk")] && List.isEmpty(Tasks.addTo([], "###")) && List.isEmpty(Tasks.renameFirst([], "milk")) && Tasks.renameFirst([Tasks.Item(0, "milk")], "###") == [Tasks.Item(0, "milk")]
 
 oracle addGrows(s: String): Bool =
-  List.len(Tasks.addTo([], s)) == (if (Str.len(Str.trim(s)) == 0) 0 else 1)
+  List.len(Tasks.addTo([], s)) == (if (Str.len(Tasks.cleanLabel(s)) == 0) 0 else 1)
 
 oracle renameKeepsLen(s: String): Bool =
   List.len(Tasks.renameFirst(Item(0, "milk") :: [], s)) == 1
@@ -55,12 +166,17 @@ oracle flipToggles(): Bool =
 oracle clearDrops(): Bool =
   List.isEmpty(Tasks.clearAll(Item(0, "x") :: []))
 
-def initialWidgets(t: Timeline): Verdict =
-  Verdict.every(t, i => i != 0 || Timeline.a11yHas(t, i, "choicechip:Home=1") && Timeline.a11yHas(t, i, "choicechip:Tasks=0") && Timeline.a11yHas(t, i, "choicechip:Preferences=0") && Timeline.a11yHas(t, i, "text:count = 0") && Timeline.signalInt(t, i, "page") == 0)
+def mainStartsOnHome(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.a11yHas(t, i, "choicechip:Home=1") && Timeline.a11yHas(t, i, "choicechip:Tasks=0") && Timeline.a11yHas(t, i, "choicechip:Preferences=0") && Timeline.a11yHas(t, i, "text:count = 0") && Timeline.signalInt(t, i, "page") == 0 && Timeline.signalInt(t, i, "saving") == 0 && Timeline.signalInt(t, i, "saveErr") == 0 && Timeline.signalStrHas(t, i, "saveStatus", "Ready"))
 
 def plusOneIncrements(t: Timeline): Verdict =
   Verdict.onHit(t, "button:+1", __tup => __tup match {
   case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 1
+})
+
+def resetCounterZeros(t: Timeline): Verdict =
+  Verdict.onHit(t, "outlined:Reset counter", __tup => __tup match {
+  case (_, after) => Timeline.signalInt(t, after, "count") == 0
 })
 
 def countOnlyMovesOnCounterActions(t: Timeline): Verdict =
@@ -80,6 +196,6 @@ def addNeedsDraft(t: Timeline): Verdict =
 
 def addGrowsWithDraft(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Add", __tup => __tup match {
-  case (before, after) => Timeline.signalStrHas(t, before, "draft", "") || Timeline.signalListLen(t, after, "items") == Timeline.signalListLen(t, before, "items") + 1
+  case (before, after) => Timeline.signalStrHas(t, before, "draft", "") || Timeline.signalStrHas(t, before, "draft", "#") || Timeline.signalStrHas(t, before, "draft", " ") || Timeline.signalListLen(t, after, "items") == Timeline.signalListLen(t, before, "items") + 1 && Timeline.signalStrHas(t, after, "draft", "")
 })
 

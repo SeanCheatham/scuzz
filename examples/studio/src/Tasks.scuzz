@@ -10,6 +10,40 @@ impl Show for Item:
 private def doneMark(): String =
   "#"
 
+private def nl(): String =
+  """
+"""
+
+private def stripMarks(s: String): String =
+  if (Str.startsWith(s, doneMark())) stripMarks(Str.trim(Str.slice(s, 1, Str.len(s)))) else s
+
+def resolvePath(envPath: String): String =
+  if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
+
+def toggleBit(flag: Int): Int =
+  if (flag == 0) 1 else 0
+
+def clampLevel(n: Int): Int =
+  if (n < 0) 0 else if (n > 100) 100 else n
+
+def stepLevel(n: Int): Int =
+  clampLevel(n + 10)
+
+def modeLabel(mode: Int): String =
+  if (mode == 1) "Theme: Night" else "Theme: Day"
+
+def layoutLabel(seg: Int): String =
+  if (seg == 1) "Layout: Grid" else "Layout: List"
+
+def quietLabel(quiet: Int): String =
+  if (quiet == 1) "Quiet: On" else "Quiet: Off"
+
+def cleanLine(s: String): String =
+  Str.trim(List.join(List.filter(List.map(Str.lines(s), x => Str.trim(x)), x => Str.nonEmpty(x)), " "))
+
+def cleanLabel(s: String): String =
+  stripMarks(cleanLine(s))
+
 def parseItem(s: String): Item =
   if (Str.startsWith(s, doneMark())) Item(1, Str.slice(s, 1, Str.len(s))) else Item(0, s)
 
@@ -28,11 +62,22 @@ def flipDone(s: String): String =
 def flipItem(item: Item): Item =
   Item(if (item.done == 1) 0 else 1, item.label)
 
+def addOpen(xs: List[Item], s: String): List[Item] =
+  for {
+    label = cleanLabel(s)
+  } yield if (Str.len(label) == 0) xs else List.append(xs, Item(0, label))
+
 def addTo(xs: List[Item], s: String): List[Item] =
-  if (Str.len(Str.trim(s)) == 0) xs else List.append(xs, parseItem(Str.trim(s)))
+  for {
+    line = cleanLine(s)
+    label = cleanLabel(line)
+    done = if (Str.startsWith(line, doneMark())) 1 else 0
+  } yield if (Str.len(label) == 0) xs else List.append(xs, Item(done, label))
 
 def renameFirst(xs: List[Item], s: String): List[Item] =
-  if (List.isEmpty(xs) || Str.len(Str.trim(s)) == 0) xs else List.setAt(xs, 0, Item(List.at(xs, 0).done, Str.trim(s)))
+  for {
+    label = cleanLabel(s)
+  } yield if (List.isEmpty(xs) || Str.len(label) == 0) xs else List.setAt(xs, 0, Item(List.at(xs, 0).done, label))
 
 def deleteLabel(xs: List[Item], s: String): List[Item] =
   List.filter(xs, x => x.label != s)
@@ -49,20 +94,26 @@ def loadItems(text: String): List[Item] =
 def saveItems(xs: List[Item]): String =
   saveBody(List.map(xs, x => encodeItem(x)))
 
-def noteAdd(_s: String): Unit =
-  Property.sometimes("droveAdd")
+def loadInitial(path: String): IO[List[Item]] =
+  IO.attempt(Fs.read(path)).map(res => res match {
+  case Result.Ok(text) => loadItems(text)
+  case Result.Err(_) => loadItems("")
+})
 
-def noteRename(_s: String): Unit =
-  Property.sometimes("droveRename")
+def saveFile(path: String, xs: List[Item]): IO[Result[String, String]] =
+  for {
+    body = saveItems(xs)
+    wrote <- IO.attempt(Fs.write(path, body))
+  } yield wrote match {
+  case Result.Ok(()) => Result.Ok(body)
+  case Result.Err(err) => Result.Err(err)
+}
 
-def noteDel(_s: String): Unit =
-  Property.sometimes("droveDel")
-
-def noteFlip(_s: String): Unit =
-  Property.sometimes("droveFlip")
-
-def noteClear(): Unit =
-  Property.sometimes("droveClear")
+def updateFile(path: String, f: List[Item] => List[Item]): IO[Result[String, String]] =
+  IO.attempt(Fs.read(path)).flatMap(loaded => loaded match {
+  case Result.Err(err) => IO.pure(Result.Err(err))
+  case Result.Ok(text) => saveFile(path, f(loadItems(text)))
+})
 
 def loadListRows(rows: List[String]): List[String] =
   if (List.isEmpty(rows)) ["milk"] else rows
@@ -71,7 +122,5 @@ def loadList(text: String): List[String] =
   loadListRows(List.filter(Str.lines(text), x => Str.nonEmpty(x)))
 
 def saveBody(xs: List[String]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(List.join(xs, """
-"""), """
-""")
+  if (List.isEmpty(xs)) "" else Str.concat(List.join(xs, nl()), nl())
 
