@@ -2574,6 +2574,70 @@ slice_mobile() {
       ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
     grep -q "scuzz mobile: present" /tmp/pkg-host.out
   fi
+  python3 - "$ROOT" <<'PY'
+import os, pathlib, signal, subprocess, sys, tempfile, time
+
+root = pathlib.Path(sys.argv[1])
+script = root / "crates/embedder-mobile/shells/ios/run_sim.sh"
+with tempfile.TemporaryDirectory(prefix="scuzz-ios-console-") as tmp:
+    base = pathlib.Path(tmp)
+    bin_dir = base / "bin"
+    bin_dir.mkdir()
+    pkg = base / "out/package/ios/simapp.app"
+    pkg.mkdir(parents=True)
+    (base / "out/package/ios/package.toml").write_text('name = "simapp"\n')
+    (pkg / "Info.plist").write_text("dev.scuzz.simapp\n")
+    sim_bin = base / "sim-dev/data/simapp.app/simapp"
+    sim_bin.parent.mkdir(parents=True)
+    sim_bin.write_text(
+        "#!/usr/bin/env bash\n"
+        "trap '' TERM\n"
+        f"printf '%s\\n' \"$$\" > \"{base / 'app.pid'}\"\n"
+        "while :; do sleep 1; done\n"
+    )
+    sim_bin.chmod(0o755)
+    plist = bin_dir / "PlistBuddy"
+    plist.write_text("#!/usr/bin/env bash\ncat \"$3\"\n")
+    plist.chmod(0o755)
+    xcrun = bin_dir / "xcrun"
+    xcrun.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$2\" in\n"
+        "  install) exit 0 ;;\n"
+        f"  launch) \"{sim_bin}\" & wait $! ;;\n"
+        "  terminate) sleep 30 ;;\n"
+        "esac\n"
+    )
+    xcrun.chmod(0o755)
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", PLISTBUDDY=str(plist))
+    proc = subprocess.Popen(
+        ["bash", str(script), "sim-dev", str(base / "out"), "watch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    deadline = time.monotonic() + 10
+    while not (base / "app.pid").exists():
+        assert time.monotonic() < deadline, "simapp never started"
+        time.sleep(0.05)
+    app_pid = int((base / "app.pid").read_text().strip())
+    t0 = time.monotonic()
+    proc.stdin.write("quit\n")
+    proc.stdin.flush()
+    time.sleep(0.4)
+    proc.send_signal(signal.SIGTERM)
+    rc = proc.wait(timeout=15)
+    elapsed = time.monotonic() - t0
+    assert rc == 0, f"expected 0, got {rc}"
+    assert elapsed < 12.0, f"stop_app stalled: {elapsed:.2f}s"
+    try:
+        os.kill(app_pid, 0)
+        raise AssertionError(f"simulator app pid {app_pid} survived stop_app")
+    except ProcessLookupError:
+        pass
+PY
 }
 
 slice_macos_app() {
