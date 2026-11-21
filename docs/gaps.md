@@ -200,7 +200,7 @@ Shared runtime checks compare 400 Desktop and Mobile event recordings with Headl
 They check retained input, field selection, and the forced native setting.
 Additional checks cover pause, reduction, View replacement, and resume.
 The shared runtime checks and private portal check pass under ASan and UBSan.
-Full native and evaluator preference replay checks remain open.
+Native and evaluator replays compare session motion preferences and recordings across six transition types.
 Android reads the animation setting before application startup and observes live changes.
 Android emulator checks cover initial preferences, live changes, visible input, resume, and restart.
 The Android viewport excludes the system bars and display cutout.
