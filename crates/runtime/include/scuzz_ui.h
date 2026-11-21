@@ -292,7 +292,9 @@ typedef enum SzViewKind {
   SZ_VIEW_ANIMATED_CONTENT_SIZE,
   SZ_VIEW_ANIMATED_POSITION,
   SZ_VIEW_SCALE,
-  SZ_VIEW_ANIMATED_SCALE
+  SZ_VIEW_ANIMATED_SCALE,
+  SZ_VIEW_ROTATE,
+  SZ_VIEW_ANIMATED_ROTATION
 } SzViewKind;
 
 typedef struct SzRect {
@@ -438,6 +440,7 @@ SzRect sz_view_control_frame(const SzView *view);
 SzView *sz_view_overlay(SzSignalInt *open, const char *label, SzView *child);
 /* Drag uses the handle center and clamps the percent from 0 to 100. */
 int sz_view_split_set_at(SzView *view, float x);
+int sz_view_split_set_at_xy(SzView *view, float x, float y);
 int sz_view_collect_splits(SzView *root, SzView **out, int cap);
 int sz_view_collect_overlays(SzView *root, SzView **out, int cap);
 int sz_view_overlay_is_open(const SzView *view);
@@ -500,6 +503,13 @@ SzView *sz_view_scale(int64_t percent, SzView *child);
 SzView *sz_view_animated_scale(SzSignalInt *value, int64_t pumps, SzView *child);
 /* Return the composed scale from layout coordinates to displayed coordinates. */
 float sz_view_paint_scale(const SzView *view);
+/* Rotate paint and input clockwise in degrees about the child center. Keep layout unchanged. */
+SzView *sz_view_rotate(int64_t degrees, SzView *child);
+SzView *sz_view_animated_rotation(SzSignalInt *value, int64_t pumps, SzView *child);
+/* Return the composed clockwise rotation in degrees from layout coordinates to displayed coordinates. */
+float sz_view_paint_rotation(const SzView *view);
+/* Convert a viewport delta into view layout coordinates. Return 0 when collapsed or invalid. */
+int sz_view_layout_delta(const SzView *view, float *dx, float *dy);
 SzView *sz_view_animated_opacity(SzSignalInt *value, int64_t pumps, SzView *child);
 /* Animate a clipped size in logical pixels. Both axes use one pump count. */
 SzView *sz_view_animated_size(SzSignalInt *width, SzSignalInt *height, int64_t pumps, SzView *child);
@@ -575,6 +585,7 @@ SzView *sz_view_find(SzView *root, uintptr_t id);
 int sz_view_is_tap_target(const SzView *view);
 /* Write the nearest allowed step from x. Return 1 for a slider. */
 int sz_view_slider_set_at(SzView *view, float x);
+int sz_view_slider_set_at_xy(SzView *view, float x, float y);
 /* Run the nearest enclosing ink-well tap handler after slider release. */
 void sz_view_slider_release(SzView *view);
 

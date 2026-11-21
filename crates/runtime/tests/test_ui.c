@@ -15937,6 +15937,272 @@ static void test_scale_wrapping(void) {
   }
 }
 
+static void test_rotation_geometry(void) {
+  for (int device = 1; device <= 2; device++) for (int clipped = 0; clipped <= 1; clipped++) {
+    SzTheme theme = *sz_theme_default();
+    theme.pad = theme.gap = 0; theme.px_scale = (float)device; theme.background = 0xffffffff;
+    SzSignalInt *taps = sz_signal_int(0);
+    SzView *button = sz_view_ink_well("Rotated card", counter_tap, taps,
+      sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+    SzView *rotated = sz_view_rotate(90, button);
+    SzView *root = scale_scene(clipped ? sz_view_clip(rotated) : rotated);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(320 * device, 240 * device);
+    assert(surface);
+    assert(sz_view_paint(root, sk_surface_get_canvas(surface), 320 * device, 240 * device, &theme));
+    assert_scale_frame(button, 120.f * device, 60.f * device, 40.f * device, 80.f * device);
+    assert_scale_frame(root, 0, 0, 320.f * device, 240.f * device);
+    assert(sz_view_paint_rotation(button) == 90.f);
+    const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+    assert(px_rgb(pixels, 320 * device, 140 * device, 100 * device, 255, 0, 0));
+    assert(px_rgb(pixels, 320 * device, 140 * device, 65 * device,
+      255, clipped ? 255 : 0, clipped ? 255 : 0));
+    assert(sz_view_hit_test(root, 140.f * device, 65.f * device) == (clipped ? NULL : button));
+    assert(sz_view_hit_test(root, 105.f * device, 100.f * device) == NULL);
+    assert(sz_view_handle_tap(root, 140.f * device, 100.f * device));
+    assert(sz_signal_int_get(taps) == 1);
+    sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(taps);
+  }
+  SzTheme theme = *sz_theme_default();
+  theme.pad = theme.gap = 0; theme.px_scale = 1; theme.background = 0xffffffff;
+  SzSignalInt *taps = sz_signal_int(0);
+  SzView *quad = sz_view_ink_well("Diagonal card", counter_tap, taps,
+    sz_view_sized(80, 80, sz_view_background(0xffff0000, sz_view_text(""))));
+  SzView *root = scale_scene(sz_view_rotate(45, quad));
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+  assert(surface);
+  assert(sz_view_paint(root, sk_surface_get_canvas(surface), 320, 240, &theme));
+  SzRect bounds = sz_view_frame(quad);
+  assert(bounds.x < 84.f && bounds.y < 64.f && bounds.w > 113.f && bounds.h > 113.f);
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, 140, 66, 255, 0, 0));
+  assert(px_rgb(pixels, 320, 86, 66, 255, 255, 255));
+  assert(sz_view_hit_test(root, 140, 66) == quad);
+  assert(sz_view_hit_test(root, 86, 66) == NULL);
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(taps);
+
+  SzView *child = sz_view_sized(80, 40, sz_view_text("nested"));
+  root = scale_scene(sz_view_rotate(90, sz_view_rotate(-90, child)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert_scale_frame(child, 100, 80, 80, 40);
+  assert(sz_view_paint_rotation(child) == 0.f);
+  sz_view_free(root);
+
+  child = sz_view_sized(80, 40, sz_view_text("scaled-rotated"));
+  root = scale_scene(sz_view_scale(200, sz_view_rotate(90, child)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert_scale_frame(child, 100, 20, 80, 160);
+  assert(sz_view_paint_scale(child) == 2.f && sz_view_paint_rotation(child) == 90.f);
+  sz_view_free(root);
+}
+
+static void test_animated_rotation_steps(void) {
+  SzTheme theme = *sz_theme_default();
+  theme.pad = theme.gap = 0; theme.px_scale = 1; theme.background = 0xffffffff;
+  SzSignalInt *value = sz_signal_int(0), *taps = sz_signal_int(0);
+  SzView *child = sz_view_ink_well("Rotation card", counter_tap, taps,
+    sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text(""))));
+  SzView *rotation = sz_view_animated_rotation(value, 8, child);
+  SzView *root = scale_scene(rotation);
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 100, 80, 80, 40);
+  assert(!sz_view_transition_pending(root));
+  sz_signal_int_set(value, 90);
+  for (int repeat = 0; repeat < 3; repeat++) {
+    sz_view_layout(root, 320, 240, &theme);
+    assert_scale_frame(child, 100, 80, 80, 40);
+    assert(sz_view_paint_rotation(child) == 0.f);
+  }
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(fabsf(sz_view_paint_rotation(child) - 11.f) < .001f);
+  FILE *file = tmpfile(); assert(file);
+  sz_view_transitions_dump_json(root, file); rewind(file);
+  char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file);
+  json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"rotation\",\"value\":11,\"target\":90,\"remaining\":7"));
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "rotation:Rotation card=11\ntarget:rotation:Rotation card=90\npumps:rotation:Rotation card=7\n"));
+  sz_string_free(dump);
+  sz_signal_int_set(value, -90);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_view_paint_rotation(child) == -2.f);
+  sz_view_pause_motion(root, 1);
+  sz_signal_int_set(value, 180);
+  for (int repeat = 0; repeat < 3; repeat++) {
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_rotation(child) == -2.f);
+  }
+  assert(!sz_view_transition_pending(root));
+  sz_view_pause_motion(root, 0);
+  const float steps[] = {21, 44, 66, 89, 112, 135, 157, 180};
+  for (int i = 0; i < 8; i++) {
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_rotation(child) == steps[i]);
+  }
+  assert(!sz_view_transition_pending(root));
+  sz_view_reduce_motion(root, 1);
+  sz_signal_int_set(value, -90);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert_scale_frame(child, 120, 60, 40, 80);
+  assert(sz_view_paint_rotation(child) == -90.f);
+  assert(!sz_view_transition_pending(root));
+  assert(sz_view_handle_tap(root, 140, 65));
+  assert(sz_signal_int_get(taps) == 1);
+  sk_surface_unref(surface); sz_view_free(root);
+  sz_signal_int_free(value); sz_signal_int_free(taps);
+}
+
+static void test_rotation_field_input(void) {
+  for (int hidden = 0; hidden < 3; hidden++) {
+    SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+    SzSignalInt *value = sz_signal_int(0), *shown = sz_signal_int(1);
+    SzSignalStr *text = sz_signal_str("Retained rotation input");
+    SzView *field = sz_view_text_field(text, "Rotation name");
+    SzView *rotation = sz_view_animated_rotation(value, 8, sz_view_sized(120, 40, field));
+    SzView *visible = hidden == 0 ? sz_view_visibility(shown, rotation) :
+      hidden == 1 ? sz_view_show_when(shown, 1, rotation) : sz_view_offstage(shown, rotation);
+    SzView *root = scale_scene(visible);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    sz_view_focus(root, field); sz_view_set_text_field_sel(field, 2, 5);
+    sz_signal_int_set(value, 90);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_focused(root) == field);
+    assert(sz_view_text_field_sel_start(field) == 2 && sz_view_text_field_sel_end(field) == 5);
+    sz_view_reduce_motion(root, 1);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert_scale_frame(field, 140, 40, 40, 120);
+    float positions[24], trailing[24];
+    const char *source = sz_signal_str_get(text);
+    sk_font_text_positions(sk_text_range(source, strlen(source)), theme.font_px, 0, positions, trailing);
+    assert(sz_view_handle_tap(root, 160, 46 + positions[4]));
+    assert(sz_view_text_field_caret(field) == 4);
+    assert(sz_view_edit_extend_to_xy(field, 160, 46 + positions[8]));
+    assert(sz_view_text_field_sel_start(field) == 4 && sz_view_text_field_sel_end(field) == 8);
+    SzRect caret = sz_view_caret_rect(root, &theme);
+    assert(fabsf(caret.y - (46 + positions[8])) < .01f && caret.h == 1);
+    sz_signal_int_set(shown, 0); sz_signal_int_set(value, -90);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_focused(root) == NULL && !sz_view_transition_pending(root));
+    sz_signal_int_set(shown, 1);
+    assert(sz_view_paint(root, canvas, 320, 240, &theme));
+    assert(sz_view_paint_rotation(field) == -90.f);
+    assert(!strcmp(sz_signal_str_get(text), "Retained rotation input"));
+    sk_surface_unref(surface); sz_view_free(root);
+    sz_signal_int_free(value); sz_signal_int_free(shown); sz_signal_str_free(text);
+  }
+}
+
+static void test_rotation_controls_and_limits(void) {
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1; theme.background = 0xffffffff;
+  SzSignalInt *range = sz_signal_int(0);
+  SzView *slider = sz_view_slider(range, "Rotated range", 0, 100, 1);
+  SzView *root = scale_scene(sz_view_rotate(90, sz_view_sized(80, 40, slider)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert_scale_frame(slider, 120, 60, 40, 80);
+  assert(sz_view_slider_set_at_xy(slider, 140, 120));
+  assert(sz_signal_int_get(range) == 75);
+  assert(sz_view_handle_tap(root, 140, 80));
+  assert(sz_signal_int_get(range) == 25);
+  sz_view_free(root); sz_signal_int_free(range);
+
+  SzSignalInt *fraction = sz_signal_int(50);
+  SzView *split = sz_view_split(fraction, "Rotated split", sz_view_text("A"), sz_view_text("B"));
+  root = scale_scene(sz_view_rotate(90, sz_view_sized(80, 40, split)));
+  sz_view_layout(root, 320, 240, &theme);
+  SzRect handle = sz_view_control_frame(split);
+  assert(handle.x == 120 && handle.y == 97 && handle.w == 40 && handle.h == 6);
+  assert(sz_view_hit_test(root, 140, 100) == split);
+  assert(sz_view_split_set_at_xy(split, 140, 118.5f));
+  assert(sz_signal_int_get(fraction) == 75);
+  sz_view_free(root); sz_signal_int_free(fraction);
+
+  SzView *scroll = sz_view_scroll(sz_view_sized(80, 400, sz_view_text("")));
+  root = sz_view_theme(&theme, scale_scene(sz_view_rotate(90, sz_view_sized(80, 40, scroll))));
+  SzUiConfig config = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 320, .height = 240, .scale = 1};
+  SzUiSession *session = sz_ui_mount(&config, root);
+  assert(session && sz_ui_pump_sync(session));
+  assert(sz_view_scroll_at(root, 140, 65) == scroll);
+  SzInputEvent event = {.kind = SZ_INPUT_POINTER, .pointer_phase = SZ_POINTER_DOWN, .x = 130, .y = 100};
+  assert(sz_ui_inject_sync(session, &event));
+  event.pointer_phase = SZ_POINTER_MOVE; event.x = 150;
+  assert(sz_ui_inject_sync(session, &event));
+  assert(sz_view_scroll_y(scroll) == 20);
+  event.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &event));
+  sz_ui_unmount(session); sz_view_free(root);
+
+  const char *labels[] = {"First", "Second", "Third"};
+  SzSignalList *options = select_test_options(labels, 3);
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *select = sz_view_select(selected, "Rotated select", options);
+  root = scale_scene(sz_view_rotate(90, sz_view_sized(80, 40, select)));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_handle_tap(root, 140, 65));
+  sz_view_layout(root, 320, 240, &theme);
+  assert(sz_view_select_open(select));
+  SzRect popup = sz_view_frame(sz_view_select_popup(select));
+  assert(popup.x == 120 && popup.y == 140 && popup.w == 40);
+  SzView *option = sz_view_select_active_option(select);
+  assert(sz_view_paint_rotation(option) == 0.f);
+  sz_view_free(root); sz_signal_int_free(selected); sz_signal_list_free(options);
+
+  SzSignalInt *limit = sz_signal_int(INT64_MAX);
+  SzView *child = sz_view_sized(80, 40, sz_view_background(0xffff0000, sz_view_text("")));
+  root = scale_scene(sz_view_animated_rotation(limit, INT_MAX, child));
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 240);
+  SkCanvas *canvas = sk_surface_get_canvas(surface);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_signal_int_get(limit) == INT64_MAX);
+  sz_signal_int_set(limit, 0);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  FILE *file = tmpfile(); assert(file);
+  sz_view_transitions_dump_json(root, file); rewind(file);
+  char json[512]; size_t bytes = fread(json, 1, sizeof json - 1, file); json[bytes] = 0; fclose(file);
+  assert(strstr(json, "\"kind\":\"rotation\",\"value\":2147483646,\"target\":0,\"remaining\":2147483646"));
+  sz_view_reduce_motion(root, 1);
+  sz_signal_int_set(limit, INT64_MIN);
+  assert(sz_view_paint(root, canvas, 320, 240, &theme));
+  assert(sz_signal_int_get(limit) == INT64_MIN && !sz_view_transition_pending(root));
+  sk_surface_unref(surface); sz_view_free(root); sz_signal_int_free(limit);
+}
+
+static void test_rotation_wrapping(void) {
+  const char *sources[] = {
+    "This paragraph uses several short words. The layout keeps each word on one line.",
+    "مرحبا بالعالم. This paragraph uses Arabic and Latin words. مرحبا بالعالم.",
+    "नमस्ते दुनिया. This paragraph uses several short words. नमस्ते दुनिया."
+  };
+  SzTheme theme = *sz_theme_default(); theme.pad = theme.gap = 0; theme.px_scale = 1;
+  for (int sample = 0; sample < 3; sample++) {
+    SzView *reference = sz_view_text(sources[sample]);
+    SzView *text = sz_view_text(sources[sample]);
+    SzSignalInt *value = sz_signal_int(0);
+    SzView *marker = sz_view_sized(80, 8, sz_view_text(""));
+    SzView *root = sz_view_column();
+    sz_view_add_child(root, sz_view_animated_rotation(value, 8, text));
+    sz_view_add_child(root, marker);
+    SkSurface *surface = sk_surface_make_raster_n32_premul(240, 640);
+    assert(surface);
+    SkCanvas *canvas = sk_surface_get_canvas(surface);
+    sz_view_layout(reference, 80, 640, &theme);
+    SzRect frame = sz_view_frame(reference);
+    assert(frame.h > theme.font_px * 2);
+    assert(sz_view_paint(root, canvas, 80, 640, &theme));
+    sz_signal_int_set(value, 90);
+    for (int step = 0; step < 8; step++) {
+      assert(sz_view_paint(root, canvas, 80, 640, &theme));
+      assert(fabsf(sz_view_frame(marker).y - frame.h) < .01f);
+      assert(fabsf(sz_view_frame(root).h - frame.h - 8.f) < .01f);
+    }
+    assert(fabsf(sz_view_frame(text).w - frame.h) < .01f);
+    assert(fabsf(sz_view_frame(text).h - frame.w) < .01f);
+    sk_surface_unref(surface); sz_view_free(root); sz_view_free(reference); sz_signal_int_free(value);
+  }
+}
+
 static void position_step(SzView *root, SzView *child, SkCanvas *canvas,
                           int x, int y, const SzTheme *theme) {
   int scale = (int)theme->px_scale;
@@ -22950,6 +23216,8 @@ int main(int argc, char **argv) {
   test_slider_live_records_xy();
   test_scale_geometry(); test_animated_scale_steps(); test_scale_field_input(); test_scale_range_input();
   test_scale_popup_input(); test_scale_drag_input(); test_scale_limits(); test_scale_small_input(); test_scale_record_bounds(); test_scale_wrapping();
+  test_rotation_geometry(); test_animated_rotation_steps(); test_rotation_field_input();
+  test_rotation_controls_and_limits(); test_rotation_wrapping();
   test_animated_position_steps();
   test_animated_position_retains_input();
   test_animated_position_limits();

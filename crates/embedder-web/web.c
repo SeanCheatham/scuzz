@@ -81,6 +81,23 @@ void sz_web_scale_transition(SzView *view, int value, int target, int remaining,
   web_scale_transition(sz_view_id(view), value, target, remaining, suppressed);
 }
 
+EM_JS(void, web_rotate_begin, (uintptr_t view, float degrees, float x, float y, int clipped, float cx, float cy, float cw, float ch), {
+  const f = Module.webFrame;
+  const id = 'rotate:' + Number(view);
+  f.items.push({id, group: true, rotateGroup: {degrees, x, y}, x: 0, y: 0, w: 0, h: 0,
+    parent: f.groups.at(-1), clip: clipped ? [cx, cy, cw, ch] : null});
+  f.groups.push(id);
+});
+void sz_web_rotate_begin(SzView *view, float degrees, float x, float y, int clipped, SzRect clip) {
+  web_rotate_begin(sz_view_id(view), degrees, x, y, clipped, clip.x, clip.y, clip.w, clip.h);
+}
+EM_JS(void, web_rotation_transition, (uintptr_t view, int value, int target, int remaining, int suppressed), {
+  Module.webFrame.transitions.push({id: Number(view), kind: 'rotation', value, target, remaining, suppressed: Boolean(suppressed)});
+});
+void sz_web_rotation_transition(SzView *view, int value, int target, int remaining, int suppressed) {
+  web_rotation_transition(sz_view_id(view), value, target, remaining, suppressed);
+}
+
 EM_JS(void, web_size_transition, (uintptr_t view, int width, int height, int target_width, int target_height, int remaining, int suppressed), {
   Module.webFrame.transitions.push({id: Number(view), kind: 'size', width, height,
     targetWidth: target_width, targetHeight: target_height, remaining, suppressed: Boolean(suppressed)});
@@ -111,7 +128,7 @@ EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t activ
   let parent = item.parent;
   for (let id = parent; id;) {
     const ancestor = Module.webFrame.items.find(item => item.id === id);
-    if (ancestor.scaleGroup) parent = ancestor.parent;
+    if (ancestor.scaleGroup || ancestor.rotateGroup) parent = ancestor.parent;
     id = ancestor.parent;
   }
   Module.webFrame.items.push({id: Number(popup), group: true, role: 56, label: item.label,

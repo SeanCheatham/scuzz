@@ -38,6 +38,7 @@ void scuzz_skia_canvas_save(void *canvas);
 int scuzz_skia_canvas_save_layer_alpha(void *canvas, uint8_t alpha);
 void scuzz_skia_canvas_restore(void *canvas);
 int scuzz_skia_canvas_scale(void *canvas, float factor, float pivot_x, float pivot_y);
+int scuzz_skia_canvas_rotate(void *canvas, float degrees, float pivot_x, float pivot_y);
 void scuzz_skia_canvas_clip_rect(void *canvas, float x, float y, float w,
                                  float h);
 void *scuzz_skia_paint_new(void);

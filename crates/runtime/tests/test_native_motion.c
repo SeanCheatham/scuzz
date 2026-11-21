@@ -74,6 +74,7 @@ static void fixture_build(Fixture *f, int kind) {
     motion = sz_view_animated_content_size(8, body);
     break;
   }
+  case 5: motion = sz_view_animated_rotation(f->value, 8, f->field); break;
   default: assert(!"unknown transition");
   }
   f->root = sz_view_column();
@@ -130,7 +131,7 @@ static void test_keyboard_requests(void) {
 }
 
 static void check_remaining(Fixture *fixture, int kind, int remaining) {
-  const char *kinds[] = {"opacity", "size", "position", "scale", "contentSize"};
+  const char *kinds[] = {"opacity", "size", "position", "scale", "contentSize", "rotation"};
   char prefix[64];
   snprintf(prefix, sizeof prefix, "pumps:%s:", kinds[kind]);
   SzString *dump = sz_view_a11y_dump(fixture->root);
@@ -142,7 +143,7 @@ static void check_remaining(Fixture *fixture, int kind, int remaining) {
 
 static void test_motion_replacement(void) {
   unsetenv("SCUZZ_UI_REDUCED_MOTION");
-  for (int peer = 0; peer <= 1; peer++) for (int kind = 0; kind < 5; kind++) {
+  for (int peer = 0; peer <= 1; peer++) for (int kind = 0; kind < 6; kind++) {
     preference = 1; queued = 0;
     Fixture fixture;
     fixture_make(&fixture, kind);
@@ -195,6 +196,89 @@ static void test_motion_replacement(void) {
     fixture_free(&fixture);
   }
   puts("Native motion: pause, reduction, View replacement, and resume checks pass.");
+}
+
+static void change_rotation(SzView *view, void *env) {
+  (void)view;
+  Fixture *f = env;
+  int next = sz_signal_int_get(f->value) == -90 ? 90 : -90;
+  sz_signal_int_set(f->value, next);
+}
+
+static void test_rotation_recordings(const char *path) {
+  unsetenv("SCUZZ_UI_REDUCED_MOTION");
+  for (int peer = 0; peer <= 1; peer++)
+      for (int initial = 0; initial <= 1; initial++)
+      for (int force = 0; force <= 1; force++)
+      for (int steps = 1; steps <= 5; steps++) for (int cut = 0; cut <= 1; cut++) {
+    Fixture live, replay;
+    if (force) setenv("SCUZZ_UI_REDUCED_MOTION", "1", 1);
+    else unsetenv("SCUZZ_UI_REDUCED_MOTION");
+    preference = initial;
+    int before_queries = queries, before_shutdowns = shutdowns;
+    SzUiConfig cfg = {.kind = peer ? SZ_UI_RUNTIME_MOBILE : SZ_UI_RUNTIME_DESKTOP, .width = 320,
+                     .height = 280, .scale = 1, .reduced_motion = force};
+    live.value = sz_signal_int(-90);
+    live.input = sz_signal_str("Retained input");
+    live.label = sz_signal_str("short");
+    live.action = sz_view_button("Turn", change_rotation, &live);
+    live.field = sz_view_text_field(live.input, "Name");
+    live.root = sz_view_column();
+    sz_view_add_child(live.root, live.action);
+    sz_view_add_child(live.root, sz_view_animated_rotation(live.value, 8, live.field));
+    SzUiSession *session = sz_ui_mount(&cfg, live.root);
+    assert(session && sz_ui_pump_sync(session));
+    assert(queries == before_queries + 1);
+    prepare(&live);
+    assert(sz_ui_session_set_record(session, path));
+    for (int i = 0; i < steps; i++) {
+      SzInputEvent key = {.kind = SZ_INPUT_KEY, .key = "Space"};
+      assert(sz_ui_session_live_inject(session, &key));
+      assert(sz_ui_pump_sync(session));
+      assert(sz_view_transition_pending(live.root) == !(preference || force));
+      if (cut && i + 1 == steps) break;
+      preference = !preference;
+      queued = 1;
+      assert(sz_ui_pump_sync(session));
+      assert(!queued);
+      if (preference || force) assert(!sz_view_motion_pending(live.root));
+    }
+    assert(!strcmp(sz_signal_str_get(live.input), "Retained input"));
+    assert(sz_view_text_field_sel_start(live.field) == 1);
+    assert(sz_view_text_field_sel_end(live.field) == 4);
+    SzString *expected = sz_view_a11y_dump(live.root);
+    int pending = sz_view_motion_pending(live.root);
+    sz_ui_unmount(session);
+    assert(shutdowns == before_shutdowns + 1);
+    int before_presents = presents;
+    cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+    cfg.reduced_motion = !(initial || force);
+    replay.value = sz_signal_int(-90);
+    replay.input = sz_signal_str("Retained input");
+    replay.label = sz_signal_str("short");
+    replay.action = sz_view_button("Turn", change_rotation, &replay);
+    replay.field = sz_view_text_field(replay.input, "Name");
+    replay.root = sz_view_column();
+    sz_view_add_child(replay.root, replay.action);
+    sz_view_add_child(replay.root, sz_view_animated_rotation(replay.value, 8, replay.field));
+    session = sz_ui_mount(&cfg, replay.root);
+    assert(session && sz_ui_pump_sync(session));
+    prepare(&replay);
+    sz_ui_script_run_file(session, path);
+    assert(queries == before_queries + 1 && presents == before_presents);
+    assert(sz_signal_int_get(live.value) == sz_signal_int_get(replay.value));
+    assert(!strcmp(sz_signal_str_get(replay.input), "Retained input"));
+    assert(sz_view_text_field_sel_start(replay.field) == 1);
+    assert(sz_view_text_field_sel_end(replay.field) == 4);
+    assert(sz_view_motion_pending(replay.root) == pending);
+    SzString *actual = sz_view_a11y_dump(replay.root);
+    assert(!strcmp(sz_string_cstr(expected), sz_string_cstr(actual)));
+    sz_string_free(expected); sz_string_free(actual);
+    sz_ui_unmount(session);
+    assert(shutdowns == before_shutdowns + 1);
+    fixture_free(&live); fixture_free(&replay);
+  }
+  remove(path);
 }
 
 int main(void) {
@@ -262,6 +346,7 @@ int main(void) {
     fixture_free(&live); fixture_free(&replay);
   }
   remove(path);
+  test_rotation_recordings(path);
   test_keyboard_requests();
   test_motion_replacement();
   puts("Native motion: 400 recordings replay with equal transitions and retained input.");

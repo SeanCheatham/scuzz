@@ -419,7 +419,8 @@ static int transition_has_axes(const SzView *view) {
 
 static int view_has_transition(const SzView *view) {
   return transition_has_axes(view) || view->kind == SZ_VIEW_ANIMATED_OPACITY ||
-    view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE || view->kind == SZ_VIEW_ANIMATED_SCALE;
+    view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE || view->kind == SZ_VIEW_ANIMATED_SCALE ||
+    view->kind == SZ_VIEW_ANIMATED_ROTATION;
 }
 
 static int motion_pending_node(const SzView *v) {
@@ -495,7 +496,7 @@ static int view_accepts_children(const SzView *view) {
          kind == SZ_VIEW_SELECT || kind == SZ_VIEW_THEME || kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
-         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY || kind == SZ_VIEW_SCALE || kind == SZ_VIEW_ANIMATED_SCALE || kind == SZ_VIEW_ANIMATED_SIZE || kind == SZ_VIEW_ANIMATED_CONTENT_SIZE ||
+         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_ANIMATED_OPACITY || kind == SZ_VIEW_SCALE || kind == SZ_VIEW_ANIMATED_SCALE || kind == SZ_VIEW_ROTATE || kind == SZ_VIEW_ANIMATED_ROTATION || kind == SZ_VIEW_ANIMATED_SIZE || kind == SZ_VIEW_ANIMATED_CONTENT_SIZE ||
          kind == SZ_VIEW_REDUCED_MOTION || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
@@ -580,60 +581,162 @@ static float view_scale(const SzView *view) {
   return 1.f;
 }
 
+static int view_rotation(const SzView *view) {
+  if (view->kind == SZ_VIEW_ROTATE) return view->img_w;
+  if (view->kind == SZ_VIEW_ANIMATED_ROTATION) return view->animation_value;
+  return 0;
+}
+
+static void rotation_sincos(int degrees, double *out_cos, double *out_sin) {
+  int rem = (int)(((int64_t)degrees % 360 + 360) % 360);
+  if (rem == 0) { *out_cos = 1.; *out_sin = 0.; return; }
+  if (rem == 90) { *out_cos = 0.; *out_sin = 1.; return; }
+  if (rem == 180) { *out_cos = -1.; *out_sin = 0.; return; }
+  if (rem == 270) { *out_cos = 0.; *out_sin = -1.; return; }
+  double rad = (double)rem * (3.14159265358979323846 / 180.);
+  *out_cos = cos(rad);
+  *out_sin = sin(rad);
+}
+
 static SzRect scale_pivot_frame(const SzView *view) {
   return view->child_count ? view->children[0]->frame : view->frame;
 }
 
-typedef struct { double scale, x, y; } ViewTransform;
+typedef struct { double scale, a, b, x, y; } ViewTransform;
 
-static ViewTransform display_transform(const SzView *view) {
-  ViewTransform matrix = {1, 0, 0};
-  for (const SzView *p = view; p; p = p->parent) {
-    double scale = view_scale(p);
-    if (scale != 1) {
+static ViewTransform compose_node_transform(ViewTransform matrix, const SzView *p) {
+  double scale = view_scale(p);
+  if (scale != 1.) {
+    SzRect frame = scale_pivot_frame(p);
+    double x = frame.x + frame.w * .5f;
+    double y = frame.y + frame.h * .5f;
+    matrix.x = scale * matrix.x + x * (1. - scale);
+    matrix.y = scale * matrix.y + y * (1. - scale);
+    matrix.scale *= scale;
+    matrix.a *= scale;
+    matrix.b *= scale;
+  }
+  int degrees = view_rotation(p);
+  if (degrees != 0) {
+    double cs, sn;
+    rotation_sincos(degrees, &cs, &sn);
+    if (cs != 1. || sn != 0.) {
       SzRect frame = scale_pivot_frame(p);
       double x = frame.x + frame.w * .5f;
       double y = frame.y + frame.h * .5f;
-      matrix.x = scale * matrix.x + x * (1 - scale);
-      matrix.y = scale * matrix.y + y * (1 - scale);
-      matrix.scale *= scale;
+      double lx = x - (cs * x - sn * y);
+      double ly = y - (sn * x + cs * y);
+      double na = cs * matrix.a - sn * matrix.b;
+      double nb = sn * matrix.a + cs * matrix.b;
+      double nx = cs * matrix.x - sn * matrix.y + lx;
+      double ny = sn * matrix.x + cs * matrix.y + ly;
+      matrix.a = na;
+      matrix.b = nb;
+      matrix.x = nx;
+      matrix.y = ny;
     }
+  }
+  return matrix;
+}
+
+static ViewTransform display_transform(const SzView *view) {
+  ViewTransform matrix = {1., 1., 0., 0., 0.};
+  for (const SzView *p = view; p; p = p->parent) {
+    matrix = compose_node_transform(matrix, p);
     /* Select popups use viewport coordinates. */
     if (p->parent && p->parent->kind == SZ_VIEW_SELECT) break;
   }
   return matrix;
 }
 
+static int display_transform_valid(ViewTransform matrix) {
+  return matrix.scale > 0. && matrix.scale <= FLT_MAX &&
+    isfinite(matrix.a) && isfinite(matrix.b) &&
+    fabs(matrix.a) <= FLT_MAX && fabs(matrix.b) <= FLT_MAX &&
+    isfinite(matrix.x) && isfinite(matrix.y) &&
+    fabs(matrix.x) <= FLT_MAX && fabs(matrix.y) <= FLT_MAX;
+}
+
 float sz_view_paint_scale(const SzView *view) {
   ViewTransform matrix = display_transform(view);
-  return isfinite(matrix.scale) && matrix.scale <= FLT_MAX &&
-    isfinite(matrix.x) && isfinite(matrix.y) && fabs(matrix.x) <= FLT_MAX && fabs(matrix.y) <= FLT_MAX
-      ? (float)matrix.scale : 0;
+  return display_transform_valid(matrix) ? (float)matrix.scale : 0;
+}
+
+float sz_view_paint_rotation(const SzView *view) {
+  if (!view) return 0.f;
+  ViewTransform matrix = display_transform(view);
+  if (!display_transform_valid(matrix)) return 0.f;
+  double total = 0.;
+  for (const SzView *p = view; p; p = p->parent) {
+    total += view_rotation(p);
+    if (p->parent && p->parent->kind == SZ_VIEW_SELECT) break;
+  }
+  return (float)fmax(-FLT_MAX, fmin(FLT_MAX, total));
 }
 
 static float display_float(double value) {
   return (float)fmax(-FLT_MAX, fmin(FLT_MAX, value));
 }
 
+static SzRect transform_rect_bounds(ViewTransform matrix, SzRect frame) {
+  if (!display_transform_valid(matrix)) return (SzRect){0};
+  if (matrix.b == 0. && matrix.a >= 0.) {
+    return (SzRect){display_float(matrix.scale * frame.x + matrix.x),
+      display_float(matrix.scale * frame.y + matrix.y),
+      display_float(matrix.scale * frame.w), display_float(matrix.scale * frame.h)};
+  }
+  const double cx[4] = {frame.x, (double)frame.x + frame.w, (double)frame.x + frame.w, frame.x};
+  const double cy[4] = {frame.y, frame.y, (double)frame.y + frame.h, (double)frame.y + frame.h};
+  double min_x = 0., min_y = 0., max_x = 0., max_y = 0.;
+  for (int i = 0; i < 4; i++) {
+    double px = matrix.a * cx[i] - matrix.b * cy[i] + matrix.x;
+    double py = matrix.b * cx[i] + matrix.a * cy[i] + matrix.y;
+    if (i == 0 || px < min_x) min_x = px;
+    if (i == 0 || py < min_y) min_y = py;
+    if (i == 0 || px > max_x) max_x = px;
+    if (i == 0 || py > max_y) max_y = py;
+  }
+  return (SzRect){display_float(min_x), display_float(min_y),
+    display_float(fmax(0., max_x - min_x)), display_float(fmax(0., max_y - min_y))};
+}
+
 static SzRect display_rect(const SzView *view, SzRect frame) {
-  ViewTransform matrix = display_transform(view);
-  if (!(matrix.scale > 0) || matrix.scale > FLT_MAX ||
-      !isfinite(matrix.x) || !isfinite(matrix.y) ||
-      fabs(matrix.x) > FLT_MAX || fabs(matrix.y) > FLT_MAX) return (SzRect){0};
-  return (SzRect){display_float(matrix.scale * frame.x + matrix.x),
-    display_float(matrix.scale * frame.y + matrix.y),
-    display_float(matrix.scale * frame.w), display_float(matrix.scale * frame.h)};
+  return transform_rect_bounds(display_transform(view), frame);
 }
 
 static int layout_point(const SzView *view, float *x, float *y) {
   if (!isfinite(*x) || !isfinite(*y)) return 0;
   ViewTransform matrix = display_transform(view);
-  if (!(matrix.scale > 0) || matrix.scale > FLT_MAX ||
-      !isfinite(matrix.x) || !isfinite(matrix.y) ||
-      fabs(matrix.x) > FLT_MAX || fabs(matrix.y) > FLT_MAX) return 0;
-  *x = display_float(((double)*x - matrix.x) / matrix.scale);
-  *y = display_float(((double)*y - matrix.y) / matrix.scale);
+  if (!display_transform_valid(matrix)) return 0;
+  if (matrix.b == 0. && matrix.a > 0.) {
+    *x = display_float(((double)*x - matrix.x) / matrix.scale);
+    *y = display_float(((double)*y - matrix.y) / matrix.scale);
+  } else {
+    double det = matrix.a * matrix.a + matrix.b * matrix.b;
+    if (!(det > 0.) || !isfinite(det)) return 0;
+    double ux = (double)*x - matrix.x;
+    double uy = (double)*y - matrix.y;
+    *x = display_float((matrix.a * ux + matrix.b * uy) / det);
+    *y = display_float((-matrix.b * ux + matrix.a * uy) / det);
+  }
   return isfinite(*x) && isfinite(*y);
+}
+
+int sz_view_layout_delta(const SzView *view, float *dx, float *dy) {
+  if (!view || !dx || !dy || !isfinite(*dx) || !isfinite(*dy)) return 0;
+  ViewTransform matrix = display_transform(view);
+  if (!display_transform_valid(matrix)) return 0;
+  if (matrix.b == 0. && matrix.a > 0.) {
+    *dx = display_float((double)*dx / matrix.scale);
+    *dy = display_float((double)*dy / matrix.scale);
+  } else {
+    double det = matrix.a * matrix.a + matrix.b * matrix.b;
+    if (!(det > 0.) || !isfinite(det)) return 0;
+    double ox = *dx, oy = *dy;
+    *dx = display_float((matrix.a * ox + matrix.b * oy) / det);
+    *dy = display_float((-matrix.b * ox + matrix.a * oy) / det);
+  }
+  return isfinite(*dx) && isfinite(*dy);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -1405,9 +1508,8 @@ static int split_set_fraction(SzView *view, int64_t value) {
   return 1;
 }
 
-int sz_view_split_set_at(SzView *view, float x) {
-  if (!view || view->kind != SZ_VIEW_SPLIT || !view->sig_int || !isfinite(x)) return 0;
-  float y = 0;
+int sz_view_split_set_at_xy(SzView *view, float x, float y) {
+  if (!view || view->kind != SZ_VIEW_SPLIT || !view->sig_int || !isfinite(x) || !isfinite(y)) return 0;
   if (!layout_point(view, &x, &y)) return 0;
   SzRect handle = control_layout_frame(view);
   double width = (double)view->frame.w - handle.w;
@@ -1420,10 +1522,15 @@ int sz_view_split_set_at(SzView *view, float x) {
   return split_set_fraction(view, value);
 }
 
-int sz_view_slider_set_at(SzView *view, float x) {
-  if (!view || view->kind != SZ_VIEW_SLIDER || !view->sig_int || !isfinite(x) ||
+int sz_view_split_set_at(SzView *view, float x) {
+  if (!view) return 0;
+  SzRect frame = sz_view_frame(view);
+  return sz_view_split_set_at_xy(view, x, frame.y + frame.h * .5f);
+}
+
+int sz_view_slider_set_at_xy(SzView *view, float x, float y) {
+  if (!view || view->kind != SZ_VIEW_SLIDER || !view->sig_int || !isfinite(x) || !isfinite(y) ||
       !isfinite(view->frame.x) || !isfinite(view->frame.w)) return 0;
-  float y = 0;
   if (!layout_point(view, &x, &y)) return 0;
   int64_t value = view->range_minimum;
   double distance = (double)x - view->frame.x;
@@ -1447,6 +1554,12 @@ int sz_view_slider_set_at(SzView *view, float x) {
   }
   sz_signal_int_set(view->sig_int, value);
   return 1;
+}
+
+int sz_view_slider_set_at(SzView *view, float x) {
+  if (!view) return 0;
+  SzRect frame = sz_view_frame(view);
+  return sz_view_slider_set_at_xy(view, x, frame.y + frame.h * .5f);
 }
 
 void sz_view_slider_release(SzView *view) {
@@ -2177,6 +2290,13 @@ static void a11y_dump_motion(SzView *v, char **buf, size_t *len, size_t *cap) {
       label, v->animation_duration - v->animation_step);
     sz_dump_append(buf, len, cap, line);
   }
+  if (v->kind == SZ_VIEW_ANIMATED_ROTATION && v->animation_ready) {
+    motion_label_copy(v, label, sizeof label);
+    snprintf(line, sizeof line, "rotation:%s=%d\ntarget:rotation:%s=%d\npumps:rotation:%s=%d\n",
+      label, v->animation_value, label, v->animation_target,
+      label, v->animation_duration - v->animation_step);
+    sz_dump_append(buf, len, cap, line);
+  }
   if (v->motion_left <= 0) return;
   motion_label_copy(v, label, sizeof label);
   snprintf(line, sizeof line, "motion:%s:%s=%d\n", motion_name(v->motion),
@@ -2616,6 +2736,23 @@ SzView *sz_view_animated_scale(SzSignalInt *value, int64_t pumps, SzView *child)
   return view;
 }
 
+SzView *sz_view_rotate(int64_t degrees, SzView *child) {
+  SzView *view = view_new(SZ_VIEW_ROTATE);
+  view->img_w = degrees < INT_MIN ? INT_MIN : degrees > INT_MAX ? INT_MAX : (int)degrees;
+  if (child) sz_view_add_child(view, child);
+  return view;
+}
+
+SzView *sz_view_animated_rotation(SzSignalInt *value, int64_t pumps, SzView *child) {
+  if (!value || !child || pumps < 1 || pumps > INT_MAX)
+    sz_panic("Animated rotation needs a Signal, a child, and positive pump count within Int32");
+  SzView *view = view_new(SZ_VIEW_ANIMATED_ROTATION);
+  view->sig_int = value;
+  view->animation_duration = (int)pumps;
+  sz_view_add_child(view, child);
+  return view;
+}
+
 SzView *sz_view_animated_opacity(SzSignalInt *value, int64_t pumps, SzView *child) {
   if (!value || !child || pumps < 1 || pumps > INT_MAX)
     sz_panic("Animated opacity needs a Signal, a child, and positive pump count within Int32");
@@ -2671,8 +2808,9 @@ static int size_collapsed(const SzView *view) {
 
 static void sync_scalar(SzView *view, int suppressed) {
   int64_t source = sz_signal_int_get(view->sig_int);
+  int minimum = view->kind == SZ_VIEW_ANIMATED_ROTATION ? INT_MIN : 0;
   int maximum = view->kind == SZ_VIEW_ANIMATED_OPACITY ? 100 : INT_MAX;
-  int target = source < 0 ? 0 : source > maximum ? maximum : (int)source;
+  int target = source < minimum ? minimum : source > maximum ? maximum : (int)source;
   if (!view->animation_ready || suppressed) {
     view->animation_ready = 1;
     view->animation_value = view->animation_from = view->animation_target = target;
@@ -2763,7 +2901,8 @@ static void sync_transitions(SzView *view, int shown, int reduced) {
   if (view->motion_suppressed) {
     view->motion = SZ_MOTION_NONE; view->motion_left = 0; view->motion_painted = 0;
   }
-  if (view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SCALE)
+  if (view->kind == SZ_VIEW_ANIMATED_OPACITY || view->kind == SZ_VIEW_ANIMATED_SCALE ||
+      view->kind == SZ_VIEW_ANIMATED_ROTATION)
     sync_scalar(view, view->motion_suppressed);
   if (transition_has_axes(view)) sync_axes(view, view->motion_suppressed);
   if (view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE && view->motion_suppressed) {
@@ -2777,7 +2916,8 @@ static void sync_transitions(SzView *view, int shown, int reduced) {
 }
 
 static int animation_lerp(int from, int target, int64_t step, int64_t duration) {
-  return (int)(((duration - step) * from + step * target + duration / 2) / duration);
+  int64_t sum = (duration - step) * from + step * target;
+  return (int)((sum + (sum >= 0 ? duration / 2 : -duration / 2)) / duration);
 }
 
 static int step_transitions(SzView *view) {
@@ -2791,7 +2931,7 @@ static int step_transitions(SzView *view) {
       view->content_h = (float)(((double)(duration - step) * view->content_from_h + (double)step * view->content_target_h) / duration);
       resized = 1;
     } else view->animation_value = animation_lerp(view->animation_from, view->animation_target, step, duration);
-    if (view->kind == SZ_VIEW_ANIMATED_SCALE) resized = 1;
+    if (view->kind == SZ_VIEW_ANIMATED_SCALE || view->kind == SZ_VIEW_ANIMATED_ROTATION) resized = 1;
     if (transition_has_axes(view)) {
       view->animation_axis2 = animation_lerp(view->animation_from_axis2, view->animation_target_axis2, step, duration);
       resized = 1;
@@ -5286,6 +5426,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_SCALE:
   case SZ_VIEW_ANIMATED_SCALE:
+  case SZ_VIEW_ROTATE:
+  case SZ_VIEW_ANIMATED_ROTATION:
   case SZ_VIEW_THEME:
   case SZ_VIEW_BACKGROUND:
   case SZ_VIEW_CLIP:
@@ -5307,7 +5449,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
   case SZ_VIEW_VISIBILITY:
-    if (v->kind == SZ_VIEW_ANIMATED_SCALE) sync_scalar(v, transition_suppressed(v));
+    if (v->kind == SZ_VIEW_ANIMATED_SCALE || v->kind == SZ_VIEW_ANIMATED_ROTATION)
+      sync_scalar(v, transition_suppressed(v));
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     if (v->kind == SZ_VIEW_FOCUS_GROUP)
       restore_group_focus(v);
@@ -5860,9 +6003,20 @@ static int view_clips_children(const SzView *view) {
     view->kind == SZ_VIEW_ANIMATED_CONTENT_SIZE;
 }
 
+static int point_in_layout_rect(const SzView *view, SzRect rect, float x, float y) {
+  if (!view || !isfinite(x) || !isfinite(y)) return 0;
+  ViewTransform matrix = display_transform(view);
+  if (!display_transform_valid(matrix)) return 0;
+  if (matrix.b == 0. && matrix.a >= 0.) {
+    SzRect disp = transform_rect_bounds(matrix, rect);
+    return point_in(&disp, x, y);
+  }
+  float lx = x, ly = y;
+  return layout_point(view, &lx, &ly) && point_in(&rect, lx, ly);
+}
+
 static int point_in_view(const SzView *view, float x, float y) {
-  SzRect frame = sz_view_frame(view);
-  return point_in(&frame, x, y);
+  return view && point_in_layout_rect(view, view->frame, x, y);
 }
 
 static int input_node_allows(const SzView *view, float x, float y) {
@@ -5990,8 +6144,7 @@ static SzView *hit_node(SzView *v, float x, float y) {
     return NULL;
   if (v->inline_action) {
     for (int i = 0; i < v->action_count; i++)
-      { SzRect box = display_rect(v, v->action_boxes[i]);
-        if (point_in(&box, x, y)) return v; }
+      if (point_in_layout_rect(v, v->action_boxes[i], x, y)) return v;
     return NULL;
   }
   if (v->kind == SZ_VIEW_IGNORE_POINTER)
@@ -6016,10 +6169,8 @@ static SzView *hit_node(SzView *v, float x, float y) {
       if (p->interactive) break;
     }
   }
-  if (v->kind == SZ_VIEW_SPLIT || v->kind == SZ_VIEW_EXPANSION_TILE) {
-    SzRect handle = sz_view_control_frame(v);
-    return point_in(&handle, x, y) ? v : NULL;
-  }
+  if (v->kind == SZ_VIEW_SPLIT || v->kind == SZ_VIEW_EXPANSION_TILE)
+    return point_in_layout_rect(v, control_layout_frame(v), x, y) ? v : NULL;
   return v->interactive && point_in_view(v, x, y) ? v : NULL;
 }
 
@@ -6881,6 +7032,31 @@ static SzRect inverse_scale_clip(SzRect rect, float scale, float x, float y) {
   return (SzRect){x0, y0, x1 - x0, y1 - y0};
 }
 
+static SzRect inverse_rotate_clip(SzRect rect, int degrees, float x, float y) {
+  double cs, sn;
+  rotation_sincos(degrees, &cs, &sn);
+  if (cs == 1. && sn == 0.) return rect;
+  const double cx[4] = {rect.x, (double)rect.x + rect.w, (double)rect.x + rect.w, rect.x};
+  const double cy[4] = {rect.y, rect.y, (double)rect.y + rect.h, (double)rect.y + rect.h};
+  double min_x = 0., min_y = 0., max_x = 0., max_y = 0.;
+  for (int i = 0; i < 4; i++) {
+    double ux = cx[i] - x, uy = cy[i] - y;
+    double lx = x + cs * ux + sn * uy;
+    double ly = y - sn * ux + cs * uy;
+    if (i == 0 || lx < min_x) min_x = lx;
+    if (i == 0 || ly < min_y) min_y = ly;
+    if (i == 0 || lx > max_x) max_x = lx;
+    if (i == 0 || ly > max_y) max_y = ly;
+  }
+  float x0 = nextafterf((float)min_x, -INFINITY);
+  float y0 = nextafterf((float)min_y, -INFINITY);
+  float x1 = nextafterf((float)max_x, INFINITY);
+  float y1 = nextafterf((float)max_y, INFINITY);
+  return (SzRect){x0, y0, x1 - x0, y1 - y0};
+}
+
+static SzRect edit_layout_caret_rect(SzView *f);
+
 static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   char buf[256];
   int i;
@@ -7646,7 +7822,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     sz_free(positions);
     sz_free(display);
     if (v->focused) {
-      SzRect cursor = sz_view_caret_rect(v, theme);
+      SzRect cursor = edit_layout_caret_rect(v);
       if (cursor.w > 0.f) paint_rect(c, floorf(cursor.x), cursor.y, cursor.w, cursor.h, theme->foreground);
     }
     sk_canvas_restore(c);
@@ -7799,7 +7975,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       }
     }
     if (v->focused) {
-      SzRect caret = sz_view_caret_rect(v, theme);
+      SzRect caret = edit_layout_caret_rect(v);
       if (caret.w > 0.f)
         paint_rect(c, floorf(caret.x), caret.y, caret.w, caret.h, theme->foreground);
     }
@@ -7901,6 +8077,35 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     }
     sk_canvas_restore(c);
     g_clip = previous_clip; g_radius_rect = previous_radius; g_radius = radius;
+    break;
+  }
+  case SZ_VIEW_ROTATE:
+  case SZ_VIEW_ANIMATED_ROTATION: {
+#ifdef __EMSCRIPTEN__
+    if (v->kind == SZ_VIEW_ANIMATED_ROTATION)
+      sz_web_rotation_transition(v, v->animation_value, v->animation_target,
+        v->animation_duration - v->animation_step, v->motion_suppressed);
+#endif
+    int degrees = view_rotation(v);
+    int reduced = (int)(((int64_t)degrees % 360 + 360) % 360);
+    SzRect frame = scale_pivot_frame(v), previous_clip = g_clip;
+    int previous_radius_on = g_radius_on;
+    float x = frame.x + frame.w * .5f, y = frame.y + frame.h * .5f;
+    sk_canvas_save(c);
+    if (sk_canvas_rotate(c, (float)reduced, x, y)) {
+#ifdef __EMSCRIPTEN__
+      sz_web_rotate_begin(v, (float)reduced, x, y, g_clip_on, g_clip);
+#endif
+      if (g_clip_on) g_clip = inverse_rotate_clip(g_clip, reduced, x, y);
+      if (reduced != 0) g_radius_on = 0;
+      for (i = 0; i < v->child_count; i++) paint_node(v->children[i], c, theme);
+#ifdef __EMSCRIPTEN__
+      sz_web_group_end();
+#endif
+    }
+    sk_canvas_restore(c);
+    g_clip = previous_clip;
+    g_radius_on = previous_radius_on;
     break;
   }
   case SZ_VIEW_ANIMATED_POSITION:
@@ -8560,8 +8765,8 @@ SzView *sz_view_scroll_wheel_target(SzView *root, float x, float y, float dx,
   while (v) {
     double ox = v->scroll_x;
     double oy = v->scroll_y;
-    float scale = sz_view_paint_scale(v);
-    if (scale > 0 && sz_view_scroll_pan(v, dx / scale, dy / scale)) {
+    float ldx = dx, ldy = dy;
+    if (sz_view_layout_delta(v, &ldx, &ldy) && sz_view_scroll_pan(v, ldx, ldy)) {
       v->scroll_x = ox;
       v->scroll_y = oy;
       return v;
@@ -8758,19 +8963,15 @@ static void editor_scroll_to_caret(SzView *v) {
     v->scroll_y = 0.f;
 }
 
-SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
+static SzRect edit_layout_caret_rect(SzView *f) {
   SzRect z = {0, 0, 0, 0};
-  SzView *f;
   float x, y, h;
   int c, n, pre_start, pre_end;
-  if (!root || !theme)
-    return z;
-  f = find_focused_edit(root);
   if (!f)
     return z;
-  theme = &f->layout_theme;
+  const SzTheme *theme = &f->layout_theme;
   if (f->kind == SZ_VIEW_EDITOR)
-    return display_rect(f, editor_caret_rect(f, theme));
+    return editor_caret_rect(f, theme);
   char *display = field_display(f, &c, &pre_start, &pre_end);
   n = (int)strlen(display);
   float *positions = text_positions(display, n, theme->font_px);
@@ -8791,7 +8992,18 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   z.y = y;
   z.w = scale_px(theme, 1.f);
   z.h = h;
-  return display_rect(f, z);
+  return z;
+}
+
+SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
+  SzRect z = {0, 0, 0, 0};
+  SzView *f;
+  if (!root || !theme)
+    return z;
+  f = find_focused_edit(root);
+  if (!f)
+    return z;
+  return display_rect(f, edit_layout_caret_rect(f));
 }
 
 static int caret_offset_at_x(SzView *f, float x) {
@@ -8990,9 +9202,9 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
     return 1;
   }
   if (hit->kind == SZ_VIEW_SLIDER)
-    return sz_view_slider_set_at(hit, x);
+    return sz_view_slider_set_at_xy(hit, x, y);
   if (hit->kind == SZ_VIEW_SPLIT)
-    return sz_view_split_set_at(hit, x);
+    return sz_view_split_set_at_xy(hit, x, y);
   if (hit->kind == SZ_VIEW_OVERLAY) {
     if (hit->sig_int)
       sz_signal_int_set(hit->sig_int, 0);
@@ -9204,6 +9416,12 @@ static void dump_transition_nodes(SzView *view, FILE *file, int *index) {
   }
   if (view->kind == SZ_VIEW_ANIMATED_SCALE) {
     fprintf(file, "%s{\"i\":%d,\"kind\":\"scale\",\"value\":%d,\"target\":%d,\"remaining\":%d,\"suppressed\":%s}",
+      *index ? "," : "", *index, view->animation_value, view->animation_target,
+      view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
+    (*index)++;
+  }
+  if (view->kind == SZ_VIEW_ANIMATED_ROTATION) {
+    fprintf(file, "%s{\"i\":%d,\"kind\":\"rotation\",\"value\":%d,\"target\":%d,\"remaining\":%d,\"suppressed\":%s}",
       *index ? "," : "", *index, view->animation_value, view->animation_target,
       view->animation_duration - view->animation_step, view->motion_suppressed ? "true" : "false");
     (*index)++;
@@ -10238,21 +10456,22 @@ SzView *sz_view_web_find(SzView *v, uintptr_t id) {
 #endif
 
 static void reveal_view(SzView *view) {
-  SzRect frame = sz_view_frame(view);
+  SzRect frame = transform_rect_bounds(compose_node_transform((ViewTransform){1., 1., 0., 0., 0.}, view), view->frame);
   for (SzView *p = view->parent; p; p = p->parent) {
-    if (p->kind != SZ_VIEW_SCROLL) continue;
-    float start = p->scroll_h ? frame.x : frame.y;
-    float extent = p->scroll_h ? frame.w : frame.h;
-    SzRect viewport = sz_view_frame(p);
-    float origin = p->scroll_h ? viewport.x : viewport.y;
-    float available = p->scroll_h ? viewport.w : viewport.h;
-    float delta = start < origin || extent > available ? start - origin :
-      start + extent > origin + available ? start + extent - origin - available : 0;
-    float scale = sz_view_paint_scale(p);
-    if (delta && scale > 0) {
-      sz_view_scroll_by(p, delta / (theme_px_scale(&p->layout_theme) * scale));
-      if (p->scroll_h) frame.x -= delta; else frame.y -= delta;
+    if (p->kind == SZ_VIEW_SCROLL) {
+      float start = p->scroll_h ? frame.x : frame.y;
+      float extent = p->scroll_h ? frame.w : frame.h;
+      float origin = p->scroll_h ? p->frame.x : p->frame.y;
+      float available = p->scroll_h ? p->frame.w : p->frame.h;
+      float delta = start < origin || extent > available ? start - origin :
+        start + extent > origin + available ? start + extent - origin - available : 0;
+      if (delta) {
+        sz_view_scroll_by(p, delta / theme_px_scale(&p->layout_theme));
+        if (p->scroll_h) frame.x -= delta; else frame.y -= delta;
+      }
     }
+    frame = transform_rect_bounds(compose_node_transform((ViewTransform){1., 1., 0., 0., 0.}, p), frame);
+    if (p->parent && p->parent->kind == SZ_VIEW_SELECT) break;
   }
 }
 

@@ -251,3 +251,50 @@ def settledScaleKeepsInputScope(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "scaleShown") == 0 || Timeline.signalInt(t, i, "scaleVisible") == 0 || !Timeline.a11yHas(t, i, """pumps:scale:Scale bounds=0
 """) || Timeline.signalInt(t, i, "scaleValue") > 0 == Timeline.a11yHas(t, i, "textfield:Scale name"))
 
+def rotationStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "rotationValue") == 0 && Timeline.signalInt(t, i, "rotationShown") == 0 && Timeline.signalInt(t, i, "rotationVisible") == 1 && Timeline.signalInt(t, i, "rotationCount") == 0 && Timeline.signalStrHas(t, i, "rotationName", "Retained rotation input"))
+
+def clockwiseSetsRotation(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Turn clockwise", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "rotationValue") == 90
+})
+
+def counterSetsRotation(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Turn counter", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "rotationValue") == -90
+})
+
+def flipSetsRotation(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Flip rotation", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "rotationValue") == 180
+})
+
+def fullTurnSetsRotation(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Full turn", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "rotationValue") == 360
+})
+
+def resetSetsRotation(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Reset rotation", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "rotationValue") == 0
+})
+
+def rotationAddChangesCount(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Rotation add", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "rotationCount") == Timeline.signalInt(t, before, "rotationCount") + 1
+})
+
+def rotationLabelsFollowValues(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "rotationShown") == 0 || Timeline.a11yHas(t, i, s"text:Rotation target: ${Timeline.signalInt(t, i, "rotationValue")}") && Timeline.a11yHas(t, i, s"text:Rotation count: ${Timeline.signalInt(t, i, "rotationCount")}"))
+
+def rotationTargetFollowsSignal(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "rotationShown") == 0 || Timeline.signalInt(t, i, "rotationVisible") == 0 || Timeline.a11yHas(t, i, Str.concat("target:rotation:Rotation bounds=", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "rotationValue")), """
+"""))))
+
+def reducedRotationHasNoPendingPumps(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "rotationShown") == 0 || Timeline.signalInt(t, i, "rotationVisible") == 0 || Timeline.signalInt(t, i, "reduced") == 0 || Timeline.a11yHas(t, i, """pumps:rotation:Rotation bounds=0
+"""))
+
+def visibleRotationKeepsInputScope(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "rotationShown") == 0 || Timeline.signalInt(t, i, "rotationVisible") != 0 == Timeline.a11yHas(t, i, "textfield:Rotation name"))
+
