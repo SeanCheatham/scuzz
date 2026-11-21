@@ -4239,6 +4239,249 @@ if name == 'text':
             assert result.returncode != 0 and 'View.heading level must be 1 through 6' in result.stdout + result.stderr, result
     print('text: invalid constant heading levels are rejected', flush=True)
 
+if name == 'motion':
+    import tempfile, tomllib
+    executable = build / ('motion.exe' if os.name == 'nt' else 'motion')
+    ui_host = repo / 'examples/ui-host/build' / ('ui-host.exe' if os.name == 'nt' else 'ui-host')
+    show_all = [
+        {'op': 'resize', 'width': 640, 'height': 2400, 'scale': 1},
+        {'op': 'tap', 'id': 'checkbox:Show size sample'},
+        {'op': 'tap', 'id': 'checkbox:Show content sample'},
+        {'op': 'tap', 'id': 'checkbox:Show position sample'},
+        {'op': 'tap', 'id': 'checkbox:Show scale sample'},
+        {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+    ]
+    selections = [(0, 1, 8), (1, 2, 10), (2, 3, 12), (3, 1, 11), (4, 2, 12), (5, 4, 15)]
+    select_ops = [{'op': 'select', 'i': idx, 'start': start, 'end': end} for idx, start, end in selections]
+    forward_taps = [
+        {'op': 'tap', 'id': 'button:Fade out'},
+        {'op': 'tap', 'id': 'button:Grow size'},
+        {'op': 'tap', 'id': 'button:Grow content'},
+        {'op': 'tap', 'id': 'button:Far position'},
+        {'op': 'tap', 'id': 'button:Grow scale'},
+        {'op': 'tap', 'id': 'button:Turn clockwise'},
+    ]
+    reverse_taps = [
+        {'op': 'tap', 'id': 'button:Half'},
+        {'op': 'tap', 'id': 'button:Shrink size'},
+        {'op': 'tap', 'id': 'button:Detail content'},
+        {'op': 'tap', 'id': 'button:Near position'},
+        {'op': 'tap', 'id': 'button:Shrink scale'},
+        {'op': 'tap', 'id': 'button:Turn counter'},
+    ]
+    expected_kinds = {'opacity', 'size', 'contentSize', 'position', 'scale', 'rotation'}
+
+    def corpus_event(line):
+        parts = line.split(' ')
+        verb = parts[0]
+        if verb == 'resize':
+            ev = {'op': 'resize', 'width': int(parts[1]), 'height': int(parts[2])}
+            if len(parts) > 3:
+                ev['scale'] = float(parts[3]) if '.' in parts[3] else int(parts[3])
+            return ev
+        if verb == 'tap':
+            rest = line[4:].strip()
+            return {'op': 'tap', 'i': int(rest)} if rest.isdigit() else {'op': 'tap', 'id': rest}
+        if verb == 'pump':
+            return {'op': 'pump', 'k': int(parts[1]) if len(parts) > 1 else 1}
+        if verb == 'reduceMotion':
+            return {'op': 'reduceMotion', 'value': parts[1] == 'true'}
+        if verb == 'lifecycle':
+            return {'op': 'lifecycle', 'phase': parts[1]}
+        if verb == 'select':
+            return {'op': 'select', 'i': int(parts[1]), 'start': int(parts[2]), 'end': int(parts[3])}
+        if verb in ('text', 'type'):
+            rest = line[len(verb) + 1:]
+            head, _, tail = rest.partition(' ')
+            return {'op': verb, 'i': int(head), 'value': tail} if head.isdigit() and tail else {'op': verb, 'value': rest}
+        if verb == 'reload':
+            return {'op': 'reload'}
+        raise AssertionError(f'unexpected corpus verb: {line}')
+
+    with tempfile.TemporaryDirectory(prefix='scuzz-motion-pref-') as tmpdir:
+        root_dir = pathlib.Path(tmpdir)
+
+        def start_ui_server(tag_name, extra_env=None):
+            srv_dir = root_dir / tag_name
+            srv_dir.mkdir(parents=True, exist_ok=True)
+            req_file = srv_dir / 'request.txt'
+            srv_env = dict(base_env,
+                           SCUZZ_EVAL_MIRROR='1',
+                           SCUZZ_UI_RUNTIME='headless',
+                           SCUZZ_EVAL_TAGS=str(srv_dir / 'tags.txt'),
+                           SCUZZ_EV_REQUEST=str(req_file))
+            for key in ('SCUZZ_UI_REDUCED_MOTION', 'SCUZZ_EV_UI_REDUCED_MOTION'):
+                srv_env.pop(key, None)
+            if extra_env:
+                srv_env.update(extra_env)
+            proc = subprocess.Popen([str(ui_host), str(source)],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, env=srv_env, cwd=srv_dir)
+            ready = read_server_line(proc, 30)
+            assert ready == 'ready\n', (tag_name, ready, proc.stderr.read() if proc.poll() is not None else '')
+            return proc, req_file, extra_env or {}
+
+        def run_pair(label, script_path, reduced_opt, srv_tuple, check_all_kinds=True):
+            case_dir = root_dir / label
+            case_dir.mkdir(parents=True, exist_ok=True)
+            base_req = {
+                'TESTRT': '1', 'SERVE': '1', 'KIT': 'sealed',
+                'UI_RUNTIME': 'headless', 'UI_WIDTH': '640', 'UI_HEIGHT': '720', 'UI_SCALE': '1.0',
+                'UI_SCRIPT': str(script_path),
+            }
+            nat_req = dict(base_req,
+                           TIMELINE_DUMP=str(case_dir / 'native.timeline'),
+                           CLAIM_DUMP=str(case_dir / 'native.claims'),
+                           FUZZ_DUMP=str(case_dir / 'native.json'))
+            nat_env = dict(base_env)
+            nat_env.pop('SCUZZ_UI_REDUCED_MOTION', None)
+            if reduced_opt is not None:
+                nat_req['UI_REDUCED_MOTION'] = reduced_opt
+            elif 'SCUZZ_EV_UI_REDUCED_MOTION' in srv_tuple[2]:
+                nat_env['SCUZZ_UI_REDUCED_MOTION'] = srv_tuple[2]['SCUZZ_EV_UI_REDUCED_MOTION']
+            nat_env.update({'SCUZZ_' + k: v for k, v in nat_req.items()})
+            nat_res = subprocess.run([str(executable)], env=nat_env, cwd=case_dir,
+                                     capture_output=True, text=True, timeout=20, preexec_fn=limit)
+            assert nat_res.returncode == 0, (label, nat_res.stdout, nat_res.stderr)
+
+            proc, req_file, _ = srv_tuple
+            ev_req = dict(base_req,
+                          TIMELINE_DUMP=str(case_dir / 'eval.timeline'),
+                          CLAIM_DUMP=str(case_dir / 'eval.claims'),
+                          FUZZ_DUMP=str(case_dir / 'eval.json'),
+                          PROBE_LOG=str(case_dir / 'probe.log'))
+            if reduced_opt is not None:
+                ev_req['UI_REDUCED_MOTION'] = reduced_opt
+            req_file.write_text(''.join(f'{k}={v}\n' for k, v in ev_req.items()))
+            proc.stdin.write('probe\n')
+            proc.stdin.flush()
+            status = read_server_line(proc, 30)
+            log_txt = (case_dir / 'probe.log').read_text() if (case_dir / 'probe.log').exists() else ''
+            assert status == '0\n', (label, status, log_txt)
+
+            for suffix in ('timeline', 'claims'):
+                assert (case_dir / f'eval.{suffix}').read_bytes() == (case_dir / f'native.{suffix}').read_bytes(), (label, suffix)
+            nat_json = json.loads((case_dir / 'native.json').read_text())
+            ev_json = json.loads((case_dir / 'eval.json').read_text())
+            for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y', 'signals'):
+                assert nat_json[field] == ev_json[field], (label, field, nat_json[field], ev_json[field])
+            if check_all_kinds:
+                assert {t['kind'] for t in nat_json['transitions']} == expected_kinds, nat_json['transitions']
+            return nat_json
+
+        def check_selections(dump_json, expected_sel):
+            assert len(dump_json['fields']) == 6, dump_json['fields']
+            for idx, start, end in expected_sel:
+                fld = dump_json['fields'][idx]
+                assert (fld['sel_start'], fld['sel_end']) == (start, end), (idx, fld)
+
+        srv_clean = start_ui_server('clean')
+        srv_ev_rm = start_ui_server('ev-rm', {'SCUZZ_EV_UI_REDUCED_MOTION': '1'})
+        try:
+            # Check initial SCUZZ_UI_REDUCED_MOTION=1 snap and clean server reset on the next probe.
+            s_flight = root_dir / 'flight.json'
+            s_flight.write_text(json.dumps({'v': 1, 'kind': 'inject', 'manualPumps': True,
+                'events': show_all + select_ops + forward_taps + [{'op': 'pump', 'k': 2}, {'op': 'lifecycle', 'phase': 'pause'}]}))
+            d_initial = run_pair('pref-initial-reduced', s_flight, '1', srv_clean)
+            assert d_initial['reducedMotion'] is True
+            assert all(t['remaining'] == 0 and t['suppressed'] is True for t in d_initial['transitions']), d_initial['transitions']
+            check_selections(d_initial, selections)
+
+            d_reset = run_pair('pref-reset-clean', s_flight, None, srv_clean)
+            assert d_reset['reducedMotion'] is False
+            assert all(t['remaining'] == 6 and t['suppressed'] is False for t in d_reset['transitions']), d_reset['transitions']
+            check_selections(d_reset, selections)
+
+            # Check live reduceMotion false override after an initial reduced session preference.
+            s_enable = root_dir / 'enable.json'
+            s_enable.write_text(json.dumps({'v': 1, 'kind': 'inject', 'manualPumps': True,
+                'events': show_all + select_ops + forward_taps + [{'op': 'reduceMotion', 'value': False}] + reverse_taps + [{'op': 'pump', 'k': 2}, {'op': 'lifecycle', 'phase': 'pause'}]}))
+            d_enable = run_pair('pref-live-enable', s_enable, '1', srv_clean)
+            assert d_enable['reducedMotion'] is False
+            assert all(t['remaining'] == 6 and t['suppressed'] is False for t in d_enable['transitions']), d_enable['transitions']
+            check_selections(d_enable, selections)
+
+            # Check mid-transition snap, pause, root and subtree View replacement, resume, and retained selection.
+            text_edits = [{'op': 'text', 'i': idx, 'value': f'Edited field {idx} value'} for idx in range(6)]
+            reselect = [(idx, 0, 6 + idx) for idx in range(6)]
+            reselect_ops = [{'op': 'select', 'i': idx, 'start': s, 'end': e} for idx, s, e in reselect]
+            s_replace = root_dir / 'replace.json'
+            s_replace.write_text(json.dumps({'v': 1, 'kind': 'inject', 'manualPumps': True,
+                'events': (show_all + text_edits + select_ops + forward_taps +
+                           [{'op': 'pump', 'k': 2}, {'op': 'lifecycle', 'phase': 'pause'},
+                            {'op': 'reduceMotion', 'value': True}, {'op': 'reload'},
+                            {'op': 'tap', 'id': 'checkbox:Show rotation sample'},
+                            {'op': 'tap', 'id': 'checkbox:Show rotation sample'}] +
+                           reselect_ops +
+                           [{'op': 'reduceMotion', 'value': False}] + reverse_taps +
+                           [{'op': 'lifecycle', 'phase': 'resume'}, {'op': 'pump', 'k': 2},
+                            {'op': 'lifecycle', 'phase': 'pause'}])}))
+            d_replace = run_pair('pref-pause-replace-resume', s_replace, '0', srv_clean)
+            assert d_replace['reducedMotion'] is False
+            assert all(t['remaining'] == 6 and t['suppressed'] is False for t in d_replace['transitions']), d_replace['transitions']
+            assert [f['value'] for f in d_replace['fields']] == [f'Edited field {idx} value' for idx in range(6)], d_replace['fields']
+            check_selections(d_replace, reselect)
+
+            # Check per-probe request override when SCUZZ_EV_UI_REDUCED_MOTION=1 is set on the server.
+            d_ev_default = run_pair('pref-ev-default', s_flight, None, srv_ev_rm)
+            assert d_ev_default['reducedMotion'] is True and all(t['remaining'] == 0 for t in d_ev_default['transitions'])
+            d_ev_override = run_pair('pref-ev-override-zero', s_flight, '0', srv_ev_rm)
+            assert d_ev_override['reducedMotion'] is False and all(t['remaining'] == 6 for t in d_ev_override['transitions'])
+
+            # Check initial preference recording and replay under opposite initial SCUZZ_UI_REDUCED_MOTION.
+            for init_rm, opp_rm, tail_events, exp_final_rm, live_ref in [
+                ('1', '0', show_all + select_ops + forward_taps + [{'op': 'reduceMotion', 'value': False}] + reverse_taps + [{'op': 'pump', 'k': 2}, {'op': 'lifecycle', 'phase': 'pause'}], False, d_enable),
+                ('0', '1', show_all + select_ops + forward_taps + [{'op': 'pump', 'k': 2}, {'op': 'reduceMotion', 'value': True}, {'op': 'pump', 'k': 1}], True, None),
+            ]:
+                rec_nat = root_dir / f'rec_nat_{init_rm}.json'
+                rec_ev = root_dir / f'rec_ev_{init_rm}.json'
+                empty_script = root_dir / f'empty_{init_rm}.json'
+                empty_script.write_text(json.dumps({'v': 1, 'kind': 'inject', 'manualPumps': True, 'events': []}))
+                nat_rec_env = dict(base_env, SCUZZ_UI_RUNTIME='headless', SCUZZ_UI_WIDTH='640', SCUZZ_UI_HEIGHT='720',
+                                   SCUZZ_UI_SCALE='1.0', SCUZZ_UI_REDUCED_MOTION=init_rm,
+                                   SCUZZ_UI_SCRIPT=str(empty_script), SCUZZ_UI_RECORD=str(rec_nat))
+                subprocess.run([str(executable)], env=nat_rec_env, cwd=root_dir, check=True, capture_output=True, text=True, timeout=20)
+                proc, req_file, _ = srv_clean
+                req_file.write_text(''.join(f'{k}={v}\n' for k, v in {
+                    'UI_RUNTIME': 'headless', 'UI_WIDTH': '640', 'UI_HEIGHT': '720', 'UI_SCALE': '1.0',
+                    'UI_REDUCED_MOTION': init_rm, 'UI_SCRIPT': str(empty_script), 'UI_RECORD': str(rec_ev),
+                    'PROBE_LOG': str(root_dir / f'rec_ev_{init_rm}.log'),
+                }.items()))
+                proc.stdin.write('probe\n')
+                proc.stdin.flush()
+                assert read_server_line(proc, 30) == '0\n'
+                nat_doc = json.loads(rec_nat.read_text())
+                ev_doc = json.loads(rec_ev.read_text())
+                assert nat_doc == ev_doc and nat_doc['events'][0] == {'op': 'reduceMotion', 'value': init_rm == '1'}, (nat_doc, ev_doc)
+                if live_ref is None:
+                    s_live = root_dir / f'live_{init_rm}.json'
+                    s_live.write_text(json.dumps({'v': 1, 'kind': 'inject', 'manualPumps': True, 'events': tail_events}))
+                    live_ref = run_pair(f'pref-live-ref-{init_rm}', s_live, init_rm, srv_clean)
+                full_rec = root_dir / f'full_rec_{init_rm}.json'
+                full_rec.write_text(json.dumps({'v': 1, 'kind': 'inject', 'manualPumps': True,
+                                                'events': [nat_doc['events'][0]] + tail_events}))
+                rep_json = run_pair(f'pref-recorded-{init_rm}-on-{opp_rm}', full_rec, opp_rm, srv_clean)
+                assert rep_json['reducedMotion'] is exp_final_rm
+                for field in ('transitions', 'reducedMotion', 'fields', 'taps', 'a11y', 'signals'):
+                    assert rep_json[field] == live_ref[field], (init_rm, field, rep_json[field], live_ref[field])
+
+            # Replay every corpus file under both initial SCUZZ_UI_REDUCED_MOTION values.
+            for corpus_file in sorted((package / 'corpus').glob('*.toml')):
+                raw_events = tomllib.loads(corpus_file.read_text())['fuzz']['events']
+                corpus_script = root_dir / f'corpus_{corpus_file.stem}.json'
+                corpus_script.write_text(json.dumps({'v': 1, 'kind': 'inject', 'events': [corpus_event(item) for item in raw_events]}))
+                for rm_val in ('0', '1'):
+                    run_pair(f'corpus-{corpus_file.stem}-rm{rm_val}', corpus_script, rm_val, srv_clean,
+                             check_all_kinds=corpus_file.stem == 'preference')
+            print('motion preference parity: initial env, server reset, recordings, pause, View replacement, and selection match across six transition types', flush=True)
+        finally:
+            for srv, _, _ in (srv_clean, srv_ev_rm):
+                srv.terminate()
+                try:
+                    srv.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    srv.kill()
+
 PY_PARITY
 }
 

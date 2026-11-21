@@ -5183,8 +5183,10 @@ static void *fuzz_probe_thunk(void *env) {
   pid_t pid;
   int code;
   char msg[64];
-  if (!req || !req[0])
+  if (!req || !req[0]) {
+    fuzz_probe_env();
     return fuzz_probe_run(program);
+  }
   fflush(stdout);
   fflush(stderr);
   pid = fork();
@@ -5193,6 +5195,7 @@ static void *fuzz_probe_thunk(void *env) {
   if (pid == 0) {
     void *out;
     fuzz_probe_child_limits();
+    fuzz_probe_env();
     fuzz_probe_request(req);
     fuzz_probe_child_log();
     out = fuzz_probe_run(program);
@@ -5217,7 +5220,6 @@ static void *fuzz_probe_run(SzIo *program) {
   void *out = NULL;
   void *outer = sz_sched_detach();
   g_probe_nested = outer != NULL;
-  fuzz_probe_env();
   sz_coverage_env_refresh();
   fuzz_arm_coverage();
   sz_testrt_oracles_refresh();

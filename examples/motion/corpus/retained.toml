@@ -1,2 +1,2 @@
 [fuzz]
-events = ["type Kept", "tap button:Fade out", "pump 10", "tap button:Add", "tap checkbox:Show content", "tap button:Fade in", "tap checkbox:Show content", "tap button:Half"]
+events = ["type Kept", "select 0 0 4", "tap button:Fade out", "pump 2", "reduceMotion true", "tap button:Add", "tap checkbox:Show content", "reduceMotion false", "tap button:Fade in", "tap checkbox:Show content", "reload", "select 0 0 4", "tap button:Half", "pump 8"]

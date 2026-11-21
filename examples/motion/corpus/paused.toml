@@ -1,2 +1,2 @@
 [fuzz]
-events = ["tap button:Fade out", "lifecycle pause", "pump 4", "tap button:Fade in", "lifecycle resume", "tap button:Half", "pump 10"]
+events = ["select 0 0 8", "tap button:Fade out", "lifecycle pause", "pump 4", "reduceMotion true", "reduceMotion false", "tap button:Fade in", "lifecycle resume", "tap button:Half", "pump 10"]
