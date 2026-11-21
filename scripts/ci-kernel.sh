@@ -584,6 +584,11 @@ def pairHandled(text: String): Int =
     checked = Property.check("input", consume(pair._1) != 0, pair._1)
   } yield consume(checked) + pair._2
 
+def validatedEnv(name: String): IO[String] =
+  for {
+    value <- Sys.getenv(name)
+  } yield if (value == "") "unset" else value.require("env", s => s != "")
+
 @main def main: IO[Unit] =
   for {
     _ <- IO.println(Str.fromInt(handled("7")))
@@ -606,6 +611,7 @@ def pairHandled(text: String): Int =
     _ <- IO.println(Str.fromInt(resultReceiver("bad")))
     _ <- IO.println(Str.fromInt(pairHandled("7")))
     _ <- IO.println(Str.fromInt(pairHandled("bad")))
+    _ <- validatedEnv("SCUZZ_UNSET_GUARD_TEST").flatMap(s => IO.println(s))
   } yield ()
 '''
     (root / 'src/Main.scuzz').write_text(source)
@@ -616,7 +622,7 @@ def pairHandled(text: String): Int =
             output = output[1:]
         assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1', '7', '-1',
                           'ok:1,100', 'error:Str.parseInt: invalid integer',
-                          'error:quantity must be 1 through 100', 'ok:', '7', '-1', '9', '1'], (engine, output)
+                          'error:quantity must be 1 through 100', 'ok:', '7', '-1', '9', '1', 'unset'], (engine, output)
     bad = [('_ = List.map(["7", "bad"], text => Str.parseInt(text))', '()', 'Result list is discarded'),
            ('ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
            ('_ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
@@ -697,6 +703,17 @@ def pairHandled(text: String): Int =
            ('result = Str.parseInt("bad")\n    _ = Property.classify("input", consume(result) > 0)', '()', 'discarded in live code'),
            ('opt = Option.Some(Str.parseInt("bad"))', 'Property.check("input", opt match { case Some(v) => consume(v) > 0\ncase None => false }, ())', 'Result option is discarded in live code'),
            ('pair = (Str.parseInt("bad"), 7)\n    _ = Property.check("input", consume(pair._1) > 0, pair._2)', '()', 'discarded in live code'),
+           ('trimmed = Str.trim("  ok  ")\n    _ = (7).require("input", n => trimmed != "")', '()', 'is used only in erased checks in live code'),
+           ('trimmed = Str.trim("  ok  ")', 'Property.check("input", trimmed != "", ())', 'is used only in erased checks in live code'),
+           ('trimmed = Str.trim("  ok  ")\n    _ = Property.assume("input", trimmed != "")', '()', 'is used only in erased checks in live code'),
+           ('trimmed = Str.trim("  ok  ")\n    _ <- Property.assert("input", trimmed != "")', '()', 'is used only in erased checks in live code'),
+           ('raw <- Fs.read("in.txt")\n    _ = Property.assume("input", raw != "")', '()', 'is used only in erased checks in live code'),
+           ('raw <- Fs.read("in.txt")\n    _ <- Property.assert("input", raw != "")', '()', 'is used only in erased checks in live code'),
+           ('raw <- Fs.read("in.txt")\n    _ = Property.assume("input", raw != "")\n    _ <- IO.println(raw)', '()', 'is guarded only by erased checks in live code'),
+           ('raw <- Fs.read("in.txt")\n    _ <- Property.assert("input", raw != "")\n    _ <- IO.println(raw)', '()', 'is guarded only by erased checks in live code'),
+           ('raw <- Fs.read("in.txt")\n    _ <- IO.println(Property.check("input", raw != "", raw))', '()', 'is guarded only by erased checks in live code'),
+           ('secret <- Sys.getenv("KEY")\n    _ <- IO.println(secret.require(v => v != ""))', '()', 'is guarded only by erased checks in live code'),
+           ('args <- Sys.args()\n    _ = Property.assume("args", List.nonEmpty(args))\n    _ <- IO.println(Str.fromInt(List.len(args)))', '()', 'is guarded only by erased checks in live code'),
            ('_ <- 1', '()', '<- needs IO'),
            ('_ <- Str.parseInt("7")', '()', '<- needs IO'),
            ('_ <- [IO.pure(7)]', '()', '<- needs IO')]
