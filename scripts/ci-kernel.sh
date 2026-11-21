@@ -121,6 +121,55 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
             'start': {'line': line - 1, 'character': col - 1},
             'end': {'line': eline - 1, 'character': ecol - 1},
         }, (bad_src, rows[0])
+    multi_bad_src = (
+        'import record.Item\n'
+        'trait record:\n'
+        '  def f(): Int\n'
+        'def depthGuard(): Int = for {\n'
+        '  x = 1 +\n'
+        'record = 2\n'
+        '} yield x\n'
+        'def semanticBad(): Int = "bad" + 1\n'
+        '@main def record: IO[Unit] = IO.println("x")\n'
+    )
+    multi_spans = [
+        (1, 8, 1, 14),
+        (2, 7, 2, 13),
+        (6, 1, 6, 7),
+        (9, 11, 9, 17),
+    ]
+    source_file.write_text(multi_bad_src)
+    fmt_out = command('fmt', root, ok=False)
+    assert 'parse error; source is unchanged' in fmt_out.stdout, fmt_out.stdout
+    assert source_file.read_text() == multi_bad_src
+    human = command('check', root, ok=False).stdout.strip().splitlines()
+    assert human == [
+        f'Main.scuzz:{line}:{col}: error: unexpected token'
+        for line, col, _, _ in multi_spans
+    ], human
+    errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
+    assert [
+        (err['file'], err['message'], err['line'], err['column'], err['end_line'], err['end_column'])
+        for err in errors
+    ] == [
+        ('Main.scuzz', 'unexpected token', line, col, eline, ecol)
+        for line, col, eline, ecol in multi_spans
+    ], errors
+    source_file.write_text(source)
+    rows = [row for row in diagnostics(root, multi_bad_src) if row['severity'] == 1]
+    assert [
+        (row['message'], row['range'])
+        for row in rows
+    ] == [
+        (
+            'unexpected token',
+            {
+                'start': {'line': line - 1, 'character': col - 1},
+                'end': {'line': eline - 1, 'character': ecol - 1},
+            },
+        )
+        for line, col, eline, ecol in multi_spans
+    ], rows
     dep = root / 'dep'
     (dep / 'src').mkdir(parents=True)
     (dep / 'scuzz.toml').write_text('[package]\nname="helper"\n')

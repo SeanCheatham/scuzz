@@ -615,14 +615,35 @@ def ioTypeCompatibility(): Bool =
 def tyckParse(): Bool =
   rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && invalidTokens() && stringDelimiters() && interpolationTypes() && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && parseErrorSpans() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
 
+def wantParseItem(file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
+  Str.concat("{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":", Str.concat(Check.jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))
+
 def wantParseSpan(file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
-  Str.concat("[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":", Str.concat(Check.jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}]"))))))))))
+  Str.concat("[", Str.concat(wantParseItem(file, line, col, eline, ecol), "]"))
+
+def wantParseSpans(spans: List[(String, Int, Int, Int, Int)]): String =
+  Str.concat("[", Str.concat(List.join(List.map(spans, sp => sp match {
+  case (file, line, col, eline, ecol) => wantParseItem(file, line, col, eline, ecol)
+}), ","), "]"))
+
+def wantHumanSpans(spans: List[(String, Int, Int, Int, Int)]): String =
+  List.join(List.map(spans, sp => sp match {
+  case (file, line, col, _, _) => Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), ": error: unexpected token")))))
+}), """
+""")
 
 def checkParseSpan(src: String, line: Int, col: Int, eline: Int, ecol: Int): Bool =
   Check.check(src) == wantParseSpan("Main.scuzz", line, col, eline, ecol) && Check.humanFiles([("Main", src)]) == Str.concat("Main.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), ": error: unexpected token"))))
 
+def checkParseMulti(src: String, spans: List[(Int, Int, Int, Int)]): Bool =
+  for {
+    full = List.map(spans, sp => sp match {
+  case (line, col, eline, ecol) => ("Main.scuzz", line, col, eline, ecol)
+})
+  } yield Check.check(src) == wantParseSpans(full) && Check.humanFiles([("Main", src)]) == wantHumanSpans(full)
+
 def parseErrorSpans(): Bool =
-  parseDeclSpans() && parseParamSpans() && parseSyntaxSpans() && parseMultiFileSpans()
+  parseDeclSpans() && parseParamSpans() && parseSyntaxSpans() && parseMultiErrorSpans() && parseMultiFileSpans()
 
 def parseDeclSpans(): Bool =
   checkParseSpan("def record(): Int = 1", 1, 5, 1, 11) && checkParseSpan("def f() = 1", 1, 9, 1, 10) && checkParseSpan("def f(): = 1", 1, 10, 1, 11) && checkParseSpan("def f(): Int 1", 1, 14, 1, 15) && checkParseSpan("def f[record](): Int = 1", 1, 7, 1, 13) && checkParseSpan("oracle record(): Bool = true", 1, 8, 1, 14) && checkParseSpan("oracle hidden(n: Int): Bool =", 1, 30, 1, 31) && checkParseSpan("private oracle hidden(): Bool = true", 1, 9, 1, 15) && checkParseSpan("private def record(): Int = 1", 1, 13, 1, 19) && checkParseSpan("""enum record:
@@ -641,6 +662,35 @@ def parseSyntaxSpans(): Bool =
 )
 """, 2, 1, 2, 2)
 
+def parseMultiAllBoundariesSrc(): String =
+  "import record.Item\nprivate oracle hidden(): Bool = true\noracle record(): Bool = true\nenum record:\n  case Good\nrecord record(value: Int)\ntype record = Int\ntrait record:\n  def f(): Int\nimpl Show Point:\n  def show(): String = \"x\"\ndef f(x: Int where ): Int = 1\ndef semanticBad(): Int = \"bad\" + true\n@main def record: IO[Unit] = IO.println(1)"
+
+def parseMultiDepthSrc(): String =
+  """def broken(): Int = for {
+  x = 1 +
+record = 2
+} yield x
+def parens(): Int = (
+  1 +
+record
+)
+def brackets(): List[Int] = [
+  1,
+def
+]
+def second(y: Int = ): Int = y"""
+
+def parseMultiTokensSrc(): String =
+  "def badInterp(): String = s\"${1 2}\"\ndef badLex(): Int = 1 $ 2\n@main def first: IO[Unit] = IO.pure(())\n@main def second: IO[Unit] = IO.pure(())"
+
+def parseMultiPkgSrc(): String =
+  """package record
+def ok(): Int = 1
+type Bad ="""
+
+def parseMultiErrorSpans(): Bool =
+  checkParseMulti(parseMultiAllBoundariesSrc(), [(1, 8, 1, 14), (2, 9, 2, 15), (3, 8, 3, 14), (4, 6, 4, 12), (6, 8, 6, 14), (7, 6, 7, 12), (8, 7, 8, 13), (10, 11, 10, 16), (12, 20, 12, 21), (14, 11, 14, 17)]) && checkParseMulti(parseMultiDepthSrc(), [(3, 1, 3, 7), (7, 1, 7, 7), (11, 1, 11, 4), (13, 21, 13, 22)]) && checkParseMulti(parseMultiTokensSrc(), [(1, 33, 1, 34), (2, 23, 2, 24), (4, 1, 4, 6)]) && checkParseMulti(parseMultiPkgSrc(), [(1, 9, 1, 15), (3, 11, 3, 12)])
+
 def parseMultiFileSpans(): Bool =
   Check.checkFiles([("Good", """def good(): Int = 1
 """), ("Broken", """def good2(): Int = 2
@@ -648,7 +698,13 @@ record record(value: Int)
 """)]) == wantParseSpan("Broken.scuzz", 2, 8, 2, 14) && Check.humanFiles([("Good", """def good(): Int = 1
 """), ("Broken", """def good2(): Int = 2
 record record(value: Int)
-""")]) == "Broken.scuzz:2:8: error: unexpected token"
+""")]) == "Broken.scuzz:2:8: error: unexpected token" && Check.checkFiles([("First", "import record.Item\ndef ok(): Int = \"bad\" + 1\ntype record = Int\n"), ("Good", """def good(): Int = 1
+"""), ("Second", """record record(value: Int)
+def f(x: Int = ): Int = 1
+""")]) == wantParseSpans([("First.scuzz", 1, 8, 1, 14), ("First.scuzz", 3, 6, 3, 12), ("Second.scuzz", 1, 8, 1, 14), ("Second.scuzz", 2, 16, 2, 17)]) && Check.humanFiles([("First", "import record.Item\ndef ok(): Int = \"bad\" + 1\ntype record = Int\n"), ("Good", """def good(): Int = 1
+"""), ("Second", """record record(value: Int)
+def f(x: Int = ): Int = 1
+""")]) == wantHumanSpans([("First.scuzz", 1, 8, 1, 14), ("First.scuzz", 3, 6, 3, 12), ("Second.scuzz", 1, 8, 1, 14), ("Second.scuzz", 2, 16, 2, 17)])
 
 def stringDelimiters(): Bool =
   rejects("def wrong(): String = \"open", "unexpected token") && rejects("def wrong(): String = \"open\\\"", "unexpected token") && rejects("def wrong(): String = \"\"\"open", "unexpected token") && rejects("def wrong(): String = s\"open", "unexpected token") && rejects("def wrong(): String = s\"${1", "unexpected token") && rejects("def wrong(): String = s\"${\"open", "unexpected token") && Check.check("def right(): String = \"closed\"") == "[]" && Check.check("def right(): String = \"\"\"closed\"\"\"") == "[]" && Check.check("def right(): String = s\"${\"closed\"}\"") == "[]"
