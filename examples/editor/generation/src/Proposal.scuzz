@@ -30,8 +30,14 @@ def setHash(files: List[(String, String)]): String =
 def safePath(path: String): Bool =
   Str.matches(path, "^src/[A-Za-z_][A-Za-z0-9_]*\\.scuzz$")
 
+def safeVerifyPath(path: String): Bool =
+  Str.matches(path, "^[A-Za-z_][A-Za-z0-9_]*\\.scuzz_verify$")
+
 def sourceSetOk(files: List[(String, String)]): Bool =
   List.nonEmpty(files) && List.len(files) <= 3 && List.len(List.distinct(List.map(files, f => f._1))) == List.len(files) && List.forall(files, f => safePath(f._1)) && List.foldLeft(files, 0, p => p._1 + Str.byteLen(p._2._2)) <= 65536
+
+def ruleSetOk(files: List[(String, String)]): Bool =
+  List.len(files) == 1 && safeVerifyPath(List.at(files, 0)._1) && Str.byteLen(List.at(files, 0)._2) > 0 && Str.byteLen(List.at(files, 0)._2) <= 65536
 
 def relativePath(path: String): Result[String, RelativePath] =
   if (Str.len(path) > 0 && pathChars(path, 0) && List.forall(Str.split(path, "/"), part => part != "" && part != "." && part != "..")) Result.Ok(RelativePath(path)) else Result.Err(Str.concat("invalid relative path: ", path))
@@ -57,6 +63,9 @@ def inside(root: String, path: RelativePath): IO[Unit] =
 def own(root: String): IO[List[(String, String)]] =
   Fs.list(Fs.join(root, "src")).flatMap(ents => IO.foreach(List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".scuzz")), e => e._1)), p => Fs.read(Fs.join(Fs.join(root, "src"), p)).map(s => (Fs.join("src", p), s))))
 
+def ownVerify(root: String): IO[List[(String, String)]] =
+  Fs.list(root).flatMap(ents => IO.foreach(List.sort(List.map(List.filter(ents, e => !e._2 && safeVerifyPath(e._1)), e => e._1)), p => Fs.read(Fs.join(root, p)).map(s => (p, s))))
+
 def inputPath(path: String): Bool =
   path == "scuzz.toml" || Str.startsWith(path, "src/") && Str.endsWith(path, ".scuzz") || !Str.startsWith(path, "build/") && !Str.startsWith(path, ".scuzz/") && (Str.endsWith(path, ".scuzz_scenario") || Str.endsWith(path, ".scuzz_verify")) || Str.startsWith(path, "corpus/") && Str.endsWith(path, ".toml")
 
@@ -77,6 +86,12 @@ def packageInputs(root: String, prefix: String, seen: List[String]): IO[List[(St
 def limits(): Json =
   Json.Obj([("files", Json.Int(3)), ("source_bytes", Json.Int(65536)), ("input_bytes", Json.Int(1048576)), ("response_bytes", Json.Int(131072)), ("context_tokens", Json.Int(4096)), ("output_tokens", Json.Int(1024)), ("request_ms", Json.Int(900000)), ("session_requests", Json.Int(8)), ("search_iterations", Json.Int(32)), ("cards", Json.Int(2)), ("feedback", Json.Int(16))])
 
+def ruleLimits(): Json =
+  Json.Obj([("files", Json.Int(1)), ("source_bytes", Json.Int(65536)), ("input_bytes", Json.Int(1048576)), ("response_bytes", Json.Int(131072)), ("context_tokens", Json.Int(4096)), ("output_tokens", Json.Int(1024)), ("request_ms", Json.Int(900000)), ("session_requests", Json.Int(8))])
+
+def ruleInstructions(): String =
+  "Propose one Timeline => Verdict claim supported by the recorded human preference and its finite witness. Add one new root *.scuzz_verify file or append the claim to one existing root *.scuzz_verify file. Do not alter, remove, or weaken any existing definition. Do not touch live source, scenarios, corpus files, dependencies, or manifests.\nUse Scuzz syntax. Define a public claim as def claimName(t: Timeline): Verdict = ... . Use Verdict.alwaysHas(t, \"a11y\"), Verdict.afterHit(t, \"trigger\", \"a11y\"), Verdict.onHit(t, \"trigger\", (prev, cur) => ...), or Verdict.every(t, i => ...). Every declared trigger must fire on the required workloads or supporting witness. Read UI text and signals from Timeline.a11yHas(t, i, \"...\"), Timeline.signalInt(t, i, \"...\"), or Timeline.signalStrHas(t, i, \"sig\", \"...\"). Finite evidence supports a checkable rule draft, not a universal proof. Omit markdown and explanations.\n"
+
 def instructions(): String =
   "The objective is a long-term direction. Select one small useful addition toward it. Add one input or one action in this request. Keep all existing labels, controls, signals, and helper functions. Keep each existing View.textField and View.button in the replacement source. Keep the current behavior and all fixed checks true. A title change alone is not progress. Keep verification files, scenarios, dependencies, and manifests unchanged.\nRead task, sources, checks, and feedback. For a correction, preserve the intended small addition and correct the reported failure. For a duplicate, select a different useful addition. Do not repeat excluded source.\nUse Scuzz syntax. Scuzz has no statement blocks, val, var, or List(...) constructors. Use String for text, lists as [a, b], List.map(xs, x => ...), and records as record Message(text: String). Bind pure values with name = value in for. Bind IO with name <- effect. Return the final value with yield. Use lambdas for button callbacks. Use named def functions for callbacks with multiple arguments. Use one untyped parameter for a lambda, such as x => ... . Omit markdown and explanations.\nList functions:\nList.append(values: List[A], value: A): List[A]\nList.isEmpty(values: List[A]): Bool\nList.len(values: List[A]): Int\nList.take(values: List[A], count: Int): List[A]\nList.drop(values: List[A], count: Int): List[A]\nList.head(values: List[A]): A\nUse List.isEmpty(values), not values.isEmpty. Use List.take(values, count), not values.take(count).\nUI signatures:\nSignal.make(value: A): Signal[A]\nSignal.get(signal: Signal[A]): A\nSignal.set(signal: Signal[A], value: A): Unit\nSignal.map(signal: Signal[A], f: A => B): Signal[B]\nView.text(value: String): View\nView.bindText(value: Signal[String]): View\nView.textField(value: Signal[String], hint: String): View\nBind a text field to a source Signal[String]. Use Signal.make(\"\") for a new input. Name each control for its actual action. A Send action retains the message before it clears the input.\nView.button(label: String, action: Unit => Unit): View\nView.column(children: List[View]): View\nView.row(children: List[View]): View\nView.each(values: Signal[List[A]], render: A => View): View\nUi.run(render: Unit => View): IO[Unit]\nExample: add a draft field to an existing counter. Preserve the Counter label, count signal, and +1 action.\n@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    draft = Signal.make(\"\")\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column([View.text(\"Counter\"), View.bindText(label), View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)), View.textField(draft, \"Message\")]))\n  } yield ()\nExample: a typed empty list and a callback with two actions.\ndef addMessage(messages: Signal[List[String]], draft: Signal[String]): Unit =\n  for {\n    _ = Signal.set(messages, List.append(Signal.get(messages), Signal.get(draft)))\n    _ = Signal.set(draft, \"\")\n  } yield ()\n\ndef messageView(): View =\n  for {\n    messages = Signal.make([]: List[String])\n    draft = Signal.make(\"\")\n  } yield View.column([View.textField(draft, \"Message\"), View.button(\"Send\", _ => addMessage(messages, draft)), View.each(messages, message => View.text(message))])\nFor the first addition, prefer one input or one action. Add only the state that this addition needs. Use the existing source as the base. Copy only the relevant syntax from an example. Do not replace the app with an example.\nSelect examples that apply to the current source. Preserve existing helper definitions. Implement one addition in this request. Formatting is automatic.\n"
 
@@ -87,6 +102,16 @@ def make(root: String, objective: String, allowed: List[String], compiler: Strin
     inputs <- packageInputs(root, "package", [])
     j = Json.Obj([("v", Json.Int(1)), ("request", Json.Str(id)), ("kind", Json.Str("behavior")), ("objective", Json.Str(objective)), ("baseline", Json.Str(setHash(sources))), ("compiler", Json.Str(compiler)), ("inputs", Json.Str(setHash(inputs))), ("sources", pairsJson(List.filter(sources, f => List.contains(allowed, f._1)))), ("allowed", Json.Arr(List.map(allowed, p => Json.Str(p)))), ("checks", pairsJson(checkInputs(inputs))), ("feedback", Json.Arr(List.takeRight(feedback, 16))), ("limits", limits()), ("instructions", Json.Str(instructions()))])
     _ <- validate(root, j, compiler)
+  } yield j
+
+def makeRule(root: String, objective: String, compiler: String, preference: Json, witness: Json): IO[Json] =
+  for {
+    id <- Uuid.v4()
+    sources <- own(root)
+    verifyFiles <- ownVerify(root)
+    inputs <- packageInputs(root, "package", [])
+    j = Json.Obj([("v", Json.Int(1)), ("request", Json.Str(id)), ("kind", Json.Str("rule")), ("objective", Json.Str(objective)), ("baseline", Json.Str(setHash(sources))), ("compiler", Json.Str(compiler)), ("inputs", Json.Str(setHash(inputs))), ("sources", pairsJson(sources)), ("verify_files", pairsJson(verifyFiles)), ("checks", pairsJson(checkInputs(inputs))), ("preference", preference), ("witness", witness), ("limits", ruleLimits()), ("instructions", Json.Str(ruleInstructions()))])
+    _ <- validateRule(root, j, compiler)
   } yield j
 
 def checkInputs(inputs: List[(String, String)]): List[(String, String)] =
@@ -130,76 +155,123 @@ def outputSafe(root: String, out: String): IO[Unit] =
     _ <- Models.need(exists == 0, "candidate output directory already exists")
   } yield ()
 
-def validate(root: String, j: Json, compiler: String): IO[Unit] =
+def validateRule(root: String, j: Json, compiler: String): IO[Unit] =
   for {
-    _ <- Models.need(keys(j, ["v", "request", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "checks", "feedback", "limits", "instructions"]) && version(j) && str(j, "kind") == "behavior", "invalid request fields or version")
-    _ <- Models.need(Str.matches(str(j, "request"), "^[A-Za-z0-9_-]{1,128}$") && Str.byteLen(str(j, "objective")) > 0 && Str.byteLen(str(j, "objective")) <= 2048 && str(j, "instructions") == instructions(), "invalid objective, request identity, or instructions")
+    _ <- Models.need(keys(j, ["v", "request", "kind", "objective", "baseline", "compiler", "inputs", "sources", "verify_files", "checks", "preference", "witness", "limits", "instructions"]) && version(j) && str(j, "kind") == "rule", "invalid rule request fields or version")
+    _ <- Models.need(Str.matches(str(j, "request"), "^[A-Za-z0-9_-]{1,128}$") && Str.byteLen(str(j, "objective")) > 0 && Str.byteLen(str(j, "objective")) <= 2048 && str(j, "instructions") == ruleInstructions(), "invalid objective, request identity, or instructions")
     _ <- Models.need(Str.matches(compiler, "^[a-f0-9]{64}$") && str(j, "compiler") == compiler, "request compiler does not match")
-    _ <- Models.need(text(field(j, "limits")) == text(limits()) && arrayValue(field(j, "feedback")) && List.len(Json.arr(field(j, "feedback"))) <= 16 && Str.byteLen(text(j)) <= 1048576, "invalid request limits")
-    allow = Json.arr(field(j, "allowed"))
-    paths = List.map(allow, p => Json.strOr(p, ""))
-    _ <- Models.need(List.nonEmpty(paths) && List.forall(allow, p => stringValue(p) && safePath(Json.strOr(p, ""))) && List.len(List.distinct(paths)) == List.len(paths), "invalid allowed source paths")
-    _ <- IO.foreachDiscard(paths, p => checkInside(root, p))
+    _ <- Models.need(text(field(j, "limits")) == text(ruleLimits()) && Str.byteLen(text(j)) <= 1048576, "invalid request limits")
+    pref = field(j, "preference")
+    _ <- Models.need(keys(pref, ["card", "proposal", "decision", "chosen", "rejected"]) && Str.matches(str(pref, "card"), "^[a-f0-9]{64}$") && List.contains(["accept", "baseline"], str(pref, "decision")) && arrayValue(field(pref, "chosen")) && arrayValue(field(pref, "rejected")), "invalid rule preference binding")
+    wit = field(j, "witness")
+    _ <- Models.need(keys(wit, ["id", "workload", "step", "events", "script", "chosen_timeline", "rejected_timeline"]) && Str.matches(str(wit, "id"), "^[a-f0-9]{64}$") && Str.byteLen(str(wit, "workload")) > 0 && arrayValue(field(wit, "events")) && stringValue(field(wit, "script")) && stringValue(field(wit, "chosen_timeline")) && stringValue(field(wit, "rejected_timeline")), "invalid rule witness binding")
     disk <- own(root)
+    verifyFiles <- ownVerify(root)
     inputs <- packageInputs(root, "package", [])
-    _ <- Models.need(str(j, "baseline") == setHash(disk) && text(field(j, "sources")) == text(pairsJson(List.filter(disk, f => List.contains(paths, f._1)))) && str(j, "inputs") == setHash(inputs) && text(field(j, "checks")) == text(pairsJson(checkInputs(inputs))), "stale request baseline or inputs")
+    _ <- Models.need(str(j, "baseline") == setHash(disk) && text(field(j, "sources")) == text(pairsJson(disk)) && text(field(j, "verify_files")) == text(pairsJson(verifyFiles)) && str(j, "inputs") == setHash(inputs) && text(field(j, "checks")) == text(pairsJson(checkInputs(inputs))), "stale request baseline or inputs")
   } yield ()
 
-def response(j: Json, request: Json): IO[List[(String, String)]] =
+def validate(root: String, j: Json, compiler: String): IO[Unit] =
+  if (str(j, "kind") == "rule") validateRule(root, j, compiler) else for {
+  _ <- Models.need(keys(j, ["v", "request", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "checks", "feedback", "limits", "instructions"]) && version(j) && str(j, "kind") == "behavior", "invalid request fields or version")
+  _ <- Models.need(Str.matches(str(j, "request"), "^[A-Za-z0-9_-]{1,128}$") && Str.byteLen(str(j, "objective")) > 0 && Str.byteLen(str(j, "objective")) <= 2048 && str(j, "instructions") == instructions(), "invalid objective, request identity, or instructions")
+  _ <- Models.need(Str.matches(compiler, "^[a-f0-9]{64}$") && str(j, "compiler") == compiler, "request compiler does not match")
+  _ <- Models.need(text(field(j, "limits")) == text(limits()) && arrayValue(field(j, "feedback")) && List.len(Json.arr(field(j, "feedback"))) <= 16 && Str.byteLen(text(j)) <= 1048576, "invalid request limits")
+  allow = Json.arr(field(j, "allowed"))
+  paths = List.map(allow, p => Json.strOr(p, ""))
+  _ <- Models.need(List.nonEmpty(paths) && List.forall(allow, p => stringValue(p) && safePath(Json.strOr(p, ""))) && List.len(List.distinct(paths)) == List.len(paths), "invalid allowed source paths")
+  _ <- IO.foreachDiscard(paths, p => checkInside(root, p))
+  disk <- own(root)
+  inputs <- packageInputs(root, "package", [])
+  _ <- Models.need(str(j, "baseline") == setHash(disk) && text(field(j, "sources")) == text(pairsJson(List.filter(disk, f => List.contains(paths, f._1)))) && str(j, "inputs") == setHash(inputs) && text(field(j, "checks")) == text(pairsJson(checkInputs(inputs))), "stale request baseline or inputs")
+} yield ()
+
+def responseRule(j: Json, request: Json): IO[List[(String, String)]] =
   for {
-    _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "generator", "files"]) && version(j) && str(j, "request") == str(request, "request") && str(j, "baseline") == str(request, "baseline") && str(j, "kind") == str(request, "kind"), "invalid or stale proposal identity")
+    expectedWitness = str(field(request, "witness"), "id")
+    _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "witness", "generator", "files"]) && version(j) && str(j, "request") == str(request, "request") && str(j, "baseline") == str(request, "baseline") && str(j, "kind") == "rule" && str(request, "kind") == "rule" && str(j, "witness") == expectedWitness, "invalid or stale rule identity or witness")
     _ <- Models.need(Str.byteLen(str(j, "generator")) > 0 && Str.byteLen(str(j, "generator")) <= 1024 && Str.byteLen(text(j)) <= 131072, "invalid generator or response size")
     fs = Json.arr(field(j, "files"))
     _ <- Models.need(List.forall(fs, f => keys(f, ["path", "content"]) && stringValue(field(f, "path")) && stringValue(field(f, "content"))), "invalid replacement fields")
     files = pairs(field(j, "files"))
-    allowed = List.map(Json.arr(field(request, "allowed")), p => Json.strOr(p, ""))
-    _ <- Models.need(sourceSetOk(files) && List.forall(files, f => List.contains(allowed, f._1)), "proposal exceeds source scope or limit")
+    _ <- Models.need(ruleSetOk(files), "rule proposal exceeds verify scope or limit")
   } yield files
+
+def response(j: Json, request: Json): IO[List[(String, String)]] =
+  if (str(request, "kind") == "rule") responseRule(j, request) else for {
+  _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "generator", "files"]) && version(j) && str(j, "request") == str(request, "request") && str(j, "baseline") == str(request, "baseline") && str(j, "kind") == str(request, "kind"), "invalid or stale proposal identity")
+  _ <- Models.need(Str.byteLen(str(j, "generator")) > 0 && Str.byteLen(str(j, "generator")) <= 1024 && Str.byteLen(text(j)) <= 131072, "invalid generator or response size")
+  fs = Json.arr(field(j, "files"))
+  _ <- Models.need(List.forall(fs, f => keys(f, ["path", "content"]) && stringValue(field(f, "path")) && stringValue(field(f, "content"))), "invalid replacement fields")
+  files = pairs(field(j, "files"))
+  allowed = List.map(Json.arr(field(request, "allowed")), p => Json.strOr(p, ""))
+  _ <- Models.need(sourceSetOk(files) && List.forall(files, f => List.contains(allowed, f._1)), "proposal exceeds source scope or limit")
+} yield files
 
 def metadata(request: String, baseline: String, generator: String, files: List[(String, String)]): String =
   text(Json.Obj([("v", Json.Int(1)), ("request", Json.Str(request)), ("baseline", Json.Str(baseline)), ("kind", Json.Str("behavior")), ("generator", Json.Str(generator)), ("files", Json.Arr(List.map(files, f => Json.Obj([("path", Json.Str(f._1)), ("sha256", Json.Str(Hash.sha256(f._2)))]))))]))
 
-def importFrom(root: String, dir: String, request: Json): IO[List[(String, String)]] =
+def ruleMetadata(request: String, baseline: String, witness: String, generator: String, files: List[(String, String)]): String =
+  text(Json.Obj([("v", Json.Int(1)), ("request", Json.Str(request)), ("baseline", Json.Str(baseline)), ("kind", Json.Str("rule")), ("witness", Json.Str(witness)), ("generator", Json.Str(generator)), ("files", Json.Arr(List.map(files, f => Json.Obj([("path", Json.Str(f._1)), ("sha256", Json.Str(Hash.sha256(f._2)))]))))]))
+
+def importRuleFrom(root: String, dir: String, request: Json): IO[List[(String, String)]] =
   for {
     _ <- checkInside(dir, "proposal.json")
     raw <- Fs.read(Fs.join(dir, "proposal.json"))
     j <- parse(raw, 131072)
-    _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "generator", "files"]), "invalid publication fields")
+    _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "witness", "generator", "files"]), "invalid rule publication fields")
     fs = Json.arr(field(j, "files"))
-    _ <- Models.need(List.nonEmpty(fs) && List.len(fs) <= 3 && List.forall(fs, f => keys(f, ["path", "sha256"]) && safePath(str(f, "path")) && Str.matches(str(f, "sha256"), "^[a-f0-9]{64}$")), "invalid publication source set")
+    _ <- Models.need(List.len(fs) == 1 && List.forall(fs, f => keys(f, ["path", "sha256"]) && safeVerifyPath(str(f, "path")) && Str.matches(str(f, "sha256"), "^[a-f0-9]{64}$")), "invalid rule publication verify set")
     files <- IO.foreach(fs, f => for {
+  path = str(f, "path")
+  _ <- checkInside(dir, path)
+  _ <- checkInside(root, path)
+  src <- Fs.read(Fs.join(dir, path))
+  _ <- Models.need(Hash.sha256(src) == str(f, "sha256"), "incomplete rule publication")
+} yield (path, src))
+    normalized = Json.Obj(List.concat(List.filter(Json.pairs(j), p => p._1 != "files"), [("files", pairsJson(files))]))
+    validated <- responseRule(normalized, request)
+    walked <- Fs.walk(dir)
+    actual = List.sort(List.map(List.filter(walked, e => !e._2), e => e._1))
+    _ <- Models.need(actual == List.sort("proposal.json" :: List.map(files, f => f._1)), "undeclared publication file")
+  } yield validated
+
+def importFrom(root: String, dir: String, request: Json): IO[List[(String, String)]] =
+  if (str(request, "kind") == "rule") importRuleFrom(root, dir, request) else for {
+  _ <- checkInside(dir, "proposal.json")
+  raw <- Fs.read(Fs.join(dir, "proposal.json"))
+  j <- parse(raw, 131072)
+  _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "generator", "files"]), "invalid publication fields")
+  fs = Json.arr(field(j, "files"))
+  _ <- Models.need(List.nonEmpty(fs) && List.len(fs) <= 3 && List.forall(fs, f => keys(f, ["path", "sha256"]) && safePath(str(f, "path")) && Str.matches(str(f, "sha256"), "^[a-f0-9]{64}$")), "invalid publication source set")
+  files <- IO.foreach(fs, f => for {
   path = str(f, "path")
   _ <- checkInside(dir, path)
   _ <- checkInside(root, path)
   src <- Fs.read(Fs.join(dir, path))
   _ <- Models.need(Hash.sha256(src) == str(f, "sha256"), "incomplete proposal publication")
 } yield (path, src))
-    normalized = Json.Obj(List.concat(List.filter(Json.pairs(j), p => p._1 != "files"), [("files", pairsJson(files))]))
-    validated <- response(normalized, request)
-    walked <- Fs.walk(dir)
-    actual = List.sort(List.map(List.filter(walked, e => !e._2), e => e._1))
-    _ <- Models.need(actual == List.sort("proposal.json" :: List.map(files, f => f._1)), "undeclared publication file")
-    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
-    sources <- own(root)
-    all <- Drive.collectDeps(root, Manifest.parse(toml).deps, List.map(sources, f => (Str.dropRight(Fs.basename(f._1), 6), f._2)))
-    additions = List.filter(files, f => !List.contains(List.map(sources, d => d._1), f._1))
-    _ <- Models.need(!List.exists(additions, f => List.contains(List.map(all, d => d._1), Str.dropRight(Fs.basename(f._1), 6))), "duplicate module stem")
-  } yield validated
+  normalized = Json.Obj(List.concat(List.filter(Json.pairs(j), p => p._1 != "files"), [("files", pairsJson(files))]))
+  validated <- response(normalized, request)
+  walked <- Fs.walk(dir)
+  actual = List.sort(List.map(List.filter(walked, e => !e._2), e => e._1))
+  _ <- Models.need(actual == List.sort("proposal.json" :: List.map(files, f => f._1)), "undeclared publication file")
+  toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+  sources <- own(root)
+  all <- Drive.collectDeps(root, Manifest.parse(toml).deps, List.map(sources, f => (Str.dropRight(Fs.basename(f._1), 6), f._2)))
+  additions = List.filter(files, f => !List.contains(List.map(sources, d => d._1), f._1))
+  _ <- Models.need(!List.exists(additions, f => List.contains(List.map(all, d => d._1), Str.dropRight(Fs.basename(f._1), 6))), "duplicate module stem")
+} yield validated
 
-def publish(root: String, out: String, request: Json, reply: Json, compiler: String): IO[Unit] =
+def publishRule(root: String, out: String, request: Json, reply: Json, compiler: String): IO[Unit] =
   for {
-    _ <- validate(root, request, compiler)
+    _ <- validateRule(root, request, compiler)
     _ <- outputSafe(root, out)
-    rawFiles <- response(reply, request)
-    sources <- own(root)
-    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
-    changed = List.concat(List.filter(sources, f => !List.contains(List.map(rawFiles, r => r._1), f._1)), rawFiles)
-    candidate <- Drive.collectDeps(root, Manifest.parse(toml).deps, List.map(changed, f => (Str.dropRight(Fs.basename(f._1), 6), f._2)))
-    valid = Check.checkFilesOwn(candidate, List.map(changed, f => Str.dropRight(Fs.basename(f._1), 6))) == "[]"
-    files = if (!valid) rawFiles else List.map(rawFiles, f => for {
-  parsed = Parse.parseFile(Str.dropRight(Fs.basename(f._1), 6), f._2)
+    rawFiles <- responseRule(reply, request)
+    files = List.map(rawFiles, f => for {
+  parsed = Parse.parseFile(Str.dropRight(f._1, 13), f._2)
 } yield (f._1, if (Parse.hasParseError(parsed)) f._2 else Parse.pretty(parsed)))
-    _ <- response(Json.set(reply, "files", pairsJson(files)), request)
+    _ <- responseRule(Json.set(reply, "files", pairsJson(files)), request)
     exists <- Fs.exists(out)
     _ <- Models.need(exists == 0, "candidate output directory already exists")
     nonce <- Uuid.v4()
@@ -207,6 +279,38 @@ def publish(root: String, out: String, request: Json, reply: Json, compiler: Str
     _ <- Fs.mkdirs(parent)
     stage = Fs.join(Fs.dirname(parent), Str.concat(".scuzz-publish-", nonce))
     _ <- IO.ensure(for {
+  _ <- Fs.mkdirs(stage)
+  _ <- IO.foreachDiscard(files, f => Fs.write(Fs.join(stage, f._1), f._2))
+  _ <- Fs.write(Fs.join(stage, "proposal.json"), ruleMetadata(str(request, "request"), str(request, "baseline"), str(reply, "witness"), str(reply, "generator"), files))
+  _ <- importRuleFrom(root, stage, request)
+  _ <- validateRule(root, request, compiler)
+  finalExists <- Fs.exists(out)
+  _ <- Models.need(finalExists == 0, "candidate output directory appeared during generation")
+  _ <- Fs.rename(stage, out)
+} yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
+  } yield ()
+
+def publish(root: String, out: String, request: Json, reply: Json, compiler: String): IO[Unit] =
+  if (str(request, "kind") == "rule") publishRule(root, out, request, reply, compiler) else for {
+  _ <- validate(root, request, compiler)
+  _ <- outputSafe(root, out)
+  rawFiles <- response(reply, request)
+  sources <- own(root)
+  toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+  changed = List.concat(List.filter(sources, f => !List.contains(List.map(rawFiles, r => r._1), f._1)), rawFiles)
+  candidate <- Drive.collectDeps(root, Manifest.parse(toml).deps, List.map(changed, f => (Str.dropRight(Fs.basename(f._1), 6), f._2)))
+  valid = Check.checkFilesOwn(candidate, List.map(changed, f => Str.dropRight(Fs.basename(f._1), 6))) == "[]"
+  files = if (!valid) rawFiles else List.map(rawFiles, f => for {
+  parsed = Parse.parseFile(Str.dropRight(Fs.basename(f._1), 6), f._2)
+} yield (f._1, if (Parse.hasParseError(parsed)) f._2 else Parse.pretty(parsed)))
+  _ <- response(Json.set(reply, "files", pairsJson(files)), request)
+  exists <- Fs.exists(out)
+  _ <- Models.need(exists == 0, "candidate output directory already exists")
+  nonce <- Uuid.v4()
+  parent = Fs.dirname(out)
+  _ <- Fs.mkdirs(parent)
+  stage = Fs.join(Fs.dirname(parent), Str.concat(".scuzz-publish-", nonce))
+  _ <- IO.ensure(for {
   _ <- Fs.mkdirs(Fs.join(stage, "src"))
   _ <- IO.foreachDiscard(files, f => Fs.write(Fs.join(stage, f._1), f._2))
   _ <- Fs.write(Fs.join(stage, "proposal.json"), metadata(str(request, "request"), str(request, "baseline"), str(reply, "generator"), files))
@@ -216,7 +320,7 @@ def publish(root: String, out: String, request: Json, reply: Json, compiler: Str
   _ <- Models.need(finalExists == 0, "candidate output directory appeared during generation")
   _ <- Fs.rename(stage, out)
 } yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
-  } yield ()
+} yield ()
 
 def validAbstentionReason(reason: String): Bool =
   reason == "" || reason == "no-visible-difference" || reason == "need-another-scenario" || reason == "outside-my-goal"

@@ -176,15 +176,7 @@ Keep those unknowns explicit in `gaps.md`.
 
 ## Implementation gates
 
-### 1. Offer a rule from a preference
-
-Add an explicit Suggest rule action for a recorded choice. Use the same local model path or external import with a rule request kind. External mode exports the rule request and waits for a matching published draft. A rule response contains added claim source and the supporting witness identity. It can add a root `*.scuzz_verify` file or add claims to one existing verify file. It cannot alter existing definitions or the scenario.
-
-Show rule source and the witness in a separate rule review. Check and replay all required workloads with the rule. Install only after the developer selects Install rule. Use the same stale-input, dirty-buffer, journal, and Undo checks. Invalidate behavior cards after installation. A failed or unsupported draft stays a draft with a diagnostic.
-
-**Gate:** A behavior choice never writes verification source. Rule installation needs its own action. A rejected rule changes no file. A weakened existing claim is rejected. An untriggered new claim cannot be offered as verified. Installation and Undo preserve existing claims and recover after interruption. The installed rule constrains a later behavior proposal. Finite evidence does not become a universal proof label.
-
-### 2. Prove and refine the complete session
+### 1. Prove and refine the complete session
 
 Use existing examples for the proof. Exercise one UI objective and one IO objective in scratch workspaces. Include generation, candidate checks, a short witness, each lane choice, abstention, next-baseline generation, Undo, rule review, restart, and a session summary. Include invalid, stale, and interrupted operations. Keep the simulation proof hermetic. Add live finite Headless proofs for the real local process, private HTTP, and filesystem paths.
 

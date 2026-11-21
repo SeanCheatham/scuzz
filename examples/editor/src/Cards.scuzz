@@ -377,7 +377,7 @@ def finish(root: String, op: Json): IO[Unit] =
     _ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")
     _ <- IO.foreachDiscard(ws, w => writeOne(root, w))
     _ <- Fs.write(recordPath(root, id), text(op))
-    _ <- Fs.write(Fs.join(storage(root), "last.json"), if (str(op, "decision") == "accept") text(op) else "")
+    _ <- Fs.write(Fs.join(storage(root), "last.json"), if (str(op, "decision") == "accept" || str(op, "decision") == "install-rule") text(op) else "")
     _ <- Fs.write(Fs.join(storage(root), "journal.json"), "")
   } yield ()
 
@@ -457,14 +457,15 @@ def undo(root: String): IO[Unit] =
   } yield ()
 
 def validAccepted(prior: Json): Bool =
-  str(prior, "decision") == "accept" && validOperation(prior)
+  List.contains(["accept", "install-rule"], str(prior, "decision")) && validOperation(prior)
 
 def validOperation(op: Json): Bool =
   for {
     card = str(op, "card")
     decision = str(op, "decision")
     ws = Json.arr(Diags.jsonField(op, "writes"))
-  } yield List.contains(["accept", "undo"], decision) && Str.matches(card, "^[a-f0-9]{64}$") && str(op, "operation") == Str.concat(decision, Str.concat("-", card)) && List.nonEmpty(ws) && List.len(ws) <= 3 && List.len(List.distinct(List.map(ws, w => str(w, "path")))) == List.len(ws) && List.forall(ws, w => safePath(str(w, "path")) && Json.isStr(Diags.jsonField(w, "before")) && Json.isStr(Diags.jsonField(w, "after")) && Json.isBool(Diags.jsonField(w, "before_exists")) && Json.isBool(Diags.jsonField(w, "after_exists")) && (Json.getBool(w, "before_exists", false) || str(w, "before") == "") && (Json.getBool(w, "after_exists", false) || str(w, "after") == ""))
+    pathsOk = if (decision == "accept") List.nonEmpty(ws) && List.len(ws) <= 3 && List.forall(ws, w => safePath(str(w, "path"))) else if (decision == "install-rule") List.len(ws) == 1 && Str.matches(str(List.at(ws, 0), "path"), "^[A-Za-z_][A-Za-z0-9_]*\\.scuzz_verify$") && Json.getBool(List.at(ws, 0), "after_exists", false) else List.nonEmpty(ws) && List.len(ws) <= 3 && (List.forall(ws, w => safePath(str(w, "path"))) || List.len(ws) == 1 && Str.matches(str(List.at(ws, 0), "path"), "^[A-Za-z_][A-Za-z0-9_]*\\.scuzz_verify$"))
+  } yield List.contains(["accept", "install-rule", "undo"], decision) && Str.matches(card, "^[a-f0-9]{64}$") && str(op, "operation") == Str.concat(decision, Str.concat("-", card)) && pathsOk && List.len(List.distinct(List.map(ws, w => str(w, "path")))) == List.len(ws) && List.forall(ws, w => Json.isStr(Diags.jsonField(w, "before")) && Json.isStr(Diags.jsonField(w, "after")) && Json.isBool(Diags.jsonField(w, "before_exists")) && Json.isBool(Diags.jsonField(w, "after_exists")) && (Json.getBool(w, "before_exists", false) || str(w, "before") == "") && (Json.getBool(w, "after_exists", false) || str(w, "after") == ""))
 
 def undoOperation(prior: Json, now: Int): Json =
   for {
@@ -562,4 +563,302 @@ def summaryLines(summary: Json): List[String] =
 } yield Str.concat("Audit ", Str.concat(str(a, "proposal"), Str.concat(" (", Str.concat(Str.take(str(a, "card"), 8), Str.concat("): ", Str.concat(str(a, "status"), Str.concat(" [", Str.concat(fileText, "]")))))))))
     header = [str(summary, "measure_note"), Str.concat("Accepted: ", Str.concat(Str.fromInt(Json.getInt(summary, "accepted", 0)), Str.concat("; retained: ", Str.concat(Str.fromInt(Json.getInt(summary, "retained_acceptances", 0)), Str.concat("; retained / active review min: ", str(summary, "retained_per_review_minute")))))), Str.concat("Baseline choices: ", Str.concat(Str.fromInt(Json.getInt(summary, "baseline_choices", 0)), Str.concat("; Undo: ", Str.fromInt(Json.getInt(summary, "undo", 0))))), Str.concat("Abstentions: ", Str.concat(Str.fromInt(Json.getInt(summary, "abstentions", 0)), Str.concat(" (no-visible-difference: ", Str.concat(Str.fromInt(Json.getInt(byReason, "no-visible-difference", 0)), Str.concat(", need-another-scenario: ", Str.concat(Str.fromInt(Json.getInt(byReason, "need-another-scenario", 0)), Str.concat(", outside-my-goal: ", Str.concat(Str.fromInt(Json.getInt(byReason, "outside-my-goal", 0)), Str.concat(", unspecified: ", Str.concat(Str.fromInt(Json.getInt(byReason, "unspecified", 0)), ")")))))))))), Str.concat("Automatic exclusions: ", Str.concat(Str.fromInt(Json.getInt(summary, "automatic_exclusions", 0)), Str.concat("; duplicates: ", Str.fromInt(Json.getInt(summary, "duplicates", 0))))), Str.concat("Readiness wait: ", Str.concat(Str.fromInt(Json.getInt(summary, "readiness_ms", 0)), Str.concat(" ms; active review time: ", Str.concat(Str.fromInt(Json.getInt(summary, "review_ms", 0)), " ms")))), Str.concat("Workspace SHA-256: ", str(summary, "workspace_sha256"))]
   } yield List.concat(header, auditLines)
+
+private def setupRuleStorage(root: String): IO[Unit] =
+  for {
+    _ <- setupStorage(root)
+    _ <- Fs.mkdirs(Fs.join(storage(root), "rules"))
+    _ <- inside(root, ".scuzz/ide/rules")
+  } yield ()
+
+def ruleDir(root: String, id: String): String =
+  Fs.join(Fs.join(storage(root), "rules"), id)
+
+def isRulePublication(root: String, name: String): IO[Bool] =
+  if (!Str.matches(name, "^[A-Za-z0-9_-]+$")) IO.pure(false) else (for {
+  relative = Fs.join(Fs.join("build/proposals", name), "proposal.json")
+  _ <- inside(root, relative)
+  raw <- readOptional(Fs.join(root, relative))
+} yield Json.parse(raw) match {
+  case Result.Ok(j) => Json.isObj(j) && str(j, "kind") == "rule"
+  case Result.Err(_) => false
+}).handleErrorWith(_ => IO.pure(false))
+
+private def activePreferenceRecords(root: String): IO[List[Json]] =
+  for {
+    records <- loadRecords(root)
+    undoneCards = List.distinct(List.map(List.filter(records, r => str(r, "kind") != "automatic" && str(r, "decision") == "undo"), r => str(r, "card")))
+    candidates = List.filter(records, r => str(r, "kind") != "automatic" && List.contains(["accept", "baseline", "reject"], str(r, "decision")) && !(str(r, "decision") == "accept" && List.contains(undoneCards, str(r, "card"))) && Str.matches(str(r, "card"), "^[a-f0-9]{64}$"))
+    kept <- IO.foreach(candidates, r => Fs.exists(Fs.join(cardDir(root, str(r, "card")), "card.json")).map(hit => if (hit != 0) r else Json.Null()))
+  } yield List.filter(kept, r => !Json.isNull(r))
+
+def latestPreferenceCard(root: String): IO[String] =
+  activePreferenceRecords(root).map(rs => if (List.isEmpty(rs)) "" else str(List.at(List.reverse(rs), 0), "card"))
+
+private def cardWitnessScript(root: String, cardId: String, evidence: Json, events: List[String]): IO[String] =
+  for {
+    wits = Json.arr(Diags.jsonField(evidence, "witnesses"))
+    matched = List.filter(wits, w => List.map(Json.arr(Diags.jsonField(w, "events")), e => Json.strOr(e, "")) == events)
+    picked = if (List.nonEmpty(matched)) List.at(matched, 0) else Json.Null()
+    name = Fs.basename(str(picked, "path"))
+    body <- if (!Json.isNull(picked) && Str.matches(name, "^witness-[a-f0-9]{16}\\.toml$")) inside(root, Fs.join(".scuzz/ide/cards", Fs.join(cardId, name))).flatMap(_ => readOptional(Fs.join(cardDir(root, cardId), name))).handleErrorWith(_ => IO.pure("")) else IO.pure("")
+  } yield if (!Str.isEmpty(body)) body else Verify.withOracle(Verify.reproText("0", "", Verify.noStr(), events), events)
+
+def choiceRuleInputs(root: String, cardId: String): IO[(Json, Json)] =
+  for {
+    _ <- need(Str.matches(cardId, "^[a-f0-9]{64}$"), "select a recorded preference choice before Suggest rule")
+    _ <- inside(root, Fs.join(".scuzz/ide/cards", Fs.join(cardId, "card.json")))
+    prefs <- activePreferenceRecords(root)
+    matches0 = List.filter(prefs, r => str(r, "card") == cardId)
+    _ <- need(List.nonEmpty(matches0), "select a recorded preference choice before Suggest rule")
+    rec = List.at(List.reverse(matches0), 0)
+    decision = if (str(rec, "decision") == "accept") "accept" else "baseline"
+    cardRaw <- Fs.read(Fs.join(cardDir(root, cardId), "card.json"))
+    card <- Proposal.parse(cardRaw, 1048576)
+    baseSrcs = pairs(Diags.jsonField(card, "baseline"))
+    propSrcs = applyPaths(baseSrcs, propsOf(card))
+    chosenSrcs = if (decision == "accept") propSrcs else baseSrcs
+    rejectedSrcs = if (decision == "accept") baseSrcs else propSrcs
+    preference = Json.Obj([("card", Json.Str(cardId)), ("proposal", Json.Str(str(card, "proposal"))), ("decision", Json.Str(decision)), ("chosen", pairsJson(chosenSrcs)), ("rejected", pairsJson(rejectedSrcs))])
+    evidence = Diags.jsonField(card, "evidence")
+    recQ = Diags.jsonField(rec, "question")
+    cardQ = Diags.jsonField(card, "question")
+    question = if (!Str.isEmpty(str(recQ, "workload"))) recQ else cardQ
+    workLabel = str(question, "workload")
+    step = Json.getInt(question, "step", 0)
+    work = Lanes.workAt(evidence, workLabel)
+    _ <- need(!Json.isNull(work), "recorded choice has no supporting witness")
+    pathA = Lanes.workPath(work, "a")
+    pathB = Lanes.workPath(work, "b")
+    _ <- need(Str.matches(pathA, "^[A-Za-z0-9_-]+\\.txt$") && Str.matches(pathB, "^[A-Za-z0-9_-]+\\.txt$"), "unsafe witness timeline path")
+    _ <- inside(root, Fs.join(".scuzz/ide/cards", Fs.join(cardId, pathA)))
+    _ <- inside(root, Fs.join(".scuzz/ide/cards", Fs.join(cardId, pathB)))
+    tlA <- Fs.read(Fs.join(cardDir(root, cardId), pathA))
+    tlB <- Fs.read(Fs.join(cardDir(root, cardId), pathB))
+    chosenTl = if (decision == "accept") tlB else tlA
+    rejectedTl = if (decision == "accept") tlA else tlB
+    events = List.map(Json.arr(Diags.jsonField(work, "events")), e => Json.strOr(e, ""))
+    script <- cardWitnessScript(root, cardId, evidence, events)
+    witnessId = Hash.sha256(text(Json.Obj([("card", Json.Str(cardId)), ("decision", Json.Str(decision)), ("workload", Json.Str(workLabel)), ("step", Json.Int(step)), ("events", Diags.jsonField(work, "events")), ("chosen_sha256", Json.Str(Hash.sha256(chosenTl)))])))
+    witness = Json.Obj([("id", Json.Str(witnessId)), ("workload", Json.Str(workLabel)), ("step", Json.Int(step)), ("events", Diags.jsonField(work, "events")), ("script", Json.Str(script)), ("chosen_timeline", Json.Str(Str.take(chosenTl, 8192))), ("rejected_timeline", Json.Str(Str.take(rejectedTl, 8192)))])
+  } yield (preference, witness)
+
+private def ruleRequestContext(request: Json): String =
+  text(Json.Obj(List.map(["v", "kind", "objective", "baseline", "compiler", "inputs", "sources", "verify_files", "checks", "preference", "witness", "limits", "instructions"], key => (key, Proposal.field(request, key)))))
+
+private def ruleInputs(root: String, request: Json): IO[List[(String, String)]] =
+  for {
+    files <- packageInputs(root, "package", [])
+    compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+    session <- sessionContext(root)
+    cli <- compilerIdentity()
+    _ <- Proposal.validateRule(root, request, cli)
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    host <- if (Manifest.parse(toml).hasUi) Main.scuzzCli().flatMap(scuzz => Drive.uiHostExe(scuzz)).flatMap(exe => need(exe != "", "UI review host is unavailable").flatMap(_ => executableIdentity(exe))) else IO.pure(cli)
+  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("review-host", host), ("rule-request-context", ruleRequestContext(request)), ("session-context", session), ("objective", str(request, "objective"))])
+
+private def activeRuleRequestRaw(root: String): IO[String] =
+  readOptional(Fs.join(storage(root), "rule-request.json")).flatMap(saved => if (!Str.isEmpty(saved)) IO.pure(saved) else readOptional(Fs.join(root, "build/ide/rule-request.json")))
+
+private def ruleProposalRequest(root: String, name: String): IO[Json] =
+  for {
+    _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
+    path = Fs.join(Fs.join("build/proposals", name), "proposal.json")
+    _ <- inside(root, path)
+    publicationRaw <- Fs.read(Fs.join(root, path))
+    publication <- Proposal.parse(publicationRaw, 131072)
+    _ <- need(str(publication, "kind") == "rule", "publication is not a rule draft")
+    id = str(publication, "request")
+    _ <- need(Str.matches(id, "^[A-Za-z0-9_-]{1,128}$"), "unsafe publication request identity")
+    latestRaw <- activeRuleRequestRaw(root)
+    _ <- need(!Str.isEmpty(latestRaw), "no exported rule request is active")
+    latest <- Proposal.parse(latestRaw, 1048576)
+    archive <- requestArchive(root, id)
+    request = Proposal.field(archive, "request")
+    session <- sessionContext(root)
+    _ <- need(str(archive, "session") == session && str(request, "request") == str(latest, "request") && ruleRequestContext(request) == ruleRequestContext(latest), stalePublicationMessage())
+    compiler <- compilerIdentity()
+    _ <- Proposal.validateRule(root, latest, compiler)
+    _ <- Proposal.validateRule(root, request, compiler)
+  } yield request
+
+private def existingVerifyPairs(root: String): IO[List[(String, String)]] =
+  packageInputs(root, "package", []).map(ins => List.map(List.filter(ins, f => Str.startsWith(f._1, "package/") && Str.endsWith(f._1, ".scuzz_verify")), f => (Str.drop(f._1, 8), f._2)))
+
+private def ruleFailReport(why: String, addedSrc: String, workRows: List[Json]): Json =
+  Json.Obj([("status", Json.Str("draft")), ("diagnostic", Json.Str(why)), ("added_source", Json.Str(addedSrc)), ("added_claims", Json.Arr([])), ("declared_triggers", Json.Arr([])), ("reached_triggers", Json.Arr([])), ("workloads", Json.Arr(workRows)), ("scope_note", Json.Str("Draft failed verification. Finite evidence does not establish a universal proof."))])
+
+def ruleStaticCheck(root: String, targetPath: String, proposedSrc: String): IO[(String, String, List[(String, String)], List[(String, String)], List[(String, String)], String)] =
+  if (!Proposal.safeVerifyPath(targetPath)) IO.pure(("rule path must be a root *.scuzz_verify file", "", [], [], [], "")) else for {
+  _ <- inside(root, targetPath)
+  toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+  m = Manifest.parse(toml)
+  _ <- Drive.manNeed(m)
+  ents <- Fs.list(Fs.join(root, "src"))
+  ownSrcs <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
+  liveAll <- Drive.collectDeps(root, m.deps, ownSrcs)
+  ens = Verify.ensOfFiles(liveAll)
+  scn <- Drive.fuzzReadScenario(root)
+  existingVers <- existingVerifyPairs(root)
+  existingHit = List.exists(existingVers, v => v._1 == targetPath)
+  existingSrc = List.getOrElse(List.map(existingVers, v => v._2), List.indexOf(List.map(existingVers, v => v._1), targetPath), "")
+  targetStem = Str.dropRight(targetPath, 13)
+  proposedProg = Parse.parseFile(targetStem, proposedSrc)
+  existingProg = if (existingHit) Parse.parseFile(targetStem, existingSrc) else Parse.emptyProg()
+  verMsg = Verify.checkVerifyEns(proposedSrc, targetPath, ens)
+  prefixPreserved = !existingHit || List.len(proposedProg.defs) > List.len(existingProg.defs) && List.map(List.take(proposedProg.defs, List.len(existingProg.defs)), d => Parse.prettyFun(d)) == List.map(existingProg.defs, d => Parse.prettyFun(d))
+  addedDefs = if (!prefixPreserved || Parse.hasParseError(proposedProg)) Parse.noFun() else List.drop(proposedProg.defs, List.len(existingProg.defs))
+  claimsValid = List.nonEmpty(addedDefs) && List.exists(addedDefs, d => Verify.isClaim(d) && List.len(d.params) == 1) && List.forall(addedDefs, d => d.priv || Verify.isClaim(d) && List.len(d.params) == 1 && Str.contains(Parse.pretty0(d.body), List.at(d.params, 0).name))
+  allExistingNames = List.flatMap(existingVers, v => List.map(Parse.parseFile(Str.dropRight(Fs.basename(v._1), 13), v._2).defs, d => d.name))
+  addedNames = List.map(addedDefs, d => d.name)
+  namesFresh = List.len(List.distinct(addedNames)) == List.len(addedNames) && !List.exists(addedNames, n => List.contains(allExistingNames, n))
+  addedSrc = if (List.isEmpty(addedDefs)) "" else Parse.pretty(Parse.emptyProg().copy(defs = addedDefs, mod = targetStem))
+  baseVerPairs = List.map(List.filter(existingVers, v => v._1 != targetPath), v => (Str.dropRight(Fs.basename(v._1), 13), v._2))
+  verPairsWithRule = List.concat(baseVerPairs, [(targetStem, proposedSrc)])
+  versWithRule = List.map(verPairsWithRule, p => p._2)
+  oracles = Verify.oracleNamesEns(versWithRule, ens)
+  drvMsg = Verify.ruleFirst(Verify.driveRule(List.concat(oracles, Verify.scenarioDrvNames(scn))), Verify.driveClaimRule(versWithRule, Verify.driveClaimNames(scn, oracles)))
+  filesWithRule = Drive.fuzzFiles(Verify.applyScenarioFiles(liveAll, scn), verPairsWithRule, Verify.scenarioWrap(scn))
+  checkedStems = Verify.wrapMod() :: Drive.fileStems(ownSrcs)
+  typeMsg = if (Parse.hasParseError(proposedProg)) "syntax error" else Check.humanFilesOwn(Drive.sigFiles(filesWithRule, checkedStems), checkedStems)
+  diag = if (Parse.hasParseError(proposedProg)) "rule draft has a syntax error" else if (!prefixPreserved) "rule draft alters, removes, or weakens an existing definition" else if (verMsg != "scuzz check ok") verMsg else if (!claimsValid) "rule draft must add a non-vacuous single-timeline Verdict claim without altering drivers" else if (!namesFresh) "rule draft redefines an existing verify name" else if (drvMsg != "") drvMsg else if (typeMsg != "scuzz check ok") Str.concat("scuzz check: ", typeMsg) else ""
+} yield (diag, addedSrc, existingVers, verPairsWithRule, filesWithRule, toml)
+
+def replayRuleWorkloads(root: String, toml: String, verPairsWithRule: List[(String, String)], filesWithRule: List[(String, String)], witness: Json): IO[(List[Json], String, String)] =
+  for {
+    _ = verPairsWithRule
+    m = Manifest.parse(toml)
+    scuzzExe <- Main.scuzzCli()
+    host <- if (m.hasUi) Drive.uiHostExeAt(scuzzExe, true) else IO.pure(scuzzExe)
+    _ <- need(!m.hasUi || !Str.isEmpty(host), "UI review host is unavailable")
+    outDir = Fs.join(root, "build/ide/rule-check")
+    _ <- Fs.delete(outDir).handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.mkdirs(outDir)
+    side <- Diff.sideEv(root, outDir, 0, m, filesWithRule, host)
+    requiredRuns = Diff.workloads(side, side)
+    witScript = str(witness, "script")
+    witEvents = List.map(Json.arr(Diags.jsonField(witness, "events")), e => Json.strOr(e, ""))
+    witRun = Drive.FuzzRun("supporting-witness", witScript, Verify.nls(if (Str.isEmpty(witScript)) witEvents else Verify.parseEvents(witScript)), Verify.tomlQuoted(witScript, "schedule_seed"), Verify.tomlQuoted(witScript, "fault_seed"), Verify.parseStrArr(witScript, "schedule_picks"))
+    allRuns = if (Drive.fuzzHasScript(requiredRuns, witRun.script)) requiredRuns else List.append(requiredRuns, witRun)
+    replayed <- IO.ensure(for {
+  _ <- IO.foreachDiscard([Drive.fuzzTriggerPath(side.job.outDir), Drive.fuzzClaimPath(side.job.outDir), Drive.fuzzSometimesPath(side.job.outDir)], p => Fs.write(p, ""))
+  workRows <- IO.foreach(allRuns, r => Diff.probeSide(side, r).map(out => for {
+  label = if (r.path == "supporting-witness") Str.concat("witness (", Str.concat(str(witness, "workload"), ")")) else Diff.label(r)
+  ok = !out.unrun && out.code == 0
+  why = if (ok) Json.Null() else Json.Str(if (Str.isEmpty(out.why)) "rejected" else out.why)
+} yield Json.Obj([("label", Json.Str(label)), ("ok", Json.Bool(ok)), ("why", why)])))
+  trigDump <- Drive.fuzzReadOr(Drive.fuzzTriggerPath(side.job.outDir))
+  claimDump <- Drive.fuzzReadOr(Drive.fuzzClaimPath(side.job.outDir))
+} yield (workRows, trigDump, claimDump), Drive.evStop(side.job))
+  } yield replayed
+
+def verifyRuleDraft(root: String, targetPath: String, proposedSrc: String, witness: Json): IO[Json] =
+  for {
+    checked <- ruleStaticCheck(root, targetPath, proposedSrc)
+    diag = checked._1
+    addedSrc = checked._2
+    existingVers = checked._3
+    verPairsWithRule = checked._4
+    filesWithRule = checked._5
+    toml = checked._6
+    report <- if (!Str.isEmpty(diag)) IO.pure(ruleFailReport(diag, addedSrc, [])) else for {
+  replayed <- replayRuleWorkloads(root, toml, verPairsWithRule, filesWithRule, witness)
+  workRows = replayed._1
+  trigDump = replayed._2
+  claimDump = replayed._3
+  failed = List.filter(workRows, row => !Json.getBool(row, "ok", false))
+  targetStem = Str.dropRight(targetPath, 13)
+  addedPair = [(targetStem, addedSrc)]
+  existingSingleClaims = List.map(List.filter(List.flatMap(existingVers, v => Verify.parseClaims(v._2)), d => List.len(d.params) == 1), d => d.name)
+  addedClaimNames = Verify.claimNames([addedSrc])
+  checkedClaims = Verify.checkedClaimNames(claimDump)
+  missingExisting = Verify.reachNever(existingSingleClaims, checkedClaims)
+  missingAdded = Verify.reachNever(addedClaimNames, checkedClaims)
+  addedTriggers = Verify.triggersOf(addedPair)
+  addedDrives = Verify.claimDriveOf(addedPair)
+  reachedTriggers = Verify.triggerReached(trigDump)
+  reachedDrives = Verify.claimDriveHit(claimDump, addedDrives)
+  untriggered = List.concat(Verify.reachNever(addedTriggers, reachedTriggers), Verify.reachNever(addedDrives, reachedDrives))
+  firstFail = if (List.isEmpty(failed)) Json.Null() else List.at(failed, 0)
+  firstWhy = if (Str.isEmpty(str(firstFail, "why"))) "rejected" else str(firstFail, "why")
+} yield if (List.nonEmpty(failed)) ruleFailReport(Str.concat("rule workload failed (", Str.concat(str(firstFail, "label"), Str.concat("): ", firstWhy))), addedSrc, workRows) else if (List.nonEmpty(missingExisting)) ruleFailReport(Str.concat("existing claim did not execute: ", List.join(missingExisting, ", ")), addedSrc, workRows) else if (List.nonEmpty(missingAdded)) ruleFailReport(Str.concat("added claim did not execute: ", List.join(missingAdded, ", ")), addedSrc, workRows) else if (List.nonEmpty(untriggered)) ruleFailReport(Str.concat("untriggered new claim: ", List.join(untriggered, ", ")), addedSrc, workRows) else Json.Obj([("status", Json.Str("verified")), ("diagnostic", Json.Str("")), ("added_source", Json.Str(addedSrc)), ("added_claims", Json.Arr(List.map(addedClaimNames, n => Json.Str(n)))), ("declared_triggers", Json.Arr(List.map(List.concat(addedTriggers, addedDrives), n => Json.Str(n)))), ("reached_triggers", Json.Arr(List.map(List.concat(List.filter(reachedTriggers, n => List.contains(addedTriggers, n)), reachedDrives), n => Json.Str(n)))), ("workloads", Json.Arr(workRows)), ("scope_note", Json.Str("Verified on finite required workloads and supporting witness. Not a universal proof."))])
+  } yield report
+
+def prepareRuleDraft(root: String, name: String): IO[Json] =
+  for {
+    _ <- recover(root)
+    request <- ruleProposalRequest(root, name)
+    files <- importFor(root, name, request)
+    verifyDisk <- Proposal.ownVerify(root)
+    ins <- ruleInputs(root, request)
+    pub <- Fs.read(Fs.join(Fs.join(Deck.proposalsDir(root), name), "proposal.json"))
+    report <- verifyRuleDraft(root, List.at(files, 0)._1, List.at(files, 0)._2, Proposal.field(request, "witness"))
+    nonce <- Uuid.v4()
+    now <- Clock.monotonic()
+    id = identity(List.concat(ins, [("frozen-rule-request", text(request))]), files, pub, nonce)
+    ruleCard = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("kind", Json.Str("rule")), ("proposal", Json.Str(name)), ("publication", Json.Str(pub)), ("objective", Proposal.field(request, "objective")), ("inputs", pairsJson(ins)), ("baseline_verify", pairsJson(verifyDisk)), ("proposed", pairsJson(files)), ("preference", Proposal.field(request, "preference")), ("witness", Proposal.field(request, "witness")), ("request", request), ("report", report), ("status", Proposal.field(report, "status")), ("diagnostic", Proposal.field(report, "diagnostic")), ("started", Json.Int(now)), ("ready", Json.Int(now))])
+    _ <- setupRuleStorage(root)
+    _ <- Fs.mkdirs(ruleDir(root, id))
+    _ <- Fs.write(Fs.join(ruleDir(root, id), "rule.json"), text(ruleCard))
+    _ <- Fs.write(Fs.join(storage(root), "active-rule.txt"), id)
+    _ <- Fs.delete(Fs.join(Deck.proposalsDir(root), name)).handleErrorWith(_ => IO.pure(()))
+  } yield ruleCard
+
+def loadActiveRule(root: String): IO[Json] =
+  (for {
+  idRaw <- readOptional(Fs.join(storage(root), "active-rule.txt"))
+  id = Str.trim(idRaw)
+  _ <- need(Str.matches(id, "^[a-f0-9]{64}$"), "no active rule")
+  _ <- inside(root, Fs.join(".scuzz/ide/rules", Fs.join(id, "rule.json")))
+  installedHit <- Fs.exists(recordPath(root, Str.concat("install-rule-", id)))
+  rejectedHit <- Fs.exists(recordPath(root, Str.concat("reject-rule-", id)))
+  _ <- need(installedHit == 0 && rejectedHit == 0, "active rule already decided")
+  raw <- Fs.read(Fs.join(ruleDir(root, id), "rule.json"))
+  card <- Proposal.parse(raw, 1048576)
+  _ <- need(str(card, "id") == id && str(card, "kind") == "rule", "invalid active rule")
+} yield card).handleErrorWith(_ => IO.pure(Json.Null()))
+
+def installRule(root: String, ruleCard: Json, dirties: List[String]): IO[Unit] =
+  for {
+    _ <- recover(root)
+    id = str(ruleCard, "id")
+    _ <- need(Str.matches(id, "^[a-f0-9]{64}$") && str(ruleCard, "kind") == "rule", "invalid rule review card")
+    _ <- need(str(ruleCard, "status") == "verified" && str(Diags.jsonField(ruleCard, "report"), "status") == "verified" && Str.isEmpty(str(ruleCard, "diagnostic")), if (!Str.isEmpty(str(ruleCard, "diagnostic"))) str(ruleCard, "diagnostic") else "rule draft is not verified")
+    installedHit <- Fs.exists(recordPath(root, Str.concat("install-rule-", id)))
+    rejectedHit <- Fs.exists(recordPath(root, Str.concat("reject-rule-", id)))
+    _ <- need(installedHit == 0 && rejectedHit == 0, "rule draft is already decided")
+    props = propsOf(ruleCard)
+    _ <- need(Proposal.ruleSetOk(props), "invalid rule verify file")
+    hits <- dirtyHits(root, props, dirties)
+    _ <- need(List.isEmpty(hits), List.join(Deck.dirtyLines(hits), Lanes.nl()))
+    request = Proposal.field(ruleCard, "request")
+    compiler <- compilerIdentity()
+    _ <- Proposal.validateRule(root, request, compiler)
+    ins <- ruleInputs(root, request)
+    _ <- need(setHash(ins) == setHash(pairs(Diags.jsonField(ruleCard, "inputs"))), "rule review inputs changed")
+    verifyDisk <- Proposal.ownVerify(root)
+    baseVer = pairs(Diags.jsonField(ruleCard, "baseline_verify"))
+    _ <- need(setHash(verifyDisk) == setHash(baseVer), "workspace verify files changed")
+    rechecked <- ruleStaticCheck(root, List.at(props, 0)._1, List.at(props, 0)._2)
+    _ <- need(Str.isEmpty(rechecked._1), rechecked._1)
+    ws = List.map(props, f => Json.Obj([("path", Json.Str(f._1)), ("before", Json.Str(List.getOrElse(List.map(baseVer, d => d._2), List.indexOf(List.map(baseVer, d => d._1), f._1), ""))), ("before_exists", Json.Bool(List.contains(List.map(baseVer, d => d._1), f._1))), ("after", Json.Str(f._2)), ("after_exists", Json.Bool(true))]))
+    now <- Clock.monotonic()
+    op = Json.Obj([("operation", Json.Str(Str.concat("install-rule-", id))), ("card", Json.Str(id)), ("kind", Json.Str("rule")), ("proposal", Proposal.field(ruleCard, "proposal")), ("decision", Json.Str("install-rule")), ("witness", Json.Str(str(Diags.jsonField(ruleCard, "witness"), "id"))), ("objective", Proposal.field(ruleCard, "objective")), ("region", Json.Arr(List.map(props, f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(ws))])
+    _ <- Fs.write(Fs.join(storage(root), "journal.json"), text(op)).flatMap(_ => finish(root, op))
+    _ <- Fs.write(Fs.join(storage(root), "active-rule.txt"), "")
+  } yield ()
+
+def rejectRule(root: String, ruleCard: Json): IO[Unit] =
+  for {
+    _ <- recover(root)
+    id = str(ruleCard, "id")
+    _ <- need(Str.matches(id, "^[a-f0-9]{64}$") && str(ruleCard, "kind") == "rule", "invalid rule review card")
+    installedHit <- Fs.exists(recordPath(root, Str.concat("install-rule-", id)))
+    rejectedHit <- Fs.exists(recordPath(root, Str.concat("reject-rule-", id)))
+    _ <- need(installedHit == 0 && rejectedHit == 0, "rule draft is already decided")
+    now <- Clock.monotonic()
+    op = Json.Obj([("operation", Json.Str(Str.concat("reject-rule-", id))), ("card", Json.Str(id)), ("kind", Json.Str("rule")), ("proposal", Proposal.field(ruleCard, "proposal")), ("decision", Json.Str("reject-rule")), ("witness", Json.Str(str(Diags.jsonField(ruleCard, "witness"), "id"))), ("objective", Proposal.field(ruleCard, "objective")), ("diagnostic", Proposal.field(ruleCard, "diagnostic")), ("region", Json.Arr(List.map(propsOf(ruleCard), f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
+    _ <- Fs.write(recordPath(root, Str.concat("reject-rule-", id)), text(op))
+    _ <- Fs.write(Fs.join(storage(root), "active-rule.txt"), "")
+  } yield ()
 

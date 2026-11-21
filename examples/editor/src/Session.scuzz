@@ -254,3 +254,50 @@ def restoredRequest(root: String, s: SessionS, compiler: String, session: String
 def restoreModels(s: SessionS): Unit =
   Signal.set(s.models, List.map(Signal.get(s.models), m => if (Proposal.str(m, "status") == "loading") Json.set(m, "status", Json.Str("cached")) else m))
 
+def exportRuleRequest(root: String, s: SessionS, cardId: String): IO[Json] =
+  for {
+    inputs0 <- Cards.choiceRuleInputs(root, cardId)
+    compiler <- Cards.compilerIdentity()
+    saved <- sessionDocument(root, s)
+    rawObj = Str.trim(Signal.get(s.objective))
+    effObj = if (!Str.isEmpty(rawObj)) Signal.get(s.objective) else "Review rule"
+    request <- Proposal.makeRule(root, effObj, compiler, inputs0._1, inputs0._2)
+    _ <- Cards.setupStorage(root)
+    _ <- Fs.write(Fs.join(Cards.storage(root), "session.json"), Proposal.text(saved))
+    _ <- Cards.rememberRequest(root, request)
+    _ <- Fs.mkdirs(Fs.join(root, "build/ide"))
+    _ <- Fs.write(Fs.join(root, "build/ide/rule-request.json"), Proposal.text(request))
+    _ <- Fs.write(Fs.join(Cards.storage(root), "rule-request.json"), Proposal.text(request))
+    _ <- refreshSummary(root, s)
+  } yield request
+
+def suggestRule(root: String, s: SessionS, cardId: String, onStatus: String => Unit, onReady: Json => Unit): IO[Unit] =
+  if (Signal.get(s.mode) == 0) exportRuleRequest(root, s, cardId).map(_ => onStatus("Rule request exported to build/ide/rule-request.json. Publish a rule draft in build/proposals.")) else own(s, true, _ => for {
+  _ <- Models.need(Signal.get(s.mode) == 1, "External proposals mode exports a request; it does not run a producer")
+  _ <- Cards.choiceRuleInputs(root, cardId)
+  _ <- Models.need(Signal.get(s.count) < 8, "session request budget is exhausted")
+  _ = Signal.set(s.count, Signal.get(s.count) + 1)
+  savedRaw <- Fs.read(Fs.join(Cards.storage(root), "session.json"))
+  saved <- Proposal.parse(savedRaw, 8192)
+  _ <- Fs.write(Fs.join(Cards.storage(root), "session.json"), Proposal.text(Json.set(saved, "requests", Json.Int(Signal.get(s.count)))))
+} yield true, _ => (for {
+  request <- exportRuleRequest(root, s, cardId)
+  _ = Signal.set(s.status, "Loading and generating one rule draft. Load deadline: 5 minutes. Request deadline: 15 minutes. Pause cancels work.")
+  _ = onStatus("Generating rule draft from recorded preference.")
+  measured <- Generate.generate(request, Signal.get(s.model), false, message => IO.pure(for {
+  _ = Signal.set(s.status, message)
+  _ = onStatus(message)
+  _ = Signal.set(s.models, List.map(Signal.get(s.models), m => if (Proposal.str(m, "id") == Signal.get(s.model)) Json.set(m, "status", Json.Str("loading")) else m))
+} yield ()), response => Generate.saveMeasurement(root, request, Json.Obj([("response", response)])))
+  _ = restoreModels(s)
+  _ <- Generate.saveMeasurement(root, request, measured)
+  reply = Proposal.field(measured, "reply")
+  out = Fs.join(Deck.proposalsDir(root), Str.concat("rule-", Proposal.str(request, "request")))
+  _ <- Proposal.publish(root, out, request, reply, Proposal.str(request, "compiler"))
+  ruleCard <- Cards.prepareRuleDraft(root, Fs.basename(out))
+  _ = onReady(ruleCard)
+  readyMsg = if (Cards.str(ruleCard, "status") == "verified") "Rule draft verified on required workloads. Review before installation." else Str.concat("Rule draft failed verification: ", Cards.str(ruleCard, "diagnostic"))
+  _ = Signal.set(s.status, readyMsg)
+  _ = onStatus(readyMsg)
+} yield ()).handleErrorWith(e => IO.pure(onStatus(e)).flatMap(_ => IO.fail(e))), _ => IO.pure(()))
+

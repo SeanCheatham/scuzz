@@ -96,8 +96,8 @@ button:+1
 """)
   } yield 1
 
-def Main.loadClaimNames(_root: String, _rels: List[String]): IO[List[String]] =
-  IO.pure(["greetFact"])
+def Main.loadClaimNames(root: String, rels: List[String]): IO[List[String]] =
+  if (List.isEmpty(rels)) IO.pure(if (root == ".") ["greetFact"] else []) else IO.foreach(rels, rel => Chrome.readOr(Fs.join(root, rel)).map(src => Chrome.claimNames(src))).map(xss => List.distinct(List.concat(if (root == ".") ["greetFact"] else [], List.flatten(xss))))
 
 def addProposal(name: String): IO[Unit] =
   for {
@@ -126,6 +126,78 @@ private def reviewFixture(raw: String): String =
     scope = Json.Obj([("complete", Json.Bool(true)), ("required", Json.Int(List.len(initial))), ("completed_required", Json.Int(List.len(initial))), ("recorded_workloads", Json.Int(List.len(rows))), ("corpus", Json.Int(0)), ("seeds", Json.Int(1)), ("registered_claims", Json.Arr([Json.Str("greetFact")])), ("declared_triggers", Json.Arr([Json.Str("button:+1")])), ("reached_a", Json.Arr([])), ("reached_b", Json.Arr([])), ("reach_scope", Json.Str("required workloads, search, and shrinking probes")), ("parity", Json.Str("evaluator evidence; compiled witness parity is a separate check")), ("alignment", Json.Str("states align by index; added or removed steps can shift the comparison"))])
     report = Json.set(Json.set(Json.set(j, "workloads", Json.Arr(rows)), "review", scope), "search", Json.Obj([("iterations", Json.Int(32)), ("ran", Json.Int(32)), ("seed", Json.Int(1))]))
   } yield Cards.text(report)
+
+private def simEvalClaim(d: Parse.Fun, tl: String): (String, List[String]) =
+  for {
+    states = Lanes.states(tl)
+    alwaysNeedles = Verify.callLitsFun(d, "Verdict.alwaysHas", 1)
+    alwaysOk = List.forall(alwaysNeedles, needle => List.forall(states, st => List.exists(Lanes.a11yLines(st), l => Str.contains(l, needle))))
+    afterPairs = List.zip(Verify.callLitsFun(d, "Verdict.afterHit", 1), Verify.callLitsFun(d, "Verdict.afterHit", 2))
+    afterEval = List.map(afterPairs, pair => for {
+  hits = List.filter(List.indices(states), idx => Str.contains(Lanes.secBody(Lanes.sections(List.at(states, idx)), "drive"), pair._1))
+  fired = List.nonEmpty(hits)
+  ok = !fired || List.exists(hits, idx => List.exists(List.drop(states, idx), st => List.exists(Lanes.a11yLines(st), l => Str.contains(l, pair._2))))
+} yield (if (ok) "" else d.name, Str.concat("claim\t", Str.concat(pair._1, if (fired) "\ttriggered" else "\tvacuous"))))
+    onEval = List.map(Verify.callLitsFun(d, "Verdict.onHit", 1), trig => for {
+  fired = List.exists(states, st => Str.contains(Lanes.secBody(Lanes.sections(st), "drive"), trig))
+} yield Str.concat("claim\t", Str.concat(trig, if (fired) "\ttriggered" else "\tvacuous")))
+    directFail = Str.contains(Parse.pretty0(d.body), "Verdict.fail(")
+    passed = alwaysOk && List.forall(afterEval, r => Str.isEmpty(r._1)) && !directFail
+    why = if (passed) "" else Str.concat("claim ", Str.concat(d.name, " failed"))
+  } yield (why, List.concat(List.map(afterEval, r => r._2), onEval))
+
+private def simEvalTimeline(verPairs: List[(String, String)], tl: String): (String, List[String], List[String]) =
+  for {
+    claims = List.filter(List.flatMap(verPairs, v => Verify.parseClaims(v._2)), d => List.len(d.params) == 1)
+    evaluated = List.map(claims, d => (d.name, simEvalClaim(d, tl)))
+    failed = List.filter(evaluated, r => !Str.isEmpty(r._2._1))
+    why = if (List.isEmpty(failed)) "" else List.at(failed, 0)._2._1
+    trigs = List.flatMap(evaluated, r => r._2._2)
+    drives = List.map(List.distinct(List.flatMap(Lanes.states(tl), st => Chrome.nonEmptyLines(Lanes.secBody(Lanes.sections(st), "drive")))), l => Str.concat("drive\t", l))
+    checked = List.concat(List.map(evaluated, r => Str.concat("checked\t", r._1)), drives)
+  } yield (why, trigs, checked)
+
+private def simSeedTimeline(countVal: String): String =
+  Str.replace("""# timeline v=3 n=2
+--- 0 checkpoint=1
+drive:
+setup
+signals:
+count=0
+a11y:
+text:Counter
+text:count = 0
+button:+1
+--- 1 checkpoint=1
+drive:
+count 1
+signals:
+count=__COUNT__
+a11y:
+text:Counter
+text:count = __COUNT__
+button:+1
+""", "__COUNT__", countVal)
+
+def Cards.replayRuleWorkloads(_root: String, _toml: String, verPairsWithRule: List[(String, String)], filesWithRule: List[(String, String)], witness: Json): IO[(List[Json], String, String)] =
+  IO.pure(for {
+  mainSrc = List.getOrElse(List.map(filesWithRule, f => f._2), List.indexOf(List.map(filesWithRule, f => f._1), "Main"), "")
+  countVal = if (Str.contains(mainSrc, "IO.println(\"3\")") || Str.contains(mainSrc, "IO.println(3)")) "3" else if (Str.contains(mainSrc, "IO.println(\"2\")") || Str.contains(mainSrc, "IO.println(2)")) "2" else "1"
+  tlIdle = """# timeline v=3 n=1
+--- 0 checkpoint=1
+a11y:
+text:Counter
+"""
+  tlSeed = simSeedTimeline(countVal)
+  witLabel = Str.concat("witness (", Str.concat(Cards.str(witness, "workload"), ")"))
+  runs = [("idle", tlIdle), ("seed count 1", tlSeed), (witLabel, tlSeed)]
+  evaluated = List.map(runs, r => (r._1, simEvalTimeline(verPairsWithRule, r._2)))
+  workRows = List.map(evaluated, e => Json.Obj([("label", Json.Str(e._1)), ("ok", Json.Bool(Str.isEmpty(e._2._1))), ("why", if (Str.isEmpty(e._2._1)) Json.Null() else Json.Str(e._2._1))]))
+  trigDump = List.join(List.flatMap(evaluated, e => e._2._2), """
+""")
+  claimDump = List.join(List.flatMap(evaluated, e => e._2._3), """
+""")
+} yield (workRows, trigDump, claimDump))
 
 def Main.reviewProposal(root: String, toml: String, disk: List[(String, String)], propSet: List[(String, String)]): IO[Unit] =
   for {
@@ -179,7 +251,16 @@ text:Counter
 text:count = 2
 button:+1
 """)
-    _ <- if (!List.exists(propSet, f => Str.contains(f._2, "IO.println(3)"))) IO.pure(()) else Fs.read(Fs.join(ide, "tl-deck-b.txt")).flatMap(body => Fs.write(Fs.join(ide, "tl-deck-b.txt"), Str.replace(Str.replace(body, "count=2", "count=3"), "count = 2", "count = 3")))
+    _ <- if (!List.exists(propSet, f => Str.contains(f._2, "IO.println(\"3\")") || Str.contains(f._2, "IO.println(3)"))) IO.pure(()) else Fs.read(Fs.join(ide, "tl-deck-b.txt")).flatMap(body => Fs.write(Fs.join(ide, "tl-deck-b.txt"), Str.replace(Str.replace(body, "count=2", "count=3"), "count = 2", "count = 3")))
+    vers <- if (List.isEmpty(propSet)) IO.pure([]: List[(String, String)]) else Proposal.ownVerify(root).handleErrorWith(_ => IO.pure([]: List[(String, String)]))
+    _ <- if (List.isEmpty(vers)) IO.pure(()) else for {
+  verPairs = List.map(vers, v => (Str.dropRight(Fs.basename(v._1), 13), v._2))
+  tlIdle <- Fs.read(Fs.join(ide, "tl-same.txt"))
+  tlCand <- Fs.read(Fs.join(ide, "tl-deck-b.txt"))
+  idleCheck = simEvalTimeline(verPairs, tlIdle)
+  candCheck = simEvalTimeline(verPairs, tlCand)
+  _ <- if (!Str.isEmpty(idleCheck._1)) IO.fail(Str.concat("scuzz ide: candidate workload fails: idle (", Str.concat(idleCheck._1, ")"))) else if (!Str.isEmpty(candCheck._1)) IO.fail(Str.concat("scuzz ide: candidate workload fails: seed count 1 (", Str.concat(candCheck._1, ")"))) else IO.pure(())
+} yield ()
   } yield ()
 
 def Main.compareBuffers(root: String, toml: String, disk: List[(String, String)], buffers: List[(String, String)]): IO[Unit] =
@@ -938,7 +1019,18 @@ def Generate.generate(request: Json, id: String, allowDownload: Bool, notify: St
     model <- Models.select(id)
     _ <- notify("Loading controlled model")
     _ <- IO.sleep(100)
-    reply = Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("behavior")), ("generator", Json.Str(model.id)), ("files", Proposal.pairsJson([("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(2)")]))])
+    isRule = Proposal.str(request, "kind") == "rule"
+    _ = Generate.messages(request)
+    _ = Generate.schema(request)
+    reply <- if (!isRule) IO.pure(Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("behavior")), ("generator", Json.Str(model.id)), ("files", Proposal.pairsJson([("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(2)")]))])) else for {
+  existingVers = Proposal.pairs(Proposal.field(request, "verify_files"))
+  targetPath = if (List.nonEmpty(existingVers)) List.at(existingVers, 0)._1 else "rules.scuzz_verify"
+  pref = Proposal.field(request, "preference")
+  wantText = if (Proposal.str(pref, "decision") == "baseline") "text:count = 1" else "text:count = 2"
+  claimSrc = Str.concat("def countAfterStepRule(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"", Str.concat(wantText, "\")\n"))
+  body = Json.Obj([("summary", Json.Str("Keep chosen count after step")), ("path", Json.Str(targetPath)), ("claim", Json.Str(claimSrc))])
+  files <- Generate.ruleFiles(request, body)
+} yield Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("rule")), ("witness", Json.Str(Proposal.str(Proposal.field(request, "witness"), "id"))), ("generator", Json.Str(model.id)), ("files", Proposal.pairsJson(files))])
     _ <- Proposal.response(reply, request)
     _ <- saveReply(Json.Obj([("reply", reply)]))
   } yield Json.Obj([("reply", reply)])
@@ -1335,5 +1427,294 @@ def sessionSummaryFlow(mode: Int where mode >= 0 && mode <= 3): IO[Unit] =
 } yield Cards.text(beforeSummary) == Cards.text(afterSummary) && beforeLines == afterLines && List.nonEmpty(afterLines) && Str.contains(List.at(afterLines, 0), "Conservative source measure")
     sessionSummaryBound = Signal.make(if (ok) 1 else 0)
     _ = Signal.set(sessionSummaryBound, if (ok) 1 else 0)
+  } yield ()
+
+private def proofRuleState(): Main.RuleS =
+  Main.RuleS(Signal.make(""), Signal.make(""), Signal.make(""), Signal.make(0), Signal.make("Select Suggest rule after a recorded preference choice."), Signal.make(""), Signal.make(""), Signal.make([]: List[String]), Signal.make([]: List[String]), Signal.make("Finite evidence from recorded workloads. Not a universal proof."), Signal.make(""), Signal.make([]: List[String]))
+
+private def waitJobs(s: SessionS, remaining: Int): IO[Unit] =
+  Ref.get(s.jobs).flatMap(owner => if (Str.isEmpty(owner.token)) IO.pure(()) else if (remaining <= 0) IO.fail("controlled model job did not finish") else IO.sleep(1).flatMap(_ => waitJobs(s, remaining - 1)))
+
+private def publishRuleCandidate(root: String, name: String, request: Json, targetPath: String, verifyBody: String): IO[Unit] =
+  for {
+    compiler <- Cards.compilerIdentity()
+    witId = Proposal.str(Proposal.field(request, "witness"), "id")
+    reply = Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("rule")), ("witness", Json.Str(witId)), ("generator", Json.Str("controlled")), ("files", Proposal.pairsJson([(targetPath, verifyBody)]))])
+    _ <- Proposal.publish(root, Fs.join(Deck.proposalsDir(root), name), request, reply, compiler)
+  } yield ()
+
+private def ruleProofCard(existingClaim: String): IO[Json] =
+  for {
+    _ <- Fs.delete("proof").handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.mkdirs("proof/src")
+    _ <- Fs.write("proof/compiler-id", Hash.sha256("controlled review compiler"))
+    _ <- Cards.setupStorage("proof")
+    _ <- Fs.write("proof/.scuzz/ide/session.json", "{\"model\":\"qwen3.5-4b\"}")
+    _ <- Fs.mkdirs("proof/dependency/src")
+    _ <- Fs.write("proof/dependency/scuzz.toml", "[package]\nname = \"dependency\"\n")
+    _ <- Fs.write("proof/dependency/src/Dependency.scuzz", """def value(): Int =
+  1
+""")
+    _ <- Fs.write("proof/scuzz.toml", "[package]\nname = \"proof\"\n[dependencies]\ndependency = { path = \"dependency\" }\n")
+    _ <- Fs.write("proof/src/Main.scuzz", "@main def main: IO[Unit] =\n  IO.println(\"1\")\n")
+    _ <- if (Str.isEmpty(existingClaim)) IO.pure(()) else Fs.write("proof/existing.scuzz_verify", existingClaim)
+    _ <- Fs.mkdirs("proof/build/proposals/p/src")
+    props = [("src/Main.scuzz", "@main def main: IO[Unit] =\n  IO.println(\"2\")\n"), ("src/Other.scuzz", """def other(): Int =
+  3
+""")]
+    _ <- IO.foreachDiscard(props, p => Fs.write(Fs.join("proof/build/proposals/p", p._1), p._2))
+    disk <- Cards.own("proof")
+    _ <- writeManualRequest("proof")
+    _ <- Fs.write("proof/build/proposals/p/proposal.json", Cards.metadata("manual", Cards.setHash(disk), "manual", props))
+    imported <- Cards.importProposal("proof", "p")
+    frozen <- Cards.freeze("proof", "p", imported, 1)
+    _ <- Main.reviewProposal("proof", "", [], [])
+    raw <- Fs.read("proof/build/ide/report.json")
+    ready <- Cards.complete("proof", frozen, raw)
+  } yield ready
+
+def ruleReviewFlow(mode: Int where mode >= 0 && mode <= 7): IO[Unit] =
+  for {
+    c1 <- ruleProofCard("")
+    ok <- if (mode == 0) for {
+  session0 <- Session.create("proof")
+  noneLatest <- Cards.latestPreferenceCard("proof")
+  noneExport <- IO.attempt(Session.exportRuleRequest("proof", session0, "").map(_ => ()))
+  _ <- Cards.decideWithDetails("proof", c1, -1, "need-another-scenario", 20, 80)
+  abstainLatest <- Cards.latestPreferenceCard("proof")
+  abstainExport <- IO.attempt(Session.exportRuleRequest("proof", session0, Cards.str(c1, "id")).map(_ => ()))
+  c2 <- ruleProofCard("")
+  _ <- Cards.decide("proof", c2, 0)
+  versAfterAccept <- Proposal.ownVerify("proof")
+  acceptLatest <- Cards.latestPreferenceCard("proof")
+  _ <- Cards.undo("proof")
+  undoLatest <- Cards.latestPreferenceCard("proof")
+  undoExport <- IO.attempt(Session.exportRuleRequest("proof", session0, Cards.str(c2, "id")).map(_ => ()))
+  c3 <- ruleProofCard("")
+  _ <- Cards.decide("proof", c3, 1)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  sessionBase <- Session.create("proof")
+  baseLatest <- Cards.latestPreferenceCard("proof")
+  baseReq <- Session.exportRuleRequest("proof", sessionBase, Cards.str(c3, "id"))
+  pref = Proposal.field(baseReq, "preference")
+  wit = Proposal.field(baseReq, "witness")
+} yield noneLatest == "" && isErrRes(noneExport) && abstainLatest == "" && isErrRes(abstainExport) && List.isEmpty(versAfterAccept) && acceptLatest == Cards.str(c2, "id") && undoLatest == "" && isErrRes(undoExport) && baseLatest == Cards.str(c3, "id") && Proposal.str(baseReq, "kind") == "rule" && Proposal.str(pref, "decision") == "baseline" && Str.contains(Proposal.str(wit, "chosen_timeline"), "text:count = 1") else if (mode == 1) for {
+  _ <- Fs.delete(Cards.cardDir("proof", Cards.str(c1, "id"))).handleErrorWith(_ => IO.pure(()))
+  _ <- Fs.delete("proof/build/proposals/p").handleErrorWith(_ => IO.pure(()))
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session1 <- Session.create("proof")
+  _ <- Session.start("proof", session1)
+  lanes1 = proofLanes()
+  deck1 = proofDeck(session1, lanes1)
+  rs1 = proofRuleState()
+  claimsSig1 = Signal.make(["greetFact"])
+  _ <- publishQueue("p-first", Cards.propsOf(c1))
+  _ <- Main.queueInit("proof", deck1)
+  _ <- Main.deckNext("proof", lanes1, deck1)
+  _ <- waitPreparation(session1, 2000)
+  firstId = Signal.get(deck1.armed)
+  firstCard = LspClient.parseJson(Signal.get(deck1.card))
+  propLane = if (Json.getInt(firstCard, "flip", 0) == 1) 0 else 1
+  _ <- Main.chooseCard("proof", firstId, propLane, lanes1, deck1, _ => [], IO.pure(()))
+  _ <- Main.syncRulePreference("proof", rs1)
+  _ <- publishQueue("p-queued", [("src/Other.scuzz", """def other(): Int =
+  4
+""")])
+  _ <- Main.queuePulse("proof", lanes1, deck1)
+  _ <- waitPreparation(session1, 2000)
+  qBefore <- Main.queueRead(deck1)
+  reqReject <- Session.exportRuleRequest("proof", session1, Signal.get(rs1.choiceCard))
+  validClaim = Parse.pretty(Parse.parseFile("rules", "def countTwoAfterStep(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n"))
+  _ <- publishRuleCandidate("proof", "r-reject", reqReject, "rules.scuzz_verify", validClaim)
+  behProps <- Main.loadProposals("proof")
+  ruleProps <- Main.loadRuleProposals("proof")
+  _ <- Main.pollRuleInbox("proof", deck1, rs1)
+  armedReject = Signal.get(rs1.armed)
+  verifiedReject = Signal.get(rs1.verified)
+  scopeReject = Signal.get(rs1.scopeNote)
+  witReject = List.join(Signal.get(rs1.witnessLines), """
+""")
+  _ <- Main.rejectRuleCard("proof", deck1, rs1)
+  versAfterReject <- Proposal.ownVerify("proof")
+  rejExists <- Fs.exists(Cards.recordPath("proof", Str.concat("reject-rule-", armedReject)))
+  qAfterReject <- Main.queueRead(deck1)
+  reqInstall <- Session.exportRuleRequest("proof", session1, Signal.get(rs1.choiceCard))
+  _ <- publishRuleCandidate("proof", "r-install", reqInstall, "rules.scuzz_verify", validClaim)
+  _ <- Main.pollRuleInbox("proof", deck1, rs1)
+  _ <- Main.installRuleCard("proof", lanes1, deck1, rs1, _ => [], IO.pure(()), claimsSig1)
+  installedRaw <- Chrome.readOr("proof/rules.scuzz_verify")
+  qAfterInstall <- Main.queueRead(deck1)
+  _ <- publishQueue("p-violate", [("src/Main.scuzz", "@main def main: IO[Unit] =\n  IO.println(\"3\")\n")])
+  _ <- Main.deckNext("proof", lanes1, deck1)
+  _ <- waitPreparation(session1, 2000)
+  _ <- Main.queuePulse("proof", lanes1, deck1)
+  _ <- waitPreparation(session1, 2000)
+  qAfterViolate <- Main.queueRead(deck1)
+  _ <- Main.dropProposal("proof", "p-violate")
+  _ <- Main.queueRetry("proof", lanes1, deck1)
+  _ <- publishQueue("p-comply", [("src/Other.scuzz", """def other(): Int =
+  5
+""")])
+  _ <- Main.queuePulse("proof", lanes1, deck1)
+  _ <- waitPreparation(session1, 2000)
+  qAfterComply <- Main.queueRead(deck1)
+  _ <- Session.pause(session1)
+  _ <- Main.queueClear(lanes1, deck1)
+} yield List.len(qBefore.cards) == 1 && !List.contains(behProps, "r-reject") && List.contains(ruleProps, "r-reject") && !Str.isEmpty(armedReject) && verifiedReject == 1 && Str.contains(scopeReject, "Not a universal proof") && Str.contains(witReject, "Supporting witness: witness 0") && List.isEmpty(versAfterReject) && rejExists != 0 && List.len(qAfterReject.cards) == 1 && installedRaw == validClaim && List.contains(Signal.get(claimsSig1), "countTwoAfterStep") && List.isEmpty(qAfterInstall.cards) && qAfterViolate.retry && List.isEmpty(qAfterViolate.cards) && List.len(qAfterComply.cards) == 1 else if (mode == 2) for {
+  existingClaim = Parse.pretty(Parse.parseFile("existing", "def counterHeaderVisible(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n"))
+  cExist <- ruleProofCard(existingClaim)
+  _ <- Cards.decide("proof", cExist, 0)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session2 <- Session.create("proof")
+  _ = Signal.set(session2.mode, 1)
+  _ = Signal.set(session2.config, Session.settings(session2))
+  _ <- Session.start("proof", session2)
+  lanes2 = proofLanes()
+  deck2 = proofDeck(session2, lanes2)
+  rs2 = proofRuleState()
+  devSec2 = Signal.make(0)
+  dirSig2 = Signal.make("proof")
+  claimsSig2 = Signal.make(["counterHeaderVisible"])
+  _ <- Main.syncRulePreference("proof", rs2)
+  _ <- Main.suggestRuleAction(dirSig2, devSec2, session2, deck2, rs2)
+  _ <- waitJobs(session2, 2000)
+  armedLocal = Signal.get(rs2.armed)
+  verifiedLocal = Signal.get(rs2.verified)
+  targetLocal = Signal.get(rs2.targetPath)
+  countAfterSuggest = Signal.get(session2.count)
+  _ <- Main.installRuleCard("proof", lanes2, deck2, rs2, _ => [], IO.pure(()), claimsSig2)
+  appendedRaw <- Chrome.readOr("proof/existing.scuzz_verify")
+  _ <- Cards.undo("proof")
+  restoredRaw <- Chrome.readOr("proof/existing.scuzz_verify")
+  _ <- Session.pause(session2)
+} yield Signal.get(devSec2) == 3 && !Str.isEmpty(armedLocal) && verifiedLocal == 1 && targetLocal == "existing.scuzz_verify" && countAfterSuggest == 1 && Str.startsWith(appendedRaw, existingClaim) && Str.contains(appendedRaw, "def countAfterStepRule") && List.contains(Signal.get(claimsSig2), "counterHeaderVisible") && List.contains(Signal.get(claimsSig2), "countAfterStepRule") && restoredRaw == existingClaim else if (mode == 3) for {
+  existingClaim = Parse.pretty(Parse.parseFile("existing", "def counterHeaderVisible(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n"))
+  cExist <- ruleProofCard(existingClaim)
+  _ <- Cards.decide("proof", cExist, 0)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session3 <- Session.create("proof")
+  req <- Session.exportRuleRequest("proof", session3, Cards.str(cExist, "id"))
+  wit = Proposal.field(req, "witness")
+  witId = Proposal.str(wit, "id")
+  weakenedSrc = Parse.pretty(Parse.parseFile("existing", "def counterHeaderVisible(t: Timeline): Verdict =\n  Verdict.ok()\n\ndef countTwoAfterStep(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n"))
+  removedSrc = Parse.pretty(Parse.parseFile("existing", "def countTwoAfterStep(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n"))
+  dupNameSrc = Str.concat(existingClaim, "\ndef counterHeaderVisible(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n")
+  weakRep <- Cards.verifyRuleDraft("proof", "existing.scuzz_verify", weakenedSrc, wit)
+  remRep <- Cards.verifyRuleDraft("proof", "existing.scuzz_verify", removedSrc, wit)
+  dupRep <- Cards.verifyRuleDraft("proof", "rules.scuzz_verify", Parse.pretty(Parse.parseFile("rules", "def counterHeaderVisible(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n")), wit)
+  _ <- publishRuleCandidate("proof", "r-weak", req, "existing.scuzz_verify", weakenedSrc)
+  weakCard <- Cards.prepareRuleDraft("proof", "r-weak")
+  weakInstall <- IO.attempt(Cards.installRule("proof", weakCard, []))
+  badLive <- IO.attempt(Proposal.response(Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(req, "request")), ("baseline", Proposal.field(req, "baseline")), ("kind", Json.Str("rule")), ("witness", Json.Str(witId)), ("generator", Json.Str("controlled")), ("files", Proposal.pairsJson([("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(\"2\")")]))]), req).map(_ => ()))
+  badScen <- IO.attempt(Proposal.response(Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(req, "request")), ("baseline", Proposal.field(req, "baseline")), ("kind", Json.Str("rule")), ("witness", Json.Str(witId)), ("generator", Json.Str("controlled")), ("files", Proposal.pairsJson([("editor.scuzz_scenario", "def setup(): IO[Unit] = IO.pure(())")]))]), req).map(_ => ()))
+  badSub <- IO.attempt(Proposal.response(Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(req, "request")), ("baseline", Proposal.field(req, "baseline")), ("kind", Json.Str("rule")), ("witness", Json.Str(witId)), ("generator", Json.Str("controlled")), ("files", Proposal.pairsJson([("sub/rules.scuzz_verify", removedSrc)]))]), req).map(_ => ()))
+  badWit <- IO.attempt(Proposal.response(Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(req, "request")), ("baseline", Proposal.field(req, "baseline")), ("kind", Json.Str("rule")), ("witness", Json.Str(Hash.sha256("wrong-witness"))), ("generator", Json.Str("controlled")), ("files", Proposal.pairsJson([("rules.scuzz_verify", removedSrc)]))]), req).map(_ => ()))
+  unchanged <- Chrome.readOr("proof/existing.scuzz_verify")
+  _ = dupNameSrc
+} yield Cards.str(weakRep, "status") == "draft" && Str.contains(Cards.str(weakRep, "diagnostic"), "alters, removes, or weakens") && Cards.str(remRep, "status") == "draft" && Cards.str(dupRep, "status") == "draft" && Str.contains(Cards.str(dupRep, "diagnostic"), "redefines an existing verify name") && isErrRes(weakInstall) && isErrRes(badLive) && isErrRes(badScen) && isErrRes(badSub) && isErrRes(badWit) && unchanged == existingClaim else if (mode == 4) for {
+  _ <- Cards.decide("proof", c1, 0)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session4 <- Session.create("proof")
+  lanes4 = proofLanes()
+  deck4 = proofDeck(session4, lanes4)
+  rs4 = proofRuleState()
+  req1 <- Session.exportRuleRequest("proof", session4, Cards.str(c1, "id"))
+  untriggeredSrc = Parse.pretty(Parse.parseFile("rules", "def missingButtonRule(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"button:Missing\", \"text:Counter\")\n"))
+  _ <- publishRuleCandidate("proof", "r-untrig", req1, "rules.scuzz_verify", untriggeredSrc)
+  _ <- Main.pollRuleInbox("proof", deck4, rs4)
+  untrigVerified = Signal.get(rs4.verified)
+  untrigDiag = Signal.get(rs4.diagnostic)
+  untrigCard = LspClient.parseJson(Signal.get(rs4.card))
+  untrigInstall <- IO.attempt(Cards.installRule("proof", untrigCard, []))
+  _ <- Main.rejectRuleCard("proof", deck4, rs4)
+  req2 <- Session.exportRuleRequest("proof", session4, Cards.str(c1, "id"))
+  failingSrc = Parse.pretty(Parse.parseFile("rules", "def wrongNineRule(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 9\")\n"))
+  _ <- publishRuleCandidate("proof", "r-fail", req2, "rules.scuzz_verify", failingSrc)
+  _ <- Main.pollRuleInbox("proof", deck4, rs4)
+  failVerified = Signal.get(rs4.verified)
+  failDiag = Signal.get(rs4.diagnostic)
+  failCard = LspClient.parseJson(Signal.get(rs4.card))
+  failInstall <- IO.attempt(Cards.installRule("proof", failCard, []))
+  _ <- Main.rejectRuleCard("proof", deck4, rs4)
+  req3 <- Session.exportRuleRequest("proof", session4, Cards.str(c1, "id"))
+  _ <- publishRuleCandidate("proof", "r-syntax", req3, "rules.scuzz_verify", "def broken(")
+  _ <- Main.pollRuleInbox("proof", deck4, rs4)
+  synVerified = Signal.get(rs4.verified)
+  synDiag = Signal.get(rs4.diagnostic)
+  versNow <- Proposal.ownVerify("proof")
+} yield untrigVerified == 0 && Str.contains(untrigDiag, "untriggered new claim: button:Missing") && isErrRes(untrigInstall) && failVerified == 0 && Str.contains(failDiag, "rule workload failed") && isErrRes(failInstall) && synVerified == 0 && Str.contains(synDiag, "syntax error") && List.isEmpty(versNow) else if (mode == 5) for {
+  _ <- Cards.decide("proof", c1, 0)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session5 <- Session.create("proof")
+  req <- Session.exportRuleRequest("proof", session5, Cards.str(c1, "id"))
+  validClaim = Parse.pretty(Parse.parseFile("rules", "def countTwoAfterStep(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n"))
+  _ <- publishRuleCandidate("proof", "r-guards", req, "rules.scuzz_verify", validClaim)
+  rc <- Cards.prepareRuleDraft("proof", "r-guards")
+  dirtyTry <- IO.attempt(Cards.installRule("proof", rc, ["proof/rules.scuzz_verify"]))
+  savedMain <- Fs.read("proof/src/Main.scuzz")
+  _ <- Fs.write("proof/src/Main.scuzz", "@main def main: IO[Unit] =\n  IO.println(\"99\")\n")
+  staleSrcTry <- IO.attempt(Cards.installRule("proof", rc, []))
+  _ <- Fs.write("proof/src/Main.scuzz", savedMain)
+  _ <- Fs.write("proof/extra.scuzz_verify", Parse.pretty(Parse.parseFile("extra", "def extraClaim(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n")))
+  staleVerTry <- IO.attempt(Cards.installRule("proof", rc, []))
+  _ <- Fs.delete("proof/extra.scuzz_verify")
+  missingBefore <- Fs.exists("proof/rules.scuzz_verify")
+  cleanTry <- IO.attempt(Cards.installRule("proof", rc, []))
+  dupTry <- IO.attempt(Cards.installRule("proof", rc, []))
+  existsAfter <- Fs.exists("proof/rules.scuzz_verify")
+} yield isErrRes(dirtyTry) && isErrRes(staleSrcTry) && isErrRes(staleVerTry) && missingBefore == 0 && isOkRes(cleanTry) && isErrRes(dupTry) && existsAfter != 0 else if (mode == 6) for {
+  existingClaim = Parse.pretty(Parse.parseFile("existing", "def counterHeaderVisible(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n"))
+  cExist <- ruleProofCard(existingClaim)
+  _ <- Cards.decide("proof", cExist, 0)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session6 <- Session.create("proof")
+  req <- Session.exportRuleRequest("proof", session6, Cards.str(cExist, "id"))
+  appendedClaim = Parse.pretty(Parse.parseFile("existing", "def counterHeaderVisible(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n\ndef countTwoAfterStep(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n"))
+  _ <- publishRuleCandidate("proof", "r-recover", req, "existing.scuzz_verify", appendedClaim)
+  rc <- Cards.prepareRuleDraft("proof", "r-recover")
+  restoredActive <- Cards.loadActiveRule("proof")
+  rid = Cards.str(rc, "id")
+  op = Json.Obj([("operation", Json.Str(Str.concat("install-rule-", rid))), ("card", Json.Str(rid)), ("kind", Json.Str("rule")), ("proposal", Json.Str("r-recover")), ("decision", Json.Str("install-rule")), ("witness", Json.Str(Proposal.str(Proposal.field(rc, "witness"), "id"))), ("objective", Proposal.field(rc, "objective")), ("region", Json.Arr([Json.Str("existing.scuzz_verify")])), ("time", Json.Int(42)), ("writes", Json.Arr([Json.Obj([("path", Json.Str("existing.scuzz_verify")), ("before", Json.Str(existingClaim)), ("before_exists", Json.Bool(true)), ("after", Json.Str(appendedClaim)), ("after_exists", Json.Bool(true))])]))])
+  _ <- Fs.write(Fs.join(Cards.storage("proof"), "journal.json"), Cards.text(op))
+  _ <- Cards.recover("proof")
+  _ <- Cards.recover("proof")
+  journalBody <- Chrome.readOr(Fs.join(Cards.storage("proof"), "journal.json"))
+  recHit <- Fs.exists(Cards.recordPath("proof", Str.concat("install-rule-", rid)))
+  afterRecover <- Chrome.readOr("proof/existing.scuzz_verify")
+  activeAfterInstall <- Cards.loadActiveRule("proof")
+  _ <- Cards.undo("proof")
+  afterUndo <- Chrome.readOr("proof/existing.scuzz_verify")
+} yield Cards.str(restoredActive, "id") == rid && Str.isEmpty(journalBody) && recHit != 0 && afterRecover == appendedClaim && Json.isNull(activeAfterInstall) && afterUndo == existingClaim else for {
+  _ <- Cards.decide("proof", c1, 0)
+  _ <- Fs.delete("proof/.scuzz/ide/requests/manual.json").handleErrorWith(_ => IO.pure(()))
+  session7 <- Session.create("proof")
+  lanes7 = proofLanes()
+  deck7 = proofDeck(session7, lanes7)
+  rs7 = proofRuleState()
+  paths7 = Signal.make(["proof/src/Main.scuzz"])
+  mainBody <- Fs.read("proof/src/Main.scuzz")
+  bodies7 = Signal.make([mainBody])
+  origs7 = Signal.make([mainBody])
+  idx7 = Signal.make(0)
+  buf7 = Signal.make(mainBody)
+  orig7 = Signal.make(mainBody)
+  claimsSig7 = Signal.make([]: List[String])
+  devSec7 = Signal.make(0)
+  dirSig7 = Signal.make("proof")
+  _ <- Main.syncRulePreference("proof", rs7)
+  _ <- Main.suggestRuleAction(dirSig7, devSec7, session7, deck7, rs7)
+  reqRaw <- Chrome.readOr("proof/build/ide/rule-request.json")
+  req <- if (Str.isEmpty(reqRaw)) IO.pure(Json.Null()) else Proposal.parse(reqRaw, 1048576)
+  validClaim = Parse.pretty(Parse.parseFile("rules", "def countTwoAfterStep(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"count 1\", \"text:count = 2\")\n"))
+  _ <- if (Json.isNull(req)) IO.pure(()) else publishRuleCandidate("proof", "r-ui", req, "rules.scuzz_verify", validClaim)
+  _ <- Main.pollRuleInbox("proof", deck7, rs7)
+  _ <- Main.installRuleCard("proof", lanes7, deck7, rs7, _ => Chrome.dirtyPaths(Signal.get(paths7), Signal.get(bodies7), Signal.get(origs7)), Main.refreshBuffers(paths7, bodies7, origs7, idx7, buf7, orig7), claimsSig7)
+  existsInstalled <- Fs.exists("proof/rules.scuzz_verify")
+  claimsInstalled = Signal.get(claimsSig7)
+  _ <- Main.undoCard("proof", lanes7, deck7, _ => Chrome.dirtyPaths(Signal.get(paths7), Signal.get(bodies7), Signal.get(origs7)), Main.refreshBuffers(paths7, bodies7, origs7, idx7, buf7, orig7))
+  existsAfterUndo <- Fs.exists("proof/rules.scuzz_verify")
+} yield Signal.get(devSec7) == 3 && !Json.isNull(req) && existsInstalled != 0 && List.contains(claimsInstalled, "countTwoAfterStep") && existsAfterUndo == 0
+    ruleReviewBound = Signal.make(if (ok) 1 else 0)
+    _ = Signal.set(ruleReviewBound, if (ok) 1 else 0)
   } yield ()
 
