@@ -234,7 +234,7 @@ There is no explicit claim suggestion or installation path from a preference. A 
 - **Parser diagnostics.** A reported parser error cannot pass the shared checker. The checker and language server report the offending token span across declarations and expressions. After a syntax error, the parser synchronizes at the next top-level declaration at delimiter depth zero. The checker and language server report each independent top-level syntax error in one pass. Checking stops before type checking when a syntax error is present. Formatting preserves the affected file. Language server formatting returns no edits. Tests cover declarations, parameters, defaults, constraints, imports, annotations, match guards, unclosed delimiters, trailing tokens, and multi-error recovery. Syntax recovery inside a single declaration remains open.
 - **Input boundaries.** Strict integers and required JSON fields return explicit errors. The kernel checks field types and domain ranges in live code. General typed JSON decoding and nested field error paths remain open. Extend the kit when an application needs them. Verification assumptions do not validate live input. Result checks reject uses confined to erased `.require` and `Property` labels and predicates. Private record constructors restrict construction and copy to the declaring module. The editor validates relative paths in live Result constructors and retains canonical path checks. Private access does not prove the predicate. Non-Result values passed only to erased checks can still be mistaken for input validation. Diagnose clear uses before adding more input operations.
 - **Failure handling.** Result bindings and Result fields in tuple, list-cons, and constructor binding patterns reject discard and partial patterns. Bound Result lists, options, and tuples reject unused Result values across nested containers, type aliases, and IO payloads. Tuple projections do not satisfy live use for unprojected Result elements. User-defined containers can still hide unused results. A whole-container alias does not replace explicit use of a selected Result field. Extend these checks only for a demonstrated application need. Passing a result to a function does not prove that the receiver handles its error. Keep expected errors explicit through input and effect boundaries.
-- **Behavior rules.** Make rules about state, effects, cancellation, duplicate requests, and recovery easy to express and diagnose. Check relationships between executions without a second app implementation. The recovery fixture compares file presence and contents for two sources, the journal, the operation record, and the Undo state. A conflict-write control passes the endpoint rules but fails this comparison. Repeated recovery preserves the same five files. A completed request rejects a duplicate. Duplicate rejection preserves these files and an unrelated file. Separate defects exercise the guard and file preservation rules. These checks use exact editor function bodies. They do not cover all editor operations or concurrent external writes.
+- **Behavior rules.** Make rules about state, effects, cancellation, duplicate requests, and recovery easy to express and diagnose. Check relationships between executions without a second app implementation. The recovery fixture compares file presence and contents for two sources, the journal, the operation record, and the Undo state. A conflict-write control passes the endpoint rules but fails this comparison. Repeated recovery preserves the same five files. A completed request rejects a duplicate. Duplicate rejection preserves these files and an unrelated file. External-write scenarios check interrupted acceptance, interrupted Undo, and Undo requests under the stated ownership limits. Recovery and Undo detect unexpected external bytes on owned files before replacement or deletion. They preserve external edits and unrelated workspace files. They surface explicit conflict state. Schedule-relation checks (`scuzz fuzz --relate`) compare ownership-gated schedules without endpoint file assertions. Sampled fuzzing, bounded exhaustive simulation, and schedule-relation checks all reject overwrite-blind defect controls. Separate defects exercise the guard and file preservation rules. These checks use exact editor function bodies. They do not cover all editor operations or concurrent external-write race windows.
 - **Reference models.** Deferred. A model is optional. It is not the default verification path.
 
 Undo validates the accepted record before journal creation.
@@ -281,6 +281,7 @@ The checker rejects a release defect with an ordinary replay workload.
 | Acceptance comparison | Inputs 0, 1, 4, 5; fault calls 1 and 9; all three fault modes | At most one preemption; 1000 steps; 2048 executions; 60 s per method | All 1286 exhaustive paths pass in 38.56 s; 2048 sampled runs take 11.89 s and reach 112 distinct paths |
 | Prepared Undo comparison | Inputs 2, 3, 6, 7; fault calls 1 and 9; all three fault modes | Same comparison limits | All 1300 exhaustive paths pass in 43.25 s; 2048 sampled runs take 12.45 s and reach 112 distinct paths |
 | Undo request comparison | Inputs 0–3; fault calls 1 and 25; all three fault modes | Same comparison limits | All 567 exhaustive paths pass in 21.27 s; 2048 sampled runs take 13.19 s and reach 107 distinct paths |
+| External ownership comparison | Inputs 0, 1, 2, 3, 6, 7; fault calls 1 and 5; all three fault modes | Same comparison limits | All 996 exhaustive paths pass in 34.39 s; 2048 sampled runs take 12.95 s and reach 110 distinct paths |
 
 Setup does not consume fault bounds.
 A preemption selects another fiber while the previous fiber remains runnable.
@@ -302,15 +303,27 @@ presence and contents. Duplicate rejection also preserves an unrelated file.
 Separate observation drivers keep reads out of existing fault paths.
 Expected file faults retain a pending operation. Unexpected errors fail a rule.
 
+External-write checks cover interrupted acceptance, interrupted Undo, and Undo requests under the stated ownership limits.
+Owned-file modifications and creations stop recovery or Undo before replacement or deletion.
+Conflict paths retain the pending journal or accepted Undo state.
+They preserve sibling and unrelated workspace files.
+Unowned workspace writes allow recovery and Undo to settle owned files.
+Recovery and Undo keep the external workspace file.
+A step invariant checks that external edits on owned and unowned files remain intact across every timeline step.
+An oracle-free driver pairs editor operations and external writes across schedules under an ownership gate.
+`scuzz fuzz --relate` passes all 82 corpus entries in 5.19 s.
+Single runs of the oracle-free driver pass on four overwrite-blind controls.
+The schedule-relation claim, bounded simulation, and sampled fuzzing all reject each overwrite-blind control.
+
 Ordinary recovery fuzzing uses 64 iterations, seed 42, and a 60 s checking limit.
-Its corpus covers acceptance, Undo, conflicts, cancellation, repeated recovery,
-duplicate requests, and malformed records and journals.
-One sample passes 67 required probes and 40 search probes in 30.88 s.
+Its corpus covers acceptance, Undo, conflicts, external writes, schedule relations,
+cancellation, repeated recovery, duplicate requests, and malformed records and journals.
+One sample passes 83 required probes and 40 search probes in 38.01 s.
 It detects 22 sampled mutations. Two are inert. None survives or stays incomplete.
 These mutations affect the fixture and selected application functions.
-The 63 fault-free rule checks and exact engine comparisons take 1.39 s.
-Both methods reject missing-write and external-overwrite controls.
-All 14 direct defect checks produce named author rule failures in both engines.
+The 75 fault-free rule checks and exact engine comparisons take 1.83 s.
+All methods reject missing-write and overwrite-blind controls.
+All 17 direct defect checks produce named author rule failures in both engines.
 Ordinary native replay reproduces each rejection.
 A conflict-write defect passes endpoint rules but fails the file comparison.
 Other controls change guards, paths, fields, Undo state, journals, or unrelated files.
@@ -324,9 +337,10 @@ The live recovery check completes 23 acceptance and Undo recovery cases.
 Restart completes recovery. Repeated recovery preserves all five operation files.
 The live Undo request check completes 22 cases, including 19 malformed records.
 A further 21 malformed journal cases preserve all workspace files and Undo state.
+Five live external-write cases check interrupted acceptance, interrupted Undo deletion, Undo requests, and unowned workspace edits.
 These checks retain source and native identities, logs, and file contents.
 
-**Open scope.** Power loss, external edits during recovery, temporary file cleanup,
+**Open scope.** Power loss, concurrent external-write race windows, temporary file cleanup,
 other fault calls, other application operations, and unbounded schedules remain open.
 Cancellation paths can reach 144 contention choices.
 The 16-point sampling policy does not limit stored replay choices.
@@ -334,7 +348,7 @@ Finite schedules do not prove eventual completion or inductive safety.
 An executed rule does not establish specification completeness.
 One host sample does not establish a general cost bound or method advantage.
 
-**Next gate.** Measure human writing time, rule comprehension, and usefulness in one author session. Preserve wider incomplete results. Keep power loss, concurrent external edits, and other application operations open. Do not infer a general method advantage from one application scope.
+**Next gate.** Measure human writing time, rule comprehension, and usefulness in one author session. Preserve wider incomplete results. Keep power loss, concurrent external-write race windows, and other application operations open. Do not infer a general method advantage from one application scope.
 
 **Limits.** Refinement types, static effect protocols, inductive proofs, and compilation validation remain proposals. Existing finite campaigns do not establish these guarantees. A proof establishes a stated property under its assumptions. It does not establish that the specification matches all product needs.
 

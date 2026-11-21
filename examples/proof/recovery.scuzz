@@ -16,14 +16,17 @@ def addition(): String =
   3
 """
 
+def acceptMode(mode: Int): Bool =
+  mode < 2 || mode == 16 || mode == 17 || mode == 20 || mode == 22 || mode == 23
+
 def writes(mode: Int): List[Json] =
-  if (mode < 2) [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str(before())), ("before_exists", Json.Bool(true)), ("after", Json.Str(after())), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Other.scuzz")), ("before", Json.Str("")), ("before_exists", Json.Bool(false)), ("after", Json.Str(addition())), ("after_exists", Json.Bool(true))])] else [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str(after())), ("before_exists", Json.Bool(true)), ("after", Json.Str(before())), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Other.scuzz")), ("before", Json.Str(addition())), ("before_exists", Json.Bool(true)), ("after", Json.Str("")), ("after_exists", Json.Bool(false))])]
+  if (acceptMode(mode)) [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str(before())), ("before_exists", Json.Bool(true)), ("after", Json.Str(after())), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Other.scuzz")), ("before", Json.Str("")), ("before_exists", Json.Bool(false)), ("after", Json.Str(addition())), ("after_exists", Json.Bool(true))])] else [Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str(after())), ("before_exists", Json.Bool(true)), ("after", Json.Str(before())), ("after_exists", Json.Bool(true))]), Json.Obj([("path", Json.Str("src/Other.scuzz")), ("before", Json.Str(addition())), ("before_exists", Json.Bool(true)), ("after", Json.Str("")), ("after_exists", Json.Bool(false))])]
 
 def prepared(mode: Int): Json =
   for {
     id = Hash.sha256("finite recovery")
-    op = Json.Obj([("operation", Json.Str(Str.concat(if (mode < 2) "accept-" else "undo-", id))), ("card", Json.Str(id)), ("decision", Json.Str(if (mode < 2) "accept" else "undo")), ("writes", Json.Arr(writes(mode)))])
-  } yield if (mode < 2) op else Json.set(op, "time", Json.Int(2))
+    op = Json.Obj([("operation", Json.Str(Str.concat(if (acceptMode(mode)) "accept-" else "undo-", id))), ("card", Json.Str(id)), ("decision", Json.Str(if (acceptMode(mode)) "accept" else "undo")), ("writes", Json.Arr(writes(mode)))])
+  } yield if (acceptMode(mode)) op else Json.set(op, "time", Json.Int(2))
 
 def text(j: Json): String =
   Json.stringify(j) match {
@@ -251,5 +254,179 @@ def canceled(mode: Int): IO[Unit] =
   case Result.Ok(_) => IO.pure(())
   case Result.Err(error) => if (expectedError(error)) IO.println(error) else Property.assert("recovery returns an expected error", false)
 }
+  } yield ()
+
+def faultError(error: String): Bool =
+  error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement"
+
+def writeRetry(path: String, data: String): IO[Unit] =
+  Fs.write(path, data).handleErrorWith(error => if (faultError(error)) IO.println(error).flatMap(_ => Fs.write(path, data)) else IO.fail(error))
+
+def externalMode(n: Int): Int =
+  if (n % 4 == 3) 20 else 16 + n % 4
+
+def externalTarget(mode: Int): String =
+  if (mode == 16 || mode == 22 || mode == 25) "src/Main.scuzz" else "src/Other.scuzz"
+
+def externalEdit(mode: Int): String =
+  if (mode == 16) "external main edit" else if (mode == 17) "external other edit" else if (mode == 18) "external undo other" else if (mode == 19) "external undo request" else if (mode == 22) "external relate main" else if (mode == 23) "external relate other" else if (mode == 24) "external relate undo" else "external relate request"
+
+def externalPrepare(mode: Int): IO[Bool] =
+  for {
+    preFault <- if (mode == 16 || mode == 18) IO.attempt(Cards.writeOne(root(mode), List.at(writes(mode), if (mode == 16) 1 else 0))).flatMap(result => result match {
+      case Result.Ok(_) => IO.pure(false)
+      case Result.Err(error) => if (expectedError(error)) IO.println(error).map(_ => true) else Property.assert("external recovery returns an expected error", false).map(_ => true)
+    }) else IO.pure(false)
+    _ <- if (mode == 20) IO.pure(()) else writeRetry(Fs.join(root(mode), externalTarget(mode)), externalEdit(mode))
+    _ <- writeRetry(Fs.join(root(mode), "notes.txt"), "external notes")
+    _ <- if (mode == 20) Property.assert("per-file guard reports conflicting path", true) else IO.attempt(Cards.writeOne(root(mode), List.at(writes(mode), if (mode == 16) 0 else 1))).flatMap(result => result match {
+      case Result.Ok(_) => Property.assert("per-file guard reports conflicting path", false)
+      case Result.Err(error) => Property.assert("per-file guard reports conflicting path", faultError(error) || error == Str.concat("recovery conflict: ", externalTarget(mode))).flatMap(_ => IO.println(error))
+    })
+  } yield preFault
+
+def externalRunOne(action: IO[Unit]): IO[Unit] =
+  IO.attempt(action).flatMap(result => result match {
+    case Result.Ok(_) => Property.assert("external recovery returns an expected error", true)
+    case Result.Err(error) => Property.assert("external recovery returns an expected error", expectedError(error)).flatMap(_ => IO.println(error))
+  })
+
+def externalAttempt(mode: Int): IO[Unit] =
+  externalRunOne(Cards.recover(root(mode)))
+
+def externalCanceled(mode: Int): IO[Unit] =
+  for {
+    entered <- Deferred.empty()
+    worker <- Fiber.fork(Deferred.complete(entered, ()).flatMap(_ => externalAttempt(mode)))
+    _ <- Deferred.get(entered)
+    _ <- Fiber.interrupt(worker)
+    result <- IO.attempt(Fiber.join(worker))
+    _ <- result match {
+      case Result.Ok(_) => Property.assert("external recovery returns an expected error", true)
+      case Result.Err(error) => Property.assert("external recovery returns an expected error", expectedError(error)).flatMap(_ => IO.println(error))
+    }
+  } yield ()
+
+def externalSnapshot(mode: Int): IO[String] =
+  for {
+    base <- snapshot(mode)
+    notes <- readOptional(Fs.join(root(mode), "notes.txt"))
+  } yield Str.concat(base, notes)
+
+def externalState(mode: Int, preFault: Bool): IO[Unit] =
+  for {
+    path = root(mode)
+    main <- Fs.read(Fs.join(path, "src/Main.scuzz"))
+    otherExists <- Fs.exists(Fs.join(path, "src/Other.scuzz"))
+    other <- if (otherExists == 0) IO.pure("") else Fs.read(Fs.join(path, "src/Other.scuzz"))
+    notes <- Fs.read(Fs.join(path, "notes.txt"))
+    unrelated <- Fs.read("unrelated.txt")
+    journal <- Fs.read(Fs.join(Fs.join(path, ".scuzz/ide"), "journal.json"))
+    last <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide"), "last.json"))
+    completed <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide/records"), Str.concat(Json.getStr(prepared(mode), "operation", ""), ".json")))
+    conflict = mode != 20
+    modifiedOk = !conflict || (if (mode == 16) main == "external main edit" else otherExists != 0 && other == externalEdit(mode))
+    ownedOk = if (mode == 16) (if (preFault) otherExists == 0 || other == addition() else otherExists != 0 && other == addition()) else if (mode == 17) main == before() else if (mode == 18) (if (preFault) main == before() || main == after() else main == before()) else main == after() && otherExists != 0 && other == addition()
+    stateOk = if (conflict) journal == text(prepared(mode)) && completed == "" && (if (mode == 18) last == text(prepared(0)) else last == "") else journal == "" && completed == text(prepared(20)) && last == completed
+    _ <- Property.assert("external recovery preserves modified owned file", modifiedOk)
+    _ <- Property.assert("external recovery settles or preserves owned files", ownedOk)
+    _ <- Property.assert("external recovery surfaces explicit conflict or settled state", stateOk)
+    _ <- Property.assert("external recovery preserves unrelated workspace files", notes == "external notes" && unrelated == "unrelated bytes")
+  } yield ()
+
+def externalChecks(mode: Int, preFault: Bool): IO[Unit] =
+  for {
+    _ <- externalState(mode, preFault)
+    beforeSnap <- externalSnapshot(mode)
+    unrelatedBefore <- Fs.read("unrelated.txt")
+    repeatResult <- IO.attempt(Cards.recover(root(mode)))
+    _ <- repeatResult match {
+      case Result.Err(error) => if (faultError(error)) IO.fail(error) else IO.pure(())
+      case Result.Ok(_) => IO.pure(())
+    }
+    _ <- Property.assert("repeated external check matches ownership state", repeatResult match {
+      case Result.Err(error) => mode != 20 && Str.startsWith(error, "recovery conflict:")
+      case Result.Ok(_) => mode == 20
+    })
+    afterSnap <- externalSnapshot(mode)
+    unrelatedAfter <- Fs.read("unrelated.txt")
+    _ <- Property.assert("repeated external check preserves all files", beforeSnap == afterSnap && unrelatedBefore == unrelatedAfter)
+  } yield ()
+
+def external(n: Int): IO[Unit] =
+  if (n < 0 || n > 7) IO.fail("external input out of range") else (for {
+    mode = externalMode(n)
+    preFault <- externalPrepare(mode)
+    _ <- if (n < 4) externalAttempt(mode) else externalCanceled(mode)
+    _ <- externalAttempt(mode)
+    _ <- externalAttempt(mode)
+    _ <- externalChecks(mode, preFault).handleErrorWith(error => if (faultError(error)) IO.println(error).flatMap(_ => externalChecks(mode, preFault)) else IO.fail(error))
+  } yield ()).handleErrorWith(error => if (faultError(error)) IO.println("external recovery remains pending") else if (Str.startsWith(error, "oracle ")) IO.fail(error) else Property.assert("external recovery returns an expected error", false))
+
+def externalUndoRun(mode: Int): IO[Unit] =
+  IO.attempt(if (mode == 19) Cards.undo(root(mode)) else Cards.recover(root(mode))).flatMap(result => result match {
+    case Result.Ok(_) => Property.assert("external Undo returns an expected error", true)
+    case Result.Err(error) => Property.assert("external Undo returns an expected error", expectedError(error) || Str.startsWith(error, "undo conflict:") || error == "no accepted change to undo").flatMap(_ => IO.println(error))
+  })
+
+def externalUndoChecks(mode: Int): IO[Unit] =
+  for {
+    path = root(mode)
+    main <- Fs.read(Fs.join(path, "src/Main.scuzz"))
+    otherExists <- Fs.exists(Fs.join(path, "src/Other.scuzz"))
+    other <- if (otherExists == 0) IO.pure("") else Fs.read(Fs.join(path, "src/Other.scuzz"))
+    notes <- Fs.read(Fs.join(path, "notes.txt"))
+    unrelated <- Fs.read("unrelated.txt")
+    journal <- Fs.read(Fs.join(Fs.join(path, ".scuzz/ide"), "journal.json"))
+    last <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide"), "last.json"))
+    completed <- readOptional(Fs.join(Fs.join(path, ".scuzz/ide/records"), Str.concat(Json.getStr(prepared(mode), "operation", ""), ".json")))
+    ownedOk = if (mode == 19) main == after() && otherExists != 0 && other == "external undo request" else main == before() && otherExists == 0
+    stateOk = if (mode == 19) journal == "" && last == text(prepared(0)) && completed == "" else journal == "" && last == "" && completed == text(prepared(21))
+    _ <- Property.assert("external Undo preserves or restores owned files", ownedOk)
+    _ <- Property.assert("external Undo surfaces explicit conflict or settled state", stateOk)
+    _ <- Property.assert("external Undo preserves unrelated workspace files", notes == "external notes" && unrelated == "unrelated bytes")
+    beforeSnap <- externalSnapshot(mode)
+    unrelatedBefore <- Fs.read("unrelated.txt")
+    repeatResult <- IO.attempt(if (mode == 19) Cards.undo(root(mode)) else Cards.recover(root(mode)))
+    _ <- repeatResult match {
+      case Result.Err(error) => if (faultError(error)) IO.fail(error) else IO.pure(())
+      case Result.Ok(_) => IO.pure(())
+    }
+    afterSnap <- externalSnapshot(mode)
+    unrelatedAfter <- Fs.read("unrelated.txt")
+    repeatOk = repeatResult match {
+      case Result.Err(error) => mode == 19 && Str.startsWith(error, "undo conflict:")
+      case Result.Ok(_) => mode == 21
+    }
+    _ <- Property.assert("repeated external Undo preserves all files", repeatOk && beforeSnap == afterSnap && unrelatedBefore == unrelatedAfter)
+  } yield ()
+
+def externalUndo(n: Int): IO[Unit] =
+  if (n < 0 || n > 3) IO.fail("external Undo input out of range") else (for {
+    mode = if (n % 2 == 0) 19 else 21
+    _ <- if (mode == 19) writeRetry(Fs.join(root(mode), "src/Other.scuzz"), "external undo request") else IO.pure(())
+    _ <- if (n < 2) writeRetry(Fs.join(root(mode), "notes.txt"), "external notes").flatMap(_ => externalUndoRun(mode)) else IO.both(externalUndoRun(mode), writeRetry(Fs.join(root(mode), "notes.txt"), "external notes")).map(_ => ())
+    _ <- if (mode == 19) IO.pure(()) else externalUndoRun(mode).flatMap(_ => externalUndoRun(mode))
+    _ <- externalUndoChecks(mode).handleErrorWith(error => if (faultError(error)) IO.println(error).flatMap(_ => externalUndoChecks(mode)) else IO.fail(error))
+  } yield ()).handleErrorWith(error => if (faultError(error)) IO.println("external Undo remains pending") else if (Str.startsWith(error, "oracle ")) IO.fail(error) else Property.assert("external Undo returns an expected error", false))
+
+def relateEditorStep(mode: Int): IO[Unit] =
+  if (mode == 23 || mode == 24) Cards.writeOne(root(mode), List.at(writes(mode), 1)).handleErrorWith(error => if (expectedError(error)) IO.pure(()) else IO.fail(error)).flatMap(_ => Cards.recover(root(mode)).handleErrorWith(error => if (expectedError(error)) IO.pure(()) else IO.fail(error))) else if (mode == 25) Cards.undo(root(mode)).handleErrorWith(error => if (expectedError(error) || Str.startsWith(error, "undo conflict:")) IO.pure(()) else IO.fail(error)) else Cards.recover(root(mode)).handleErrorWith(error => if (expectedError(error)) IO.pure(()) else IO.fail(error))
+
+def relateExternalStep(mode: Int): IO[Unit] =
+  writeRetry(Fs.join(root(mode), externalTarget(mode)), externalEdit(mode)).flatMap(_ => writeRetry(Fs.join(root(mode), "notes.txt"), "external relate notes"))
+
+def withGate(gate: Queue[Int], action: IO[Unit]): IO[Unit] =
+  Queue.take(gate).flatMap(_ => IO.attempt(action).flatMap(result => Queue.offer(gate, 1).flatMap(_ => result match {
+    case Result.Ok(_) => IO.pure(())
+    case Result.Err(error) => if (faultError(error)) IO.pure(()) else IO.fail(error)
+  })))
+
+def relateExternal(n: Int): IO[Unit] =
+  if (n < 0 || n > 3) IO.fail("relate input out of range") else for {
+    mode = 22 + n
+    gate <- Queue.unbounded()
+    _ <- Queue.offer(gate, 1)
+    _ <- IO.both(withGate(gate, relateEditorStep(mode)), withGate(gate, relateExternalStep(mode)))
   } yield ()
 

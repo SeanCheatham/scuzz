@@ -47,6 +47,25 @@ INVALID_JOURNAL_RULES = {
     'invalid journal preserves operation files',
 }
 
+EXTERNAL_RULES = {
+    'per-file guard reports conflicting path',
+    'external recovery returns an expected error',
+    'external recovery preserves modified owned file',
+    'external recovery settles or preserves owned files',
+    'external recovery surfaces explicit conflict or settled state',
+    'external recovery preserves unrelated workspace files',
+    'repeated external check matches ownership state',
+    'repeated external check preserves all files',
+}
+
+EXTERNAL_UNDO_RULES = {
+    'external Undo returns an expected error',
+    'external Undo preserves or restores owned files',
+    'external Undo surfaces explicit conflict or settled state',
+    'external Undo preserves unrelated workspace files',
+    'repeated external Undo preserves all files',
+}
+
 
 class IncompleteCheck(Exception):
     """A resource limit or missing evidence prevents a result."""
@@ -894,6 +913,7 @@ def main():
         report['live_write_outcomes'] = live_write_outcomes(cli, output / 'write-outcomes', output)
         report['protocol'] = protocol_checks(cli, experiment['protocol'], output)
         report['preemption_checks'] = protocol_preemption_checks(cli, report['protocol'], output)
+        report['external_ownership'] = external_ownership_checks(cli, output / 'external-ownership', output)
         try:
             protocol_checks(cli, experiment['protocol'], output / 'truncated', contention_limit=0)
         except IncompleteCheck as error:
@@ -961,8 +981,38 @@ def recovery_documents():
     return before, after, addition, accepted, undone
 
 
+def relate_flip_seed(label, script, index):
+    def left_first(rng):
+        s = (rng % 2147483646) + 1
+        s = s * 48271 % 2147483647
+        left = s * 48271 % 2147483647
+        right = left * 48271 % 2147483647
+        return left > right
+
+    def i64(value):
+        value &= (1 << 64) - 1
+        return value - (1 << 64) if value >= (1 << 63) else value
+
+    def mix_byte(h, byte):
+        return i64((h ^ byte) * 16777619) % 2147483647
+
+    def mix_str(h, text):
+        for char in text:
+            h = mix_byte(h, ord(char))
+        return h
+
+    for rng in range(64):
+        sched = str(rng * 32)
+        mixed = mix_byte(mix_str(mix_str(mix_str(2166136261, label), sched), script), index)
+        perturbed = rng + 1 + (mixed % 16)
+        if left_first(rng) != left_first(perturbed):
+            return sched
+    raise AssertionError('no flipping schedule seed found')
+
+
 def recovery_package(cli, sources, output, variant):
     package = output / variant
+    shutil.rmtree(package, ignore_errors=True)
     (package / 'src').mkdir(parents=True, exist_ok=True)
     (package / 'scuzz.toml').write_text('[package]\nname="recovery"\n')
     for name, source in sources.items():
@@ -983,6 +1033,24 @@ def recovery_package(cli, sources, output, variant):
             files[storage + '/last.json'] = json.dumps(accepted, separators=(',', ':'))
         for path, content in files.items():
             setup.append(f'    _ <- Fs.write({json.dumps(path)}, {json.dumps(content)})')
+    for mode in range(16, 26):
+        root = f'recovery-{mode}'
+        storage = root + '/.scuzz/ide'
+        for path in (root + '/src', storage + '/cards', storage + '/records'):
+            setup.append(f'    _ <- Fs.mkdirs({json.dumps(path)})')
+        accept_mode = mode in (16, 17, 20, 22, 23)
+        settled_accept = mode in (19, 25)
+        files = {
+            root + '/src/Main.scuzz': before if accept_mode else after,
+            root + '/notes.txt': 'notes before',
+            storage + '/journal.json': '' if settled_accept else json.dumps(
+                accepted if accept_mode else undone, separators=(',', ':')),
+        }
+        if not accept_mode:
+            files[root + '/src/Other.scuzz'] = addition
+            files[storage + '/last.json'] = json.dumps(accepted, separators=(',', ':'))
+        for path, content in files.items():
+            setup.append(f'    _ <- Fs.write({json.dumps(path)}, {json.dumps(content)})')
     setup.append('    _ <- Fs.write("unrelated.txt", "unrelated bytes")')
     setup.append('  } yield ()')
     (package / 'recovery.scuzz_scenario').write_text('\n'.join(setup) + '\n\n'
@@ -994,17 +1062,64 @@ def recovery_package(cli, sources, output, variant):
         'def undo(n: Int where n == 2 || n == 3 || n == 6 || n == 7): IO[Unit] = Recovery.undo(n)\n\n'
         'def request(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.request(n)\n\n'
         'def invalidRecord(n: Int where n >= 0 && n < 19): IO[Unit] = Recovery.invalidRecord(n)\n\n'
-        'def invalidJournal(n: Int where n >= 0 && n < 21): IO[Unit] = Recovery.invalidJournal(n)\n')
+        'def invalidJournal(n: Int where n >= 0 && n < 21): IO[Unit] = Recovery.invalidJournal(n)\n\n'
+        'def external(n: Int where n >= 0 && n <= 7): IO[Unit] = Recovery.external(n)\n\n'
+        'def externalUndo(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.externalUndo(n)\n\n'
+        'def relateExternal(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.relateExternal(n)\n')
     (package / 'recovery.scuzz_verify').write_text(
         'def externalBytes(t: Timeline): Verdict =\n'
         '  Verdict.every(t, i => !(Timeline.driveHas(t, i, "recover") || Timeline.driveHas(t, i, "undo") || Timeline.driveHas(t, i, "request")) || '
         'Timeline.fileTextIs(t, i, "recovery-1/src/Main.scuzz", "external bytes") && '
         'Timeline.fileTextIs(t, i, "recovery-3/src/Main.scuzz", "external bytes") && '
         'Timeline.fileTextIs(t, i, "recovery-7/src/Main.scuzz", "external bytes") && '
-        'Timeline.fileTextIs(t, i, "recovery-11/src/Main.scuzz", "external bytes"))\n')
+        'Timeline.fileTextIs(t, i, "recovery-11/src/Main.scuzz", "external bytes"))\n\n'
+        'private def monotonicText(t: Timeline, prev: Int, step: Int, path: String, expected: String): Bool =\n'
+        '  !Timeline.fileTextIs(t, prev, path, expected) || Timeline.fileTextIs(t, step, path, expected)\n\n'
+        'def externalOwnership(t: Timeline): Verdict =\n'
+        '  Verdict.and(\n'
+        '    Verdict.every(t, i => !(Timeline.driveHas(t, i, "external") || Timeline.driveHas(t, i, "externalUndo")) || '
+        'Timeline.fileTextIs(t, i, "unrelated.txt", "unrelated bytes")),\n'
+        '    Verdict.stepEvery(t, pair => pair match {\n'
+        '      case (prev, step) =>\n'
+        '        monotonicText(t, prev, step, "recovery-16/src/Main.scuzz", "external main edit") &&\n'
+        '        monotonicText(t, prev, step, "recovery-17/src/Other.scuzz", "external other edit") &&\n'
+        '        monotonicText(t, prev, step, "recovery-18/src/Other.scuzz", "external undo other") &&\n'
+        '        monotonicText(t, prev, step, "recovery-19/src/Other.scuzz", "external undo request") &&\n'
+        '        monotonicText(t, prev, step, "recovery-16/notes.txt", "external notes") &&\n'
+        '        monotonicText(t, prev, step, "recovery-17/notes.txt", "external notes") &&\n'
+        '        monotonicText(t, prev, step, "recovery-18/notes.txt", "external notes") &&\n'
+        '        monotonicText(t, prev, step, "recovery-19/notes.txt", "external notes") &&\n'
+        '        monotonicText(t, prev, step, "recovery-20/notes.txt", "external notes") &&\n'
+        '        monotonicText(t, prev, step, "recovery-21/notes.txt", "external notes")\n'
+        '    }))\n\n'
+        'private def sameFileText(a: Timeline, lastA: Int, b: Timeline, lastB: Int, path: String, expected: String): Bool =\n'
+        '  Timeline.fileTextIs(a, lastA, path, expected) == Timeline.fileTextIs(b, lastB, path, expected)\n\n'
+        'private def atomicConflict(t: Timeline, last: Int): Bool =\n'
+        '  Timeline.fileTextIs(t, last, "recovery-23/.scuzz/ide/journal.json", "") || '
+        'Timeline.fileTextIs(t, last, "recovery-23/src/Main.scuzz", Recovery.before())\n\n'
+        'def externalOwnershipRelation(a: Timeline, b: Timeline): Verdict =\n'
+        '  for {\n'
+        '    lastA = Timeline.len(a) - 1\n'
+        '    lastB = Timeline.len(b) - 1\n'
+        '    ownedSame = sameFileText(a, lastA, b, lastB, "recovery-22/src/Main.scuzz", "external relate main") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "recovery-23/src/Other.scuzz", "external relate other") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "recovery-24/src/Other.scuzz", "external relate undo") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "recovery-25/src/Main.scuzz", "external relate request") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "recovery-25/.scuzz/ide/journal.json", "")\n'
+        '    unownedSame = sameFileText(a, lastA, b, lastB, "recovery-22/notes.txt", "external relate notes") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "recovery-23/notes.txt", "external relate notes") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "recovery-24/notes.txt", "external relate notes") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "recovery-25/notes.txt", "external relate notes") &&\n'
+        '      sameFileText(a, lastA, b, lastB, "unrelated.txt", "unrelated bytes")\n'
+        '    atomicOk = atomicConflict(a, lastA) == atomicConflict(b, lastB)\n'
+        '  } yield if (ownedSame && unownedSame && atomicOk) Verdict.ok() else Verdict.fail(lastA, "external write ownership differs across schedules")\n')
     command(cli, ['fmt', package], output, variant + '-format')
     command(cli, ['fuzz', '--iterations', '0', package], output, variant + '-build')
-    exported = command(cli, ['run', 'examples/proof'], output, variant + '-export',
+    exporter_bin = ROOT / 'examples/proof/build/proof'
+    if not exporter_bin.is_file():
+        command(cli, ['run', 'examples/proof'], output, variant + '-exporter-build',
+                env=dict(os.environ, SCUZZ_PROOF_EXPORT='0'))
+    exported = command(exporter_bin, [], output, variant + '-export',
                        env=dict(os.environ, SCUZZ_PROOF_EXPORT='recovery', SCUZZ_RECOVERY_PACKAGE=str(package)))
     files = json.loads(next(line for line in exported.stdout.splitlines() if line.startswith('[')))
     probe = package / 'evaluator'
@@ -1048,7 +1163,23 @@ def recovery_package(cli, sources, output, variant):
         (package / f'corpus/invalid-journal-{n}.toml').write_text(
             '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
             'events=' + json.dumps([f'drive invalidJournal {n}']) + '\n')
+    for n in range(8):
+        (package / f'corpus/external-{n}.toml').write_text(
+            '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive external {n}']) + '\n')
+    for n in range(4):
+        (package / f'corpus/external-undo-{n}.toml').write_text(
+            '[fuzz]\nschedule_seed="0"\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive externalUndo {n}']) + '\n')
     (package / 'corpus/duplicate.toml').write_text('[fuzz]\nschedule_seed="0"\nfault_seed="0"\nevents=["drive duplicate"]\n')
+    relate_names = [f'relate-external-{n}.toml' for n in range(4)]
+    all_names = sorted([item.name for item in (package / 'corpus').glob('*.toml')] + relate_names)
+    for n in range(4):
+        label = f'relate-external-{n}.toml'
+        sched = relate_flip_seed(label, f'drive relateExternal {n}\n', all_names.index(label))
+        (package / 'corpus' / label).write_text(
+            f'[fuzz]\nschedule_seed={json.dumps(sched)}\nfault_seed="0"\n' +
+            'events=' + json.dumps([f'drive relateExternal {n}']) + '\n')
     return package, package / 'build/recovery', probe
 
 
@@ -1125,7 +1256,9 @@ def recovery_finite(cli, package, executable, probe, output, defective=False, pr
                 unique.add(key)
                 row['parity'] = protocol_parity(cli, probe, row, directory, output, 1000, seconds=remaining())
                 if row['status'] == 'passed':
-                    assert 'checked\texternalBytes' in (directory / 'claims.txt').read_text()
+                    claims_raw = (directory / 'claims.txt').read_text()
+                    assert 'checked\texternalBytes' in claims_raw
+                    assert 'checked\texternalOwnership' in claims_raw
             if row['status'] == 'failed':
                 assert defective, ('application recovery rejects', row)
                 command(cli, ['fuzz', '--replay', row['workload'], package], output,
@@ -1162,9 +1295,9 @@ def recovery_finite(cli, package, executable, probe, output, defective=False, pr
                 distinct_replays=len(unique))
 
 
-def recovery_sampled(cli, package, output):
+def recovery_sampled(cli, package, output, iterations=64):
     started = time.monotonic()
-    process = subprocess.Popen([str(cli), 'fuzz', '--no-fail-fast', '--iterations', '64', '--seed', '42', str(package)],
+    process = subprocess.Popen([str(cli), 'fuzz', '--no-fail-fast', '--iterations', str(iterations), '--seed', '42', str(package)],
                                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     try:
         stdout, stderr = process.communicate(timeout=60)
@@ -1172,14 +1305,90 @@ def recovery_sampled(cli, package, output):
         (output / 'sampled.stderr').write_text(stderr)
         summary = json.loads((package / 'build/fuzz/summary.json').read_text())
         return dict(status=summary['status'], exit=process.returncode, seconds=time.monotonic() - started,
-                    seconds_budget=60, requested_iterations=64, report=summary)
+                    seconds_budget=60, requested_iterations=iterations, report=summary)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         stdout, stderr = process.communicate()
         (output / 'sampled.stdout').write_text(stdout)
         (output / 'sampled.stderr').write_text(stderr)
         return dict(status='incomplete', reason='checking budget', seconds=time.monotonic() - started,
-                    seconds_budget=60, requested_iterations=64)
+                    seconds_budget=60, requested_iterations=iterations)
+
+
+def recovery_relate(cli, package, executable, probe, output, expect_failure=False,
+                    check_relation=True, target_entry=None):
+    started = time.monotonic()
+    single_runs = []
+    indices = range(4) if target_entry is None else [target_entry]
+    for n in indices:
+        for seed_label, seed in (('schedule-a', 0), ('schedule-b', 128)):
+            directory = output / f'relate-single-{n}-{seed_label}'
+            witness = protocol_probe(executable, directory, 'relateExternal', n, 0, schedule_seed=seed)
+            assert witness['status'] == 'passed', ('oracle-free relation driver fails single run', n, seed, witness)
+            if not expect_failure:
+                witness['parity'] = protocol_parity(cli, probe, witness, directory, output, 1000)
+            single_runs.append(dict(input=n, schedule_seed=seed, status=witness['status'],
+                                    schedule_picks=witness['schedule_picks']))
+    relate = command(cli, ['fuzz', '--relate', '--message-format=json', package], output,
+                     'relate', success=not expect_failure)
+    summary = json.loads(next(line for line in reversed(relate.stdout.splitlines()) if line.startswith('{')))
+    assert summary['v'] == 1 and summary['kind'] == 'relate'
+    assert summary['ok'] is (not expect_failure), summary
+    entries = {row['label']: row['ok'] for row in summary['entries']}
+    if not expect_failure:
+        assert summary['failed'] == 0
+        assert all(entries.get(f'relate-external-{n}.toml') is True for n in range(4)), entries
+    elif check_relation and target_entry is not None:
+        assert entries.get(f'relate-external-{target_entry}.toml') is False, entries
+    elif check_relation:
+        assert all(entries.get(f'relate-external-{n}.toml') is False for n in range(4)), entries
+    return dict(status=summary['status'], ok=summary['ok'], total=summary['total'],
+                failed=summary['failed'], seconds=time.monotonic() - started,
+                single_runs=single_runs, entries=summary['entries'])
+
+
+def external_ownership_checks(cli, output, logs):
+    output.mkdir(parents=True, exist_ok=True)
+    sources, _ = recovery_sources()
+    overwrite = dict(sources)
+    for anchor in (
+        '_ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")',
+        '_ <- need(after || before, Str.concat("recovery conflict: ", str(w, "path")))',
+        '_ <- need(List.forall(checks, b => b), "undo conflict: preserve external edits")',
+    ):
+        assert overwrite['Cards'].count(anchor) == 1
+        overwrite['Cards'] = overwrite['Cards'].replace(anchor, '_ <- IO.pure(())')
+    package, executable, probe = recovery_package(cli, sources, output, 'correct')
+    witnesses = []
+    for driver, count, expected_rules in (
+        ('external', 8, EXTERNAL_RULES),
+        ('externalUndo', 4, EXTERNAL_UNDO_RULES),
+    ):
+        for n in range(count):
+            directory = package / f'check-{driver}-{n}'
+            witness = protocol_probe(executable, directory, driver, n, 0)
+            assert witness['status'] == 'passed', ('external ownership check rejects', driver, n, witness)
+            witness['executed_properties'] = executed_properties(directory / 'coverage.txt')
+            assert expected_rules <= set(witness['executed_properties'])
+            witness['parity'] = protocol_parity(cli, probe, witness, directory, package, 1000)
+            witnesses.append(dict(driver=driver, input=n, status=witness['status']))
+    relate_ok = recovery_relate(cli, package, executable, probe, package, expect_failure=False)
+    sampled_ok = recovery_sampled(cli, package, package, iterations=16)
+    assert sampled_ok['status'] == 'passed', sampled_ok
+    bad_pkg, bad_exe, bad_probe = recovery_package(cli, overwrite, output, 'external-overwrite')
+    bad_witness = protocol_probe(bad_exe, bad_pkg / 'bad-external-0', 'external', 0, 0)
+    assert bad_witness['status'] == 'failed', bad_witness
+    bad_witness['parity'] = protocol_parity(cli, bad_probe, bad_witness, bad_pkg / 'bad-external-0', bad_pkg, 1000)
+    relate_bad = recovery_relate(cli, bad_pkg, bad_exe, bad_probe, bad_pkg, expect_failure=True)
+    sampled_bad = recovery_sampled(cli, bad_pkg, bad_pkg, iterations=16)
+    assert sampled_bad['status'] == 'failed', sampled_bad
+    return dict(
+        status='passed',
+        rule_witnesses=len(witnesses),
+        correct=dict(relate=relate_ok['status'], sampled=sampled_ok['status']),
+        external_overwrite=dict(exhaustive=bad_witness['status'], relate=relate_bad['status'], sampled=sampled_bad['status']),
+        open_obligations=['concurrent external write race windows'],
+    )
 
 
 def recovery_schedule_samples(cli, package, executable, probe, output, bounds, defective=False):
@@ -1420,14 +1629,66 @@ def live_recovery_checks(cli, sources, output):
         assert result.returncode != 0 and 'invalid recovery journal' in result.stderr, (n, result)
         assert all_files() == initial, ('invalid recovery journal changes live files', n)
         journals.append(dict(input=n, status='passed', contents=initial))
+    external_cases = []
+    prepare(0)
+    (root / 'src/Main.scuzz').write_text('external live main')
+    (root / 'notes.txt').write_text('external live notes')
+    (root / 'unrelated.txt').write_text('unrelated bytes')
+    initial = all_files()
+    result = run(None, 0, 'live-external-accept-main')
+    assert result.returncode != 0 and 'recovery conflict:' in result.stderr, result
+    assert all_files() == initial
+    external_cases.append(dict(kind='accept-main-conflict', status='passed', contents=initial))
+    prepare(0)
+    (root / 'src/Main.scuzz').write_text(before)
+    (root / 'src/Other.scuzz').write_text('external live other')
+    (root / 'notes.txt').write_text('external live notes')
+    (root / 'unrelated.txt').write_text('unrelated bytes')
+    initial = all_files()
+    result = run(None, 0, 'live-external-accept-other')
+    assert result.returncode != 0 and 'recovery conflict:' in result.stderr, result
+    assert all_files() == initial
+    external_cases.append(dict(kind='accept-other-conflict', status='passed', contents=initial))
+    prepare(0)
+    (root / 'src/Main.scuzz').write_text(before)
+    (root / 'notes.txt').write_text('external live notes')
+    (root / 'unrelated.txt').write_text('unrelated bytes')
+    interrupted = run('after', 1, 'live-external-unowned-interrupt')
+    assert interrupted.returncode == 93, interrupted
+    (root / 'notes.txt').write_text('external live notes updated')
+    resumed = run(None, 0, 'live-external-unowned-resume')
+    assert resumed.returncode == 0 and snapshot(0) == expected(0), resumed
+    assert (root / 'notes.txt').read_text() == 'external live notes updated'
+    assert (root / 'unrelated.txt').read_text() == 'unrelated bytes'
+    external_cases.append(dict(kind='accept-unowned-settled', status='passed', contents=all_files()))
+    prepare(2)
+    (root / 'src/Other.scuzz').write_text('external live undo')
+    (root / 'notes.txt').write_text('external live notes')
+    (root / 'unrelated.txt').write_text('unrelated bytes')
+    initial = all_files()
+    result = run(None, 0, 'live-external-undo-other')
+    assert result.returncode != 0 and 'recovery conflict:' in result.stderr, result
+    assert all_files() == initial
+    external_cases.append(dict(kind='undo-other-conflict', status='passed', contents=initial))
+    accepted_files(encoded(accepted))
+    (root / 'src/Other.scuzz').write_text('external live undo request')
+    (root / 'notes.txt').write_text('external live notes')
+    initial = all_files()
+    result = run(None, 0, 'live-undo-request-other-conflict', 'undo')
+    assert result.returncode != 0 and 'undo conflict:' in result.stderr, result
+    assert (root / '.scuzz/ide/journal.json').read_text() == ''
+    assert all_files() == initial
+    external_cases.append(dict(kind='undo-request-other-conflict', status='passed', contents=initial))
     return dict(status='passed', workloads=runs, file_outcomes=hooks,
                 journals=dict(status='passed', workloads=journals,
                               scope='21 malformed journals; acceptance files and an existing accepted Undo state'),
                 requests=dict(status='passed', workloads=requests,
                               scope='19 malformed records; one complete request, one repeated request, and one conflict'),
+                external=dict(status='passed', workloads=external_cases,
+                              scope='interrupted acceptance and Undo external writes on owned and unowned workspace files'),
                 native_sha256=digest(executable.read_bytes()),
-                scope='acceptance and Undo recovery; every file and directory sync; two conflict states',
-                open_obligations=['power loss', 'external edits during recovery',
+                scope='acceptance and Undo recovery; every file and directory sync; owned and unowned external writes',
+                open_obligations=['power loss', 'concurrent external write race windows',
                                   'other application operations', 'staged temporary file cleanup'])
 
 
@@ -1435,15 +1696,19 @@ def recovery_experiment(cli):
     destination = ROOT / 'examples/proof/build/recovery'
     destination.mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix='run-', dir=destination))
-    report = dict(status='incomplete', methods=['exhaustive-bounded-simulation', 'sampled-simulation', 'ordinary-fuzz'],
+    report = dict(status='incomplete',
+                  methods=['exhaustive-bounded-simulation', 'sampled-simulation', 'schedule-relation', 'ordinary-fuzz'],
                   trusted=['source function selection', 'Scuzz compiler and evaluator', 'C runtime', 'host OS'],
-                  open_obligations=['other filesystem fault call indices', 'multiple faults', 'external edits during recovery',
+                  open_obligations=['other filesystem fault call indices', 'multiple faults',
+                                    'concurrent external write race windows',
                                     'other live filesystem and process termination cases', 'other application paths'])
     path = destination / 'summary.json'
     def save():
         path.write_text(json.dumps(report, indent=2) + '\n')
     save()
     try:
+        command(cli, ['run', 'examples/proof'], output, 'exporter-build',
+                env=dict(os.environ, SCUZZ_PROOF_EXPORT='0'))
         sources, identities = recovery_sources()
         report['identities'] = dict(production_sources=identities, compiler_sha256=digest(cli.read_bytes()),
             runtime_sha256=digest((ROOT / 'crates/runtime/build/libscuzz_rt.a').read_bytes()),
@@ -1457,14 +1722,18 @@ def recovery_experiment(cli):
                                    check=True, timeout=5).stdout)
         report['identities']['graph_exporter_source_sha256'] = digest((ROOT / 'examples/proof/src/Main.scuzz').read_bytes())
         report['identities']['python'] = platform.python_version()
-        report['scope'] = dict(files=2, operations=['accept', 'undo'], external_edit='before recovery only',
+        report['scope'] = dict(files=2, operations=['accept', 'undo'],
+                              external_edit='under stated ownership limits; concurrent race windows remain open',
                               entry='resume a journal or request Undo from accepted files',
                               methods_budget_seconds=60, sampled_seed=42, sampled_iterations=64, required_recovery_inputs=list(range(8)),
                               required_repeat_inputs=[0, 2], required_preserve_inputs=[1, 3, 5, 7],
                               required_undo_inputs=[2, 3, 6, 7], required_request_inputs=list(range(4)),
+                              required_external_inputs=list(range(8)),
+                              required_external_undo_inputs=list(range(4)),
+                              required_relate_inputs=list(range(4)),
                               required_invalid_record_inputs=list(range(19)),
                               required_invalid_journal_inputs=list(range(21)),
-                              observed_files=['two sources', 'journal', 'operation record', 'Undo state'],
+                              observed_files=['two sources', 'journal', 'operation record', 'Undo state', 'unrelated workspace files'],
                               ordinary_scope='the default search also includes repeated calls and persistent faults')
         report['live_recovery'] = live_recovery_checks(cli, sources, output)
         save()
@@ -1502,6 +1771,7 @@ def recovery_experiment(cli):
                 inputs = [('recover', n) for n in range(8)] + [('repeat', 0), ('repeat', 2)]
                 inputs += [('preserve', n) for n in (1, 3, 5, 7)]
                 inputs += [('duplicate', None)] + [('undo', n) for n in (2, 3, 6, 7)] + [('request', n) for n in range(4)]
+                inputs += [('external', n) for n in range(8)] + [('externalUndo', n) for n in range(4)]
                 inputs += [('invalidRecord', n) for n in range(19)]
                 inputs += [('invalidJournal', n) for n in range(21)]
                 for driver, n in inputs:
@@ -1513,6 +1783,10 @@ def recovery_experiment(cli):
                         assert {'completed request rejects a duplicate', 'duplicate rejection preserves files'} <= set(witness['executed_properties'])
                     elif driver == 'request':
                         assert REQUEST_RULES <= set(witness['executed_properties'])
+                    elif driver == 'external':
+                        assert EXTERNAL_RULES <= set(witness['executed_properties'])
+                    elif driver == 'externalUndo':
+                        assert EXTERNAL_UNDO_RULES <= set(witness['executed_properties'])
                     elif driver == 'invalidRecord':
                         assert INVALID_RECORD_RULES <= set(witness['executed_properties'])
                     elif driver == 'invalidJournal':
@@ -1546,7 +1820,8 @@ def recovery_experiment(cli):
             for scope, inputs, driver, rules, calls in (
                     ('acceptance', [0, 1, 4, 5], 'recover', RECOVERY_RULES, [1, 9]),
                     ('undo', [2, 3, 6, 7], 'undo', UNDO_RULES, [1, 9]),
-                    ('request', [0, 1, 2, 3], 'request', REQUEST_RULES, [1, 25])):
+                    ('request', [0, 1, 2, 3], 'request', REQUEST_RULES, [1, 25]),
+                    ('external', [0, 1, 2, 3, 6, 7], 'external', EXTERNAL_RULES, [1, 5])):
                 sampled_scope = scope + '_sampled'
                 scoped_output = package / scope
                 scoped_output.mkdir()
@@ -1573,6 +1848,10 @@ def recovery_experiment(cli):
                     command(cli, ['fuzz', '--replay', witness['workload'], package], output,
                             variant + '-' + scope + '-sampled-scope-replay', success=False)
                 save()
+            row['relate'] = recovery_relate(cli, package, executable, probe, package,
+                                            expect_failure=(variant != 'correct'),
+                                            check_relation=(variant == 'external-overwrite'))
+            save()
             row['sampled'] = recovery_sampled(cli, package, package)
             search = row['sampled'].get('report', {}).get('scope', {}).get('search', {})
             row['sampled']['search_status'] = ('failed' if search.get('failed', 0) else 'incomplete'
@@ -1581,6 +1860,39 @@ def recovery_experiment(cli):
             if variant != 'correct':
                 assert row['finite']['status'] == 'failed', 'deliberate recovery defect is not rejected'
                 assert row['sampled']['search_status'] == 'failed', 'ordinary search does not reject the deliberate defect'
+            if variant == 'external-overwrite':
+                assert row['relate']['status'] == 'failed', 'schedule relation check does not reject external overwrite'
+        report['overwrite_controls'] = {}
+        for name, anchor, driver, n, relate_entry in (
+            ('write-one-overwrite',
+             '_ <- need(after || before, Str.concat("recovery conflict: ", str(w, "path")))',
+             'external', 1, 1),
+            ('finish-overwrite',
+             '_ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")',
+             'external', 1, 1),
+            ('undo-overwrite',
+             '_ <- need(List.forall(checks, b => b), "undo conflict: preserve external edits")',
+             'externalUndo', 0, 3),
+        ):
+            changed = dict(sources)
+            assert changed['Cards'].count(anchor) == 1
+            changed['Cards'] = changed['Cards'].replace(anchor, '_ <- IO.pure(())')
+            package, executable, probe = recovery_package(cli, changed, output, 'control-' + name)
+            witness = protocol_probe(executable, package / 'exhaustive-witness', driver, n, 0)
+            assert witness['status'] == 'failed', (name, witness)
+            witness['parity'] = protocol_parity(cli, probe, witness, package / 'exhaustive-witness', package, 1000)
+            relate_bad = recovery_relate(cli, package, executable, probe, package,
+                                         expect_failure=True, target_entry=relate_entry)
+            sampled_bad = recovery_sampled(cli, package, package, iterations=16)
+            assert sampled_bad['status'] == 'failed', (name, sampled_bad)
+            report['overwrite_controls'][name] = dict(
+                status='detected',
+                exhaustive=witness['status'],
+                relate=relate_bad['status'],
+                sampled=sampled_bad['status'],
+                single_relate_runs='passed',
+            )
+            save()
         report['mutation_regressions'] = {}
         regressions = [
             ('journal-identity-guard', 'Cards',
@@ -1600,6 +1912,15 @@ def recovery_experiment(cli):
              '_ <- if (List.forall(checks, b => b)) IO.pure(()) else Fs.write(Fs.join(root, "src/Other.scuzz"), "unexpected bytes")\n'
              '    _ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")',
              'preserve', 1, 'recovery conflict preserves all operation files'),
+            ('write-one-conflict-guard', 'Cards',
+             '_ <- need(after || before, Str.concat("recovery conflict: ", str(w, "path")))',
+             '_ <- IO.pure(())', 'external', 1, 'per-file guard reports conflicting path'),
+            ('finish-conflict-guard', 'Cards',
+             '_ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")',
+             '_ <- IO.pure(())', 'external', 1, 'external recovery settles or preserves owned files'),
+            ('undo-conflict-guard', 'Cards',
+             '_ <- need(List.forall(checks, b => b), "undo conflict: preserve external edits")',
+             '_ <- IO.pure(())', 'externalUndo', 0, 'external Undo surfaces explicit conflict or settled state'),
             ('repeat-undo-state', 'Cards',
              'if (Str.isEmpty(raw)) IO.pure(()) else finish(root, LspClient.parseJson(raw))',
              'if (Str.isEmpty(raw)) Fs.write(Fs.join(storage(root), "last.json"), "") else finish(root, LspClient.parseJson(raw))',
@@ -1669,19 +1990,22 @@ def recovery_experiment(cli):
                 report['mutation_regressions'][name]['existing_rules'] = previous
             save()
         report['comparison'] = dict(
-            deliberate_defects=dict(finite=2, ordinary_search=2),
+            deliberate_defects=dict(finite=2, ordinary_search=2, schedule_relation=4),
             stronger_rule_control=dict(defect='conflict-write', existing_rules='passed', added_rule='failed'),
-            conclusion='Both methods reject the controls. General application benefit remains unproven.',
+            overwrite_relation_controls=report['overwrite_controls'],
+            conclusion='Exhaustive, sampled, and schedule-relation checks reject the overwrite controls. General application benefit remains unproven.',
             limits=['finite exploration must complete within its checking budget',
+                    'concurrent external write race windows remain open',
                     'search scopes differ; timing does not establish a speed advantage'])
-        for scope in ('acceptance', 'undo', 'request'):
+        for scope in ('acceptance', 'undo', 'request', 'external'):
             report['comparison'][scope] = dict(
                 equal_scope=True, bounds=report['variants']['correct'][scope]['bounds'],
                 methods=['exhaustive-bounded-simulation', 'sampled-simulation'],
                 source_variants=list(variants), author_rules='the same source rules in both methods',
                 verdicts={name: dict(exhaustive=row[scope]['status'], sampled=row[scope + '_sampled']['status'])
                           for name, row in report['variants'].items()},
-                limits=['other application operations', 'other fault calls', 'multiple faults', 'more than one preemption'],
+                limits=['other application operations', 'other fault calls', 'multiple faults',
+                        'more than one preemption', 'concurrent external write race windows'],
                 conclusion='A completed finite scope supplies stronger evidence than passing sampled executions.')
         duplicate = re.search(r'^def duplicate\(\): IO\[Unit\] =\n.*?(?=^def |\Z)', sources['Recovery'], re.M | re.S)
         assert duplicate is not None
@@ -1698,7 +2022,8 @@ def recovery_experiment(cli):
             scope='one duplicate request rule; production request guard; fault-free input',
             limits=['command costs do not measure human writing time', 'human usefulness remains unproven'])
         correct = report['variants']['correct']
-        scopes = [correct[name] for name in ('finite', 'acceptance', 'acceptance_sampled', 'undo', 'undo_sampled', 'request', 'request_sampled')]
+        scopes = [correct[name] for name in ('finite', 'acceptance', 'acceptance_sampled', 'undo', 'undo_sampled',
+                                             'request', 'request_sampled', 'external', 'external_sampled', 'relate')]
         scopes += list(correct['preemption_scopes'].values())
         scopes += [correct['sampled']]
         controls = [row['sampled'] for name, row in report['variants'].items() if name != 'correct']
