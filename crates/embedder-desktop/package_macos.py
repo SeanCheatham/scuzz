@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a local macOS app bundle with its non-system libraries."""
 
+import json
 from pathlib import Path
 import plistlib
 import shutil
@@ -37,9 +38,13 @@ def bundle(exe, dest, name, version, identifier, width, height, scale):
         root = Path(__file__).resolve().parents[2]
         licenses = contents / "Resources" / "licenses"
         licenses.mkdir()
-        for font_name in ("devanagari", "thai", "sc", "arabic"):
-            shutil.copy2(root / "third_party/fonts" / (font_name + "-LICENSE"), licenses)
+        for font in json.loads((root / "third_party/fonts/PIN").read_text()):
+            shutil.copy2(root / "third_party/fonts" / (font["name"] + "-LICENSE"), licenses)
         shutil.copy2(root / "third_party/skia/SheenBidi-LICENSE", licenses)
+        harfbuzz_license = root / "crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE"
+        if not harfbuzz_license.is_file():
+            run("make", "-C", str(root / "crates/ffi-skia"), "build/harfbuzz/HarfBuzz-LICENSE")
+        shutil.copy2(harfbuzz_license, licenses)
         copied = {}
         names = {}
 

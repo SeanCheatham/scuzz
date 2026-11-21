@@ -447,6 +447,9 @@ static void *sys_exec_start(void *env) {
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   int out_fds[2];
   int err_fds[2];
+  int sync_fds[2];
+  char sync_byte;
+  ssize_t sync_n;
   pid_t pid;
   const char *c = sz_string_cstr(st->cmd);
 
@@ -462,12 +465,25 @@ static void *sys_exec_start(void *env) {
     r->as.err = sz_error_new(3, "Sys.exec: pipe failed");
     return r;
   }
+  if (pipe(sync_fds) != 0) {
+    close(out_fds[0]);
+    close(out_fds[1]);
+    close(err_fds[0]);
+    close(err_fds[1]);
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.exec: pipe failed");
+    return r;
+  }
+  (void)fcntl(sync_fds[0], F_SETFD, FD_CLOEXEC);
+  (void)fcntl(sync_fds[1], F_SETFD, FD_CLOEXEC);
   pid = fork();
   if (pid < 0) {
     close(out_fds[0]);
     close(out_fds[1]);
     close(err_fds[0]);
     close(err_fds[1]);
+    close(sync_fds[0]);
+    close(sync_fds[1]);
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.exec: fork failed");
     return r;
@@ -475,13 +491,19 @@ static void *sys_exec_start(void *env) {
   if (pid == 0) {
     /* Drop the parent's fatal-signal handler before any syscall can run it. */
     sz_exec_child_signals();
-    /* Keep the shell and its children in one cancellation group. */
-    if (getpgrp() != getpid() && setpgid(0, 0) != 0 &&
-        getpgrp() != getpid()) {
-      const char msg[] = "setpgid failed\n";
-      (void)write(err_fds[1], msg, sizeof msg - 1);
+    close(sync_fds[0]);
+    /* Set the cancellation group in the child alone. Concurrent parent and
+     * child setpgid calls race on Darwin. */
+    while (getpgrp() != getpid() && setpgid(0, 0) != 0) {
+      if (errno == EINTR)
+        continue;
+      {
+        const char msg[] = "setpgid failed\n";
+        (void)write(err_fds[1], msg, sizeof msg - 1);
+      }
       _exit(127);
     }
+    close(sync_fds[1]);
     close(out_fds[0]);
     close(err_fds[0]);
     if (dup2(out_fds[1], STDOUT_FILENO) < 0)
@@ -500,8 +522,12 @@ static void *sys_exec_start(void *env) {
     }
     _exit(127);
   }
-  /* Both sides set the group before either side can cancel. */
-  (void)setpgid(pid, pid);
+  /* Wait until the child establishes its process group. */
+  close(sync_fds[1]);
+  do {
+    sync_n = read(sync_fds[0], &sync_byte, 1);
+  } while (sync_n < 0 && errno == EINTR);
+  close(sync_fds[0]);
   st->pgid = pid;
   close(out_fds[1]);
   close(err_fds[1]);

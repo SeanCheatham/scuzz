@@ -922,8 +922,23 @@ licenses = package_out / "package/host"
 if sys.platform == "darwin":
     licenses = licenses / "scuzz-release-app.app/Contents/Resources"
 licenses = licenses / "licenses"
-for source in [*(home / "third_party/fonts" / (font["name"] + "-LICENSE") for font in fonts), home / "third_party/skia/SheenBidi-LICENSE", joining / "HarfBuzz-LICENSE"]:
+expected_licenses = [*(home / "third_party/fonts" / (font["name"] + "-LICENSE") for font in fonts), home / "third_party/skia/SheenBidi-LICENSE", joining / "HarfBuzz-LICENSE"]
+assert {item.name for item in licenses.iterdir()} == {item.name for item in expected_licenses}
+for source in expected_licenses:
     assert (licenses / source.name).read_bytes() == source.read_bytes()
+if sys.platform != "darwin":
+    import importlib.util
+    from unittest.mock import patch
+    spec = importlib.util.spec_from_file_location("package_macos", home / "crates/embedder-desktop/package_macos.py")
+    macos_packager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(macos_packager)
+    with patch.object(macos_packager, "run", return_value=""):
+        macos_packager.bundle(package_out / "scuzz-release-app", root / "build/macos-bundle/host",
+                              "scuzz-release-app", "0.1.0", "dev.scuzz.release", "480", "320", "1")
+    macos_licenses = root / "build/macos-bundle/host/scuzz-release-app.app/Contents/Resources/licenses"
+    assert {item.name for item in macos_licenses.iterdir()} == {item.name for item in expected_licenses}
+    for source in expected_licenses:
+        assert (macos_licenses / source.name).read_bytes() == source.read_bytes()
 print('Native package: font and text shaper licenses pass', flush=True)
 out = root / "build/ide-host"
 out.mkdir(parents=True, exist_ok=True)
