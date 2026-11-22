@@ -1,6 +1,9 @@
 oracle prettyGenerated(n: Int where n >= 0): Bool =
   Main.prettyGenerated(n)
 
+oracle lexEofLast(): Bool =
+  Main.lexEofLast()
+
 oracle fmtHi(): Bool =
   Main.fmtDiff(Main.srcHi(), Main.wantHi())
 
@@ -62,7 +65,7 @@ oracle fmtTriple(): Bool =
   Main.fmtDiff(Main.srcTriple(), Main.wantTriple())
 
 oracle fmtCons(): Bool =
-  Main.fmtDiff(Main.srcCons(), Main.wantCons()) && Main.fmtDiff(Main.srcConsL(), Main.wantConsL()) && Main.fmtIdem(Main.srcConsL()) && Main.fmtDiff(Main.srcConsEq(), Main.wantConsEq()) && Main.fmtIdem(Main.srcConsEq()) && Main.fmtDiff(Main.srcConsMul(), Main.wantConsMul()) && Main.fmtIdem(Main.srcConsMul())
+  Main.fmtDiff(Main.srcCons(), Main.wantCons()) && Main.fmtDiff(Main.srcCons2(), Main.wantCons2()) && Main.fmtIdem(Main.srcCons2()) && Main.fmtDiff(Main.srcConsL(), Main.wantConsL()) && Main.fmtIdem(Main.srcConsL()) && Main.fmtDiff(Main.srcConsEq(), Main.wantConsEq()) && Main.fmtIdem(Main.srcConsEq()) && Main.fmtDiff(Main.srcConsMul(), Main.wantConsMul()) && Main.fmtIdem(Main.srcConsMul())
 
 oracle fmtGuard(): Bool =
   Main.fmtDiff(Main.srcGuard(), Main.wantGuard())
@@ -80,13 +83,28 @@ oracle fmtCopy(): Bool =
   Main.fmtDiff(Main.srcCopy(), Main.wantCopy())
 
 oracle fmtOr(): Bool =
-  Main.fmtDiff(Main.srcOr(), Main.wantOr())
+  Main.fmtDiff(Main.srcOr(), Main.wantOr()) && Main.fmtDiff(Main.srcOr2(), Main.wantOr2()) && Main.fmtIdem(Main.srcOr2())
+
+oracle fmtAnd(): Bool =
+  Main.fmtDiff(Main.srcAnd(), Main.wantAnd()) && Main.fmtIdem(Main.srcAnd())
+
+oracle fmtUn(): Bool =
+  Main.fmtDiff(Main.srcUn(), Main.wantUn()) && Main.fmtIdem(Main.srcUn())
+
+oracle fmtIfOp(): Bool =
+  Main.fmtDiff(Main.srcIfOp(), Main.wantIfOp()) && Main.fmtIdem(Main.srcIfOp())
+
+oracle fmtFunParen(): Bool =
+  Main.fmtDiff(Main.srcFunParen(), Main.wantFunParen()) && Main.fmtIdem(Main.srcFunParen())
 
 oracle fmtBits(): Bool =
   Main.fmtDiff(Main.srcBits(), Main.wantBits())
 
+oracle fmtPatAs(): Bool =
+  Main.fmtDiff(Main.srcAs(), Main.wantAs()) && Main.fmtIdem(Main.srcAs())
+
 oracle fmtHex(): Bool =
-  Main.fmtDiff(Main.srcHex(), Main.wantHex()) && Main.fmtDiff(Main.srcAsc(), Main.wantAsc()) && Main.fmtDiff(Main.srcLamTy(), Main.wantLamTy()) && Main.format(Main.srcBinBad()) != Main.wantBinWrong()
+  Main.fmtDiff(Main.srcHex(), Main.wantHex()) && Main.fmtDiff(Main.srcAsc(), Main.wantAsc()) && Main.fmtIdem(Main.srcAsc()) && Main.fmtDiff(Main.srcLamTy(), Main.wantLamTy()) && Main.fmtIdem(Main.srcLamTy()) && Main.format(Main.srcBinBad()) != Main.wantBinWrong()
 
 oracle fmtIdemHi(): Bool =
   Main.fmtIdem(Main.srcHi())

@@ -9,7 +9,7 @@ enum Block:
   case Link(nav: NavLink)
   case Viz(kind: String, src: String)
 
-def verbs(): List[String] =
+private def verbs(): List[String] =
   "devices" :: "build" :: "run" :: "watch" :: "check" :: "lsp" :: "fmt" :: "fuzz" :: "diff" :: "new" :: "ide" :: "models" :: "package" :: "help" :: "docs" :: []
 
 def topics(): List[Topic] =
@@ -18,7 +18,7 @@ def topics(): List[Topic] =
 def idsLine(): String =
   List.join(List.map(topics(), t => t.id), "|")
 
-def findTopic(id: String): List[Topic] =
+private def findTopic(id: String): List[Topic] =
   List.filter(topics(), t => t.id == id)
 
 def hasTopic(id: String): Bool =
@@ -30,20 +30,20 @@ def formatSrc(src: String): String =
 def wrapPara(text: String): String =
   fillWords(wordsOf(text), 80, "", "")
 
-def wordsOf(s: String): List[String] =
+private def wordsOf(s: String): List[String] =
   List.filter(Str.split(s, " "), w => w != "")
 
-def fillWords(words: List[String], width: Int, line: String, acc: String): String =
+private def fillWords(words: List[String], width: Int, line: String, acc: String): String =
   if (List.isEmpty(words)) endLine(line, acc) else fillWord(List.at(words, 0), List.tail(words), width, line, acc)
 
-def fillWord(w: String, rest: List[String], width: Int, line: String, acc: String): String =
+private def fillWord(w: String, rest: List[String], width: Int, line: String, acc: String): String =
   if (line == "") fillWords(rest, width, w, acc) else if (Str.len(line) + 1 + Str.len(w) <= width) fillWords(rest, width, Str.concat(line, Str.concat(" ", w)), acc) else fillWords(rest, width, w, endLine(line, acc))
 
-def endLine(line: String, acc: String): String =
+private def endLine(line: String, acc: String): String =
   if (line == "") acc else if (acc == "") line else Str.concat(acc, Str.concat("""
 """, line))
 
-def indentBlock(s: String): String =
+private def indentBlock(s: String): String =
   List.join(List.map(Str.split(s, """
 """), line => Str.concat("  ", line)), """
 """)
@@ -53,10 +53,10 @@ def renderList(): String =
 """), """
 """)
 
-def renderListRow(t: Topic): String =
+private def renderListRow(t: Topic): String =
   Str.concat(t.id, Str.concat("  ", t.title))
 
-def unknownTopic(id: String): String =
+private def unknownTopic(id: String): String =
   Str.concat("scuzz docs: unknown topic '", Str.concat(id, Str.concat("""'
 
 """, renderList())))
@@ -66,13 +66,13 @@ def renderTopic(id: String): String =
     found = findTopic(id)
   } yield if (List.isEmpty(found)) unknownTopic(id) else renderTopicBody(List.at(found, 0))
 
-def renderTopicBody(t: Topic): String =
+private def renderTopicBody(t: Topic): String =
   Str.concat(t.title, Str.concat("""
 
 """, Str.concat(renderBlocks(t.blocks), """
 """)))
 
-def renderBlocks(xs: List[Block]): String =
+private def renderBlocks(xs: List[Block]): String =
   List.join(List.map(xs, b => renderBlock(b)), """
 
 """)
@@ -87,7 +87,7 @@ def renderBlock(b: Block): String =
 """)), indentBlock(src))
   }
 
-def allBlocks(): List[Block] =
+private def allBlocks(): List[Block] =
   List.flatMap(topics(), t => t.blocks)
 
 def allCode(): List[String] =
