@@ -23,10 +23,7 @@ def diagRow(item: Json): String =
   Str.concat(Str.fromInt(jsonInt(jsonField(item, "line"))), Str.concat(":", Str.concat(Str.fromInt(jsonInt(jsonField(item, "column"))), Str.concat("|", Str.concat(jsonStr(jsonField(item, "file")), Str.concat("|", jsonStr(jsonField(item, "message"))))))))
 
 def diagFile(s: String): String =
-  Str.split(s, "|") match {
-    case _ :: f :: _ => f
-    case _ => ""
-  }
+  List.getOrElse(Str.split(s, "|"), 1, "")
 
 def diagRows(j: Json): List[String] =
   j match {
@@ -56,6 +53,6 @@ def jumpDiag(s: String): IO[Unit] =
   case Option.Some(c) => Str.toInt(c, Str.len(""))
   case Option.None => 0
 }
-    _ <- Ui.setEditorCaret(lineN, Str.toInt(List.at(lc, Str.len("x")), Str.len("")))
+    _ <- Ui.setEditorCaret(lineN, Str.toInt(List.getOrElse(lc, 1, "0"), Str.len("")))
   } yield ()
 

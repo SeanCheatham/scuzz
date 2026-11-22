@@ -939,6 +939,7 @@ def focusDiagnostic(): IO[Unit] =
     src <- Fs.read("src/Main.scuzz")
     raw <- Main.analyze("src/Main.scuzz", src)
     rows = Diags.diagRows(LspClient.parseJson(raw))
+    _ <- Diags.jumpDiag("1|src/Main.scuzz|no-colon")
     _ <- IO.foreachDiscard(rows, row => Diags.jumpDiag(row))
     caret <- Ui.editorCaret()
     diagnosticRows = Signal.make(List.len(rows))

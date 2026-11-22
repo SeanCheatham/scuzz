@@ -1969,6 +1969,7 @@ baseline = hashlib.sha256(json.dumps(records, ensure_ascii=False, separators=(',
 ops = {"v": 1, "kind": "inject", "events": [{"op": "tap", "id": "button:Start"}]}
 path = root / "ops-deck.json"
 path.write_text(json.dumps(ops))
+(root / "deck-debug.json").unlink(missing_ok=True)
 env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(path), SCUZZ_UI_INJECT=str(path), SCUZZ_UI_DEBUG_DUMP=str(root / "deck-debug.json"))
 with open(root / "deck-live.log", "w") as log:
     proc = subprocess.Popen([str(repo / "examples/editor/build/editor")], cwd=root, env=env, stdout=log, stderr=log)
@@ -1992,7 +1993,7 @@ with open(root / "deck-live.log", "w") as log:
         temp.write_text(json.dumps({"v": 1, "kind": "inject", "events": events}))
         temp.replace(path)
     try:
-        await_state(lambda: (root / "build/ide/request.json").is_file())
+        await_state(lambda: (root / "build/ide/request.json").is_file() and "External proposals: publish a complete directory" in json.dumps(json.loads((root / "deck-debug.json").read_text())))
         request = json.loads((root / "build/ide/request.json").read_text())
         assert request["objective"] == "Review behavior"
         (stage / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(prop.encode()).hexdigest()}]}))
@@ -2189,6 +2190,7 @@ if os.uname().sysname == "Linux":
     library = root / "fault.so"
     subprocess.run(["clang", "-shared", "-fPIC", str(fault), "-ldl", "-o", str(library)], check=True)
     inject = write_ops(root, [{"op": "tap", "id": "button:Start"}])
+    (root / "debug.json").unlink(missing_ok=True)
     env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(inject), SCUZZ_UI_INJECT=str(inject), SCUZZ_UI_DEBUG_DUMP=str(root / "debug.json"), LD_PRELOAD=str(library))
     log = open(root / "live.log", "w")
     review_wall_start = time.monotonic()
@@ -2216,7 +2218,7 @@ if os.uname().sysname == "Linux":
                 if idle and armed and "Choose left" in json.dumps(ui.get("taps", [])):
                     return c
     try:
-        await_state(lambda: (root / "build/ide/request.json").is_file())
+        await_state(lambda: (root / "build/ide/request.json").is_file() and "External proposals: publish a complete directory" in json.dumps(read_ui(root)))
         write_ops(root, [{"op": "tap", "id": "choicechip:Code"}])
         await_state(lambda: read_ui(root).get("editors"))
         write_ops(root, [{"op": "caret", "offset": len(original)}, {"op": "key", "key": "x", "text": "x"}])
@@ -2365,11 +2367,12 @@ if os.uname().sysname == "Linux":
     publish(root, [("src/Main.scuzz", proposed), ("src/Other.scuzz", "def other(): Int =\n  3\n\n")])
     env.pop("LD_PRELOAD", None)
     write_ops(root, [{"op": "tap", "id": "button:Start"}])
+    (root / "debug.json").unlink(missing_ok=True)
     log = open(root / "live.log", "a")
     review_wall_start = time.monotonic()
     proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
     try:
-        await_state(lambda: (root / "build/ide/request.json").is_file())
+        await_state(lambda: (root / "build/ide/request.json").is_file() and "External proposals: publish a complete directory" in json.dumps(read_ui(root)))
         bind_publication(root)
         write_ops(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
