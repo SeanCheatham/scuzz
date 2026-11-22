@@ -49,6 +49,12 @@ oracle cliValidFormatting(): Bool =
     valid = ["def f(): Int = for { n = 1 } yield n", "def f(): List[Int] = List.map([1], n => n + 1)", "def f(): List[Int] = List.map([1], _ + 1)", "record Item(value: Int)", "def f(): Int = (1: Int)", "def f(): List[Int] = List.map([1], (n: Int) => n)", "@main def main: IO[Unit] = IO.println(1)", "def f(x: Int = 1): Int = x", "def f(x: Int where x > 0): Int = x", "def f(): Int = 1 match { case n if n > 0 => n case _ => 0 }"]
   } yield List.forall(valid, source => !Parse.hasParseError(Parse.parse(Lexer.lex(source))) && Lsp.formatJson(source) != "[]" && Cli.fmtSrc(Cli.fmtSrc(source)) == Cli.fmtSrc(source))
 
+private def parseMsg(hint: String): String =
+  if (hint == "") "unexpected token" else Str.concat("unexpected token; expected ", hint)
+
+private def firstHint(src: String): String =
+  if (List.isEmpty(Parse.parseErrorNotes(src))) "" else List.at(Parse.parseErrorNotes(src), 0).hint
+
 oracle cliSyntaxDiagnostics(): Bool =
   for {
     cases = [("record record(value: Int)", 1, 8, 1, 14), ("""enum record:
@@ -61,11 +67,11 @@ def f(): Int = 1""", 2, 1, 2, 4), ("@main def record: IO[Unit] = IO.println(1)",
     multiRaw = Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", multi)])
     multiLsp = Lsp.publishDiags("file:///tmp/Broken.scuzz", multiRaw)
   } yield List.forall(cases, c => c match {
-  case (source, line, col, eline, ecol) => Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)]) == Str.concat("[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":\"Broken.scuzz\",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}]")))))))) && Check.humanFiles([("Good", "def good(): Int = 1"), ("Broken", source)]) == Str.concat("Broken.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), ": error: unexpected token")))) && Str.contains(Lsp.publishDiags("file:///tmp/Broken.scuzz", Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)])), Str.concat("{\"range\":{\"start\":{\"line\":", Str.concat(Str.fromInt(line - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(col - 1), Str.concat("},\"end\":{\"line\":", Str.concat(Str.fromInt(eline - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(ecol - 1), "}}")))))))))
-}) && Check.humanFiles([("Good", "def good(): Int = 1"), ("Broken", multi)]) == """Broken.scuzz:1:8: error: unexpected token
-Broken.scuzz:3:8: error: unexpected token
-Broken.scuzz:4:16: error: unexpected token
-Broken.scuzz:5:11: error: unexpected token""" && !Str.contains(multiRaw, "type error") && List.forall([(1, 8, 1, 14), (3, 8, 3, 14), (4, 16, 4, 17), (5, 11, 5, 17)], sp => sp match {
+  case (source, line, col, eline, ecol) => Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)]) == Str.concat("[{\"severity\":\"error\",\"message\":", Str.concat(Check.jsonStr(parseMsg(firstHint(source))), Str.concat(",\"file\":\"Broken.scuzz\",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}]")))))))))) && Check.humanFiles([("Good", "def good(): Int = 1"), ("Broken", source)]) == Str.concat("Broken.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: ", parseMsg(firstHint(source))))))) && Str.contains(Lsp.publishDiags("file:///tmp/Broken.scuzz", Check.checkFiles([("Good", "def good(): Int = 1"), ("Broken", source)])), Str.concat("{\"range\":{\"start\":{\"line\":", Str.concat(Str.fromInt(line - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(col - 1), Str.concat("},\"end\":{\"line\":", Str.concat(Str.fromInt(eline - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(ecol - 1), "}}")))))))))
+}) && Check.humanFiles([("Good", "def good(): Int = 1"), ("Broken", multi)]) == """Broken.scuzz:1:8: error: unexpected token; expected identifier
+Broken.scuzz:3:8: error: unexpected token; expected identifier
+Broken.scuzz:4:16: error: unexpected token; expected expression
+Broken.scuzz:5:11: error: unexpected token; expected identifier""" && !Str.contains(multiRaw, "type error") && List.forall([(1, 8, 1, 14), (3, 8, 3, 14), (4, 16, 4, 17), (5, 11, 5, 17)], sp => sp match {
   case (line, col, eline, ecol) => Str.contains(multiLsp, Str.concat("{\"range\":{\"start\":{\"line\":", Str.concat(Str.fromInt(line - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(col - 1), Str.concat("},\"end\":{\"line\":", Str.concat(Str.fromInt(eline - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(ecol - 1), "}}")))))))))
 })
 

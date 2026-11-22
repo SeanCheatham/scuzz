@@ -19,6 +19,7 @@ import Parse.Imp
 import Parse.Im
 import Parse.Tr
 import Parse.TrMethod
+import Parse.ErrAt
 import Lexer.lex
 import Lexer.interpEnd
 import Lexer.numberEnd
@@ -4623,6 +4624,19 @@ def diagJson2(o: Out, file: String, loc: (Int, Int, Int, Int)): String =
 def errMsg(o: Out): String =
   if (o.err == "unexpected token") o.err else Str.concat("type error: ", o.err)
 
+def parseErrText(hint: String): String =
+  if (hint == "") "unexpected token" else Str.concat("unexpected token; expected ", hint)
+
+def diagJsonParse(file: String, loc: (Int, Int, Int, Int), hint: String): String =
+  loc match {
+    case (line, col, eline, ecol) => Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(parseErrText(hint)), Str.concat(",\"file\":", Str.concat(jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))))
+  }
+
+def humanParse(file: String, loc: (Int, Int, Int, Int), hint: String): String =
+  loc match {
+    case (line, col, _, _) => Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: ", parseErrText(hint)))))))
+  }
+
 def diagJson3(o: Out, file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
   Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(errMsg(o)), Str.concat(",\"file\":", Str.concat(jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))))
 
@@ -4638,16 +4652,16 @@ def checkFilesOwn(files: List[(String, String)], stems: List[String]): String =
 def parseLocOfIdx(starts: LineIndex, src: String, off: Int): (Int, Int, Int, Int) =
   if (off < 0 || src == "") (1, 1, 1, 1) else parseLocOf2(starts, src, off)
 
-def parseErrorDiagFile(o: Out, stem: String, src: String, starts: LineIndex, offs: List[Int], acc: List[String]): List[String] =
-  if (List.isEmpty(offs)) acc else parseErrorDiagFile(o, stem, src, starts, List.tail(offs), diagJson2(o, fileOf(stem), parseLocOfIdx(starts, src, List.at(offs, 0))) :: acc)
+def parseErrorDiagFile(stem: String, src: String, starts: LineIndex, notes: List[ErrAt], acc: List[String]): List[String] =
+  if (List.isEmpty(notes)) acc else parseErrorDiagFile(stem, src, starts, List.tail(notes), diagJsonParse(fileOf(stem), parseLocOfIdx(starts, src, List.at(notes, 0).off), List.at(notes, 0).hint) :: acc)
 
 def parseErrorDiagsHd(file: (String, String), rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
   file match {
-    case (stem, src) => parseErrorDiagsOffs(stem, src, Parse.parseErrorOffs(src), rest, o, acc)
+    case (stem, src) => parseErrorDiagsNotes(stem, src, Parse.parseErrorNotes(src), rest, o, acc)
   }
 
-def parseErrorDiagsOffs(stem: String, src: String, offs: List[Int], rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
-  parseErrorDiagsGo(rest, o, if (List.isEmpty(offs)) acc else parseErrorDiagFile(o, stem, src, fastLineIndex(src), offs, acc))
+def parseErrorDiagsNotes(stem: String, src: String, notes: List[ErrAt], rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  parseErrorDiagsGo(rest, o, if (List.isEmpty(notes)) acc else parseErrorDiagFile(stem, src, fastLineIndex(src), notes, acc))
 
 def parseErrorDiagsGo(files: List[(String, String)], o: Out, acc: List[String]): List[String] =
   if (List.isEmpty(files)) List.reverse(acc) else parseErrorDiagsHd(List.at(files, 0), List.tail(files), o, acc)
@@ -4809,16 +4823,16 @@ def humanFiles(files: List[(String, String)]): String =
 def humanFilesOwn(files: List[(String, String)], stems: List[String]): String =
   human3(files, checkProgOwn(Parse.parseFiles(files), stems))
 
-def parseErrorHumanFile(o: Out, stem: String, src: String, starts: LineIndex, offs: List[Int], acc: List[String]): List[String] =
-  if (List.isEmpty(offs)) acc else parseErrorHumanFile(o, stem, src, starts, List.tail(offs), humanLine2(o, fileOf(stem), parseLocOfIdx(starts, src, List.at(offs, 0))) :: acc)
+def parseErrorHumanFile(stem: String, src: String, starts: LineIndex, notes: List[ErrAt], acc: List[String]): List[String] =
+  if (List.isEmpty(notes)) acc else parseErrorHumanFile(stem, src, starts, List.tail(notes), humanParse(fileOf(stem), parseLocOfIdx(starts, src, List.at(notes, 0).off), List.at(notes, 0).hint) :: acc)
 
 def parseErrorHumansHd(file: (String, String), rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
   file match {
-    case (stem, src) => parseErrorHumansOffs(stem, src, Parse.parseErrorOffs(src), rest, o, acc)
+    case (stem, src) => parseErrorHumansNotes(stem, src, Parse.parseErrorNotes(src), rest, o, acc)
   }
 
-def parseErrorHumansOffs(stem: String, src: String, offs: List[Int], rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
-  parseErrorHumansGo(rest, o, if (List.isEmpty(offs)) acc else parseErrorHumanFile(o, stem, src, fastLineIndex(src), offs, acc))
+def parseErrorHumansNotes(stem: String, src: String, notes: List[ErrAt], rest: List[(String, String)], o: Out, acc: List[String]): List[String] =
+  parseErrorHumansGo(rest, o, if (List.isEmpty(notes)) acc else parseErrorHumanFile(stem, src, fastLineIndex(src), notes, acc))
 
 def parseErrorHumansGo(files: List[(String, String)], o: Out, acc: List[String]): List[String] =
   if (List.isEmpty(files)) List.reverse(acc) else parseErrorHumansHd(List.at(files, 0), List.tail(files), o, acc)

@@ -119,29 +119,29 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
     assert [row['message'] for row in rows if row['severity'] == 1] == [row['message'] for row in errors], (errors, rows)
     assert 'unbound variable missing' in rows[0]['message'], rows
     parse_cases = [
-        ('def ok(): Int = 1\nrecord record(value: Int)\n', 2, 8, 2, 14),
-        ('private oracle hidden(): Bool = true\n', 1, 9, 1, 15),
-        ('def f(x: Int = ): Int = 1\n', 1, 16, 1, 17),
-        ('def f(x: Int where ): Int = 1\n', 1, 20, 1, 21),
-        ('import Domain\n@main def main: IO[Unit] = IO.pure(())\n', 2, 1, 2, 6),
-        ('@main def record: IO[Unit] = IO.println(1)\n', 1, 11, 1, 17),
-        ('def f(): Int = 1 match { case n if => n }\n', 1, 36, 1, 38),
-        ('def f(): Int = (1 + 2', 1, 22, 1, 23),
-        ('def broken(): Int = 1\n)\n', 2, 1, 2, 2),
+        ('def ok(): Int = 1\nrecord record(value: Int)\n', 2, 8, 2, 14, 'unexpected token; expected identifier'),
+        ('private oracle hidden(): Bool = true\n', 1, 9, 1, 15, 'unexpected token; expected def'),
+        ('def f(x: Int = ): Int = 1\n', 1, 16, 1, 17, 'unexpected token; expected expression'),
+        ('def f(x: Int where ): Int = 1\n', 1, 20, 1, 21, 'unexpected token; expected expression'),
+        ('import Domain\n@main def main: IO[Unit] = IO.pure(())\n', 2, 1, 2, 6, 'unexpected token; expected .'),
+        ('@main def record: IO[Unit] = IO.println(1)\n', 1, 11, 1, 17, 'unexpected token; expected identifier'),
+        ('def f(): Int = 1 match { case n if => n }\n', 1, 36, 1, 38, 'unexpected token; expected expression'),
+        ('def f(): Int = (1 + 2', 1, 22, 1, 23, 'unexpected token; expected )'),
+        ('def broken(): Int = 1\n)\n', 2, 1, 2, 2, 'unexpected token; expected declaration'),
     ]
-    for bad_src, line, col, eline, ecol in parse_cases:
+    for bad_src, line, col, eline, ecol, message in parse_cases:
         source_file.write_text(bad_src)
         human = command('check', root, ok=False).stdout.strip()
-        assert f'Main.scuzz:{line}:{col}: error: unexpected token' in human, (bad_src, human)
+        assert f'Main.scuzz:{line}:{col}: error: {message}' in human, (bad_src, human)
         errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
         assert len(errors) == 1, (bad_src, errors)
         err = errors[0]
-        assert (err['file'], err['line'], err['column'], err['end_line'], err['end_column']) == (
-            'Main.scuzz', line, col, eline, ecol
+        assert (err['file'], err['message'], err['line'], err['column'], err['end_line'], err['end_column']) == (
+            'Main.scuzz', message, line, col, eline, ecol
         ), (bad_src, err)
         source_file.write_text(source)
         rows = [row for row in diagnostics(root, bad_src) if row['severity'] == 1]
-        assert len(rows) == 1 and rows[0]['message'] == 'unexpected token', (bad_src, rows)
+        assert len(rows) == 1 and rows[0]['message'] == message, (bad_src, rows)
         assert rows[0]['range'] == {
             'start': {'line': line - 1, 'character': col - 1},
             'end': {'line': eline - 1, 'character': ecol - 1},
@@ -158,10 +158,10 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
         '@main def record: IO[Unit] = IO.println("x")\n'
     )
     multi_spans = [
-        (1, 8, 1, 14),
-        (2, 7, 2, 13),
-        (6, 1, 6, 7),
-        (9, 11, 9, 17),
+        (1, 8, 1, 14, 'unexpected token; expected identifier'),
+        (2, 7, 2, 13, 'unexpected token; expected identifier'),
+        (6, 1, 6, 7, 'unexpected token; expected expression'),
+        (9, 11, 9, 17, 'unexpected token; expected identifier'),
     ]
     source_file.write_text(multi_bad_src)
     fmt_out = command('fmt', root, ok=False)
@@ -169,16 +169,16 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
     assert source_file.read_text() == multi_bad_src
     human = command('check', root, ok=False).stdout.strip().splitlines()
     assert human == [
-        f'Main.scuzz:{line}:{col}: error: unexpected token'
-        for line, col, _, _ in multi_spans
+        f'Main.scuzz:{line}:{col}: error: {message}'
+        for line, col, _, _, message in multi_spans
     ], human
     errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
     assert [
         (err['file'], err['message'], err['line'], err['column'], err['end_line'], err['end_column'])
         for err in errors
     ] == [
-        ('Main.scuzz', 'unexpected token', line, col, eline, ecol)
-        for line, col, eline, ecol in multi_spans
+        ('Main.scuzz', message, line, col, eline, ecol)
+        for line, col, eline, ecol, message in multi_spans
     ], errors
     source_file.write_text(source)
     rows = [row for row in diagnostics(root, multi_bad_src) if row['severity'] == 1]
@@ -187,13 +187,13 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
         for row in rows
     ] == [
         (
-            'unexpected token',
+            message,
             {
                 'start': {'line': line - 1, 'character': col - 1},
                 'end': {'line': eline - 1, 'character': ecol - 1},
             },
         )
-        for line, col, eline, ecol in multi_spans
+        for line, col, eline, ecol, message in multi_spans
     ], rows
     intra_decl_src = (
         'trait Codec[A]:\n'
@@ -220,17 +220,17 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
         '  IO.println(1 + )\n'
     )
     intra_decl_spans = [
-        (2, 25, 2, 26),
-        (3, 19, 3, 20),
-        (5, 17, 5, 18),
-        (8, 7, 8, 8),
-        (9, 7, 9, 8),
-        (10, 19, 10, 21),
-        (12, 9, 12, 13),
-        (15, 23, 15, 24),
-        (16, 11, 16, 12),
-        (17, 17, 17, 18),
-        (22, 18, 22, 19),
+        (2, 25, 2, 26, 'unexpected token; expected expression'),
+        (3, 19, 3, 20, 'unexpected token; expected identifier'),
+        (5, 17, 5, 18, 'unexpected token; expected identifier'),
+        (8, 7, 8, 8, 'unexpected token; expected expression'),
+        (9, 7, 9, 8, 'unexpected token; expected expression'),
+        (10, 19, 10, 21, 'unexpected token; expected expression'),
+        (12, 9, 12, 13, 'unexpected token; expected expression'),
+        (15, 23, 15, 24, 'unexpected token; expected case'),
+        (16, 11, 16, 12, 'unexpected token; expected expression'),
+        (17, 17, 17, 18, 'unexpected token; expected expression'),
+        (22, 18, 22, 19, 'unexpected token; expected expression'),
     ]
     source_file.write_text(intra_decl_src)
     fmt_out = command('fmt', root, ok=False)
@@ -238,16 +238,16 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
     assert source_file.read_text() == intra_decl_src
     human = command('check', root, ok=False).stdout.strip().splitlines()
     assert human == [
-        f'Main.scuzz:{line}:{col}: error: unexpected token'
-        for line, col, _, _ in intra_decl_spans
+        f'Main.scuzz:{line}:{col}: error: {message}'
+        for line, col, _, _, message in intra_decl_spans
     ], human
     errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
     assert [
         (err['file'], err['message'], err['line'], err['column'], err['end_line'], err['end_column'])
         for err in errors
     ] == [
-        ('Main.scuzz', 'unexpected token', line, col, eline, ecol)
-        for line, col, eline, ecol in intra_decl_spans
+        ('Main.scuzz', message, line, col, eline, ecol)
+        for line, col, eline, ecol, message in intra_decl_spans
     ], errors
     source_file.write_text(source)
     rows = [row for row in diagnostics(root, intra_decl_src) if row['severity'] == 1]
@@ -256,13 +256,13 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
         for row in rows
     ] == [
         (
-            'unexpected token',
+            message,
             {
                 'start': {'line': line - 1, 'character': col - 1},
                 'end': {'line': eline - 1, 'character': ecol - 1},
             },
         )
-        for line, col, eline, ecol in intra_decl_spans
+        for line, col, eline, ecol, message in intra_decl_spans
     ], rows
     assert lsp_format_edits(root, intra_decl_src) == []
     dep = root / 'dep'
