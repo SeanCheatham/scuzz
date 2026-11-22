@@ -20,6 +20,9 @@ static SzView *web_modal_scope;
 
 #define EDITOR_UNDO_MAX 64
 
+#define SZ_AFFINITY_DOWNSTREAM 0
+#define SZ_AFFINITY_UPSTREAM 1
+
 typedef struct SzEditHist {
   char *text;
   int caret;
@@ -142,6 +145,8 @@ struct SzView {
   int caret;
   /* TextField / editor selection anchor (UTF-8 snapped). Collapsed when equal to caret. */
   int sel_anchor;
+  /* TextField caret edge affinity: 0=downstream (leading), 1=upstream (trailing). */
+  int caret_affinity;
   /* IME compose preview. Not in the committed SignalStr until commit. */
   char *preedit;
   SzEditHist *undo;
@@ -1855,6 +1860,7 @@ static int edit_set_caret(SzView *view, int offset) {
   view->caret = offset;
   view->caret = field_caret_clamped(view);
   view->sel_anchor = view->caret;
+  view->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
   return 1;
 }
 
@@ -1973,6 +1979,7 @@ static int edit_set_sel(SzView *view, int start, int end) {
   view->caret = end;
   view->sel_anchor = field_anchor_clamped(view);
   view->caret = field_caret_clamped(view);
+  view->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
   return 1;
 }
 
@@ -3299,11 +3306,66 @@ static float *text_positions(const char *text, int length, float font) {
   return positions;
 }
 
+static int text_has_non_ascii(const char *text, int length) {
+  for (int i = 0; i < length; i++)
+    if ((unsigned char)text[i] >= 0x80) return 1;
+  return 0;
+}
+
+/* Query the UAX #9 paragraph base direction through the shared shaper. */
+static int text_paragraph_rtl(const char *text, int length, float font) {
+  if (!text || length <= 0 || !text_has_non_ascii(text, length)) return 0;
+  int line_start = 0;
+  for (int i = length; i > 0; i--) {
+    if (text[i - 1] == '\n') { line_start = i; break; }
+  }
+  char *probe = sz_alloc((size_t)length + 2);
+  memcpy(probe, text, (size_t)length);
+  probe[length] = ' ';
+  probe[length + 1] = '\0';
+  float lead[2] = {0.f, 0.f}, trail[2] = {0.f, 0.f};
+  SkTextRange range = {probe, (size_t)length + 1, (size_t)length,
+                       (size_t)length + 1, (size_t)line_start, (size_t)length + 1};
+  sk_font_text_positions(range, font, 0, lead, trail);
+  sz_free(probe);
+  return trail[0] < lead[0];
+}
+
+static float text_visual_width(const float *positions, int length) {
+  const float *trailing = positions + length + 1;
+  float width = 0.f;
+  for (int i = 0; i < length; i++) {
+    if (positions[i] > width) width = positions[i];
+    if (trailing[i] > width) width = trailing[i];
+  }
+  return width;
+}
+
+static int field_caret_affinity(const SzView *view, int length, int caret) {
+  if (!view || view->caret != caret || caret < 0 || caret > length)
+    return SZ_AFFINITY_DOWNSTREAM;
+  return view->caret_affinity ? SZ_AFFINITY_UPSTREAM : SZ_AFFINITY_DOWNSTREAM;
+}
+
+static float text_caret_edge_x(int length, const float *positions, int rtl, int caret, int affinity) {
+  float width = text_visual_width(positions, length);
+  const float *trailing = positions + length + 1;
+  if (affinity == SZ_AFFINITY_UPSTREAM)
+    return caret <= 0 ? (rtl ? width : 0.f) : trailing[caret - 1];
+  return caret >= length ? (rtl ? 0.f : width) : positions[caret];
+}
+
 static int field_caret_after_zero_width(const char *source, int length, int caret, const float *positions) {
+  const float *trailing = positions + length + 1;
   while (caret < length) {
     int next = caret + utf8_clen(source, caret);
-    if (next > length || positions[caret] != positions[next] ||
-        positions[caret] != positions[length + 1 + caret]) break;
+    if (next > length) break;
+    int same_span = caret > 0 && positions[caret] == positions[caret - 1] &&
+                    trailing[caret] == trailing[caret - 1];
+    int zero_mark = positions[caret] == trailing[caret] &&
+                    (positions[caret] == positions[next] ||
+                     (caret > 0 && positions[caret] == trailing[caret - 1]));
+    if (!same_span && !zero_mark) break;
     caret = next;
   }
   return caret;
@@ -8980,8 +9042,11 @@ static SzRect edit_layout_caret_rect(SzView *f) {
     return editor_caret_rect(f, theme);
   char *display = field_display(f, &c, &pre_start, &pre_end);
   n = (int)strlen(display);
+  int rtl = text_paragraph_rtl(display, n, theme->font_px);
+  int affinity = pre_end > pre_start ? SZ_AFFINITY_UPSTREAM : field_caret_affinity(f, n, c);
   float *positions = text_positions(display, n, theme->font_px);
-  x = f->frame.x + scale_px(theme, k_text_field_inset) + positions[c];
+  x = f->frame.x + scale_px(theme, k_text_field_inset) +
+      text_caret_edge_x(n, positions, rtl, c, affinity);
   sz_free(positions);
   sz_free(display);
   if (x > f->frame.x + f->frame.w - scale_px(theme, 2.f))
@@ -9012,29 +9077,65 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   return display_rect(f, edit_layout_caret_rect(f));
 }
 
-static int caret_offset_at_x(SzView *f, float x) {
-  if (!f || f->kind != SZ_VIEW_TEXT_FIELD) return 0;
+static void caret_hit_at_x(SzView *f, float x, int *out_caret, int *out_affinity) {
+  *out_caret = 0;
+  *out_affinity = SZ_AFFINITY_DOWNSTREAM;
+  if (!f || f->kind != SZ_VIEW_TEXT_FIELD) return;
   const char *source = field_cstr(f);
-  int length = (int)strlen(source), best = 0;
-  float *positions = text_positions(source, length, f->layout_theme.font_px);
+  int length = (int)strlen(source);
+  if (length <= 0) return;
+  float font = f->layout_theme.font_px;
+  int rtl = text_paragraph_rtl(source, length, font);
+  float *positions = text_positions(source, length, font);
+  const float *trailing = positions + length + 1;
+  float width = text_visual_width(positions, length);
   double local = (double)x - f->frame.x - scale_px(&f->layout_theme, k_text_field_inset);
-  float minimum = positions[0], maximum = positions[0];
-  for (int byte = 0; byte <= length;) {
-    minimum = fminf(minimum, positions[byte]); maximum = fmaxf(maximum, positions[byte]);
-    if (byte == length) break;
-    byte += utf8_clen(source, byte);
+  if (width <= 0.f || local <= 0.) {
+    if (rtl) { *out_caret = length; *out_affinity = SZ_AFFINITY_DOWNSTREAM; }
+    else { *out_caret = 0; *out_affinity = SZ_AFFINITY_UPSTREAM; }
+    sz_free(positions);
+    return;
   }
-  local = fmax(minimum - 1., fmin(maximum + 1., local));
-  double distance = fabs(positions[0] - local);
-  for (int byte = 0; byte <= length;) {
-    double next = fabs(positions[byte] - local);
-    if (next < distance) { distance = next; best = byte; }
-    if (byte == length) break;
-    byte += utf8_clen(source, byte);
+  if (local >= (double)width) {
+    if (rtl) { *out_caret = 0; *out_affinity = SZ_AFFINITY_UPSTREAM; }
+    else { *out_caret = length; *out_affinity = SZ_AFFINITY_DOWNSTREAM; }
+    sz_free(positions);
+    return;
   }
-  best = field_caret_after_zero_width(source, length, best, positions);
+  int found = 0, best_start = 0, best_end = 0;
+  float best_lead = 0.f, best_trail = 0.f;
+  double best_gap = INFINITY;
+  for (int byte = 0; byte < length;) {
+    int step = utf8_clen(source, byte);
+    if (step < 1) step = 1;
+    int next = field_caret_after_zero_width(source, length, byte + step, positions);
+    if (next > length) next = length;
+    float lead_x = positions[byte], trail_x = trailing[next - 1];
+    float left = fminf(lead_x, trail_x), right = fmaxf(lead_x, trail_x);
+    if (right > left + 1e-4f) {
+      double gap = local < (double)left ? (double)left - local :
+                   (local > (double)right ? local - (double)right : 0.);
+      if (!found || gap < best_gap) {
+        found = 1;
+        best_gap = gap;
+        best_start = byte;
+        best_end = next;
+        best_lead = lead_x;
+        best_trail = trail_x;
+      }
+    }
+    byte = next;
+  }
+  if (found) {
+    if (fabs(local - (double)best_lead) <= fabs(local - (double)best_trail)) {
+      *out_caret = best_start;
+      *out_affinity = SZ_AFFINITY_DOWNSTREAM;
+    } else {
+      *out_caret = best_end;
+      *out_affinity = SZ_AFFINITY_UPSTREAM;
+    }
+  }
   sz_free(positions);
-  return best;
 }
 
 static int text_row_at_y(double local_y, double line_h) {
@@ -9236,7 +9337,10 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
     if (!layout_point(hit, &x, &y)) return 0;
     clear_focus(root);
     hit->focused = 1;
-    sz_view_set_text_field_caret(hit, caret_offset_at_x(hit, x));
+    int c, aff;
+    caret_hit_at_x(hit, x, &c, &aff);
+    sz_view_set_text_field_caret(hit, c);
+    hit->caret_affinity = aff;
     return 1;
   }
   if (hit->kind == SZ_VIEW_EDITOR) {
@@ -9851,6 +9955,7 @@ int sz_view_handle_text(SzView *root, const char *text) {
   s = field_cstr(target);
   target->caret = (int)strlen(s);
   target->sel_anchor = target->caret;
+  target->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
   target->focused = 1;
   if (target->kind == SZ_VIEW_EDITOR)
     editor_scroll_to_caret(target);
@@ -9916,6 +10021,7 @@ static int field_delete_sel(SzView *t) {
   sz_free(buf);
   t->caret = a;
   t->sel_anchor = a;
+  t->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
   return 1;
 }
 
@@ -9939,6 +10045,7 @@ static void field_insert_at_caret(SzView *t, const char *text) {
   sz_free(buf);
   t->caret = c + add;
   t->sel_anchor = t->caret;
+  t->caret_affinity = SZ_AFFINITY_UPSTREAM;
 }
 
 static void field_commit_preedit(SzView *t) {
@@ -9951,10 +10058,33 @@ static void field_commit_preedit(SzView *t) {
   sz_free(p);
 }
 
+static int field_affinity_after_delete(SzView *t, const char *old_text, int old_len,
+                                       int del_byte, int new_caret) {
+  if (!t || t->kind != SZ_VIEW_TEXT_FIELD || !old_text || old_len <= 0 ||
+      !text_has_non_ascii(old_text, old_len))
+    return SZ_AFFINITY_DOWNSTREAM;
+  const char *cur = field_cstr(t);
+  int n = (int)strlen(cur);
+  if (new_caret <= 0) return SZ_AFFINITY_UPSTREAM;
+  if (new_caret >= n) return SZ_AFFINITY_DOWNSTREAM;
+  float font = t->layout_theme.font_px;
+  float *old_pos = text_positions(old_text, old_len, font);
+  int del_rtl = old_pos[del_byte] > old_pos[old_len + 1 + del_byte];
+  sz_free(old_pos);
+  float *new_pos = text_positions(cur, n, font);
+  int prev = utf8_prev(cur, new_caret);
+  int prev_rtl = new_pos[prev] > new_pos[n + 1 + prev];
+  int next_rtl = new_pos[new_caret] > new_pos[n + 1 + new_caret];
+  sz_free(new_pos);
+  if (prev_rtl != next_rtl)
+    return prev_rtl == del_rtl ? SZ_AFFINITY_UPSTREAM : SZ_AFFINITY_DOWNSTREAM;
+  return SZ_AFFINITY_UPSTREAM;
+}
+
 static void field_backspace_at_caret(SzView *t) {
   const char *cur;
-  int c, n, keep;
-  char *buf;
+  int c, n, keep, aff;
+  char *buf, *old_copy;
   if (!t || !t->sig_str)
     return;
   if (field_delete_sel(t))
@@ -9969,19 +10099,23 @@ static void field_backspace_at_caret(SzView *t) {
   n = (int)strlen(cur);
   c = field_caret_clamped(t);
   keep = utf8_prev(cur, c);
+  old_copy = sz_strdup(cur);
   buf = (char *)sz_alloc((size_t)(n - (c - keep)) + 1);
   memcpy(buf, cur, (size_t)keep);
   memcpy(buf + keep, cur + c, (size_t)(n - c + 1));
   sz_signal_str_set(t->sig_str, buf);
   sz_free(buf);
+  aff = field_affinity_after_delete(t, old_copy, n, keep, keep);
+  sz_free(old_copy);
   t->caret = keep;
   t->sel_anchor = t->caret;
+  t->caret_affinity = aff;
 }
 
 static void field_delete_at_caret(SzView *t) {
   const char *cur;
-  int c, n, clen;
-  char *buf;
+  int c, n, clen, aff;
+  char *buf, *old_copy;
   if (!t || !t->sig_str)
     return;
   if (field_delete_sel(t))
@@ -10000,13 +10134,17 @@ static void field_delete_at_caret(SzView *t) {
     clen = 1;
   if (c + clen > n)
     clen = n - c;
+  old_copy = sz_strdup(cur);
   buf = (char *)sz_alloc((size_t)(n - clen) + 1);
   memcpy(buf, cur, (size_t)c);
   memcpy(buf + c, cur + c + clen, (size_t)(n - c - clen + 1));
   sz_signal_str_set(t->sig_str, buf);
   sz_free(buf);
+  aff = field_affinity_after_delete(t, old_copy, n, c, c);
+  sz_free(old_copy);
   t->caret = c;
   t->sel_anchor = t->caret;
+  t->caret_affinity = aff;
 }
 
 static void field_move_caret(SzView *t, int dir) {
@@ -10018,16 +10156,83 @@ static void field_move_caret(SzView *t, int dir) {
   n = (int)strlen(cur);
   c = field_caret_clamped(t);
   if (t->kind == SZ_VIEW_TEXT_FIELD && dir) {
-    float *positions = text_positions(cur, n, t->layout_theme.font_px);
-    float current = positions[c], distance = INFINITY;
-    int best = c;
-    for (int byte = 0; byte <= n;) {
-      float delta = (positions[byte] - current) * dir;
-      if (delta > .001f && delta < distance) { distance = delta; best = byte; }
-      if (byte == n) break;
-      byte += utf8_clen(cur, byte);
+    if (n <= 0) {
+      t->caret = 0;
+      t->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
+      return;
     }
-    t->caret = field_caret_after_zero_width(cur, n, best, positions);
+    float font = t->layout_theme.font_px;
+    int rtl = text_paragraph_rtl(cur, n, font);
+    int aff = field_caret_affinity(t, n, c);
+    float *positions = text_positions(cur, n, font);
+    const float *trailing = positions + n + 1;
+    float width = text_visual_width(positions, n);
+    float current = text_caret_edge_x(n, positions, rtl, c, aff);
+    float distance = INFINITY;
+    float d0 = (0.f - current) * (float)dir;
+    if (d0 > .001f && d0 < distance) distance = d0;
+    float dw = (width - current) * (float)dir;
+    if (dw > .001f && dw < distance) distance = dw;
+    for (int byte = 0; byte < n;) {
+      int step = utf8_clen(cur, byte);
+      if (step < 1) step = 1;
+      int next = field_caret_after_zero_width(cur, n, byte + step, positions);
+      if (next > n) next = n;
+      float d1 = (positions[byte] - current) * (float)dir;
+      if (d1 > .001f && d1 < distance) distance = d1;
+      float d2 = (trailing[next - 1] - current) * (float)dir;
+      if (d2 > .001f && d2 < distance) distance = d2;
+      byte = next;
+    }
+    if (!isfinite(distance)) {
+      if ((dir > 0 && rtl) || (dir < 0 && !rtl)) {
+        t->caret = 0;
+        t->caret_affinity = SZ_AFFINITY_UPSTREAM;
+      } else {
+        t->caret = n;
+        t->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
+      }
+    } else {
+      float target = current + (float)dir * distance;
+      if ((!rtl && target <= .001f) || (rtl && target >= width - .001f)) {
+        t->caret = 0;
+        t->caret_affinity = SZ_AFFINITY_UPSTREAM;
+      } else if ((!rtl && target >= width - .001f) || (rtl && target <= .001f)) {
+        t->caret = n;
+        t->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
+      } else {
+        float mid = (current + target) * .5f;
+        int found = 0, best_start = 0, best_end = 0;
+        float best_lead = 0.f, best_trail = 0.f, best_gap = INFINITY;
+        for (int byte = 0; byte < n;) {
+          int step = utf8_clen(cur, byte);
+          if (step < 1) step = 1;
+          int next = field_caret_after_zero_width(cur, n, byte + step, positions);
+          if (next > n) next = n;
+          float lead_x = positions[byte], trail_x = trailing[next - 1];
+          float left = fminf(lead_x, trail_x), right = fmaxf(lead_x, trail_x);
+          if (right > left + 1e-4f) {
+            float gap = mid < left ? left - mid : (mid > right ? mid - right : 0.f);
+            if (!found || gap < best_gap) {
+              found = 1;
+              best_gap = gap;
+              best_start = byte;
+              best_end = next;
+              best_lead = lead_x;
+              best_trail = trail_x;
+            }
+          }
+          byte = next;
+        }
+        if (found && fabsf(best_lead - target) <= fabsf(best_trail - target)) {
+          t->caret = best_start;
+          t->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
+        } else if (found) {
+          t->caret = best_end;
+          t->caret_affinity = SZ_AFFINITY_UPSTREAM;
+        }
+      }
+    }
     sz_free(positions);
     return;
   }
@@ -10053,8 +10258,31 @@ static void field_nudge_caret(SzView *t, int dir, int extend) {
     if (t->kind == SZ_VIEW_TEXT_FIELD) {
       const char *source = field_cstr(t);
       int n = (int)strlen(source);
-      float *positions = text_positions(source, n, t->layout_theme.font_px);
-      t->caret = (positions[a] < positions[b]) == (dir < 0) ? a : b;
+      float font = t->layout_theme.font_px;
+      int rtl = text_paragraph_rtl(source, n, font);
+      float *positions = text_positions(source, n, font);
+      const float *trailing = positions + n + 1;
+      float width = text_visual_width(positions, n);
+      int aff_a = a == 0 ? SZ_AFFINITY_UPSTREAM : SZ_AFFINITY_DOWNSTREAM;
+      float xa = text_caret_edge_x(n, positions, rtl, a, aff_a);
+      int aff_b = SZ_AFFINITY_UPSTREAM;
+      if (b == n && fabsf(xa - (rtl ? 0.f : width)) > .001f) {
+        float sel_min = INFINITY, sel_max = 0.f;
+        for (int k = a; k < b; k++) {
+          sel_min = fminf(sel_min, fminf(positions[k], trailing[k]));
+          sel_max = fmaxf(sel_max, fmaxf(positions[k], trailing[k]));
+        }
+        if (rtl ? sel_min <= .001f : sel_max >= width - .001f)
+          aff_b = SZ_AFFINITY_DOWNSTREAM;
+      }
+      float xb = text_caret_edge_x(n, positions, rtl, b, aff_b);
+      if ((xa < xb) == (dir < 0)) {
+        t->caret = a;
+        t->caret_affinity = aff_a;
+      } else {
+        t->caret = b;
+        t->caret_affinity = aff_b;
+      }
       sz_free(positions);
     } else t->caret = dir < 0 ? a : b;
     t->sel_anchor = t->caret;
@@ -10353,8 +10581,10 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
         line_bounds_at_off(field_cstr(target), field_caret_clamped(target), &ls,
                            &le);
         target->caret = ls;
-      } else
+      } else {
         target->caret = 0;
+        target->caret_affinity = SZ_AFFINITY_UPSTREAM;
+      }
       if (!extend)
         target->sel_anchor = target->caret;
       target->focused = 1;
@@ -10370,8 +10600,10 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
         line_bounds_at_off(field_cstr(target), field_caret_clamped(target), &ls,
                            &le);
         target->caret = le;
-      } else
+      } else {
         target->caret = (int)strlen(field_cstr(target));
+        target->caret_affinity = SZ_AFFINITY_DOWNSTREAM;
+      }
       if (!extend)
         target->sel_anchor = target->caret;
       target->focused = 1;
@@ -10453,8 +10685,12 @@ int sz_view_edit_extend_to_xy(SzView *view, float x, float y) {
     return 0;
   if (view->kind == SZ_VIEW_EDITOR)
     view->caret = caret_offset_at_xy(view, x, y);
-  else
-    view->caret = caret_offset_at_x(view, x);
+  else {
+    int c, aff;
+    caret_hit_at_x(view, x, &c, &aff);
+    view->caret = c;
+    view->caret_affinity = aff;
+  }
   return 1;
 }
 
@@ -10525,6 +10761,21 @@ int sz_view_web_in_group(SzView *view) {
   if (!view || !group_tap_item(view)) return 0;
   SzView *overlay = find_open_overlay(view_root(view));
   return ancestor_focus_group_in(view, overlay) != NULL;
+}
+
+int sz_view_web_anchor(const SzView *view) {
+  return view_is_edit(view) ? field_anchor_clamped(view) : 0;
+}
+
+void sz_view_web_set_affinity(SzView *view, int upstream) {
+  if (view && view->kind == SZ_VIEW_TEXT_FIELD)
+    view->caret_affinity = upstream ? SZ_AFFINITY_UPSTREAM : SZ_AFFINITY_DOWNSTREAM;
+}
+
+void sz_view_web_after_delete(SzView *view, const char *old_text, int old_len, int del_byte) {
+  if (view && view->kind == SZ_VIEW_TEXT_FIELD)
+    view->caret_affinity = field_affinity_after_delete(
+      view, old_text, old_len, del_byte, field_caret_clamped(view));
 }
 #endif
 

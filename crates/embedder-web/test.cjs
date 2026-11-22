@@ -2205,6 +2205,87 @@ async function checkShaping(browserType, url, mobile) {
     await page.getByRole('button', {name: 'Set Latin', exact: true}).click();
     await expectText('Value: AV fi é');
     assert.equal(await field.inputValue(), 'AV fi é');
+    const tapField = async (x, y) => {
+      if (mobile) await page.touchscreen.tap(x, y);
+      else await page.mouse.click(x, y);
+    };
+    const nextPaint = async fn => {
+      const before = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
+      await fn();
+      await page.waitForFunction(p => Module.ccall('sz_web_paints', 'number', [], []) > p, before);
+    };
+    const measureCaretX = async base => page.evaluate(base => {
+      const ctx = Module.canvas.getContext('2d');
+      const data = ctx.getImageData(base.left, base.top, base.width, base.height).data;
+      let bestX = -1, bestCount = 0;
+      for (let x = 0; x < base.width; x++) {
+        let changed = 0;
+        for (let y = 0; y < base.height; y++) {
+          const i = (y * base.width + x) * 4;
+          if (data[i] !== base.pixels[i] || data[i + 1] !== base.pixels[i + 1] || data[i + 2] !== base.pixels[i + 2])
+            changed++;
+        }
+        if (changed > bestCount) { bestCount = changed; bestX = x; }
+      }
+      if (bestCount === 0) throw new Error('missing painted caret column');
+      return (base.left + bestX) / base.scale;
+    }, base);
+    const snapshotFieldBase = async () => {
+      await nextPaint(() => page.evaluate(() => {
+        document.activeElement?.blur?.();
+        Module.ccall('sz_web_focus', null, ['number'], [0]);
+        Module.ccall('sz_web_fonts_changed', null, [], []);
+      }));
+      return page.evaluate(() => {
+        const frame = Module.webFrame, scale = frame.scale;
+        const item = frame.items.find(entry => entry.role === 3 && entry.label === 'Name');
+        const left = Math.ceil(item.x + 4 * scale);
+        const top = Math.ceil(item.y + (item.h - item.font) / 2);
+        const width = Math.max(1, Math.floor(item.w - 8 * scale));
+        const height = Math.max(1, Math.floor(item.font));
+        const pixels = Array.from(Module.canvas.getContext('2d').getImageData(left, top, width, height).data);
+        return {left, top, width, height, scale, fieldX: item.x / scale, fieldY: item.y / scale, fieldH: item.h / scale, inset: item.inset / scale, pixels};
+      });
+    };
+    await field.fill('ab אב');
+    await expectText('Value: ab אב');
+    await expectText('Mixed: ab ab אב');
+    assert.equal(await field.inputValue(), 'ab אב');
+    const mixedBase = await snapshotFieldBase();
+    await nextPaint(async () => { await field.focus(); await page.keyboard.press('Home'); });
+    const rightOffsets = [await field.evaluate(node => node.selectionStart)];
+    const rightXs = [await measureCaretX(mixedBase)];
+    for (let step = 0; step < 5; step++) {
+      await nextPaint(() => page.keyboard.press('ArrowRight'));
+      rightOffsets.push(await field.evaluate(node => node.selectionStart));
+      rightXs.push(await measureCaretX(mixedBase));
+    }
+    assert.deepEqual(rightOffsets, [0, 1, 2, 3, 4, 5], 'visual ArrowRight steps across mixed bidi runs');
+    for (let i = 1; i < rightXs.length; i++)
+      assert(rightXs[i] > rightXs[i - 1] + 2, `caret moves visually right on step ${i}: ${JSON.stringify(rightXs)}`);
+    const splitLeftX = rightXs[3], midRtlX = rightXs[4], endRightX = rightXs[5];
+    await nextPaint(() => page.keyboard.press('ArrowLeft'));
+    assert.equal(await field.evaluate(node => node.selectionStart), 4);
+    assert(Math.abs(await measureCaretX(mixedBase) - midRtlX) <= 1.5);
+    await nextPaint(() => page.keyboard.press('ArrowLeft'));
+    assert.equal(await field.evaluate(node => node.selectionStart), 5, 'upstream trailing edge of ב keeps logical end offset');
+    assert(Math.abs(await measureCaretX(mixedBase) - splitLeftX) <= 1.5, 'upstream offset 5 paints at left edge of RTL run');
+    const centerY = mixedBase.fieldY + mixedBase.fieldH / 2;
+    await nextPaint(() => tapField(rightXs[2] + (splitLeftX - rightXs[2]) * 0.75, centerY));
+    assert.equal(await field.evaluate(node => node.selectionStart), 3);
+    assert(Math.abs(await measureCaretX(mixedBase) - splitLeftX) <= 1.5, 'tapping trailing half of space selects upstream split edge');
+    await nextPaint(() => tapField(endRightX - (endRightX - midRtlX) * 0.25, centerY));
+    assert.equal(await field.evaluate(node => node.selectionStart), 3);
+    assert(Math.abs(await measureCaretX(mixedBase) - endRightX) <= 1.5, 'tapping leading half of א selects downstream split edge');
+    await page.keyboard.insertText('X');
+    await expectText('Value: ab Xאב');
+    await field.fill('ab אב');
+    await expectText('Value: ab אב');
+    await nextPaint(() => tapField(splitLeftX + (midRtlX - splitLeftX) * 0.25, centerY));
+    assert.equal(await field.evaluate(node => node.selectionStart), 5);
+    assert(Math.abs(await measureCaretX(mixedBase) - splitLeftX) <= 1.5, 'tapping trailing half of ב paints caret at split boundary');
+    await page.keyboard.insertText('!');
+    await expectText('Value: ab אב!');
     await field.fill('café'); await expectText('Value: café');
     await page.getByRole('button', {name: 'Add', exact: true}).click(); await expectText('Count: 12');
     const scroll = await page.evaluate(() => {

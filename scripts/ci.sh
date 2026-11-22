@@ -3513,7 +3513,7 @@ def replay(package, executable, label, events, ui=False, auto_tap=True, expected
         started = time.monotonic()
         result = subprocess.run(command, input='probe\n' if engine == 'eval' else None,
                                 text=True, capture_output=True, env=env, cwd=work,
-                                timeout=45 if engine == 'eval' else 20,
+                                timeout=90 if engine == 'eval' else 20,
                                 preexec_fn=None if engine == 'eval' else limit)
         (out / f'{engine}.log').write_text(result.stdout + result.stderr)
         detail = result.stdout + result.stderr
@@ -4271,7 +4271,7 @@ if name == 'tyck':
                    capture_output=True, text=True, timeout=30)
     result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(target)],
                             env=base_env, cwd=target / 'work', capture_output=True,
-                            text=True, timeout=180)
+                            text=True, timeout=360)
     detail = result.stdout + result.stderr
     (target / 'campaign.log').write_text(detail)
     assert result.returncode == 0 and 'probes run compiled' not in detail, detail

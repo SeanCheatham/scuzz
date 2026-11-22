@@ -49,4 +49,7 @@ void sz_web_copy(SzView *view, const char *text);
 SzView *sz_view_web_find(SzView *root, uintptr_t id);
 int sz_view_web_navigate(SzView *root, const char *title);
 int sz_view_web_in_group(SzView *view);
+int sz_view_web_anchor(const SzView *view);
+void sz_view_web_set_affinity(SzView *view, int upstream);
+void sz_view_web_after_delete(SzView *view, const char *old_text, int old_len, int del_byte);
 #endif
