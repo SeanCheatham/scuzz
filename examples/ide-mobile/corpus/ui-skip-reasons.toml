@@ -1,0 +1,12 @@
+[fuzz]
+events = [
+  "tap choicechip:No diff",
+  "tap choicechip:None",
+  "tap choicechip:No diff",
+  "tap textbutton:Skip",
+  "tap choicechip:Need scenario",
+  "tap textbutton:Skip",
+  "tap choicechip:Off goal",
+  "tap textbutton:Skip",
+  "tap button:Sync",
+]

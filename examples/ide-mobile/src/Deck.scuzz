@@ -16,7 +16,7 @@ record BatchReply(baseline: String, cursor: String, revision: Int, results: List
 
 record ClientState(clientId: String, nextSeq: Int, pairing: Pairing, snapshot: Snapshot, outbox: List[OutboxAction], syncStatus: String, alert: String)
 
-def emptySnapshot(): Snapshot =
+private def emptySnapshot(): Snapshot =
   Snapshot("", "", 0, "", [], [])
 
 def defaultPairing(): Pairing =
@@ -40,7 +40,7 @@ def validPort(port: Int): Bool =
 def validHex(s: String): Bool =
   Str.matches(s, "^[0-9a-f]{64}$")
 
-def validActionId(s: String): Bool =
+private def validActionId(s: String): Bool =
   Str.matches(s, "^[A-Za-z0-9_-]{1,128}$")
 
 def validReason(reason: String): Bool =
@@ -65,7 +65,7 @@ def endpointUrl(pairing: Pairing): Result[String, String] =
 def authHeaders(token: String): Map[String, String] =
   Map.set(Map.set(Map.empty(), "Authorization", Str.concat("Bearer ", token)), "Content-Type", "application/json")
 
-def decidedCardIds(outbox: List[OutboxAction]): List[String] =
+private def decidedCardIds(outbox: List[OutboxAction]): List[String] =
   List.map(List.filter(outbox, a => a.kind == "accept" || a.kind == "reject" || a.kind == "skip"), a => a.card)
 
 def visibleCards(st: ClientState): List[CardItem] =
@@ -85,7 +85,7 @@ def formatFiles(files: List[FilePair]): String =
 ---
 """)
 
-def nextActionId(st: ClientState): String =
+private def nextActionId(st: ClientState): String =
   Str.concat(st.clientId, Str.concat("-", Str.fromInt(st.nextSeq)))
 
 def queueCardAction(st: ClientState, kind: String, reason: String): ClientState =
@@ -134,7 +134,7 @@ private def jField(obj: Json, key: String): Json =
     case Result.Err(_) => Json.Null()
   }
 
-def encodeActionWire(a: OutboxAction): Json =
+private def encodeActionWire(a: OutboxAction): Json =
   for {
     base = [("id", Json.Str(a.id)), ("kind", Json.Str(a.kind))]
     withCard = if (a.kind == "steer") List.append(base, ("prompt", Json.Str(a.prompt))) else List.append(base, ("card", Json.Str(a.card)))

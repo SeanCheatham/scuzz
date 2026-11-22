@@ -42,12 +42,27 @@ private def submitSteer(dir: String, store: Signal[String], steerInput: Signal[S
 } yield ()
   }
 
-private def savePairing(dir: String, store: Signal[String], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], pairOpen: Signal[Int]): IO[Unit] =
+private def openPairing(store: Signal[String], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], pairErr: Signal[String], pairOpen: Signal[Int]): Unit =
+  for {
+    p = Sync.readCell(store).pairing
+    _ = Signal.set(hostInput, p.host)
+    _ = Signal.set(portInput, Str.fromInt(p.port))
+    _ = Signal.set(tokenInput, p.token)
+    _ = Signal.set(pairErr, "")
+  } yield Signal.set(pairOpen, 1)
+
+private def closePairing(pairErr: Signal[String], pairOpen: Signal[Int]): Unit =
+  for {
+    _ = Signal.set(pairErr, "")
+  } yield Signal.set(pairOpen, 0)
+
+private def savePairing(dir: String, store: Signal[String], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], pairErr: Signal[String], pairOpen: Signal[Int]): IO[Unit] =
   Deck.parsePairing(Signal.get(hostInput), Signal.get(portInput), Signal.get(tokenInput)) match {
-    case Result.Err(msg) => IO.pure(Sync.writeCell(store, Sync.readCell(store).copy(syncStatus = msg, alert = msg)))
+    case Result.Err(msg) => IO.pure(Signal.set(pairErr, msg))
     case Result.Ok(pair) => for {
   cur = Sync.readCell(store)
   cleared = if (Str.startsWith(cur.alert, "401 ")) "" else cur.alert
+  _ = Signal.set(pairErr, "")
   _ = Sync.writeCell(store, cur.copy(pairing = pair, syncStatus = "Paired", alert = cleared))
   _ = Signal.set(pairOpen, 0)
   _ <- Sync.persist(dir, store)
@@ -60,13 +75,8 @@ private def clearAlert(dir: String, store: Signal[String]): IO[Unit] =
     _ <- Sync.persist(dir, store)
   } yield ()
 
-def buildApp(dir: String, store: Signal[String], busy: Signal[Int], swipe: Signal[Int], skipReason: Signal[Int], steerInput: Signal[String], pairOpen: Signal[Int], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], outboxCount: Signal[Int], hasCard: Signal[Int], hasEmpty: Signal[Int], hasAlert: Signal[Int], statusLine: Signal[String], objectiveLine: Signal[String], alertText: Signal[String], deckHeader: Signal[String], questionLine: Signal[String], changesLine: Signal[String], laneAText: Signal[String], laneBText: Signal[String], swipeHint: Signal[String], steerItems: Signal[List[String]]): View =
-  View.appShell(View.appBar(View.text("Scuzz Mobile"), View.row([View.badge(outboxCount, View.button("Sync", _ => Sync.syncNow(dir, store, busy))), View.outlinedButton("Pair", _ => for {
-  p = Sync.readCell(store).pairing
-  _ = Signal.set(hostInput, p.host)
-  _ = Signal.set(portInput, Str.fromInt(p.port))
-  _ = Signal.set(tokenInput, p.token)
-} yield Signal.set(pairOpen, 1))])), View.stack([View.expanded(1, View.scroll(View.padding(6, View.gap(4, View.column([View.card(View.column([View.bindText(statusLine), View.bindText(objectiveLine)])), View.showWhen(hasAlert, 1, View.card(View.column([View.bindText(alertText), View.textButton("Dismiss alert", _ => clearAlert(dir, store))]))), View.showWhen(hasCard, 1, View.card(View.gap(4, View.column([View.bindText(deckHeader), View.bindText(questionLine), View.bindText(changesLine), View.grid(2, [View.column([View.text("Lane A"), View.bindText(laneAText), View.outlinedButton("Choose A", _ => recordLaneChoice(dir, store, swipe, 0))]), View.column([View.text("Lane B"), View.bindText(laneBText), View.outlinedButton("Choose B", _ => recordLaneChoice(dir, store, swipe, 1))])]), View.bindText(swipeHint), View.inkWell("Swipe release", _ => commitSwipe(dir, store, swipe), View.slider(swipe, "Swipe card", -100, 100, 1)), View.row([View.outlinedButton("Reject", _ => recordCardDecision(dir, store, swipe, "reject", "")), View.button("Accept", _ => recordCardDecision(dir, store, swipe, "accept", "")), View.textButton("Skip", _ => recordCardDecision(dir, store, swipe, "skip", Deck.skipReasonOf(Signal.get(skipReason))))]), View.segmented(skipReason, "Skip reason", ["None", "No diff", "Need scenario", "Off goal"])])))), View.showWhen(hasEmpty, 1, View.card(View.column([View.text("No undecided cards in local deck."), View.text("Tap Sync to refresh from scuzz ide serve or queue a steer prompt below.")]))), View.card(View.gap(4, View.column([View.text("Steer"), View.textField(steerInput, "Steer prompt"), View.button("Queue steer", _ => submitSteer(dir, store, steerInput)), View.each(steerItems, line => View.text(line))])))]))))), View.overlay(pairOpen, "Pair laptop", View.center(View.maxSize(360, 340, View.card(View.gap(8, View.column([View.heading(2, View.text("Pair laptop")), View.textField(hostInput, "Host"), View.textField(portInput, "Port"), View.textField(tokenInput, "Bearer token"), View.row([View.button("Save pairing", _ => savePairing(dir, store, hostInput, portInput, tokenInput, pairOpen)), View.textButton("Close pairing", _ => Signal.set(pairOpen, 0))])]))))))]))
+private def buildApp(dir: String, store: Signal[String], busy: Signal[Int], swipe: Signal[Int], skipReason: Signal[Int], steerInput: Signal[String], pairOpen: Signal[Int], pairErr: Signal[String], hasPairErr: Signal[Int], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], outboxCount: Signal[Int], hasCard: Signal[Int], hasEmpty: Signal[Int], hasAlert: Signal[Int], statusLine: Signal[String], objectiveLine: Signal[String], alertText: Signal[String], deckHeader: Signal[String], questionLine: Signal[String], changesLine: Signal[String], laneAText: Signal[String], laneBText: Signal[String], swipeHint: Signal[String], steerItems: Signal[List[String]]): View =
+  View.appShell(View.appBar(View.text("Scuzz Mobile"), View.row([View.badge(outboxCount, View.button("Sync", _ => Sync.syncNow(dir, store, busy))), View.outlinedButton("Pair", _ => openPairing(store, hostInput, portInput, tokenInput, pairErr, pairOpen))])), View.stack([View.expanded(1, View.scroll(View.padding(6, View.gap(4, View.column([View.card(View.column([View.bindText(statusLine), View.bindText(objectiveLine)])), View.showWhen(hasAlert, 1, View.card(View.column([View.bindText(alertText), View.textButton("Dismiss alert", _ => clearAlert(dir, store))]))), View.showWhen(hasCard, 1, View.card(View.gap(4, View.column([View.bindText(deckHeader), View.bindText(questionLine), View.bindText(changesLine), View.grid(2, [View.column([View.text("Lane A"), View.bindText(laneAText), View.outlinedButton("Choose A", _ => recordLaneChoice(dir, store, swipe, 0))]), View.column([View.text("Lane B"), View.bindText(laneBText), View.outlinedButton("Choose B", _ => recordLaneChoice(dir, store, swipe, 1))])]), View.bindText(swipeHint), View.inkWell("Swipe release", _ => commitSwipe(dir, store, swipe), View.slider(swipe, "Swipe card", -100, 100, 1)), View.row([View.outlinedButton("Reject", _ => recordCardDecision(dir, store, swipe, "reject", "")), View.button("Accept", _ => recordCardDecision(dir, store, swipe, "accept", "")), View.textButton("Skip", _ => recordCardDecision(dir, store, swipe, "skip", Deck.skipReasonOf(Signal.get(skipReason))))]), View.segmented(skipReason, "Skip reason", ["None", "No diff", "Need scenario", "Off goal"])])))), View.showWhen(hasEmpty, 1, View.card(View.column([View.text("No undecided cards in local deck."), View.text("Tap Sync to refresh from scuzz ide serve or queue a steer prompt below.")]))), View.card(View.gap(4, View.column([View.text("Steer"), View.textField(steerInput, "Steer prompt"), View.button("Queue steer", _ => submitSteer(dir, store, steerInput)), View.each(steerItems, line => View.text(line))])))]))))), View.overlay(pairOpen, "Pair laptop", View.center(View.maxSize(360, 400, View.card(View.gap(8, View.column([View.heading(2, View.text("Pair laptop")), View.showWhen(hasPairErr, 1, View.bindText(pairErr)), View.textField(hostInput, "Host"), View.textField(portInput, "Port"), View.textField(tokenInput, "Bearer token"), View.row([View.button("Save pairing", _ => savePairing(dir, store, hostInput, portInput, tokenInput, pairErr, pairOpen)), View.textButton("Close pairing", _ => closePairing(pairErr, pairOpen))])]))))))]))
 
 @main def main: IO[Unit] =
   for {
@@ -78,6 +88,7 @@ def buildApp(dir: String, store: Signal[String], busy: Signal[Int], swipe: Signa
     skipReason = Signal.make(0)
     steerInput = Signal.make("")
     pairOpen = Signal.make(0)
+    pairErr = Signal.make("")
     hostInput = Signal.make(initial.pairing.host)
     portInput = Signal.make(Str.fromInt(initial.pairing.port))
     tokenInput = Signal.make(initial.pairing.token)
@@ -88,7 +99,8 @@ def buildApp(dir: String, store: Signal[String], busy: Signal[Int], swipe: Signa
     revision = Signal.map(store, _ => Sync.readCell(store).snapshot.revision)
     hasCard = Signal.map(cardCount, n => if (n > 0) 1 else 0)
     hasEmpty = Signal.map(cardCount, n => if (n == 0) 1 else 0)
-    hasAlert = Signal.map(alert, s => if (s == "") 0 else 1)
+    hasAlert = Signal.map(alert, _ => if (Signal.get(alert) == "") 0 else 1)
+    hasPairErr = Signal.map(pairErr, _ => if (Signal.get(pairErr) == "") 0 else 1)
     statusLine = Signal.map(store, _ => for {
   st = Sync.readCell(store)
 } yield Str.concat("Status: ", Str.concat(st.syncStatus, Str.concat(" | Outbox: ", Str.fromInt(List.len(st.outbox))))))
@@ -118,7 +130,9 @@ def buildApp(dir: String, store: Signal[String], busy: Signal[Int], swipe: Signa
   case None => ""
   case Some(c) => Deck.formatFiles(Deck.laneFiles(c, 1))
 })
-    swipeHint = Signal.map(swipe, d => if (d >= 60) "Release right to accept" else if (d <= -60) "Release left to reject" else "Swipe left to reject or right to accept")
+    swipeHint = Signal.map(swipe, _ => for {
+  d = Signal.get(swipe)
+} yield if (d >= 60) "Release right to accept" else if (d <= -60) "Release left to reject" else "Swipe left to reject or right to accept")
     steerItems = Signal.map(store, _ => Deck.steerLines(Sync.readCell(store)))
-    _ <- Ui.run(_ => buildApp(dir, store, busy, swipe, skipReason, steerInput, pairOpen, hostInput, portInput, tokenInput, outboxCount, hasCard, hasEmpty, hasAlert, statusLine, objectiveLine, alertText, deckHeader, questionLine, changesLine, laneAText, laneBText, swipeHint, steerItems)).require(Signal.get(outboxCount) >= 0).require(Signal.get(cardCount) >= 0).require(Signal.get(revision) >= 0).require(Signal.get(swipe) >= -100 && Signal.get(swipe) <= 100)
+    _ <- Ui.run(_ => buildApp(dir, store, busy, swipe, skipReason, steerInput, pairOpen, pairErr, hasPairErr, hostInput, portInput, tokenInput, outboxCount, hasCard, hasEmpty, hasAlert, statusLine, objectiveLine, alertText, deckHeader, questionLine, changesLine, laneAText, laneBText, swipeHint, steerItems)).require(Signal.get(outboxCount) >= 0).require(Signal.get(cardCount) >= 0).require(Signal.get(revision) >= 0).require(Signal.get(swipe) >= -100 && Signal.get(swipe) <= 100).require(Signal.get(skipReason) >= 0 && Signal.get(skipReason) <= 3)
   } yield ()

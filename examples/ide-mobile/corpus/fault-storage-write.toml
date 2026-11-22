@@ -1,0 +1,7 @@
+[fuzz]
+fault_seed = "fs:fail:4"
+events = [
+  "tap button:Accept",
+  "tap outlined:Reject",
+  "tap button:Sync",
+]

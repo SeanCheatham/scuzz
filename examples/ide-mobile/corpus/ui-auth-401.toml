@@ -1,0 +1,8 @@
+[fuzz]
+events = [
+  "tap button:Accept",
+  "tap outlined:Pair",
+  "text 2 wrong-token-123456",
+  "tap button:Save pairing",
+  "tap button:Sync",
+]
