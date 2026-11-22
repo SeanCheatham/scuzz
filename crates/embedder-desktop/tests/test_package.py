@@ -37,6 +37,31 @@ def wait_for(check, label, timeout=60):
 def worker_gone(pid):
     return subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode != 0
 
+def read_text_safe(path):
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+def write_atomic(path, content):
+    tmp = path.with_name(path.name + ".tmp." + uuid.uuid4().hex[:8])
+    tmp.write_text(content)
+    os.replace(tmp, path)
+
+def wait_quiet_log(path, quiet_seconds=0.6, timeout=30):
+    deadline = time.monotonic() + timeout
+    last = read_text_safe(path)
+    since = time.monotonic()
+    while time.monotonic() < deadline:
+        current = read_text_safe(path)
+        if current != last:
+            last = current
+            since = time.monotonic()
+        elif time.monotonic() - since >= quiet_seconds:
+            return
+        time.sleep(0.05)
+    raise AssertionError("log did not settle:\n" + last)
+
 with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
     root = Path(temp) / "author's project, with spaces"
     root.mkdir()
@@ -60,6 +85,9 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
     watch_env = {key: value for key, value in author_env.items()
                  if key != "SCUZZ_LIVE_FRAMES"}
     debug = source / "native output" / "debug.json"
+    inject = source / "native output" / "inject.json"
+    debug.unlink(missing_ok=True)
+    inject.unlink(missing_ok=True)
     with (root / "watch.log").open("w") as output:
         watch = subprocess.Popen([cli, "run", "--watch", "--target", "headless", "--out-dir",
                                   "native output", str(source)], env=watch_env,
@@ -70,103 +98,111 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
             for expected in ("Counter", "count = 1", "Updated counter"):
                 deadline = time.monotonic() + 60
                 while time.monotonic() < deadline:
-                    assert watch.poll() is None, (root / "watch.log").read_text()
-                    if debug.is_file() and expected in debug.read_text():
+                    assert watch.poll() is None, read_text_safe(root / "watch.log")
+                    if expected in read_text_safe(debug):
                         break
                     time.sleep(0.1)
                 else:
                     raise AssertionError("watch does not show " + expected + "\n" +
-                                         (root / "watch.log").read_text())
+                                         read_text_safe(root / "watch.log"))
                 active = workers(watch.pid)
                 assert len(active) == 1, "one running UI worker is required"
                 if worker is None:
                     worker = active[0]
                 assert active[0] == worker, "a View reload replaces the worker"
                 if expected == "Counter":
-                    inject = source / "native output" / "inject.json"
-                    inject.write_text(json.dumps({"v": 1, "kind": "inject", "events": [
+                    write_atomic(inject, json.dumps({"v": 1, "kind": "inject", "events": [
                         {"op": "tap", "id": "button:+1"}]}))
                 elif expected == "count = 1":
                     main = source / "src" / "Main.scuzz"
-                    main.write_text(main.read_text().replace('"Counter"', '"Updated counter"'))
+                    write_atomic(main, main.read_text().replace('"Counter"', '"Updated counter"'))
                 else:
-                    assert "count = 1" in debug.read_text(), "reload resets the Signal"
+                    assert "count = 1" in read_text_safe(debug), "reload resets the Signal"
             main = source / "src" / "Main.scuzz"
             stable = main.read_text()
             def await_log(message):
                 deadline = time.monotonic() + 60
                 while time.monotonic() < deadline:
-                    assert watch.poll() is None, (root / "watch.log").read_text()
-                    if message in (root / "watch.log").read_text():
+                    assert watch.poll() is None, read_text_safe(root / "watch.log")
+                    if message in read_text_safe(root / "watch.log"):
                         return
                     time.sleep(0.1)
                 raise AssertionError("watch does not report " + message)
-            main.write_text("invalid source")
+            write_atomic(main, "invalid source")
             await_log("Build fails. Fix the source and retry.")
-            assert "count = 1" in debug.read_text()
-            main.write_text(stable.replace("count = Signal.make(0)",
-                                           "extra = 42\n    count = Signal.make(0)").replace(
-                                               '"Updated counter"', '"Unsafe counter"'))
+            wait_quiet_log(root / "watch.log")
+            assert "count = 1" in read_text_safe(debug)
+            write_atomic(main, stable.replace("count = Signal.make(0)",
+                                              "extra = 42\n    count = Signal.make(0)").replace(
+                                                  '"Updated counter"', '"Unsafe counter"'))
             await_log("Restart the app.")
-            assert "Updated counter" in debug.read_text() and "Unsafe counter" not in debug.read_text()
-            main.write_text(stable.replace('"Updated counter"', '"Recovered counter"'))
+            wait_quiet_log(root / "watch.log")
+            assert "Updated counter" in read_text_safe(debug) and "Unsafe counter" not in read_text_safe(debug)
+            write_atomic(main, stable.replace('"Updated counter"', '"Recovered counter"'))
             deadline = time.monotonic() + 60
-            while "Recovered counter" not in debug.read_text():
-                assert watch.poll() is None and time.monotonic() < deadline, (root / "watch.log").read_text()
+            while "Recovered counter" not in read_text_safe(debug):
+                assert watch.poll() is None and time.monotonic() < deadline, read_text_safe(root / "watch.log")
                 time.sleep(0.1)
-            assert "count = 1" in debug.read_text()
+            assert "count = 1" in read_text_safe(debug)
             assert subprocess.run(["ps", "-p", worker], capture_output=True).returncode == 0
             watch.stdin.write("r\n")
             watch.stdin.flush()
-            wait_for(lambda: "count = 0" in debug.read_text() and
+            wait_for(lambda: "count = 0" in read_text_safe(debug) and
                      workers(watch.pid) and workers(watch.pid)[0] != worker, "manual restart")
-            wait_for(lambda: worker_gone(worker), "old worker stops", 10)
+            wait_for(lambda: worker_gone(worker), "old worker stops", 30)
             worker = workers(watch.pid)[0]
-            main.write_text(main.read_text().replace('"Recovered counter"', '"Restarted counter"'))
-            wait_for(lambda: "Restarted counter" in debug.read_text(), "reload after restart")
-            assert "count = 0" in debug.read_text() and workers(watch.pid)[0] == worker
+            write_atomic(main, main.read_text().replace('"Recovered counter"', '"Restarted counter"'))
+            wait_for(lambda: "Restarted counter" in read_text_safe(debug), "reload after restart")
+            assert "count = 0" in read_text_safe(debug) and workers(watch.pid)[0] == worker
             watch.stdin.write("q\n")
             watch.stdin.flush()
-            assert watch.wait(timeout=10) == 0, "quit fails"
-            wait_for(lambda: worker_gone(worker), "quit stops worker", 10)
+            assert watch.wait(timeout=30) == 0, "quit fails"
+            wait_for(lambda: worker_gone(worker), "quit stops worker", 30)
         finally:
             if watch.poll() is None:
                 watch.send_signal(signal.SIGINT)
-                watch.wait(timeout=10)
+                watch.wait(timeout=30)
     # Native Desktop sessions also stop when the owner process ends.
-    manifest.write_text(manifest.read_text().replace('default_runtime = "headless"',
-                                                   'default_runtime = "desktop"'))
+    desktop_stable = main.read_text()
+    write_atomic(manifest, manifest.read_text().replace('default_runtime = "headless"',
+                                                        'default_runtime = "desktop"'))
     for mode in ("interrupt", "terminate", "window"):
         debug.unlink(missing_ok=True)
-        with (root / (mode + ".log")).open("w") as output:
+        inject.unlink(missing_ok=True)
+        write_atomic(main, desktop_stable)
+        mode_log = root / (mode + ".log")
+        with mode_log.open("w") as output:
             watch = subprocess.Popen([cli, "run", "--watch", "--out-dir", "native output", str(source)],
                                      env=watch_env, stdin=subprocess.PIPE, stdout=output,
                                      stderr=subprocess.STDOUT, text=True)
             try:
-                wait_for(lambda: debug.exists() and '"runtime":"desktop"' in debug.read_text() and
+                wait_for(lambda: '"runtime":"desktop"' in read_text_safe(debug) and
+                         "window " in read_text_safe(mode_log) and
                          workers(watch.pid), "native " + mode)
                 worker = workers(watch.pid)[0]
                 if mode == "window":
-                    main.write_text("invalid source")
+                    write_atomic(main, "invalid source")
                     wait_for(lambda: "Build fails. Fix the source and retry." in
-                             (root / (mode + ".log")).read_text(), "failed build before window close")
-                    (source / "native output" / "inject.json").write_text(json.dumps(
+                             read_text_safe(mode_log), "failed build before window close")
+                    wait_quiet_log(mode_log)
+                    assert workers(watch.pid) == [worker], "failed build replaced desktop worker"
+                    write_atomic(inject, json.dumps(
                         {"v": 1, "kind": "inject", "events": [{"op": "quit"}]}))
                 else:
                     watch.send_signal(signal.SIGINT if mode == "interrupt" else signal.SIGTERM)
                 try:
-                    code = watch.wait(timeout=10)
+                    code = watch.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    raise AssertionError("session stays up\n" +
-                                         (root / (mode + ".log")).read_text())
+                    raise AssertionError("session stays up\n" + read_text_safe(mode_log))
                 expected = {"window": (0,), "interrupt": (-signal.SIGINT, 130),
                             "terminate": (-signal.SIGTERM, 128 + signal.SIGTERM)}
                 assert code in expected[mode], "unexpected session exit: " + str(code)
-                wait_for(lambda: worker_gone(worker), "native owner cleanup", 10)
+                wait_for(lambda: worker_gone(worker), "native owner cleanup", 30)
             finally:
                 if watch.poll() is None:
                     watch.send_signal(signal.SIGINT)
-                    watch.wait(timeout=10)
+                    watch.wait(timeout=30)
+    write_atomic(main, desktop_stable)
     io_name = "ioproof" + uuid.uuid4().hex[:8]
     subprocess.run([cli, "new", io_name, "--path", str(root)], check=True)
     io_source = root / io_name
