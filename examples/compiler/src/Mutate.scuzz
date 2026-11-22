@@ -20,6 +20,8 @@ record SiteSpan(site: Int, kind: String, file: String, symbol: String, line: Int
 
 record SpanStep(ts: List[SpTok], n: Int, hi: Int, kind: String, off: Int)
 
+record SpanState(loaded: Bool, rewrote: Bool, live: List[(String, String)], liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)])
+
 import Parse.Expr
 import Parse.Fun
 import Parse.Prog
@@ -1460,11 +1462,46 @@ def resolveFunSpanHit(site: Int, stem: String, builtSrc: String, d: Fun, local: 
 def resolveBodySpan(site: Int, stem: String, builtSrc: String, builtProg: Prog, local: Int, o: Bool, liveHit: List[(String, String, Prog)], expHit: List[(String, String, Prog)]): SiteSpan =
   if (List.isEmpty(liveHit) || List.isEmpty(expHit)) spanOnBody(site, stem, builtSrc, builtProg, local, o) else if (List.at(liveHit, 0)._3.main != "" && canUseLiveExpr(List.at(liveHit, 0)._3.body, List.at(expHit, 0)._3.body, builtProg.body, o)) spanOnBody(site, stem, List.at(liveHit, 0)._2, List.at(liveHit, 0)._3, local, o) else spanOnBody(site, stem, builtSrc, builtProg, local, o)
 
-def siteSpanFiles(liveFiles: List[(String, String)], builtFiles: List[(String, String)], site: Int, o: Bool): SiteSpan =
-  siteSpanFromLive(parseLive(liveFiles), parseLive(builtFiles), site, o)
+def emptySpanState(): SpanState =
+  SpanState(false, false, noFiles(), noKept(), noKept())
 
-def siteSpanFromLive(liveKept: List[(String, String, Prog)], builtKept: List[(String, String, Prog)], site: Int, o: Bool): SiteSpan =
-  siteSpanKept(liveKept, parseLive(Verify.rewriteReqFromKept(liveKept)), builtKept, site, o)
+def fileSrcOf(files: List[(String, String)], stem: String): List[String] =
+  if (List.isEmpty(files)) Verify.noStr() else if (List.at(files, 0)._1 == stem) List.at(files, 0)._2 :: Verify.noStr() else fileSrcOf(List.tail(files), stem)
+
+def siteOwnerKept(builtKept: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  if (List.isEmpty(builtKept)) noFiles() else siteOwnerKeptHd(List.at(builtKept, 0), List.tail(builtKept), site, base, o)
+
+def siteOwnerKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  h match {
+    case (stem, src, p) => if (stem == wrapStem()) siteOwnerKept(rest, site, base, o) else if (site < base + countProg(p, o)) (stem, src) :: noFiles() else siteOwnerKept(rest, site, base + countProg(p, o), o)
+  }
+
+def siteNeedsRewrite(liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], site: Int, o: Bool): Bool =
+  siteNeedsRewriteOwner(liveFiles, siteOwnerKept(builtKept, site, 0, o))
+
+def siteNeedsRewriteOwner(liveFiles: List[(String, String)], owner: List[(String, String)]): Bool =
+  if (List.isEmpty(owner)) false else siteNeedsRewriteHit(fileSrcOf(liveFiles, List.at(owner, 0)._1), List.at(owner, 0)._2)
+
+def siteNeedsRewriteHit(hit: List[String], builtSrc: String): Bool =
+  !List.isEmpty(hit) && List.at(hit, 0) != builtSrc
+
+def fillSpanRewrite(st: SpanState): SpanState =
+  fillSpanRewriteKept(st, parseLive(st.live))
+
+def fillSpanRewriteKept(st: SpanState, lk: List[(String, String, Prog)]): SpanState =
+  SpanState(true, true, st.live, lk, parseLive(Verify.rewriteReqFromKept(lk)))
+
+def stepSpanState(st: SpanState, liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], site: Int, o: Bool): (SpanState, SiteSpan) =
+  stepSpanLoaded(if (st.loaded) st else SpanState(true, false, liveFiles, noKept(), noKept()), builtKept, site, o)
+
+def stepSpanLoaded(st: SpanState, builtKept: List[(String, String, Prog)], site: Int, o: Bool): (SpanState, SiteSpan) =
+  if (!siteNeedsRewrite(st.live, builtKept, site, o)) (st, siteSpanKept(noKept(), noKept(), builtKept, site, o)) else stepSpanReady(if (st.rewrote) st else fillSpanRewrite(st), builtKept, site, o)
+
+def stepSpanReady(st: SpanState, builtKept: List[(String, String, Prog)], site: Int, o: Bool): (SpanState, SiteSpan) =
+  (st, siteSpanKept(st.liveKept, st.expKept, builtKept, site, o))
+
+def siteSpanFiles(liveFiles: List[(String, String)], builtFiles: List[(String, String)], site: Int, o: Bool): SiteSpan =
+  stepSpanState(emptySpanState(), liveFiles, parseLive(builtFiles), site, o)._2
 
 def siteSpanKept(liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)], builtKept: List[(String, String, Prog)], site: Int, o: Bool): SiteSpan =
   siteSpanKeptGo(liveKept, expKept, builtKept, site, 0, o)
@@ -1492,15 +1529,18 @@ def survivorOfSpan(span: SiteSpan, diverged: List[String], claims: List[String])
 def survivorHuman(span: SiteSpan, diverged: List[String], claims: List[String]): String =
   Str.concat("  mutant ", Str.concat(Str.fromInt(span.site), Str.concat(": survived at ", Str.concat(span.file, Str.concat(":", Str.concat(Str.fromInt(span.line), Str.concat(":", Str.concat(Str.fromInt(span.column), Str.concat(" (", Str.concat(span.symbol, Str.concat(", ", Str.concat(span.kind, Str.concat("; diverged: ", Str.concat(if (List.isEmpty(diverged)) "none" else List.join(diverged, ", "), Str.concat("; claims: ", Str.concat(if (List.isEmpty(claims)) "none" else List.join(claims, ", "), ")"))))))))))))))))
 
+def hasSurvivedResult(results: List[(Int, String)]): Bool =
+  if (List.isEmpty(results)) false else isSurvivedStatus(List.at(results, 0)._2) || hasSurvivedResult(List.tail(results))
+
 def survivorsOf(liveFiles: List[(String, String)], builtFiles: List[(String, String)], results: List[(Int, String)], o: Bool): List[MutSurvivor] =
-  survivorsFromLive(parseLive(liveFiles), parseLive(builtFiles), results, o)
+  if (!hasSurvivedResult(results)) noSurvivors() else survivorsGo(emptySpanState(), liveFiles, parseLive(builtFiles), results, o)
 
-def survivorsFromLive(liveKept: List[(String, String, Prog)], builtKept: List[(String, String, Prog)], results: List[(Int, String)], o: Bool): List[MutSurvivor] =
-  survivorsGo(liveKept, parseLive(Verify.rewriteReqFromKept(liveKept)), builtKept, results, o)
+def survivorsGo(st: SpanState, liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], results: List[(Int, String)], o: Bool): List[MutSurvivor] =
+  if (List.isEmpty(results)) noSurvivors() else survivorsHd(st, liveFiles, builtKept, List.at(results, 0), List.tail(results), o)
 
-def survivorsGo(liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)], builtKept: List[(String, String, Prog)], results: List[(Int, String)], o: Bool): List[MutSurvivor] =
-  if (List.isEmpty(results)) noSurvivors() else survivorsHd(liveKept, expKept, builtKept, List.at(results, 0), List.tail(results), o)
+def survivorsHd(st: SpanState, liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], h: (Int, String), rest: List[(Int, String)], o: Bool): List[MutSurvivor] =
+  if (!isSurvivedStatus(h._2)) survivorsGo(st, liveFiles, builtKept, rest, o) else survivorsStep(stepSpanState(st, liveFiles, builtKept, h._1, o), decodeSurvived(h._2), liveFiles, builtKept, rest, o)
 
-def survivorsHd(liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)], builtKept: List[(String, String, Prog)], h: (Int, String), rest: List[(Int, String)], o: Bool): List[MutSurvivor] =
-  if (!isSurvivedStatus(h._2)) survivorsGo(liveKept, expKept, builtKept, rest, o) else survivorOfSpan(siteSpanKept(liveKept, expKept, builtKept, h._1, o), decodeSurvived(h._2)._1, decodeSurvived(h._2)._2) :: survivorsGo(liveKept, expKept, builtKept, rest, o)
+def survivorsStep(step: (SpanState, SiteSpan), dec: (List[String], List[String]), liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], rest: List[(Int, String)], o: Bool): List[MutSurvivor] =
+  survivorOfSpan(step._2, dec._1, dec._2) :: survivorsGo(step._1, liveFiles, builtKept, rest, o)
 
