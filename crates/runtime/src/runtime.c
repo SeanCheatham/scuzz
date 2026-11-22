@@ -5252,16 +5252,14 @@ typedef struct {
 #if defined(__APPLE__)
 /* Worker finished - main thread may leave the CFRunLoop park. */
 static volatile int g_sz_main_worker_done;
-/* Main has left the park and will join the worker. */
-static volatile int g_sz_main_leaving;
 static int g_sz_main_rc;
 
-/* AppKit can stay inside a window call after the worker is done.
+/* AppKit can stay inside a window or exit call after the worker is done.
  * Leave the process so a closed session does not stay up. */
 static void sz_main_force_exit(void *ctx) {
   (void)ctx;
-  if (!g_sz_main_leaving)
-    _exit(g_sz_main_rc);
+  fflush(NULL);
+  _exit(g_sz_main_rc);
 }
 
 static void sz_main_arm_exit(void) {
@@ -5518,7 +5516,6 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
     sz_interrupt_check_pending();
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
   }
-  g_sz_main_leaving = 1;
 #endif
   perr = pthread_join(thr, NULL);
   if (perr != 0)
