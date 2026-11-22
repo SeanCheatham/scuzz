@@ -45,6 +45,31 @@ def diagnostics(root, source, additional=None):
             rows += message['params']['diagnostics']
     return rows
 
+def lsp_format_edits(root, source):
+    uri = (root / 'src/Main.scuzz').as_uri()
+    messages = [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': root.as_uri()}},
+        {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': uri, 'languageId': 'scuzz', 'version': 1, 'text': source}}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'textDocument/formatting', 'params': {'textDocument': {'uri': uri}, 'options': {'tabSize': 2, 'insertSpaces': True}}},
+        {'jsonrpc': '2.0', 'id': 3, 'method': 'shutdown', 'params': None},
+        {'jsonrpc': '2.0', 'method': 'exit', 'params': None},
+    ]
+    wire = b''
+    for message in messages:
+        body = json.dumps(message).encode()
+        wire += f'Content-Length: {len(body)}\r\n\r\n'.encode() + body
+    run = subprocess.run([str(cli), 'lsp', str(root)], input=wire, capture_output=True, timeout=180)
+    assert run.returncode == 0, run.stderr.decode()
+    data = run.stdout
+    while data:
+        header, data = re.split(b'\r?\n\r?\n', data, maxsplit=1)
+        size = int(header.split(b':', 1)[1].strip())
+        message = json.loads(data[:size])
+        data = data[size:]
+        if message.get('id') == 2:
+            return message.get('result')
+    raise AssertionError('missing formatting response')
+
 with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
     root = Path(directory)
     (root / 'src').mkdir()
@@ -170,6 +195,76 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
         )
         for line, col, eline, ecol in multi_spans
     ], rows
+    intra_decl_src = (
+        'trait Codec[A]:\n'
+        '  def encode(x: A where ): String\n'
+        '  def decode(raw: ): A\n'
+        'impl Codec[Int] for Box:\n'
+        '  def encode(x: ): String =\n'
+        '    for {\n'
+        '      a = 1 +\n'
+        '      b = "bad" +\n'
+        '      c = x match {\n'
+        '        case 0 if => 10\n'
+        '        case 1 => 20 +\n'
+        '        case _ => 30\n'
+        '      }\n'
+        '    } yield Str.fromInt(c)\n'
+        'def blockBad(): Int = {\n'
+        '  u = 1 + )\n'
+        '  v = "wrong" + ]\n'
+        '  u + v\n'
+        '}\n'
+        '@main def main: IO[Unit] =\n'
+        '  IO.println("first")\n'
+        '  IO.println(1 + )\n'
+    )
+    intra_decl_spans = [
+        (2, 25, 2, 26),
+        (3, 19, 3, 20),
+        (5, 17, 5, 18),
+        (8, 7, 8, 8),
+        (9, 7, 9, 8),
+        (10, 19, 10, 21),
+        (12, 9, 12, 13),
+        (15, 23, 15, 24),
+        (16, 11, 16, 12),
+        (17, 17, 17, 18),
+        (22, 18, 22, 19),
+    ]
+    source_file.write_text(intra_decl_src)
+    fmt_out = command('fmt', root, ok=False)
+    assert 'parse error; source is unchanged' in fmt_out.stdout, fmt_out.stdout
+    assert source_file.read_text() == intra_decl_src
+    human = command('check', root, ok=False).stdout.strip().splitlines()
+    assert human == [
+        f'Main.scuzz:{line}:{col}: error: unexpected token'
+        for line, col, _, _ in intra_decl_spans
+    ], human
+    errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
+    assert [
+        (err['file'], err['message'], err['line'], err['column'], err['end_line'], err['end_column'])
+        for err in errors
+    ] == [
+        ('Main.scuzz', 'unexpected token', line, col, eline, ecol)
+        for line, col, eline, ecol in intra_decl_spans
+    ], errors
+    source_file.write_text(source)
+    rows = [row for row in diagnostics(root, intra_decl_src) if row['severity'] == 1]
+    assert [
+        (row['message'], row['range'])
+        for row in rows
+    ] == [
+        (
+            'unexpected token',
+            {
+                'start': {'line': line - 1, 'character': col - 1},
+                'end': {'line': eline - 1, 'character': ecol - 1},
+            },
+        )
+        for line, col, eline, ecol in intra_decl_spans
+    ], rows
+    assert lsp_format_edits(root, intra_decl_src) == []
     dep = root / 'dep'
     (dep / 'src').mkdir(parents=True)
     (dep / 'scuzz.toml').write_text('[package]\nname="helper"\n')
@@ -1009,6 +1104,7 @@ grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/scale
 ./examples/jump/gen.sh
 "$SCUZZ" check examples/jump
+"$SCUZZ" check examples/syntax
 "$SCUZZ" check examples/fmt
 "$SCUZZ" check examples/tyck
 "$SCUZZ" check examples/codegen
