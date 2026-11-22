@@ -16,6 +16,12 @@ record ArmWalk(xs: List[Arm], n: Int, hi: Int)
 
 record BindWalk(xs: List[Bind], n: Int, hi: Int)
 
+record SiteSpan(site: Int, kind: String, file: String, symbol: String, line: Int, column: Int, endLine: Int, endColumn: Int)
+
+record SpanStep(ts: List[SpTok], n: Int, hi: Int, kind: String, off: Int)
+
+record SpanState(loaded: Bool, rewrote: Bool, live: List[(String, String)], liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)])
+
 import Parse.Expr
 import Parse.Fun
 import Parse.Prog
@@ -23,6 +29,9 @@ import Parse.Arm
 import Parse.Bind
 import Parse.Param
 import Parse.Im
+import Lexer.SpTok
+import Lexer.Tok
+import Verify.MutSurvivor
 
 def wrapStem(): String =
   "__verify"
@@ -271,7 +280,25 @@ def storeReusableHash(sd: StoreDef, d: DefSite, site: Int): String =
   if (sd.hash != d.hash) "" else reusableStatus(storeSiteOf(sd.sites, site - d.base))
 
 def reusableStatus(status: String): String =
-  if (status == "killed" || status == "survived" || status == "inert" || status == "invalid" || status == "excluded") status else ""
+  if (status == "killed" || status == "inert" || status == "invalid" || status == "excluded" || Str.startsWith(status, "survived:")) status else ""
+
+def isSurvivedStatus(status: String): Bool =
+  status == "survived" || Str.startsWith(status, "survived:")
+
+def encodeSurvived(diverged: List[String], claims: List[String]): String =
+  Str.concat("survived:", Str.concat(Hex.encode(Verify.nls(diverged)), Str.concat(":", Hex.encode(Verify.nls(claims)))))
+
+def decodeSurvived(status: String): (List[String], List[String]) =
+  if (!Str.startsWith(status, "survived:")) (Verify.noStr(), Verify.noStr()) else decodeSurvivedAt(Str.drop(status, 9))
+
+def decodeSurvivedAt(rest: String): (List[String], List[String]) =
+  decodeSurvivedSep(rest, Str.indexOf(rest, ":"))
+
+def decodeSurvivedSep(rest: String, sep: Int): (List[String], List[String]) =
+  if (sep < 0) (Verify.noStr(), Verify.noStr()) else (nonEmptyLines(Hex.decode(Str.slice(rest, 0, sep))), nonEmptyLines(Hex.decode(Str.drop(rest, sep + 1))))
+
+def nonEmptyLines(raw: String): List[String] =
+  List.filter(Verify.linesOf(raw), l => l != "")
 
 def storeChanged(store: MutStore, ds: List[DefSite]): List[Int] =
   if (store.input == "" || List.isEmpty(store.defs)) noInts() else storeChangedGo(ds, store.defs, noInts())
@@ -980,4 +1007,540 @@ def arithBtnKept(): Bool =
 
 def arithBtnKeptOf(k: List[(String, String, Prog)]): Bool =
   countKept(k, false) == 3 && Str.contains(fileSrc(applyKept(k, 1, false)), "Signal.get(a) - 3") && siteLocKept(k, 1, false) == "body"
+
+def noToks(): List[SpTok] =
+  []
+
+def noSurvivors(): List[MutSurvivor] =
+  []
+
+def tokHeadOff(ts: List[SpTok], fallback: Int): Int =
+  if (List.isEmpty(ts)) fallback else List.at(ts, 0).off
+
+def tokStep(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.tail(ts)
+
+def tokAdvanceTo(ts: List[SpTok], off: Int): List[SpTok] =
+  if (off <= 0 || List.isEmpty(ts)) ts else if (List.at(ts, 0).off < off) tokAdvanceTo(List.tail(ts), off) else ts
+
+def tokDepthDelta(t: Tok, d: Int): Int =
+  t match {
+    case Tok.LParen => d + 1
+    case Tok.LBracket => d + 1
+    case Tok.LBrace => d + 1
+    case Tok.RParen => if (d > 0) d - 1 else 0
+    case Tok.RBracket => if (d > 0) d - 1 else 0
+    case Tok.RBrace => if (d > 0) d - 1 else 0
+    case _ => d
+  }
+
+def tokSkipPastEq0(ts: List[SpTok], d: Int): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Eq => if (d == 0) List.tail(ts) else tokSkipPastEq0(List.tail(ts), d)
+  case t => tokSkipPastEq0(List.tail(ts), tokDepthDelta(t, d))
+}
+
+def tokFindAtMain(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.AtMain => tokSkipPastEq0(List.tail(ts), 0)
+  case _ => tokFindAtMain(List.tail(ts))
+}
+
+def tokFindBool(ts: List[SpTok], b: Bool): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.True => if (b) ts else tokFindBool(List.tail(ts), b)
+  case Tok.False => if (!b) ts else tokFindBool(List.tail(ts), b)
+  case _ => tokFindBool(List.tail(ts), b)
+}
+
+def tokIsBinOp(t: Tok, op: String): Bool =
+  t match {
+    case Tok.Plus => op == "+"
+    case Tok.Minus => op == "-"
+    case Tok.Star => op == "*"
+    case Tok.Slash => op == "/"
+    case Tok.Percent => op == "%"
+    case Tok.EqEq => op == "=="
+    case Tok.BangEq => op == "!="
+    case Tok.Lt => op == "<"
+    case Tok.LtEq => op == "<="
+    case Tok.Gt => op == ">"
+    case Tok.GtEq => op == ">="
+    case Tok.AmpAmp => op == "&&"
+    case Tok.PipePipe => op == "||"
+    case Tok.ColonColon => op == "::"
+    case Tok.Amp => op == "&"
+    case Tok.Pipe => op == "|"
+    case Tok.Caret => op == "^"
+    case Tok.Shl => op == "<<"
+    case Tok.Shr => op == ">>"
+    case _ => false
+  }
+
+def tokFindBinOp(ts: List[SpTok], op: String, d: Int): List[SpTok] =
+  if (List.isEmpty(ts)) ts else if (d == 0 && tokIsBinOp(List.at(ts, 0).tok, op)) ts else tokFindBinOp(List.tail(ts), op, tokDepthDelta(List.at(ts, 0).tok, d))
+
+def tokSkipBalancedParen(ts: List[SpTok], d: Int): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.LParen => tokSkipBalancedParen(List.tail(ts), d + 1)
+  case Tok.RParen => if (d <= 1) List.tail(ts) else tokSkipBalancedParen(List.tail(ts), d - 1)
+  case _ => tokSkipBalancedParen(List.tail(ts), d)
+}
+
+def tokIsArrowHead(ts: List[SpTok]): Bool =
+  !List.isEmpty(ts) && List.at(ts, 0).tok match {
+  case Tok.Arrow => true
+  case _ => false
+}
+
+def tokSkipLamHead(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Comma => tokSkipLamHead(List.tail(ts))
+  case Tok.LBracket => tokSkipLamHead(List.tail(ts))
+  case Tok.LBrace => tokSkipLamHead(List.tail(ts))
+  case Tok.LParen => tokSkipLamParen(ts, tokSkipBalancedParen(List.tail(ts), 1))
+  case Tok.Ident(_) => if (tokIsArrowHead(List.tail(ts))) List.tail(List.tail(ts)) else ts
+  case Tok.Underscore => if (tokIsArrowHead(List.tail(ts))) List.tail(List.tail(ts)) else ts
+  case _ => ts
+}
+
+def tokSkipLamParen(ts: List[SpTok], afterParen: List[SpTok]): List[SpTok] =
+  if (tokIsArrowHead(afterParen)) List.tail(afterParen) else tokSkipLamHead(List.tail(ts))
+
+def tokFindCaseArrow(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Case => tokSkipPastArrow0(List.tail(ts), 0)
+  case _ => tokFindCaseArrow(List.tail(ts))
+}
+
+def tokSkipPastArrow0(ts: List[SpTok], d: Int): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Arrow => if (d == 0) List.tail(ts) else tokSkipPastArrow0(List.tail(ts), d)
+  case t => tokSkipPastArrow0(List.tail(ts), tokDepthDelta(t, d))
+}
+
+def tokIsForHead(ts: List[SpTok]): Bool =
+  !List.isEmpty(ts) && List.at(ts, 0).tok match {
+  case Tok.For => true
+  case _ => false
+}
+
+def tokIsElseHead(ts: List[SpTok]): Bool =
+  !List.isEmpty(ts) && List.at(ts, 0).tok match {
+  case Tok.Else => true
+  case _ => false
+}
+
+def tokSkipToElse(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Else => List.tail(ts)
+  case Tok.RParen => tokSkipToElse(List.tail(ts))
+  case Tok.RBracket => tokSkipToElse(List.tail(ts))
+  case Tok.RBrace => tokSkipToElse(List.tail(ts))
+  case _ => ts
+}
+
+def tokSkipBindHead(ts: List[SpTok], name: String, d: Int): List[SpTok] =
+  if (List.isEmpty(ts)) ts else if (name == "__guard") tokFindIf(ts) else List.at(ts, 0).tok match {
+  case Tok.LeftArrow => if (d == 0) List.tail(ts) else tokSkipBindHead(List.tail(ts), name, d)
+  case Tok.Eq => if (d == 0) List.tail(ts) else tokSkipBindHead(List.tail(ts), name, d)
+  case t => tokSkipBindHead(List.tail(ts), name, tokDepthDelta(t, d))
+}
+
+def tokFindIf(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.If => List.tail(ts)
+  case _ => tokFindIf(List.tail(ts))
+}
+
+def tokSkipToYield(ts: List[SpTok], d: Int): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Yield => if (d == 0) List.tail(ts) else tokSkipToYield(List.tail(ts), d)
+  case t => tokSkipToYield(List.tail(ts), tokDepthDelta(t, d))
+}
+
+def tokStepUnit(ts: List[SpTok]): List[SpTok] =
+  if (List.len(ts) < 2) ts else List.at(ts, 0).tok match {
+  case Tok.LParen => List.at(ts, 1).tok match {
+  case Tok.RParen => List.tail(List.tail(ts))
+  case _ => ts
+}
+  case _ => ts
+}
+
+def binKind(op: String, idx: Int): String =
+  if (idx == 0) if (op == "&&" || op == "||") "logic-flip" else if (flipRel(op) != "") "rel-flip" else "arith-flip" else if (idx == 1) "and-left" else "and-right"
+
+def mergeHit(k1: String, off1: Int, k2: String, off2: Int): (String, Int) =
+  if (k1 != "") (k1, off1) else (k2, off2)
+
+def isMatchLam(p: String, body: Expr): Bool =
+  p == "__p" && body match {
+  case Expr.EMatch(_, _, off) => off > 0
+  case _ => false
+}
+
+def patLamInner(p: String, body: Expr): List[Expr] =
+  if (p != "__p" && p != "__tup") noExprs() else body match {
+  case Expr.EMatch(s, arms, off) => if (off == 0 && List.len(arms) == 1 && isZeroVar(s)) List.at(arms, 0).body :: noExprs() else noExprs()
+  case _ => noExprs()
+}
+
+def isZeroVar(e: Expr): Bool =
+  e match {
+    case Expr.EVar(_, off) => off == 0
+    case _ => false
+  }
+
+def isUnitExpr(e: Expr): Bool =
+  e match {
+    case Expr.EUnit => true
+    case _ => false
+  }
+
+def spanWalk(e: Expr, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  e match {
+    case Expr.EInt(k, off) => spanInt(k, off, ts, target, seen, inO, hi, o)
+    case Expr.EBool(b) => spanBool(b, ts, target, seen, inO, hi, o)
+    case Expr.EStr(_, off) => SpanStep(tokStep(tokAdvanceTo(ts, off)), seen, hi, "", 0)
+    case Expr.EFloat(_, off) => SpanStep(tokStep(tokAdvanceTo(ts, off)), seen, hi, "", 0)
+    case Expr.EInterp(_, _, off) => SpanStep(tokStep(tokAdvanceTo(ts, off)), seen, hi, "", 0)
+    case Expr.EVar(_, off) => SpanStep(tokStep(tokAdvanceTo(ts, off)), seen, hi, "", 0)
+    case Expr.EUnit => SpanStep(tokStepUnit(ts), seen, hi, "", 0)
+    case Expr.EHole => SpanStep(tokStep(ts), seen, hi, "", 0)
+    case Expr.EBin(op, l, r, _) => spanBin(op, l, r, ts, target, seen, inO, hs, hi, o)
+    case Expr.EIf(c, t, el, off) => spanIf(c, t, el, off, ts, target, seen, inO, hs, hi, o)
+    case Expr.ECall(f, args, off) => spanCall(f, args, off, ts, target, seen, inO, hs, hi, o)
+    case Expr.EPrint(inner, off) => spanWalk(inner, tokStep(tokAdvanceTo(ts, off)), target, seen, inO, hs, hi, o)
+    case Expr.EMethod(recv, name, args, _) => spanMethod(recv, name, args, ts, target, seen, inO, hs, hi, o)
+    case Expr.EField(recv, _, _) => spanField(recv, ts, target, seen, inO, hs, hi, o)
+    case Expr.EUn(op, inner, off) => spanUn(op, inner, off, ts, target, seen, inO, hs, hi, o)
+    case Expr.ELam(p, _, body) => spanLam(p, body, ts, target, seen, inO, hs, hi, o)
+    case Expr.EMatch(s, arms, off) => spanMatch(s, arms, off, ts, target, seen, inO, hs, hi, o)
+    case Expr.EFor(bs, body, off) => spanFor(bs, body, off, ts, target, seen, inO, hs, hi, o)
+    case Expr.EList(xs) => spanArgs(xs, tokStep(ts), target, seen, inO, hs, hi, o, "", 0)
+    case Expr.ETuple(xs) => spanArgs(xs, tokStep(ts), target, seen, inO, hs, hi, o, "", 0)
+    case Expr.ENamed(name, inner) => spanWalk(inner, tokSkipBindHead(ts, name, 0), target, seen, inO, hs, hi, o)
+    case Expr.EAscribe(inner, _, _) => spanWalk(inner, ts, target, seen, inO, hs, hi, o)
+  }
+
+def spanInt(k: Int, off: Int, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): SpanStep =
+  spanIntAt(k, tokAdvanceTo(ts, off), off, target, seen, inO, hi, o)
+
+def spanIntAt(k: Int, ts: List[SpTok], off: Int, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): SpanStep =
+  if ((k == 0 || k == 1) && live(inO, o)) SpanStep(tokStep(ts), seen + 1, hi, if (seen == target) "int-flip" else "", if (seen == target) if (off > 0) off else tokHeadOff(ts, 0) else 0) else SpanStep(tokStep(ts), seen, hi, "", 0)
+
+def spanBool(b: Bool, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): SpanStep =
+  spanBoolAt(tokFindBool(ts, b), target, seen, inO, hi, o)
+
+def spanBoolAt(ts: List[SpTok], target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): SpanStep =
+  if (live(inO, o)) SpanStep(tokStep(ts), seen + 1, hi, if (seen == target) "bool-flip" else "", if (seen == target) tokHeadOff(ts, 0) else 0) else SpanStep(tokStep(ts), seen, hi, "", 0)
+
+def spanBin(op: String, l: Expr, r: Expr, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  if (live(inO, o) && binN(op) > 0) spanBinHit(op, l, r, ts, target, seen, inO, hs, hi, o) else spanBinKids(op, l, r, ts, target, seen, inO, hs, hi, o)
+
+def spanBinHit(op: String, l: Expr, r: Expr, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanWalk(l, ts, target, seen + binN(op), inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanBinOp(op, r, tokFindBinOp(ts1, op, 0), target, seen, n1, h1, k1, off1, inO, hs, o)
+  }
+
+def spanBinOp(op: String, r: Expr, tsOp: List[SpTok], target: Int, seen: Int, n1: Int, h1: Int, k1: String, off1: Int, inO: Bool, hs: List[Expr], o: Bool): SpanStep =
+  spanBinR(r, tokStep(tsOp), target, n1, h1, inO, hs, o, if (target >= seen && target < seen + binN(op)) binKind(op, target - seen) else k1, if (target >= seen && target < seen + binN(op)) tokHeadOff(tsOp, 0) else off1)
+
+def spanBinKids(op: String, l: Expr, r: Expr, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanWalk(l, ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanBinR(r, tokStep(tokFindBinOp(ts1, op, 0)), target, n1, h1, inO, hs, o, k1, off1)
+  }
+
+def spanBinR(r: Expr, ts: List[SpTok], target: Int, seen: Int, hi: Int, inO: Bool, hs: List[Expr], o: Bool, k1: String, off1: Int): SpanStep =
+  spanWalk(r, ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts2, n2, h2, k2, off2) => SpanStep(ts2, n2, h2, mergeHit(k1, off1, k2, off2)._1, mergeHit(k1, off1, k2, off2)._2)
+  }
+
+def spanIf(c: Expr, t: Expr, el: Expr, off: Int, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanIfAt(c, t, el, tokAdvanceTo(ts, off), off, target, seen, inO, hs, hi, o)
+
+def spanIfAt(c: Expr, t: Expr, el: Expr, ts0: List[SpTok], off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  if (progSite(inO, o)) spanIfGo(c, t, el, tokStep(ts0), target, seen + 1, false, hs, hi, o, if (seen == target) "if-swap" else "", if (seen == target) if (off > 0) off else tokHeadOff(ts0, 0) else 0) else spanIfGo(c, t, el, tokStep(ts0), target, seen, inO, hs, hi, o, "", 0)
+
+def spanIfGo(c: Expr, t: Expr, el: Expr, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, k0: String, off0: Int): SpanStep =
+  spanWalk(c, ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanIfThen(t, el, ts1, target, n1, h1, inO, hs, o, mergeHit(k0, off0, k1, off1)._1, mergeHit(k0, off0, k1, off1)._2)
+  }
+
+def spanIfThen(t: Expr, el: Expr, ts: List[SpTok], target: Int, seen: Int, hi: Int, inO: Bool, hs: List[Expr], o: Bool, k0: String, off0: Int): SpanStep =
+  spanWalk(t, ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanIfElse(el, ts1, target, n1, h1, inO, hs, o, mergeHit(k0, off0, k1, off1)._1, mergeHit(k0, off0, k1, off1)._2)
+  }
+
+def spanIfElse(el: Expr, ts: List[SpTok], target: Int, seen: Int, hi: Int, inO: Bool, hs: List[Expr], o: Bool, k0: String, off0: Int): SpanStep =
+  if (isUnitExpr(el) && !tokIsElseHead(ts)) SpanStep(ts, seen, hi, k0, off0) else spanWalk(el, tokSkipToElse(ts), target, seen, inO, hs, hi, o) match {
+  case SpanStep(ts1, n1, h1, k1, off1) => SpanStep(ts1, n1, h1, mergeHit(k0, off0, k1, off1)._1, mergeHit(k0, off0, k1, off1)._2)
+}
+
+def tokSkipBracket(ts: List[SpTok], d: Int): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.LBracket => tokSkipBracket(List.tail(ts), d + 1)
+  case Tok.RBracket => if (d <= 1) List.tail(ts) else tokSkipBracket(List.tail(ts), d - 1)
+  case _ => tokSkipBracket(List.tail(ts), d)
+}
+
+def tokAfterCallOpen(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Ident(_) => tokAfterCallOpen(List.tail(ts))
+  case Tok.Dot => tokAfterCallOpen(List.tail(ts))
+  case Tok.RParen => tokAfterCallOpen(List.tail(ts))
+  case Tok.LBracket => tokAfterCallOpen(tokSkipBracket(List.tail(ts), 1))
+  case Tok.LParen => List.tail(ts)
+  case _ => ts
+}
+
+def tokSkipComma(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) ts else List.at(ts, 0).tok match {
+  case Tok.Comma => List.tail(ts)
+  case Tok.RParen => tokSkipComma(List.tail(ts))
+  case _ => ts
+}
+
+def spanCall(f: String, args: List[Expr], off: Int, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanCallAt(f, args, tokAdvanceTo(ts, off), off, target, seen, inO, hs, hi, o)
+
+def spanCallAt(f: String, args: List[Expr], ts0: List[SpTok], off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  if (f == "Property.check" && List.len(args) == 3) spanCheck(args, tokAfterCallOpen(ts0), target, seen, inO, hs, hi, o) else if (isOracle(f)) spanArgs(args, tokAfterCallOpen(ts0), target, seen, true, hs, hi, o, "", 0) else if (f == "Signal.map" && progSite(inO, o) && mapParam(args) != "") spanArgs(args, tokAfterCallOpen(ts0), target, seen + 1, inO, hs, hi, o, if (seen == target) "signal-map" else "", if (seen == target) if (off > 0) off else tokHeadOff(ts0, 0) else 0) else if (isHandler(f) && progSite(inO, o) && List.len(hs) >= 2) spanArgs(args, tokAfterCallOpen(ts0), target, seen + 1, inO, hs, hi + 1, o, if (seen == target) "handler-swap" else "", if (seen == target) if (off > 0) off else tokHeadOff(ts0, 0) else 0) else spanArgs(args, tokAfterCallOpen(ts0), target, seen, inO, hs, hi, o, "", 0)
+
+def spanCheck(args: List[Expr], ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanArgs(List.take(args, 2), ts, target, seen, true, hs, hi, o, "", 0) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanArgs(List.drop(args, 2), tokSkipComma(ts1), target, n1, inO, hs, h1, o, k1, off1)
+  }
+
+def spanMethod(recv: Expr, name: String, args: List[Expr], ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  if (name == "require") spanRequire(recv, args, ts, target, seen, hs, hi, o) else spanWalk(recv, ts, target, seen, inO, hs, hi, o) match {
+  case SpanStep(ts1, n1, h1, k1, off1) => spanArgs(args, tokAfterCallOpen(ts1), target, n1, inO, hs, h1, o, k1, off1)
+}
+
+def spanRequire(recv: Expr, args: List[Expr], ts: List[SpTok], target: Int, seen: Int, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanWalk(recv, ts, target, seen, false, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanArgs(args, tokAfterCallOpen(ts1), target, n1, true, hs, h1, o, k1, off1)
+  }
+
+def spanField(recv: Expr, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanWalk(recv, ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => SpanStep(tokStep(tokStep(ts1)), n1, h1, k1, off1)
+  }
+
+def spanUn(op: String, inner: Expr, off: Int, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanUnAt(op, inner, tokAdvanceTo(ts, off), off, target, seen, inO, hs, hi, o)
+
+def spanUnAt(op: String, inner: Expr, ts0: List[SpTok], off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  if (op == "!" && live(inO, o)) spanWalk(inner, tokStep(ts0), target, seen + 1, inO, hs, hi, o) match {
+  case SpanStep(ts1, n1, h1, k1, off1) => SpanStep(ts1, n1, h1, mergeHit(if (seen == target) "not-drop" else "", if (seen == target) if (off > 0) off else tokHeadOff(ts0, 0) else 0, k1, off1)._1, mergeHit(if (seen == target) "not-drop" else "", if (seen == target) if (off > 0) off else tokHeadOff(ts0, 0) else 0, k1, off1)._2)
+} else spanWalk(inner, tokStep(ts0), target, seen, inO, hs, hi, o)
+
+def spanLam(p: String, body: Expr, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  if (isMatchLam(p, body)) spanWalk(body, ts, target, seen, inO, hs, hi, o) else spanLamPat(body, patLamInner(p, body), ts, target, seen, inO, hs, hi, o)
+
+def spanLamPat(body: Expr, inner: List[Expr], ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  if (!List.isEmpty(inner)) spanWalk(List.at(inner, 0), tokSkipLamHead(ts), target, seen, inO, hs, hi, o) else spanWalk(body, tokSkipLamHead(ts), target, seen, inO, hs, hi, o)
+
+def spanMatch(s: Expr, arms: List[Arm], off: Int, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanWalk(s, ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanArms(arms, off > 0, ts1, target, n1, inO, hs, h1, o, k1, off1)
+  }
+
+def spanArms(xs: List[Arm], hasCase: Bool, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, k0: String, off0: Int): SpanStep =
+  if (List.isEmpty(xs)) SpanStep(ts, seen, hi, k0, off0) else spanArmsHd(List.at(xs, 0), List.tail(xs), hasCase, ts, target, seen, inO, hs, hi, o, k0, off0)
+
+def spanArmsHd(a: Arm, rest: List[Arm], hasCase: Bool, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, k0: String, off0: Int): SpanStep =
+  spanWalk(a.body, if (hasCase) tokFindCaseArrow(ts) else ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanArms(rest, hasCase, ts1, target, n1, inO, hs, h1, o, mergeHit(k0, off0, k1, off1)._1, mergeHit(k0, off0, k1, off1)._2)
+  }
+
+def spanFor(bs: List[Bind], body: Expr, off: Int, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanForAt(bs, body, tokAdvanceTo(ts, off), target, seen, inO, hs, hi, o)
+
+def spanForAt(bs: List[Bind], body: Expr, ts0: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): SpanStep =
+  spanBinds(bs, tokIsForHead(ts0), if (tokIsForHead(ts0)) tokStep(tokStep(ts0)) else ts0, target, seen, inO, hs, hi, o, "", 0) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanWalk(body, if (tokIsForHead(ts0)) tokSkipToYield(ts1, 0) else ts1, target, n1, inO, hs, h1, o) match {
+  case SpanStep(ts2, n2, h2, k2, off2) => SpanStep(ts2, n2, h2, mergeHit(k1, off1, k2, off2)._1, mergeHit(k1, off1, k2, off2)._2)
+}
+  }
+
+def spanBinds(xs: List[Bind], realFor: Bool, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, k0: String, off0: Int): SpanStep =
+  if (List.isEmpty(xs)) SpanStep(ts, seen, hi, k0, off0) else spanBindsHd(List.at(xs, 0), List.tail(xs), realFor, ts, target, seen, inO, hs, hi, o, k0, off0)
+
+def spanBindsHd(b: Bind, rest: List[Bind], realFor: Bool, ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, k0: String, off0: Int): SpanStep =
+  spanWalk(b.value, if (realFor) tokSkipBindHead(ts, b.name, 0) else ts, target, seen, inO, hs, hi, o) match {
+    case SpanStep(ts1, n1, h1, k1, off1) => spanBinds(rest, realFor, ts1, target, n1, inO, hs, h1, o, mergeHit(k0, off0, k1, off1)._1, mergeHit(k0, off0, k1, off1)._2)
+  }
+
+def spanArgs(xs: List[Expr], ts: List[SpTok], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, k0: String, off0: Int): SpanStep =
+  if (List.isEmpty(xs)) SpanStep(ts, seen, hi, k0, off0) else spanWalk(List.at(xs, 0), ts, target, seen, inO, hs, hi, o) match {
+  case SpanStep(ts1, n1, h1, k1, off1) => spanArgs(List.tail(xs), tokSkipComma(ts1), target, n1, inO, hs, h1, o, mergeHit(k0, off0, k1, off1)._1, mergeHit(k0, off0, k1, off1)._2)
+}
+
+def spanExpr(ts: List[SpTok], e: Expr, local: Int, o: Bool): SpanStep =
+  spanWalk(e, ts, local, 0, false, collectHs(e, noExprs()), 0, o)
+
+def siteKindsExpr(e: Expr, o: Bool): List[String] =
+  siteKindsGo(e, 0, countExpr(e, o), o)
+
+def siteKindsGo(e: Expr, i: Int, n: Int, o: Bool): List[String] =
+  if (i >= n) Verify.noStr() else spanExpr(noToks(), e, i, o).kind :: siteKindsGo(e, i + 1, n, o)
+
+def strListEq(a: List[String], b: List[String]): Bool =
+  if (List.len(a) != List.len(b)) false else strListEqGo(a, b)
+
+def strListEqGo(a: List[String], b: List[String]): Bool =
+  if (List.isEmpty(a)) true else List.at(a, 0) == List.at(b, 0) && strListEqGo(List.tail(a), List.tail(b))
+
+def countReqCalls(e: Expr): Int =
+  e match {
+    case Expr.EMethod(recv, name, args, _) => (if (name == "require") 1 else 0) + countReqCalls(recv) + countReqList(args)
+    case Expr.ECall(_, args, _) => countReqList(args)
+    case Expr.EPrint(inner, _) => countReqCalls(inner)
+    case Expr.EField(recv, _, _) => countReqCalls(recv)
+    case Expr.EBin(_, l, r, _) => countReqCalls(l) + countReqCalls(r)
+    case Expr.EUn(_, inner, _) => countReqCalls(inner)
+    case Expr.ELam(_, _, body) => countReqCalls(body)
+    case Expr.EIf(c, t, el, _) => countReqCalls(c) + countReqCalls(t) + countReqCalls(el)
+    case Expr.EMatch(s, arms, _) => countReqCalls(s) + countReqArms(arms)
+    case Expr.EFor(bs, body, _) => countReqBinds(bs) + countReqCalls(body)
+    case Expr.EList(xs) => countReqList(xs)
+    case Expr.ETuple(xs) => countReqList(xs)
+    case Expr.ENamed(_, inner) => countReqCalls(inner)
+    case Expr.EAscribe(inner, _, _) => countReqCalls(inner)
+    case _ => 0
+  }
+
+def countReqList(xs: List[Expr]): Int =
+  if (List.isEmpty(xs)) 0 else countReqCalls(List.at(xs, 0)) + countReqList(List.tail(xs))
+
+def countReqArms(xs: List[Arm]): Int =
+  if (List.isEmpty(xs)) 0 else countReqCalls(List.at(xs, 0).body) + countReqArms(List.tail(xs))
+
+def countReqBinds(xs: List[Bind]): Int =
+  if (List.isEmpty(xs)) 0 else countReqCalls(List.at(xs, 0).value) + countReqBinds(List.tail(xs))
+
+def buildSpan(site: Int, kind: String, stem: String, symbol: String, src: String, off: Int): SiteSpan =
+  buildSpanLoc(site, kind, Check.fileOf(stem), symbol, Check.locOf(src, off))
+
+def buildSpanLoc(site: Int, kind: String, file: String, symbol: String, loc: (Int, Int, Int, Int)): SiteSpan =
+  loc match {
+    case (line, col, eline, ecol) => SiteSpan(site, kind, file, symbol, line, col, eline, ecol)
+  }
+
+def keptStemOf(kept: List[(String, String, Prog)], stem: String): List[(String, String, Prog)] =
+  if (List.isEmpty(kept)) noKept() else if (List.at(kept, 0)._1 == stem) List.at(kept, 0) :: noKept() else keptStemOf(List.tail(kept), stem)
+
+def findFunDefs(ds: List[Fun], mod: String, name: String): List[Fun] =
+  if (List.isEmpty(ds)) Parse.noFun() else if (List.at(ds, 0).mod == mod && List.at(ds, 0).name == name) List.at(ds, 0) :: Parse.noFun() else findFunDefs(List.tail(ds), mod, name)
+
+def findImplMethod(xs: List[Im], tn: String, forTy: String, name: String): List[Fun] =
+  if (List.isEmpty(xs)) Parse.noFun() else if (List.at(xs, 0).tn == tn && List.at(xs, 0).forTy == forTy) findFunDefs(List.at(xs, 0).methods, List.at(xs, 0).mod, name) else findImplMethod(List.tail(xs), tn, forTy, name)
+
+def spanOnFun(site: Int, stem: String, src: String, d: Fun, local: Int, o: Bool): SiteSpan =
+  spanOnFunStep(site, stem, src, d, spanExpr(tokSkipPastEq0(tokAdvanceTo(Lexer.lex(src), d.off), 0), d.body, local, o))
+
+def spanOnFunStep(site: Int, stem: String, src: String, d: Fun, step: SpanStep): SiteSpan =
+  buildSpan(site, step.kind, stem, Str.concat(if (d.mod == "") stem else d.mod, Str.concat(".", d.name)), src, if (step.off > 0 || Str.startsWith(src, "0") || Str.startsWith(src, "1") || Str.startsWith(src, "true") || Str.startsWith(src, "false") || Str.startsWith(src, "!") || Str.startsWith(src, "if")) step.off else d.off)
+
+def spanOnBody(site: Int, stem: String, src: String, p: Prog, local: Int, o: Bool): SiteSpan =
+  spanOnBodyStep(site, stem, src, p, spanExpr(tokFindAtMain(Lexer.lex(src)), p.body, local, o))
+
+def spanOnBodyStep(site: Int, stem: String, src: String, p: Prog, step: SpanStep): SiteSpan =
+  buildSpan(site, step.kind, stem, Str.concat(if (p.mod == "") stem else p.mod, Str.concat(".", if (p.main == "") "main" else p.main)), src, step.off)
+
+def canUseLiveExpr(liveBody: Expr, expBody: Expr, builtBody: Expr, o: Bool): Bool =
+  Parse.pretty0(expBody) == Parse.pretty0(builtBody) && (!o || countReqCalls(liveBody) <= 1) && strListEq(siteKindsExpr(liveBody, o), siteKindsExpr(builtBody, o))
+
+def resolveFunSpan(site: Int, stem: String, builtSrc: String, d: Fun, local: Int, o: Bool, liveHit: List[(String, String, Prog)], expHit: List[(String, String, Prog)], tn: String, forTy: String): SiteSpan =
+  if (List.isEmpty(liveHit) || List.isEmpty(expHit)) spanOnFun(site, stem, builtSrc, d, local, o) else resolveFunSpanHit(site, stem, builtSrc, d, local, o, List.at(liveHit, 0)._2, if (tn == "") findFunDefs(List.at(liveHit, 0)._3.defs, d.mod, d.name) else findImplMethod(List.at(liveHit, 0)._3.impls, tn, forTy, d.name), if (tn == "") findFunDefs(List.at(expHit, 0)._3.defs, d.mod, d.name) else findImplMethod(List.at(expHit, 0)._3.impls, tn, forTy, d.name))
+
+def resolveFunSpanHit(site: Int, stem: String, builtSrc: String, d: Fun, local: Int, o: Bool, liveSrc: String, liveFuns: List[Fun], expFuns: List[Fun]): SiteSpan =
+  if (List.isEmpty(liveFuns) || List.isEmpty(expFuns)) spanOnFun(site, stem, builtSrc, d, local, o) else if (canUseLiveExpr(List.at(liveFuns, 0).body, List.at(expFuns, 0).body, d.body, o)) spanOnFun(site, stem, liveSrc, List.at(liveFuns, 0), local, o) else spanOnFun(site, stem, builtSrc, d, local, o)
+
+def resolveBodySpan(site: Int, stem: String, builtSrc: String, builtProg: Prog, local: Int, o: Bool, liveHit: List[(String, String, Prog)], expHit: List[(String, String, Prog)]): SiteSpan =
+  if (List.isEmpty(liveHit) || List.isEmpty(expHit)) spanOnBody(site, stem, builtSrc, builtProg, local, o) else if (List.at(liveHit, 0)._3.main != "" && canUseLiveExpr(List.at(liveHit, 0)._3.body, List.at(expHit, 0)._3.body, builtProg.body, o)) spanOnBody(site, stem, List.at(liveHit, 0)._2, List.at(liveHit, 0)._3, local, o) else spanOnBody(site, stem, builtSrc, builtProg, local, o)
+
+def emptySpanState(): SpanState =
+  SpanState(false, false, noFiles(), noKept(), noKept())
+
+def fileSrcOf(files: List[(String, String)], stem: String): List[String] =
+  if (List.isEmpty(files)) Verify.noStr() else if (List.at(files, 0)._1 == stem) List.at(files, 0)._2 :: Verify.noStr() else fileSrcOf(List.tail(files), stem)
+
+def siteOwnerKept(builtKept: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  if (List.isEmpty(builtKept)) noFiles() else siteOwnerKeptHd(List.at(builtKept, 0), List.tail(builtKept), site, base, o)
+
+def siteOwnerKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  h match {
+    case (stem, src, p) => if (stem == wrapStem()) siteOwnerKept(rest, site, base, o) else if (site < base + countProg(p, o)) (stem, src) :: noFiles() else siteOwnerKept(rest, site, base + countProg(p, o), o)
+  }
+
+def siteNeedsRewrite(liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], site: Int, o: Bool): Bool =
+  siteNeedsRewriteOwner(liveFiles, siteOwnerKept(builtKept, site, 0, o))
+
+def siteNeedsRewriteOwner(liveFiles: List[(String, String)], owner: List[(String, String)]): Bool =
+  if (List.isEmpty(owner)) false else siteNeedsRewriteHit(fileSrcOf(liveFiles, List.at(owner, 0)._1), List.at(owner, 0)._2)
+
+def siteNeedsRewriteHit(hit: List[String], builtSrc: String): Bool =
+  !List.isEmpty(hit) && List.at(hit, 0) != builtSrc
+
+def fillSpanRewrite(st: SpanState): SpanState =
+  fillSpanRewriteKept(st, parseLive(st.live))
+
+def fillSpanRewriteKept(st: SpanState, lk: List[(String, String, Prog)]): SpanState =
+  SpanState(true, true, st.live, lk, parseLive(Verify.rewriteReqFromKept(lk)))
+
+def stepSpanState(st: SpanState, liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], site: Int, o: Bool): (SpanState, SiteSpan) =
+  stepSpanLoaded(if (st.loaded) st else SpanState(true, false, liveFiles, noKept(), noKept()), builtKept, site, o)
+
+def stepSpanLoaded(st: SpanState, builtKept: List[(String, String, Prog)], site: Int, o: Bool): (SpanState, SiteSpan) =
+  if (!siteNeedsRewrite(st.live, builtKept, site, o)) (st, siteSpanKept(noKept(), noKept(), builtKept, site, o)) else stepSpanReady(if (st.rewrote) st else fillSpanRewrite(st), builtKept, site, o)
+
+def stepSpanReady(st: SpanState, builtKept: List[(String, String, Prog)], site: Int, o: Bool): (SpanState, SiteSpan) =
+  (st, siteSpanKept(st.liveKept, st.expKept, builtKept, site, o))
+
+def siteSpanFiles(liveFiles: List[(String, String)], builtFiles: List[(String, String)], site: Int, o: Bool): SiteSpan =
+  stepSpanState(emptySpanState(), liveFiles, parseLive(builtFiles), site, o)._2
+
+def siteSpanKept(liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)], builtKept: List[(String, String, Prog)], site: Int, o: Bool): SiteSpan =
+  siteSpanKeptGo(liveKept, expKept, builtKept, site, 0, o)
+
+def siteSpanKeptGo(liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)], builtKept: List[(String, String, Prog)], site: Int, base: Int, o: Bool): SiteSpan =
+  if (List.isEmpty(builtKept)) SiteSpan(site, "unknown", "Main.scuzz", "Main", 1, 1, 1, 2) else siteSpanKeptHd(liveKept, expKept, List.at(builtKept, 0), List.tail(builtKept), site, base, o)
+
+def siteSpanKeptHd(liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)], h: (String, String, Prog), rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): SiteSpan =
+  h match {
+    case (stem, src, p) => if (stem == wrapStem()) siteSpanKeptGo(liveKept, expKept, rest, site, base, o) else if (site < base + countProg(p, o)) siteSpanProg(liveKept, expKept, stem, src, p, site, site - base, o) else siteSpanKeptGo(liveKept, expKept, rest, site, base + countProg(p, o), o)
+  }
+
+def siteSpanProg(liveKept: List[(String, String, Prog)], expKept: List[(String, String, Prog)], stem: String, src: String, p: Prog, site: Int, local: Int, o: Bool): SiteSpan =
+  if (local < countImpls(p.impls, 0, o)) siteSpanImpls(keptStemOf(liveKept, stem), keptStemOf(expKept, stem), stem, src, p.impls, site, local, 0, o) else if (local < countImpls(p.impls, 0, o) + countFuns(p.defs, 0, o)) siteSpanFuns(keptStemOf(liveKept, stem), keptStemOf(expKept, stem), stem, src, p.defs, site, local - countImpls(p.impls, 0, o), o, "", "") else resolveBodySpan(site, stem, src, p, local - countImpls(p.impls, 0, o) - countFuns(p.defs, 0, o), o, keptStemOf(liveKept, stem), keptStemOf(expKept, stem))
+
+def siteSpanImpls(liveHit: List[(String, String, Prog)], expHit: List[(String, String, Prog)], stem: String, src: String, xs: List[Im], site: Int, local: Int, seen: Int, o: Bool): SiteSpan =
+  if (List.isEmpty(xs)) SiteSpan(site, "unknown", Check.fileOf(stem), stem, 1, 1, 1, 2) else if (local < seen + countFuns(List.at(xs, 0).methods, 0, o)) siteSpanFuns(liveHit, expHit, stem, src, List.at(xs, 0).methods, site, local - seen, o, List.at(xs, 0).tn, List.at(xs, 0).forTy) else siteSpanImpls(liveHit, expHit, stem, src, List.tail(xs), site, local, seen + countFuns(List.at(xs, 0).methods, 0, o), o)
+
+def siteSpanFuns(liveHit: List[(String, String, Prog)], expHit: List[(String, String, Prog)], stem: String, src: String, ds: List[Fun], site: Int, local: Int, o: Bool, tn: String, forTy: String): SiteSpan =
+  if (List.isEmpty(ds)) SiteSpan(site, "unknown", Check.fileOf(stem), stem, 1, 1, 1, 2) else if (local < countExpr(List.at(ds, 0).body, o)) resolveFunSpan(site, stem, src, List.at(ds, 0), local, o, liveHit, expHit, tn, forTy) else siteSpanFuns(liveHit, expHit, stem, src, List.tail(ds), site, local - countExpr(List.at(ds, 0).body, o), o, tn, forTy)
+
+def survivorOfSpan(span: SiteSpan, diverged: List[String], claims: List[String]): MutSurvivor =
+  MutSurvivor(span.site, span.kind, span.file, span.line, span.column, span.endLine, span.endColumn, diverged, claims)
+
+def survivorHuman(span: SiteSpan, diverged: List[String], claims: List[String]): String =
+  Str.concat("  mutant ", Str.concat(Str.fromInt(span.site), Str.concat(": survived at ", Str.concat(span.file, Str.concat(":", Str.concat(Str.fromInt(span.line), Str.concat(":", Str.concat(Str.fromInt(span.column), Str.concat(" (", Str.concat(span.symbol, Str.concat(", ", Str.concat(span.kind, Str.concat("; diverged: ", Str.concat(if (List.isEmpty(diverged)) "none" else List.join(diverged, ", "), Str.concat("; claims: ", Str.concat(if (List.isEmpty(claims)) "none" else List.join(claims, ", "), ")"))))))))))))))))
+
+def hasSurvivedResult(results: List[(Int, String)]): Bool =
+  if (List.isEmpty(results)) false else isSurvivedStatus(List.at(results, 0)._2) || hasSurvivedResult(List.tail(results))
+
+def survivorsOf(liveFiles: List[(String, String)], builtFiles: List[(String, String)], results: List[(Int, String)], o: Bool): List[MutSurvivor] =
+  if (!hasSurvivedResult(results)) noSurvivors() else survivorsGo(emptySpanState(), liveFiles, parseLive(builtFiles), results, o)
+
+def survivorsGo(st: SpanState, liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], results: List[(Int, String)], o: Bool): List[MutSurvivor] =
+  if (List.isEmpty(results)) noSurvivors() else survivorsHd(st, liveFiles, builtKept, List.at(results, 0), List.tail(results), o)
+
+def survivorsHd(st: SpanState, liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], h: (Int, String), rest: List[(Int, String)], o: Bool): List[MutSurvivor] =
+  if (!isSurvivedStatus(h._2)) survivorsGo(st, liveFiles, builtKept, rest, o) else survivorsStep(stepSpanState(st, liveFiles, builtKept, h._1, o), decodeSurvived(h._2), liveFiles, builtKept, rest, o)
+
+def survivorsStep(step: (SpanState, SiteSpan), dec: (List[String], List[String]), liveFiles: List[(String, String)], builtKept: List[(String, String, Prog)], rest: List[(Int, String)], o: Bool): List[MutSurvivor] =
+  survivorOfSpan(step._2, dec._1, dec._2) :: survivorsGo(step._1, liveFiles, builtKept, rest, o)
 

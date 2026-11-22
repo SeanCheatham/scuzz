@@ -5,4 +5,8 @@ def scale(n: Int): Int =
   n * 2
 
 @main def main: IO[Unit] =
-  IO.println(Str.fromInt(bump(0) + scale(1)))
+  for {
+    total = bump(0) + scale(1)
+    _ <- Fs.write("total.txt", Str.fromInt(total))
+    _ <- IO.println(Str.fromInt(total))
+  } yield ()

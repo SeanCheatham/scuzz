@@ -1826,8 +1826,9 @@ root = (repo / "scratchpad/review").resolve()
 src = (root / "src/Main.scuzz").read_text()
 prop = src.replace('"Counter"', '"Counter app"', 1)
 d = root / "build/proposals/p1"
-(d / "src").mkdir(parents=True, exist_ok=True)
-(d / "src/Main.scuzz").write_text(prop)
+stage = root / "build/p1.stage"
+(stage / "src").mkdir(parents=True, exist_ok=True)
+(stage / "src/Main.scuzz").write_text(prop)
 session_dir = root / ".scuzz/ide"
 session_dir.mkdir(parents=True, exist_ok=True)
 (session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "qwen3.5-4b", "requests": 0}))
@@ -1863,7 +1864,9 @@ with open(root / "deck-live.log", "w") as log:
         await_state(lambda: (root / "build/ide/request.json").is_file())
         request = json.loads((root / "build/ide/request.json").read_text())
         assert request["objective"] == "Review behavior"
-        (d / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(prop.encode()).hexdigest()}]}))
+        (stage / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(prop.encode()).hexdigest()}]}))
+        d.parent.mkdir(parents=True, exist_ok=True)
+        stage.replace(d)
         inject([{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
         await_state(ready)
         inject([{"op": "tap", "id": "button:Choose left"}])
@@ -1953,19 +1956,31 @@ def read_ui(where):
             time.sleep(0.005)
 
 def publish(where, files):
-    dest = where / "build/proposals/p"
-    (dest / "src").mkdir(parents=True, exist_ok=True)
+    stage = where / "build/proposals.stage/p"
+    shutil.rmtree(stage, ignore_errors=True)
+    (stage / "src").mkdir(parents=True, exist_ok=True)
     session_dir = where / ".scuzz/ide"
     session_dir.mkdir(parents=True, exist_ok=True)
     (session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "qwen3.5-4b", "requests": 0}))
     for path, content in files:
-        (dest / path).write_text(content)
+        (stage / path).write_text(content)
 
 def bind_publication(where):
     request = json.loads((where / "build/ide/request.json").read_text())
+    stage = where / "build/proposals.stage/p"
     dest = where / "build/proposals/p"
-    files = [{"path": "src/" + p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted((dest / "src").glob("*.scuzz"))]
-    (dest / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": files}))
+    source = stage if stage.exists() else dest
+    files = [{"path": "src/" + p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted((source / "src").glob("*.scuzz"))]
+    body = json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": files})
+    if stage.exists():
+        (stage / "proposal.json").write_text(body)
+        shutil.rmtree(dest, ignore_errors=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        stage.replace(dest)
+    else:
+        tmp = dest / "proposal.json.tmp"
+        tmp.write_text(body)
+        tmp.replace(dest / "proposal.json")
 
 def write_ops(where, events):
     path = where / "inject.json"
@@ -2092,11 +2107,14 @@ if os.uname().sysname == "Linux":
             assert (root / ".scuzz/ide/cards" / c["id"] / witness["path"]).is_file()
         print("Counter first card readiness (fresh target; cached host):", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; freeze to ready:", c["ready"] - c["started"], "ms; required:", evidence["review"]["required"], "; search:", evidence["search"]["ran"])
         successor_source = original.replace('"Counter"', '"Counter successor"', 1)
+        successor_stage = root / "build/p-next.stage"
         successor_dir = root / "build/proposals/p-next"
-        (successor_dir / "src").mkdir(parents=True)
-        (successor_dir / "src/Main.scuzz").write_text(successor_source)
+        (successor_stage / "src").mkdir(parents=True)
+        (successor_stage / "src/Main.scuzz").write_text(successor_source)
         request = json.loads((root / "build/ide/request.json").read_text())
-        (successor_dir / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "controlled-successor", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(successor_source.encode()).hexdigest()}]}))
+        (successor_stage / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "controlled-successor", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(successor_source.encode()).hexdigest()}]}))
+        successor_dir.parent.mkdir(parents=True, exist_ok=True)
+        successor_stage.replace(successor_dir)
         await_state(lambda: "Ready cards: 2 / 2; reserved: 0" in json.dumps(read_ui(root)))
         assert next(v["value"] for v in read_ui(root)["signals"] if v.get("name") == "deckArmed") == c["id"]
         unread = root / "build/proposals/p-unread"

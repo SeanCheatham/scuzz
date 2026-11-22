@@ -1,3 +1,6 @@
 oracle bump(n: Int): Bool =
   Main.bump(n) == n + 1
 
+def wroteTotal(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.fileTextIs(t, i, "total.txt", ""))
+

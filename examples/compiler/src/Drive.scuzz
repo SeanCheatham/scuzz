@@ -18,6 +18,8 @@ import Manifest.Man
 import Manifest.UiMan
 import Mutate.DefSite
 import Mutate.MutStore
+import Mutate.SiteSpan
+import Mutate.SpanState
 import Mutate.StoreDef
 import Verify.Workload
 import Parse.En
@@ -2338,8 +2340,12 @@ def fuzzWriteSummary(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut, floo
     somNever = Verify.reachNever(somDec, somHit)
     trigNever = Verify.reachNever(trigDec, trigHit)
     claimNever = Verify.reachNever(claimDec, claimHit)
+    ordered = List.reverse(mut.results)
+    incompleteSites = List.map(List.filter(ordered, r => r._2 == "incomplete"), r => r._1)
+    excludedSites = List.map(List.filter(ordered, r => r._2 == "excluded"), r => r._1)
+    survivors = Mutate.survivorsOf(files, job.files, ordered, job.oracles)
     ok = Verify.fuzzCampaignOk(fuzzMutIncompleteCount(mut) + acc.searchFail + acc.corpFail + (if (Verify.requiredBlocked(acc.workloads)) 1 else 0), job.iterations, somNever, trigNever, claimNever, Verify.fuzzBelowFloor(scoreMilli(mut), floor))
-    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJson(ok, job.seed, job.iterations, acc.search, acc.searchFail, corpus, acc.corpFail, promo, acc.repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, fuzzMutIncompleteCount(mut), both._1, both._2, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, Verify.InputScope(corpus + 1, List.reverse(acc.workloads), List.map(List.filter(mut.results, r => r._2 == "excluded"), r => r._1), Verify.mapSpecE(Verify.workloadDefs(srcs, job.ens), job.ens), Verify.claimNames(List.map(ver, v => v._2)), Verify.checkedClaimNames(claimDump)), Verify.propertyNames(hits)), """
+    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJsonMut(ok, job.seed, job.iterations, acc.search, acc.searchFail, corpus, acc.corpFail, promo, acc.repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, fuzzMutIncompleteCount(mut), incompleteSites, excludedSites, survivors, both._1, both._2, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, Verify.InputScope(corpus + 1, List.reverse(acc.workloads), excludedSites, Verify.mapSpecE(Verify.workloadDefs(srcs, job.ens), job.ens), Verify.claimNames(List.map(ver, v => v._2)), Verify.checkedClaimNames(claimDump)), Verify.propertyNames(hits)), """
 """))
     _ <- fuzzSay(job, Str.concat("author rules: ", if (List.isEmpty(Verify.propertyNames(hits)) && List.isEmpty(Verify.checkedClaimNames(claimDump))) "unguarded" else "guarded"))
     _ <- fuzzSay(job, Verify.scopeLine(Verify.InputScope(corpus + 1, acc.workloads, [], [], [], [])))
@@ -2370,16 +2376,16 @@ def mutTake(iterations: Int, sites: Int): Int =
   if (iterations <= 0 || sites <= 0) 0 else if (Verify.mutateN(iterations) < sites) Verify.mutateN(iterations) else sites
 
 def fuzzMutate(job: FuzzJob, runs: List[FuzzRun], acc: FuzzAcc): IO[Unit] =
-  if (job.iterations <= 0 || Verify.requiredBlocked(acc.workloads)) fuzzDone(job, List.len(runs), acc, emptyMut(mutSites(job))) else fuzzMutateLive(job, runs, acc, Mutate.parseLive(job.files))
+  if (job.iterations <= 0 || Verify.requiredBlocked(acc.workloads)) fuzzDone(job, List.len(runs), acc, emptyMut(mutSites(job))) else fuzzMutate2(job, runs, acc, Mutate.parseLive(job.files))
 
-def fuzzMutateLive(job: FuzzJob, runs: List[FuzzRun], acc: FuzzAcc, kept: List[(String, String, Prog)]): IO[Unit] =
+def fuzzMutate2(job: FuzzJob, runs: List[FuzzRun], acc: FuzzAcc, kept: List[(String, String, Prog)]): IO[Unit] =
   fuzzMutate3(job, runs, acc, Mutate.countKept(kept, job.oracles), kept)
 
 def fuzzMutate3(job: FuzzJob, runs: List[FuzzRun], acc: FuzzAcc, sites: Int, kept: List[(String, String, Prog)]): IO[Unit] =
   fuzzMutate4(job, runs, acc, sites, mutTake(job.iterations, sites), kept)
 
 def fuzzMutate4(job: FuzzJob, runs: List[FuzzRun], acc: FuzzAcc, sites: Int, take: Int, kept: List[(String, String, Prog)]): IO[Unit] =
-  if (take <= 0) fuzzDone(job, List.len(runs), acc, emptyMut(sites)) else fuzzSay(job, Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutInput(job, runs).flatMap(input => fuzzMutBase(job, runs).flatMap(base => fuzzMutStore(job.dir, input).flatMap(store => fuzzMutGo(job, kept, Mutate.defSites(kept, job.oracles), store, mutPicks(job.seed, take, sites, Mutate.defSites(kept, job.oracles), store), base, emptyMut(sites), take).flatMap(mut => fuzzMutWrite(job.dir, job.oracles, kept, store, mut).flatMap(_ => fuzzMutFin(job, List.len(runs), acc, mut, take)))))))
+  if (take <= 0) fuzzDone(job, List.len(runs), acc, emptyMut(sites)) else fuzzSay(job, Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutInput(job, runs).flatMap(input => fuzzMutBase(job, runs).flatMap(base => fuzzMutStore(job.dir, input).flatMap(store => Ref.of(Mutate.emptySpanState()).flatMap(spanRef => fuzzMutGo(job, kept, spanRef, Mutate.defSites(kept, job.oracles), store, mutPicks(job.seed, take, sites, Mutate.defSites(kept, job.oracles), store), base, emptyMut(sites), take).flatMap(mut => fuzzMutWrite(job.dir, job.oracles, kept, store, mut).flatMap(_ => fuzzMutFin(job, List.len(runs), acc, mut, take))))))))
 
 def mutStorePath(dir: String): String =
   joinSlash(joinSlash(dir, ".scuzz"), "mutate.results")
@@ -2479,20 +2485,20 @@ def fuzzMutBaseRunHd(job: FuzzJob, h: FuzzRun, rest: List[FuzzRun], i: Int, tls:
 def fuzzMutBaseGot(job: FuzzJob, h: FuzzRun, rest: List[FuzzRun], i: Int, tls: List[String], pass: List[FuzzRun], p: (Int, String, String)): IO[(List[String], List[FuzzRun])] =
   if (p._1 == 0) fuzzMutBaseRuns(job, rest, i + 1, List.concat(tls, p._2 :: Verify.noStr()), List.concat(pass, h :: noRuns())) else if (p._1 == 77 || Str.startsWith(fuzzMutStatus(p._1, p._3), "killed:")) fuzzMutBaseRuns(job, rest, i + 1, tls, pass) else IO.fail("mutation baseline probe is incomplete")
 
-def fuzzMutGo(job: FuzzJob, kept: List[(String, String, Prog)], ds: List[DefSite], store: MutStore, sites: List[Int], base: MutBase, acc: FuzzMut, take: Int): IO[FuzzMut] =
-  if (List.isEmpty(sites)) IO.pure(acc) else fuzzMutStep(job, kept, ds, store, List.at(sites, 0), List.tail(sites), base, acc, take)
+def fuzzMutGo(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], ds: List[DefSite], store: MutStore, sites: List[Int], base: MutBase, acc: FuzzMut, take: Int): IO[FuzzMut] =
+  if (List.isEmpty(sites)) IO.pure(acc) else fuzzMutStep(job, kept, spanRef, ds, store, List.at(sites, 0), List.tail(sites), base, acc, take)
 
-def fuzzMutStep(job: FuzzJob, kept: List[(String, String, Prog)], ds: List[DefSite], store: MutStore, site: Int, rest: List[Int], base: MutBase, acc: FuzzMut, take: Int): IO[FuzzMut] =
-  fuzzMutStepGo(job, kept, ds, store, site, rest, base, acc, take, Mutate.storeReusable(store, ds, site))
+def fuzzMutStep(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], ds: List[DefSite], store: MutStore, site: Int, rest: List[Int], base: MutBase, acc: FuzzMut, take: Int): IO[FuzzMut] =
+  fuzzMutStepGo(job, kept, spanRef, ds, store, site, rest, base, acc, take, Mutate.storeReusable(store, ds, site))
 
-def fuzzMutStepGo(job: FuzzJob, kept: List[(String, String, Prog)], ds: List[DefSite], store: MutStore, site: Int, rest: List[Int], base: MutBase, acc: FuzzMut, take: Int, got: String): IO[FuzzMut] =
-  if (got != "") fuzzMutReused(job.quiet, site, got, acc).flatMap(next => fuzzMutGo(job, kept, ds, store, rest, base, next, take)) else fuzzMutOne(job, kept, site, base, acc).flatMap(next => fuzzMutGo(job, kept, ds, store, rest, base, next, take))
+def fuzzMutStepGo(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], ds: List[DefSite], store: MutStore, site: Int, rest: List[Int], base: MutBase, acc: FuzzMut, take: Int, got: String): IO[FuzzMut] =
+  if (got != "") fuzzMutReused(job.quiet, site, got, acc).flatMap(next => fuzzMutGo(job, kept, spanRef, ds, store, rest, base, next, take)) else fuzzMutOne(job, kept, spanRef, site, base, acc).flatMap(next => fuzzMutGo(job, kept, spanRef, ds, store, rest, base, next, take))
 
 def fuzzMutReused(quiet: Bool, site: Int, got: String, acc: FuzzMut): IO[FuzzMut] =
-  sayAt(quiet, Str.concat("  mutant ", Str.concat(Str.fromInt(site), Str.concat(": reused ", got)))).flatMap(_ => IO.pure(FuzzMut(acc.killed + (if (got == "killed") 1 else 0), acc.survived + (if (got == "survived") 1 else 0), acc.inert + (if (got == "inert") 1 else 0), acc.ran, acc.sites, acc.invalid + (if (got == "invalid" || got == "excluded") 1 else 0), acc.reused + 1, (site, got) :: acc.results)))
+  sayAt(quiet, Str.concat("  mutant ", Str.concat(Str.fromInt(site), Str.concat(": reused ", if (Mutate.isSurvivedStatus(got)) "survived" else got)))).flatMap(_ => IO.pure(FuzzMut(acc.killed + (if (got == "killed") 1 else 0), acc.survived + (if (Mutate.isSurvivedStatus(got)) 1 else 0), acc.inert + (if (got == "inert") 1 else 0), acc.ran, acc.sites, acc.invalid + (if (got == "invalid" || got == "excluded") 1 else 0), acc.reused + 1, (site, got) :: acc.results)))
 
-def fuzzMutOne(job: FuzzJob, kept: List[(String, String, Prog)], site: Int, base: MutBase, acc: FuzzMut): IO[FuzzMut] =
-  fuzzSay(job, Str.concat("  mutation source: ", Mutate.siteLocKept(kept, site, job.oracles))).flatMap(_ => fuzzMutCompile(job, kept, site).flatMap(exe => fuzzMutRun(job, kept, site, exe, base, acc))).handleErrorWith(e => fuzzSay(job, Str.concat("  mutation error: ", e)).flatMap(_ => fuzzMutIncomplete(job.quiet, site, acc)))
+def fuzzMutOne(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], site: Int, base: MutBase, acc: FuzzMut): IO[FuzzMut] =
+  fuzzSay(job, Str.concat("  mutation source: ", Mutate.siteLocKept(kept, site, job.oracles))).flatMap(_ => fuzzMutCompile(job, kept, site).flatMap(exe => fuzzMutRun(job, kept, spanRef, site, exe, base, acc))).handleErrorWith(e => fuzzSay(job, Str.concat("  mutation error: ", e)).flatMap(_ => fuzzMutIncomplete(job.quiet, site, acc)))
 
 def fuzzMutCompile(job: FuzzJob, kept: List[(String, String, Prog)], site: Int): IO[String] =
   fuzzMutCompile2(job, site, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)), Mutate.applyKept(kept, site, job.oracles))
@@ -2512,11 +2518,11 @@ def fuzzMutLink(job: FuzzJob, mutDir: String): IO[String] =
 def fuzzMutLinkIo(r: (Int, String, String), exe: String, quiet: Bool): IO[String] =
   linkOnlyGotAt(r, quiet).map(_ => exe)
 
-def fuzzMutRun(job: FuzzJob, kept: List[(String, String, Prog)], site: Int, exe: String, base: MutBase, acc: FuzzMut): IO[FuzzMut] =
-  if (exe == "") fuzzMutInvalid(job.quiet, site, acc) else fuzzIdleAt(job, exe, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site))).flatMap(p => fuzzMutAfterIdle(job, kept, site, exe, base, acc, p))
+def fuzzMutRun(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], site: Int, exe: String, base: MutBase, acc: FuzzMut): IO[FuzzMut] =
+  if (exe == "") fuzzMutInvalid(job.quiet, site, acc) else fuzzIdleAt(job, exe, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site))).flatMap(p => fuzzMutAfterIdle(job, kept, spanRef, site, exe, base, acc, p))
 
-def fuzzMutAfterIdle(job: FuzzJob, kept: List[(String, String, Prog)], site: Int, exe: String, base: MutBase, acc: FuzzMut, p: (Int, String, String)): IO[FuzzMut] =
-  if (p._1 != 0) fuzzMutResult(job.quiet, site, fuzzMutStatus(p._1, p._3), acc) else fuzzMutReplay(job, site, exe, base.pass, 0, Verify.noStr()).flatMap(tls => fuzzMutAfterReplay(job, kept, site, base, acc, p._2, tls)).handleErrorWith(e => fuzzMutResult(job.quiet, site, e, acc))
+def fuzzMutAfterIdle(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], site: Int, exe: String, base: MutBase, acc: FuzzMut, p: (Int, String, String)): IO[FuzzMut] =
+  if (p._1 != 0) fuzzMutResult(job.quiet, site, fuzzMutStatus(p._1, p._3), acc) else fuzzMutReplay(job, site, exe, base.pass, 0, Verify.noStr()).flatMap(tls => fuzzMutAfterReplay(job, kept, spanRef, site, base, acc, p._2, tls)).handleErrorWith(e => fuzzMutResult(job.quiet, site, e, acc))
 
 def fuzzMutStatus(code: Int, rejection: String): String =
   if (code == 0) "passed" else if (code == 77) "excluded" else if (code == 3 || code == 124) "incomplete" else if (Str.startsWith(rejection, """v1
@@ -2541,8 +2547,35 @@ def fuzzMutReplayHd(job: FuzzJob, site: Int, exe: String, h: FuzzRun, rest: List
 def fuzzMutReplayGot(job: FuzzJob, site: Int, exe: String, rest: List[FuzzRun], i: Int, acc: List[String], p: (Int, String, String)): IO[List[String]] =
   if (p._1 != 0) IO.fail(fuzzMutStatus(p._1, p._3)) else fuzzMutReplay(job, site, exe, rest, i + 1, List.concat(acc, p._2 :: Verify.noStr()))
 
-def fuzzMutAfterReplay(job: FuzzJob, kept: List[(String, String, Prog)], site: Int, base: MutBase, acc: FuzzMut, idle: String, tls: List[String]): IO[FuzzMut] =
-  if (idle == base.idle && tlsEq(tls, base.tls)) IO.pure(FuzzMut(acc.killed, acc.survived, acc.inert + 1, acc.ran, acc.sites, acc.invalid, acc.reused, (site, "inert") :: acc.results)) else fuzzMutLived(job, kept, site, acc)
+def fuzzMutAfterReplay(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], site: Int, base: MutBase, acc: FuzzMut, idle: String, tls: List[String]): IO[FuzzMut] =
+  if (idle == base.idle && tlsEq(tls, base.tls)) IO.pure(FuzzMut(acc.killed, acc.survived, acc.inert + 1, acc.ran, acc.sites, acc.invalid, acc.reused, (site, "inert") :: acc.results)) else fuzzMutSurvived(job, kept, spanRef, site, base, acc, idle != base.idle, tls, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)))
+
+def fuzzMutSurvived(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], site: Int, base: MutBase, acc: FuzzMut, idleDiff: Bool, tls: List[String], mutDir: String): IO[FuzzMut] =
+  fuzzReadClaimsAll(fuzzDivergedDirs(mutDir, idleDiff, tls, base.tls, 0)).flatMap(rawClaims => fuzzMutSpanAt(job, kept, spanRef, site).flatMap(span => fuzzMutLived(job, span, fuzzDivergedWorkloads(idleDiff, tls, base.tls, base.pass), Verify.checkedClaimNames(rawClaims), acc)))
+
+def fuzzMutSpanAt(job: FuzzJob, kept: List[(String, String, Prog)], spanRef: Ref[SpanState], site: Int): IO[SiteSpan] =
+  Ref.get(spanRef).flatMap(st => (if (st.loaded) IO.pure(st.live) else fuzzLiveCollect(job.dir)).flatMap(live => fuzzMutSpanStore(spanRef, Mutate.stepSpanState(st, live, kept, site, job.oracles))))
+
+def fuzzMutSpanStore(spanRef: Ref[SpanState], res: (SpanState, SiteSpan)): IO[SiteSpan] =
+  Ref.set(spanRef, res._1).map(_ => res._2)
+
+def addDistinctStr(xs: List[String], x: String): List[String] =
+  if (x == "" || List.contains(xs, x)) xs else List.concat(xs, x :: Verify.noStr())
+
+def fuzzDivergedWorkloads(idleDiff: Bool, tls: List[String], baseTls: List[String], pass: List[FuzzRun]): List[String] =
+  fuzzDivergedRuns(tls, baseTls, pass, if (idleDiff) "idle" :: Verify.noStr() else Verify.noStr())
+
+def fuzzDivergedRuns(tls: List[String], baseTls: List[String], pass: List[FuzzRun], acc: List[String]): List[String] =
+  if (List.isEmpty(tls) || List.isEmpty(baseTls) || List.isEmpty(pass)) acc else fuzzDivergedRuns(List.tail(tls), List.tail(baseTls), List.tail(pass), if (List.at(tls, 0) != List.at(baseTls, 0)) addDistinctStr(acc, List.at(pass, 0).path) else acc)
+
+def fuzzDivergedDirs(mutDir: String, idleDiff: Bool, tls: List[String], baseTls: List[String], i: Int): List[String] =
+  List.concat(if (idleDiff) mutDir :: Verify.noStr() else Verify.noStr(), fuzzDivergedReplayDirs(mutDir, tls, baseTls, i))
+
+def fuzzDivergedReplayDirs(mutDir: String, tls: List[String], baseTls: List[String], i: Int): List[String] =
+  if (List.isEmpty(tls) || List.isEmpty(baseTls)) Verify.noStr() else if (List.at(tls, 0) != List.at(baseTls, 0)) joinSlash(mutDir, Str.fromInt(i)) :: fuzzDivergedReplayDirs(mutDir, List.tail(tls), List.tail(baseTls), i + 1) else fuzzDivergedReplayDirs(mutDir, List.tail(tls), List.tail(baseTls), i + 1)
+
+def fuzzReadClaimsAll(dirs: List[String]): IO[String] =
+  if (List.isEmpty(dirs)) IO.pure("") else fuzzReadOr(fuzzClaimPath(List.at(dirs, 0))).flatMap(first => fuzzReadClaimsAll(List.tail(dirs)).map(rest => Str.concat(first, rest)))
 
 def tlsEq(a: List[String], b: List[String]): Bool =
   if (List.len(a) != List.len(b)) false else tlsEqGo(a, b)
@@ -2553,14 +2586,14 @@ def tlsEqGo(a: List[String], b: List[String]): Bool =
 def fuzzMutKilled(quiet: Bool, site: Int, kind: String, acc: FuzzMut): IO[FuzzMut] =
   sayAt(quiet, Str.concat("  mutant ", Str.concat(Str.fromInt(site), Str.concat(": ", kind)))).flatMap(_ => IO.pure(FuzzMut(acc.killed + 1, acc.survived, acc.inert, acc.ran, acc.sites, acc.invalid, acc.reused, (site, "killed") :: acc.results)))
 
-def fuzzMutLived(job: FuzzJob, kept: List[(String, String, Prog)], site: Int, acc: FuzzMut): IO[FuzzMut] =
-  fuzzSay(job, Str.concat("  mutant ", Str.concat(Str.fromInt(site), Str.concat(": survived at ", Mutate.siteLocKept(kept, site, job.oracles))))).flatMap(_ => IO.pure(FuzzMut(acc.killed, acc.survived + 1, acc.inert, acc.ran, acc.sites, acc.invalid, acc.reused, (site, "survived") :: acc.results)))
+def fuzzMutLived(job: FuzzJob, span: SiteSpan, diverged: List[String], claims: List[String], acc: FuzzMut): IO[FuzzMut] =
+  fuzzSay(job, Mutate.survivorHuman(span, diverged, claims)).flatMap(_ => IO.pure(FuzzMut(acc.killed, acc.survived + 1, acc.inert, acc.ran, acc.sites, acc.invalid, acc.reused, (span.site, Mutate.encodeSurvived(diverged, claims)) :: acc.results)))
 
 def fuzzIdleAt(job: FuzzJob, exe: String, mutDir: String): IO[(Int, String, String)] =
   fuzzProbeAt(job, exe, mutDir, "", "", "", Verify.noStr())
 
 def fuzzProbeAt(job: FuzzJob, exe: String, mutDir: String, script: String, sched: String, fault: String, picks: List[String]): IO[(Int, String, String)] =
-  Fs.mkdirs(joinSlash(mutDir, "fuzz")).flatMap(_ => Fs.write(joinSlash(mutDir, "rejection.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "replay.toml"), Verify.reproText(sched, fault, picks, Verify.linesOf(script))).flatMap(_ => Fs.write(joinSlash(mutDir, "drive.json"), Verify.scriptJson(script)).flatMap(_ => fuzzProbeAtRun(job, exe, mutDir, script, sched, fault, picks).flatMap(code => fuzzIdleRead(mutDir, code)))))))
+  Fs.mkdirs(joinSlash(mutDir, "fuzz")).flatMap(_ => Fs.write(fuzzClaimPath(mutDir), "").flatMap(_ => Fs.write(joinSlash(mutDir, "rejection.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "replay.toml"), Verify.reproText(sched, fault, picks, Verify.linesOf(script))).flatMap(_ => Fs.write(joinSlash(mutDir, "drive.json"), Verify.scriptJson(script)).flatMap(_ => fuzzProbeAtRun(job, exe, mutDir, script, sched, fault, picks).flatMap(code => fuzzIdleRead(mutDir, code))))))))
 
 def fuzzProbeAtRun(job: FuzzJob, exe: String, mutDir: String, script: String, sched: String, fault: String, picks: List[String]): IO[Int] =
   if (job.ev) evProbe(job, exe, fuzzProbeAtEnv("", job, mutDir, script, sched, fault, picks)) else runProbeAt(job.asan, Str.concat(asanEnv(job.asan), Str.concat(fuzzProbeAtEnv("SCUZZ_", job, mutDir, script, sched, fault, picks), shQuote(exe)))).flatMap(r => Fs.write(joinSlash(mutDir, "probe.log"), Str.concat(r._2, r._3)).map(_ => r._1))

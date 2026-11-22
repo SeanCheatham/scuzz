@@ -23,6 +23,25 @@ search = budget * 5 // 8
 assert 0 <= summary["fuzz"]["search"] <= search
 assert 0 <= summary["fuzz"]["search_failures"] <= summary["fuzz"]["search"]
 assert 0 <= summary["mutate"]["ran"] <= min(budget - search, summary["mutate"]["sites"])
+mut = summary["mutate"]
+assert len(mut["incomplete_sites"]) == mut["incomplete"], mut
+assert len(mut["excluded_sites"]) == mut["excluded"], mut
+assert mut["excluded_sites"] == summary["scope"]["mutant_excluded"], (mut, summary["scope"])
+assert len(mut["survivors"]) == mut["survived"], mut
+workload_labels = {row["label"] for row in summary["scope"]["workloads"]}
+reached_claims = set(summary["scope"]["claims"]["reached"])
+for survivor in mut["survivors"]:
+    assert set(survivor) == {
+        "site", "kind", "file", "line", "column", "end_line", "end_column",
+        "diverged_workloads", "passed_claims",
+    }, survivor
+    assert 0 <= survivor["site"] < mut["sites"], survivor
+    assert survivor["kind"] and survivor["file"].endswith(".scuzz"), survivor
+    assert survivor["line"] >= 1 and survivor["column"] >= 1, survivor
+    assert (survivor["end_line"], survivor["end_column"]) > (survivor["line"], survivor["column"]), survivor
+    assert survivor["diverged_workloads"], survivor
+    assert set(survivor["diverged_workloads"]).issubset(workload_labels), (survivor, workload_labels)
+    assert set(survivor["passed_claims"]).issubset(reached_claims), (survivor, reached_claims)
 if summary["fuzz"]["ok"]:
     assert summary["fuzz"]["search"] == search
     assert summary["mutate"]["ran"] == min(budget - search, summary["mutate"]["sites"])
@@ -93,6 +112,8 @@ try:
         assert mut['invalid'] == 0 and mut['excluded'] == 0, report
         assert mut['killed'] == (1 if expected == 'killed' else 0), report
         assert mut['incomplete'] == (1 if expected == 'incomplete' else 0), report
+        assert mut['incomplete_sites'] == ([1] if expected == 'incomplete' else []), report
+        assert mut['excluded_sites'] == [] and mut['survivors'] == [], report
         assert report['scope']['required']['failed'] == 0 and report['scope']['required']['passed'] == 2, report
         assert mut['killed'] + mut['survived'] + mut['inert'] + mut['invalid'] + mut['excluded'] + mut['incomplete'] == mut['ran'], report
         if expected == 'incomplete':
@@ -830,6 +851,8 @@ def history(t: Timeline): Verdict =
     for report in reports:
         mut = report['mutate']
         assert mut['excluded'] == len(report['scope']['mutant_excluded'])
+        assert mut['excluded_sites'] == report['scope']['mutant_excluded'], mut
+        assert mut['incomplete_sites'] == [], mut
         count = mut['ran'] - mut['invalid'] - mut['inert']
         if count > 0:
             assert abs(mut['score'] - mut['killed'] / count) < 0.001, mut
@@ -1036,6 +1059,7 @@ assert d["corpus"]["failures"] >= 1
 assert d["scope"]["required"]["failed"] >= 1
 assert d["mutate"]["ran"] == 0
 assert d["mutate"]["killed"] == 0 and d["mutate"]["inert"] == 0
+assert d["mutate"]["survivors"] == [] and d["mutate"]["incomplete_sites"] == [] and d["mutate"]["excluded_sites"] == []
 PY
 if fuzz --replay /tmp/bad-example/build/fuzz/repro.toml /tmp/bad-example; then
   echo "replay should have reproduced the property failure" && exit 1
@@ -1043,6 +1067,78 @@ fi
 if fuzz --iterations 0 examples/bad-example; then
   echo "corpus-only should pin the bad-example failure" && exit 1
 fi
+rm -rf /tmp/bad-example-survivor /tmp/bad-example-survivor.log /tmp/bad-example-survivor.json
+cp -R examples/bad-example /tmp/bad-example-survivor
+rm -rf /tmp/bad-example-survivor/build /tmp/bad-example-survivor/.scuzz
+python3 - <<'PY_FIX_BUMP'
+from pathlib import Path
+p = Path("/tmp/bad-example-survivor/src/Main.scuzz")
+text = p.read_text()
+assert "n - 1" in text
+p.write_text(text.replace("n - 1", "n + 1", 1))
+PY_FIX_BUMP
+if fuzz --iterations 16 /tmp/bad-example-survivor > /tmp/bad-example-survivor.log 2>&1; then
+  echo "weakly claimed scale and main mutants must fail the default floor" && exit 1
+fi
+grep -q 'mutant 2: survived at Main.scuzz:5:5 (Main.scale, arith-flip;' /tmp/bad-example-survivor.log
+grep -q 'mutant 3: survived at Main.scuzz:9:21 (Main.main, arith-flip;' /tmp/bad-example-survivor.log
+grep -q 'mutant 4: survived at Main.scuzz:9:18 (Main.main, int-flip;' /tmp/bad-example-survivor.log
+grep -q 'mutant 5: survived at Main.scuzz:9:29 (Main.main, int-flip;' /tmp/bad-example-survivor.log
+cp /tmp/bad-example-survivor/build/fuzz/summary.json /tmp/bad-example-survivor-ev.json
+if "$SCUZZ" fuzz --iterations 16 --message-format=json /tmp/bad-example-survivor > /tmp/bad-example-survivor.json; then
+  echo "json mode must also fail when reused survivors miss the floor" && exit 1
+fi
+rm -f /tmp/bad-example-survivor/.scuzz/mutate.results
+if SCUZZ_FUZZ_ENGINE=compiled fuzz --iterations 16 /tmp/bad-example-survivor > /tmp/bad-example-survivor-compiled.log 2>&1; then
+  echo "compiled engine must also fail on surviving mutants" && exit 1
+fi
+python3 - <<'PY_SURVIVORS'
+import json
+from pathlib import Path
+ev = json.loads(Path("/tmp/bad-example-survivor-ev.json").read_text())
+reused_json = json.loads(Path("/tmp/bad-example-survivor.json").read_text())
+compiled = json.loads(Path("/tmp/bad-example-survivor/build/fuzz/summary.json").read_text())
+assert ev["mutate"] == reused_json["mutate"] == compiled["mutate"], (ev["mutate"], reused_json["mutate"], compiled["mutate"])
+mut = ev["mutate"]
+assert mut["killed"] == 2 and mut["survived"] == 4 and mut["ran"] == 6, mut
+assert mut["incomplete_sites"] == [] and mut["excluded_sites"] == [], mut
+by_site = {row["site"]: row for row in mut["survivors"]}
+assert sorted(by_site) == [2, 3, 4, 5], by_site
+want_spans = {
+    2: ("arith-flip", "Main.scuzz", 5, 5, 5, 6),
+    3: ("arith-flip", "Main.scuzz", 9, 21, 9, 22),
+    4: ("int-flip", "Main.scuzz", 9, 18, 9, 19),
+    5: ("int-flip", "Main.scuzz", 9, 29, 9, 30),
+}
+want_workloads = ["idle"]
+for site, (kind, file_name, line, col, end_line, end_col) in want_spans.items():
+    row = by_site[site]
+    assert (row["kind"], row["file"], row["line"], row["column"], row["end_line"], row["end_column"]) == (
+        kind, file_name, line, col, end_line, end_col
+    ), row
+    assert row["diverged_workloads"] == want_workloads, row
+    assert row["passed_claims"] == ["wroteTotal"], row
+PY_SURVIVORS
+cat > /tmp/bad-example-survivor/bump.scuzz_verify <<'STRONG_VERIFY'
+oracle bump(n: Int): Bool =
+  Main.bump(n) == n + 1
+
+oracle scale(n: Int): Bool =
+  Main.scale(n) == n * 2
+
+def wroteTotal(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.exists(t, k => Timeline.driveHas(t, k, "bump") || Timeline.driveHas(t, k, "scale")) || Timeline.fileTextIs(t, i, "total.txt", "3"))
+STRONG_VERIFY
+fuzz --iterations 16 /tmp/bad-example-survivor
+python3 - <<'PY_KILLED'
+import json
+with open("/tmp/bad-example-survivor/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is True
+assert d["mutate"]["survived"] == 0 and d["mutate"]["survivors"] == [], d["mutate"]
+assert d["mutate"]["score"] == 1, d["mutate"]
+PY_KILLED
+rm -rf /tmp/bad-example-survivor /tmp/bad-example-survivor-ev.json /tmp/bad-example-survivor.log /tmp/bad-example-survivor-compiled.log /tmp/bad-example-survivor.json
 fuzz --iterations 0 examples/kernel
 grep -q 'drive addTwoThree' examples/kernel/build/seeds.txt
 grep -q 'drive sumToTen' examples/kernel/build/seeds.txt
@@ -1290,6 +1386,20 @@ with open(sys.argv[1]) as f:
     d = json.load(f)
 assert d["fuzz"]["ok"] is True
 assert d["mutate"]["ran"] >= 1
+assert len(d["mutate"]["survivors"]) == d["mutate"]["survived"] == 1, d["mutate"]
+surv = d["mutate"]["survivors"][0]
+assert (surv["site"], surv["kind"], surv["file"], surv["line"], surv["column"], surv["end_line"], surv["end_column"]) == (
+    0, "int-flip", "Main.scuzz", 9, 26, 9, 27
+), surv
+assert "idle" in surv["diverged_workloads"], surv
+assert surv["passed_claims"] == [
+    "afterPlusShowsOne",
+    "countFollowsTaps",
+    "countStaysNonNeg",
+    "neverCountNegOne",
+    "plusVisible",
+    "titleVisible",
+], surv
 PY_GATE
 GATE_DIR="$gate_root/counter" python3 - <<'PY_EDIT'
 import os
@@ -1301,7 +1411,7 @@ assert old in text
 p.write_text(text.replace(old, 'Str.concat(value, Str.concat(env, ""))', 1))
 PY_EDIT
 fuzz --iterations 16 "$gate_root/counter" > /tmp/scuzz-mutgate-3.log 2>&1
-grep -q 'mutant 0: survived at Main.capturedLabel' /tmp/scuzz-mutgate-3.log
+grep -q 'mutant 0: survived at Main.scuzz:9:26 (Main.capturedLabel, int-flip;' /tmp/scuzz-mutgate-3.log
 reused2="$(grep -c 'reused' /tmp/scuzz-mutgate-2.log)"
 reused3="$(grep -c 'reused' /tmp/scuzz-mutgate-3.log)"
 test "$reused2" -gt "$reused3"

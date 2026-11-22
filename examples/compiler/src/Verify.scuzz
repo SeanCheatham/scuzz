@@ -4,6 +4,8 @@ record InputScope(planned: Int, workloads: List[Workload], mutantExcluded: List[
 
 record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String], unclaimed: List[String])
 
+record MutSurvivor(site: Int, kind: String, file: String, line: Int, column: Int, endLine: Int, endColumn: Int, divergedWorkloads: List[String], passedClaims: List[String])
+
 record IBound(lo: Int, hi: Int, onLo: Bool, onHi: Bool, eq: Int, onEq: Bool, ok: Bool)
 
 import Parse.Fun
@@ -487,7 +489,13 @@ def jb(b: Bool): String =
   if (b) "true" else "false"
 
 def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String]): String =
-  Str.concat(Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"status\":", Str.concat(Check.jsonStr(campaignStatus(ok, incomplete, scope)), ",\"fuzz\":")), Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded), incomplete), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), "}"))))))))))))
+  summaryJsonAt(ok, seed, iterations, search, failures, corpus, corpFail, promo, repro, jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded), incomplete), classRaw, incomplete, covRows, branchRows, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, scope, properties)
+
+def summaryJsonMut(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, incompleteSites: List[Int], excludedSites: List[Int], survivors: List[MutSurvivor], covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String]): String =
+  summaryJsonAt(ok, seed, iterations, search, failures, corpus, corpFail, promo, repro, jMutReport(killed, survived, inert, ran, sites, oracles, invalid - List.len(excludedSites), List.len(excludedSites), incomplete, incompleteSites, excludedSites, survivors), classRaw, incomplete, covRows, branchRows, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, scope, properties)
+
+def summaryJsonAt(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, mutJson: String, classRaw: String, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String]): String =
+  Str.concat(Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"status\":", Str.concat(Check.jsonStr(campaignStatus(ok, incomplete, scope)), ",\"fuzz\":")), Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(mutJson, Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), "}"))))))))))))
 
 def replayJson(input: String, mode: String, asan: Bool, declaredPicks: List[String], scope: InputScope, properties: List[String]): String =
   Str.concat("{\"v\":1,\"kind\":\"replay\",\"status\":", Str.concat(Check.jsonStr(List.at(scope.workloads, 0).status), Str.concat(jStrK("input", input), Str.concat(jStrK("mode", mode), Str.concat(",\"asan\":", Str.concat(jb(asan), Str.concat(",\"declared_schedule_picks\":", Str.concat(jStrList(declaredPicks), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), "}"))))))))))
@@ -520,7 +528,19 @@ def jClassOne(line: String): String =
   Str.concat("{\"name\":", Str.concat(Check.jsonStr(className(line)), Str.concat(",\"true\":", Str.concat(classYes(classNums(line)), Str.concat(",\"false\":", Str.concat(classNo(classNums(line)), "}"))))))
 
 def jMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int, excluded: Int, incomplete: Int): String =
-  Str.concat(",\"mutate\":{\"killed\":", Str.concat(Str.fromInt(killed), Str.concat(",\"survived\":", Str.concat(Str.fromInt(survived), Str.concat(",\"inert\":", Str.concat(Str.fromInt(inert), Str.concat(",\"ran\":", Str.concat(Str.fromInt(ran), Str.concat(",\"sites\":", Str.concat(Str.fromInt(sites), Str.concat(",\"oracles\":", Str.concat(jb(oracles), Str.concat(",\"invalid\":", Str.concat(Str.fromInt(invalid), Str.concat(Str.concat(",\"incomplete\":", Str.fromInt(incomplete)), Str.concat(Str.concat(",\"excluded\":", Str.fromInt(excluded)), Str.concat(jScore(killed, ran - invalid - inert), "}")))))))))))))))))
+  Str.concat(jMutBase(killed, survived, inert, ran, sites, oracles, invalid, excluded, incomplete), Str.concat(jScore(killed, ran - invalid - inert), "}"))
+
+def jMutReport(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int, excluded: Int, incomplete: Int, incompleteSites: List[Int], excludedSites: List[Int], survivors: List[MutSurvivor]): String =
+  Str.concat(jMutBase(killed, survived, inert, ran, sites, oracles, invalid, excluded, incomplete), Str.concat(",\"incomplete_sites\":", Str.concat(jIntList(incompleteSites), Str.concat(",\"excluded_sites\":", Str.concat(jIntList(excludedSites), Str.concat(",\"survivors\":[", Str.concat(List.join(List.map(survivors, s => jMutSurvivor(s)), ","), Str.concat("]", Str.concat(jScore(killed, ran - invalid - inert), "}")))))))))
+
+def jMutBase(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int, excluded: Int, incomplete: Int): String =
+  Str.concat(",\"mutate\":{\"killed\":", Str.concat(Str.fromInt(killed), Str.concat(",\"survived\":", Str.concat(Str.fromInt(survived), Str.concat(",\"inert\":", Str.concat(Str.fromInt(inert), Str.concat(",\"ran\":", Str.concat(Str.fromInt(ran), Str.concat(",\"sites\":", Str.concat(Str.fromInt(sites), Str.concat(",\"oracles\":", Str.concat(jb(oracles), Str.concat(",\"invalid\":", Str.concat(Str.fromInt(invalid), Str.concat(Str.concat(",\"incomplete\":", Str.fromInt(incomplete)), Str.concat(",\"excluded\":", Str.fromInt(excluded)))))))))))))))))
+
+def jIntList(xs: List[Int]): String =
+  Str.concat("[", Str.concat(List.join(List.map(xs, n => Str.fromInt(n)), ","), "]"))
+
+def jMutSurvivor(s: MutSurvivor): String =
+  Str.concat("{\"site\":", Str.concat(Str.fromInt(s.site), Str.concat(",\"kind\":", Str.concat(Check.jsonStr(s.kind), Str.concat(",\"file\":", Str.concat(Check.jsonStr(s.file), Str.concat(",\"line\":", Str.concat(Str.fromInt(s.line), Str.concat(",\"column\":", Str.concat(Str.fromInt(s.column), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(s.endLine), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(s.endColumn), Str.concat(",\"diverged_workloads\":", Str.concat(jStrList(s.divergedWorkloads), Str.concat(",\"passed_claims\":", Str.concat(jStrList(s.passedClaims), "}"))))))))))))))))))
 
 def jScore(killed: Int, sites: Int): String =
   if (sites <= 0) "" else Str.concat(",\"score\":", score3(killed, sites))
