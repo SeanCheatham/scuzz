@@ -63,7 +63,7 @@ def copyPayload(n: Int, enabled: Bool, ratio: Float, label: String): IO[Unit] =
     single = Payload(0).copy(value = n)
     unchanged = changed.copy()
     rebuilt = rebuildPayload(changed)
-    looped = rebuildLoop(changed, 3)
+    looped = rebuildLoop(changed, 4)
     _ <- IO.pure(changed).require(p => p.value == n && p.enabled == enabled && p.ratio == ratio && p.label == label && p.child.value == n)
     _ <- IO.pure(positional).require(p => p.value == n + 1 && !p.enabled && p.label == "original")
     _ <- IO.pure(single).require(p => p.value == n)
@@ -223,7 +223,7 @@ private def genKit(): IO[Unit] =
   for {
     it <- Stream.compileToList(Stream.iterate(0, 4, n => n + 1))
     _ <- IO.println(s"iterate:${headInt(it)}:${Str.fromInt(List.len(it))}")
-    un <- Stream.compileToList(Stream.unfold(0, n => if (n < 3) [(n, n + 1)] else []))
+    un <- Stream.compileToList(Stream.take(Stream.unfold(0, n => if (n >= 0 && n < 3) [(n, n + 1)] else []), 5))
     _ <- IO.println(s"unfold:${Str.fromInt(List.len(un))}")
     tapped <- Stream.compileToList(Stream.evalTap(Stream.emits(["a"]), x => IO.println(Str.concat("tap:", x))))
     _ <- IO.println(Str.concat("evalTap:", List.join(tapped, ",")))
@@ -247,11 +247,24 @@ private def missKit(): IO[Unit] =
     _ <- IO.println(Str.concat("forallMiss:", if (missAll) "1" else "0"))
   } yield ()
 
+def streamSlice(xs: List[Int], limit: Int): IO[(List[Int], Int, Bool)] =
+  for {
+    kept = Stream.take(Stream.map(Stream.filter(Stream.emits(xs), x => x >= 0), x => x + 1), if (limit < 0) 0 else limit)
+    items <- Stream.compileToList(kept)
+    total <- Stream.fold(Stream.emits(items), 0, pair => pair match {
+  case (acc, n) => acc + n
+})
+    hasAboveOne <- Stream.exists(Stream.emits(items), n => n > 1)
+  } yield (items, total, hasAboveOne)
+
 def run(): IO[Unit] =
   for {
     _ <- tupleCapture((0, "0", true), 0).require(ok => ok)
     _ <- tupleCapture((7, "7", false), 7).require(ok => ok)
     _ <- tupleCapture((-3, "-3", false), -3).require(ok => ok)
+    _ <- streamSlice([0, -1, 2, 5], 2).require(res => res == ([1, 3], 4, true))
+    _ <- streamSlice([0], 2).require(res => res == ([1], 1, false))
+    _ <- streamSlice([0, 2], -1).require(res => res == ([], 0, false))
     _ <- composition(7)
     _ <- namedComposition(7)
     _ <- attempted(7)
@@ -295,7 +308,7 @@ def attempted(n: Int): IO[Unit] =
 }
   case Result.Ok(_) => n + 1
 }
-    drained = drainError(Result.Err(3))
+    drained = drainError(Result.Err(4))
     drainedValue = drained match {
   case Result.Err(v) => v
   case Result.Ok(_) => 1
@@ -317,57 +330,60 @@ def attempted(n: Int): IO[Unit] =
     _ <- IO.pure(recordValue == n && intValue == n && enumValue == n && successValue == n && drainedValue == 0 && transformedValue == n && transformedLabel == Str.fromInt(n)).require(ok => ok)
   } yield ()
 
-def namedPayload(io: IO[Payload]): IO[Int] =
+private def namedPayload(io: IO[Payload]): IO[Int] =
   io.map(p => p.value)
 
-def attemptedText(result: Result[Payload, Int]): Result[Int, String] =
+private def attemptedText(result: Result[Payload, Int]): Result[Int, String] =
   result match {
     case Result.Err(problem) => Result.Err(problem.value)
     case Result.Ok(number) => Result.Ok(Str.fromInt(number))
   }
 
-def rebuildPayload(p: CopyPayload): CopyPayload =
+private def rebuildPayload(p: CopyPayload): CopyPayload =
   p match {
     case CopyPayload(n, enabled, ratio, label, child) => CopyPayload(n, enabled, ratio, label, child)
   }
 
-def rebuildLoop(p: CopyPayload, steps: Int): CopyPayload =
+private def rebuildLoop(p: CopyPayload, steps: Int): CopyPayload =
   p match {
-    case CopyPayload(n, enabled, ratio, label, child) if steps > 0 => rebuildLoop(CopyPayload(n, enabled, ratio, label, child), steps - 1)
+    case CopyPayload(n, enabled, ratio, label, child) if steps > 0 && steps <= 4 => rebuildLoop(CopyPayload(n, enabled, ratio, label, child), steps / 2)
     case _ => p
   }
 
-def payloadHead(xs: List[Int]): Payload =
+private def payloadHead(xs: List[Int]): Payload =
   xs match {
     case h :: _ => Payload(h)
     case _ => Payload(0)
   }
 
-def payloadSecond(xs: List[Int]): Payload =
+private def payloadSecond(xs: List[Int]): Payload =
   xs match {
     case _ :: h :: tail => Payload(h + List.len(tail))
     case _ => Payload(0)
   }
 
-def payloadFold(xs: List[Int], acc: Payload): Payload =
+private def payloadFold(xs: List[Int], acc: Payload): Payload =
   xs match {
     case h :: tail => payloadFold(tail, Payload(acc.value + h))
     case _ => acc
   }
 
-def drainError(result: Result[Int, String]): Result[Int, String] =
+private def drainError(result: Result[Int, String]): Result[Int, String] =
   result match {
-    case Result.Err(n) if n > 0 => drainError(Result.Err(n - 1))
+    case Result.Err(n) if n > 0 && n <= 4 => drainError(Result.Err(n / 2))
     case _ => result
   }
 
-def code(n: Int): Int =
+private def code(n: Int): Int =
   n + 1
 
-def tupleCapture(result: (Int, String, Bool), expected: Int): IO[Bool] =
-  result match {
-    case (code, label, enabled) => IO.pure(()).flatMap(_ => IO.pure(code == 0).flatMap(zero => IO.pure(zero == (expected == 0) && code == expected && label == Str.fromInt(expected) && enabled == (expected == 0))))
-  }
+private def tupleCapture(result: (Int, String, Bool), expected: Int): IO[Bool] =
+  for {
+    stepped = code(expected)
+    matched <- result match {
+  case (code, label, enabled) => IO.pure(()).flatMap(_ => IO.pure(code == 0).flatMap(zero => IO.pure(zero == (expected == 0) && code == expected && label == Str.fromInt(expected) && enabled == (expected == 0))))
+}
+  } yield matched && stepped == expected + 1
 
 def openStore(): IO[String] =
   Sys.exec("true").map(_ => "live-store")

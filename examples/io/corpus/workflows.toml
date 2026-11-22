@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive storeCommit", "drive storeRecover", "drive netPingRecover", "drive netMiss"]

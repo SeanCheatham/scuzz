@@ -1,3 +1,37 @@
-def wroteNote(t: Timeline): Verdict =
-  Verdict.any(t, i => Timeline.effectHas(t, i, "Fs.write"))
+oracle querySelectContracts(): Bool =
+  for {
+    sample = "{\"items\":[{\"name\":\"alpha\",\"active\":true,\"score\":10},{\"name\":\"beta\",\"active\":false,\"score\":99},{\"name\":\"gamma\",\"active\":true,\"score\":3}]}"
+    _ = Property.force(Query.run())
+    pathJoined = Fs.join("store", "note.txt")
+  } yield Query.selectNames(sample, 5) == Result.Ok(["alpha"]) && Query.selectNames(sample, 3) == Result.Ok(["alpha", "gamma"]) && Query.selectNames("{\"items\":[]}", 0) == Result.Ok([]) && Query.selectNames("{", 0) == Result.Err("Invalid JSON") && Query.selectNames("{}", 0) == Result.Err("Missing items array") && Query.selectNames("{\"items\":1}", 0) == Result.Err("Missing items array") && Query.selectNames("{\"items\":[{}]}", 0) == Result.Err("Invalid item") && Query.selectNames("{\"items\":[{\"name\":\"a\"}]}", 0) == Result.Err("Invalid item") && Query.selectNames("{\"items\":[{\"name\":\"a\",\"active\":true}]}", 0) == Result.Err("Invalid item") && Query.selectNames("{\"items\":[{\"name\":null,\"active\":true,\"score\":1}]}", 0) == Result.Err("Invalid item") && Query.selectNames("{\"items\":[{\"name\":\"a\",\"active\":1,\"score\":1}]}", 0) == Result.Err("Invalid item") && Query.selectNames("{\"items\":[{\"name\":\"a\",\"active\":true,\"score\":\"1\"}]}", 0) == Result.Err("Invalid item") && Query.selectNames("{\"items\":[{\"name\":\"a\",\"active\":true,\"score\":1.5}]}", 0) == Result.Err("Invalid item") && pathJoined == "store/note.txt" && Fs.dirname(pathJoined) == "store" && Fs.basename(pathJoined) == "note.txt"
+
+oracle queryScoreThreshold(minScore: Int): Bool =
+  for {
+    raw = "{\"items\":[{\"name\":\"low\",\"active\":true,\"score\":-5},{\"name\":\"high\",\"active\":true,\"score\":10},{\"name\":\"off\",\"active\":false,\"score\":50}]}"
+    expected = if (minScore <= -5) ["low", "high"] else if (minScore <= 10) ["high"] else []
+  } yield Query.selectNames(raw, minScore) == Result.Ok(expected)
+
+private def fsFaulted(t: Timeline, i: Int): Bool =
+  Timeline.faultKindHas(t, i, "fs")
+
+private def validStoreText(t: Timeline, i: Int, path: String): Bool =
+  Timeline.fileTextIs(t, i, path, "sim-store:init") || Timeline.fileTextIs(t, i, path, "sim-store:committed")
+
+def storeIntegrity(t: Timeline): Verdict =
+  Verdict.every(t, i => validStoreText(t, i, "store/note.txt") && validStoreText(t, i, "store/backup.txt"))
+
+def backupMonotonic(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.fileTextIs(t, a, "store/backup.txt", "sim-store:committed") || Timeline.fileTextIs(t, b, "store/backup.txt", "sim-store:committed")
+})
+
+def storeCommitAndRecover(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.driveHas(t, b, "storeCommit") || !fsFaulted(t, b) && Timeline.fileTextIs(t, b, "store/note.txt", "sim-store:committed") && Timeline.fileTextIs(t, b, "store/backup.txt", "sim-store:committed") && Timeline.effectHas(t, b, "Fs.write") || fsFaulted(t, b) && (Timeline.fileSame(t, a, b, "store/note.txt") || validStoreText(t, b, "store/note.txt")) && (Timeline.fileSame(t, a, b, "store/backup.txt") || Timeline.fileTextIs(t, b, "store/backup.txt", "sim-store:committed"))) && (!Timeline.driveHas(t, b, "storeRecover") || Timeline.fileSame(t, a, b, "store/backup.txt") && (!fsFaulted(t, b) && (Timeline.fileTextIs(t, b, "store/backup.txt", "sim-store:init") && Timeline.fileTextIs(t, b, "store/note.txt", "sim-store:init") || Timeline.fileTextIs(t, b, "store/backup.txt", "sim-store:committed") && Timeline.fileTextIs(t, b, "store/note.txt", "sim-store:committed")) || fsFaulted(t, b) && (Timeline.fileSame(t, a, b, "store/note.txt") || validStoreText(t, b, "store/note.txt"))))
+})
+
+def nonStoreDrivesPreserveFiles(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "composePayloads") || Timeline.driveHas(t, b, "runConcurrency") || Timeline.driveHas(t, b, "netPingRecover") || Timeline.driveHas(t, b, "netMiss")) || Timeline.fileSame(t, a, b, "store/note.txt") && Timeline.fileSame(t, a, b, "store/backup.txt")
+})
 

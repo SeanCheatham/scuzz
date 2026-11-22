@@ -1,0 +1,3 @@
+[fuzz]
+fault_seed = "fs:after:3"
+events = ["drive storeCommit", "drive storeRecover"]

@@ -1,9 +1,9 @@
-def showResp(tag: String, p: (Unit, (Int, Map[String, String], String))): IO[Unit] =
+private def showResp(tag: String, p: (Unit, (Int, Map[String, String], String))): IO[Unit] =
   p match {
     case (_, resp) => printResp(tag, resp)
   }
 
-def printResp(tag: String, resp: (Int, Map[String, String], String)): IO[Unit] =
+private def printResp(tag: String, resp: (Int, Map[String, String], String)): IO[Unit] =
   resp match {
     case (status, headers, body) => IO.println(s"$tag:${Str.fromInt(status)}:${Map.getOrElse(headers, "X-Trace", "-")}:$body")
   }
@@ -16,19 +16,19 @@ def handle(req: (String, String, Map[String, String], String)): IO[(Int, Map[Str
     case (path, method, _, body) => IO.println(s"served:$method:$path:$body").map(_ => reply(path))
   }
 
-def runHttpOk(): IO[Unit] =
+private def runHttpOk(): IO[Unit] =
   for {
     p <- IO.both(Net.serveOnce(8080, handle), Net.httpPost("http://127.0.0.1:8080/ping", Map.empty(), "hi"))
     _ <- showResp("ping", p)
   } yield ()
 
-def runHttpMiss(): IO[Unit] =
+private def runHttpMiss(): IO[Unit] =
   for {
     p <- IO.both(Net.serveOnce(8081, handle), Net.httpGet("http://127.0.0.1:8081/nope", Map.empty()))
     _ <- showResp("miss", p)
   } yield ()
 
-def runHttpFile(): IO[Unit] =
+private def runHttpFile(): IO[Unit] =
   for {
     response <- IO.both(Net.serveOnce(8085, handle), Net.httpGetToFile("http://127.0.0.1:8085/ping", Map.empty(), "net-stream.txt"))
     status = response._2._1
@@ -38,7 +38,7 @@ def runHttpFile(): IO[Unit] =
     _ <- Fs.delete("net-stream.txt")
   } yield ()
 
-def runHttpLargeFile(): IO[Unit] =
+private def runHttpLargeFile(): IO[Unit] =
   for {
     response <- IO.both(Net.serveOnce(8086, handle), Net.httpGetToFile("http://127.0.0.1:8086/large", Map.empty(), "net-large.txt"))
     status = response._2._1
@@ -47,7 +47,7 @@ def runHttpLargeFile(): IO[Unit] =
     _ <- Fs.delete("net-large.txt")
   } yield ()
 
-def echoServer(ln: Tcp): IO[Unit] =
+private def echoServer(ln: Tcp): IO[Unit] =
   for {
     c <- Net.tcpAccept(ln)
     s <- Net.tcpRead(c, 16)
@@ -55,7 +55,7 @@ def echoServer(ln: Tcp): IO[Unit] =
     _ <- Net.tcpClose(c)
   } yield ()
 
-def echoClient(): IO[Unit] =
+private def echoClient(): IO[Unit] =
   for {
     c <- Net.tcpConnect("127.0.0.1", 9090)
     _ <- Net.tcpWrite(c, "hi")
@@ -64,19 +64,19 @@ def echoClient(): IO[Unit] =
     _ <- IO.println(s"tcp:$s")
   } yield ()
 
-def runTcp(): IO[Unit] =
+private def runTcp(): IO[Unit] =
   for {
     ln <- Net.tcpListen(9090)
     sock = Resource.make(IO.pure(ln), s => Net.tcpClose(s))
     _ <- Resource.use(sock, s => IO.both(echoServer(s), echoClient()))
   } yield ()
 
-def showUdp(got: (String, Int, String)): IO[Unit] =
+private def showUdp(got: (String, Int, String)): IO[Unit] =
   got match {
     case (_, _, data) => IO.println(s"udp:$data")
   }
 
-def runUdp(): IO[Unit] =
+private def runUdp(): IO[Unit] =
   for {
     a <- Net.udpBind(19091)
     b <- Net.udpBind(19092)
@@ -99,7 +99,7 @@ def runHttpsFiles(): IO[Unit] =
     _ <- showResp("files", p)
   } yield ()
 
-def runHttpMethods(): IO[Unit] =
+private def runHttpMethods(): IO[Unit] =
   for {
     put <- IO.both(Net.serveOnce(8083, handle), Net.httpPut("http://127.0.0.1:8083/ping", Map.set(Map.empty(), "Content-Type", "text/plain"), "put"))
     _ <- showResp("put", put)

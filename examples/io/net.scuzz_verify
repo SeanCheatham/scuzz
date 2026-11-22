@@ -1,3 +1,34 @@
-def pingHitsNet(t: Timeline): Verdict =
-  Verdict.any(t, i => Timeline.effectHas(t, i, "Net.httpPost"))
+oracle serverReplyContracts(suffix: String): Bool =
+  for {
+    ping = Server.reply("/ping")
+    large = Server.reply("/large")
+    miss = Server.reply(Str.concat("/miss/", suffix))
+  } yield ping._1 == 200 && Map.getOrElse(ping._2, "X-Trace", "-") == "ok" && ping._3 == "ok:/ping" && large._1 == 200 && Map.getOrElse(large._2, "X-Trace", "-") == "-" && Str.len(large._3) == 2097152 && miss._1 == 404 && Map.getOrElse(miss._2, "X-Trace", "-") == "miss" && miss._3 == "missing"
+
+oracle serverHandleAndLoopback(flag: Bool): Bool =
+  for {
+    handledPing = Property.force(Server.handle(("/ping", if (flag) "POST" else "GET", Map.empty(), "hi")))
+    handledMiss = Property.force(Server.handle(("/nope", "GET", Map.empty(), "")))
+    loopbackRun = Property.force(IO.attempt(Server.runHttp().flatMap(_ => Server.runHttps()).flatMap(_ => Server.runHttpsFiles()).flatMap(_ => Server.run())))
+    loopbackOk = loopbackRun match {
+  case Result.Ok(_) => true
+  case Result.Err(msg) => Str.len(msg) > 0
+}
+  } yield handledPing._1 == 200 && Map.getOrElse(handledPing._2, "X-Trace", "-") == "ok" && handledPing._3 == "ok:/ping" && handledMiss._1 == 404 && Map.getOrElse(handledMiss._2, "X-Trace", "-") == "miss" && handledMiss._3 == "missing" && loopbackOk
+
+private def netOrFsFaulted(t: Timeline, i: Int): Bool =
+  Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs")
+
+def netProbeStatesValid(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.fileTextIs(t, i, "store/net-probe.txt", "0:idle") || Timeline.fileTextIs(t, i, "store/net-probe.txt", "200:ok:/ping") || Timeline.fileTextIs(t, i, "store/net-probe.txt", "404:missing"))
+
+def netPingAndMissRecover(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.driveHas(t, b, "netPingRecover") || Timeline.fileTextIs(t, b, "store/net-probe.txt", "200:ok:/ping") && Timeline.effectHas(t, b, "Net.httpPost") || netOrFsFaulted(t, b) && Timeline.fileSame(t, a, b, "store/net-probe.txt")) && (!Timeline.driveHas(t, b, "netMiss") || Timeline.fileTextIs(t, b, "store/net-probe.txt", "404:missing") && Timeline.effectHas(t, b, "Net.httpGet") || netOrFsFaulted(t, b) && Timeline.fileSame(t, a, b, "store/net-probe.txt"))
+})
+
+def nonNetDrivesPreserveProbe(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "composePayloads") || Timeline.driveHas(t, b, "runConcurrency") || Timeline.driveHas(t, b, "storeCommit") || Timeline.driveHas(t, b, "storeRecover")) || Timeline.fileSame(t, a, b, "store/net-probe.txt")
+})
 

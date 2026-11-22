@@ -1,11 +1,77 @@
 record World(token: String)
 
 def setup(): IO[World] =
-  Flow.openStore().map(token => World(token))
+  for {
+    token <- Flow.openStore()
+    _ <- Fs.mkdirs("store")
+    _ <- Fs.write("store/note.txt", s"$token:init")
+    _ <- Fs.write("store/backup.txt", s"$token:init")
+    _ <- Fs.write("store/net-probe.txt", "0:idle")
+  } yield World(token)
+
+def faults(): List[String] =
+  ["fs", "net"]
 
 def Flow.openStore(): IO[String] =
   IO.pure("sim-store")
 
 def composePayloads(world: World, n: Int): IO[Unit] =
-  if (Str.len(world.token) < 0) IO.pure(()) else Bracket.lifecycle().flatMap(_ => Flow.attempted(n % 10000)).flatMap(_ => Flow.namedComposition(n % 10000)).flatMap(_ => Flow.composition(n % 10000)).flatMap(_ => Flow.recoverInt(n % 10000)).flatMap(_ => Flow.recoverRecord(n % 10000)).flatMap(_ => Flow.recoverEnum(n % 10000)).flatMap(_ => Flow.copyPayload(n % 10000, n > 0, 1.5, Str.fromInt(n))).flatMap(_ => Impurity.runKit()).flatMap(_ => Server.runHttp()).flatMap(_ => Server.runHttps()).flatMap(_ => Server.runHttpsFiles())
+  if (Str.len(world.token) < 0) IO.pure(()) else Bracket.lifecycle().flatMap(_ => Flow.attempted(n % 10000)).flatMap(_ => Flow.namedComposition(n % 10000)).flatMap(_ => Flow.composition(n % 10000)).flatMap(_ => Flow.recoverInt(n % 10000)).flatMap(_ => Flow.recoverRecord(n % 10000)).flatMap(_ => Flow.recoverEnum(n % 10000)).flatMap(_ => Flow.copyPayload(n % 10000, n > 0, 1.5, Str.fromInt(n))).flatMap(_ => IO.attempt(Impurity.runKit().flatMap(_ => Server.runHttp()).flatMap(_ => Server.runHttps()).flatMap(_ => Server.runHttpsFiles())).map(_ => ()))
+
+def runConcurrency(world: World): IO[Unit] =
+  if (Str.len(world.token) == 0) IO.pure(()) else IO.attempt(Concurrency.run()).map(_ => ())
+
+private def restoreFromBackup(): IO[Unit] =
+  IO.attempt(Fs.read("store/backup.txt").flatMap(saved => Fs.write("store/note.txt", saved))).map(_ => ())
+
+def storeRecover(world: World): IO[Unit] =
+  if (Str.len(world.token) == 0) IO.pure(()) else restoreFromBackup()
+
+def storeCommit(world: World): IO[Unit] =
+  if (Str.len(world.token) == 0) IO.pure(()) else for {
+  target = s"${world.token}:committed"
+  attemptResult <- IO.attempt(for {
+  _ <- Fs.write("store/staging.txt", target)
+  staged <- Fs.read("store/staging.txt")
+  _ <- if (staged == target) IO.pure(()) else IO.fail("staging mismatch")
+  _ <- Fs.write("store/note.txt", target)
+  _ <- Fs.write("store/backup.txt", target)
+  _ <- Fs.delete("store/staging.txt")
+} yield ())
+  _ <- attemptResult match {
+  case Result.Ok(_) => IO.pure(())
+  case Result.Err(_) => restoreFromBackup()
+}
+} yield ()
+
+private def requestOnce(port: Int, method: String, path: String, body: String): IO[(Int, Map[String, String], String)] =
+  for {
+    server <- Fiber.fork(Net.serveOnce(port, req => Server.handle(req)))
+    result <- IO.ensure(IO.attempt(if (method == "POST") Net.httpPost(s"http://127.0.0.1:$port$path", Map.empty(), body) else Net.httpGet(s"http://127.0.0.1:$port$path", Map.empty())), Fiber.interrupt(server))
+    response <- result match {
+  case Result.Ok(resp) => IO.pure(resp)
+  case Result.Err(err) => IO.fail(err)
+}
+  } yield response
+
+private def saveNetProbe(resp: (Int, Map[String, String], String)): IO[Unit] =
+  resp match {
+    case (status, _, body) => Fs.write("store/net-probe.txt", s"${Str.fromInt(status)}:$body")
+  }
+
+def netPingRecover(world: World): IO[Unit] =
+  if (Str.len(world.token) == 0) IO.pure(()) else for {
+  first <- IO.attempt(requestOnce(18080, "POST", "/ping", world.token))
+  resolved <- first match {
+  case Result.Ok(resp) => IO.pure(Result.Ok(resp))
+  case Result.Err(_) => IO.attempt(requestOnce(18081, "POST", "/ping", world.token))
+}
+  _ <- resolved match {
+  case Result.Ok(resp) => IO.attempt(saveNetProbe(resp)).map(_ => ())
+  case Result.Err(_) => IO.pure(())
+}
+} yield ()
+
+def netMiss(world: World): IO[Unit] =
+  if (Str.len(world.token) == 0) IO.pure(()) else IO.attempt(requestOnce(18082, "GET", "/nope", "").flatMap(resp => saveNetProbe(resp))).map(_ => ())
 

@@ -1,4 +1,4 @@
-def liveClock(): IO[Unit] =
+private def liveClock(): IO[Unit] =
   Clock.realTime().flatMap(t => IO.println(s"real:$t").flatMap(_ => Clock.monotonic().flatMap(m => IO.println(s"mono:$m").flatMap(_ => IO.println(s"iso:${Clock.iso8601(0)}").flatMap(_ => IO.println(s"leap:${Clock.iso8601(1582934400000)}"))))))
 
 def showParse(s: String): String =
@@ -7,7 +7,7 @@ def showParse(s: String): String =
     case Option.None => "none"
   }
 
-def liveTime(): IO[Unit] =
+private def liveTime(): IO[Unit] =
   for {
     _ <- IO.println(s"parse:${showParse(Clock.iso8601(List.at([0], 0)))}")
     _ <- IO.println(s"parse-neg:${showParse(Clock.iso8601(0 - 1))}")
@@ -24,43 +24,43 @@ def liveTime(): IO[Unit] =
     _ <- IO.println(s"parse-y0:${showParse("0000-01-01T00:00:00.000Z")}")
   } yield ()
 
-def liveFs(): IO[Unit] =
+private def liveFs(): IO[Unit] =
   Fs.mkdirs("examples/io/build").flatMap(_ => Fs.write("examples/io/build/note.txt", "fs-note").flatMap(_ => Fs.rename("examples/io/build/note.txt", "examples/io/build/renamed.txt").flatMap(_ => Fs.read("examples/io/build/renamed.txt").flatMap(s => IO.println(s"fs:$s").flatMap(_ => Fs.delete("examples/io/build/renamed.txt"))))))
 
-def liveRand(): IO[Unit] =
+private def liveRand(): IO[Unit] =
   Random.nextInt(10).flatMap(n => IO.println(if (n >= 0 && n < 10) "rand:ok" else "rand:bad"))
 
-def liveRe(): IO[Unit] =
+private def liveRe(): IO[Unit] =
   IO.println(s"re:${if (Str.matches("abc123", "[a-z]+[0-9]+")) "hit" else "miss"}").flatMap(_ => IO.println(s"re-miss:${if (Str.matches("abc123x", "[a-z]+[0-9]+")) "hit" else "miss"}").flatMap(_ => IO.println(s"re-bad:${if (Str.matches("a", "[")) "hit" else "miss"}")))
 
-def liveHash(): IO[Unit] =
+private def liveHash(): IO[Unit] =
   IO.println(s"sha:${Hash.sha256("abc")}")
 
-def liveHex(): IO[Unit] =
+private def liveHex(): IO[Unit] =
   IO.println(s"hex:${Hex.encode("abc")}").flatMap(_ => IO.println(s"hex-rt:${Hex.decode(Hex.encode("abc"))}").flatMap(_ => IO.println(s"hex-bad:${if (Str.len(Hex.decode("zz")) == 0) "miss" else "hit"}")))
 
-def liveB64(): IO[Unit] =
+private def liveB64(): IO[Unit] =
   IO.println(s"b64:${Base64.encode("abc")}").flatMap(_ => IO.println(s"b64-rt:${Base64.decode(Base64.encode("abc"))}").flatMap(_ => IO.println(s"b64-bad:${if (Str.len(Base64.decode("!!!!")) == 0) "miss" else "hit"}")))
 
 def uuidOk(u: String): Bool =
   Str.len(u) == 36 && Str.charAt(u, 8) == 45 && Str.charAt(u, 13) == 45 && Str.charAt(u, 18) == 45 && Str.charAt(u, 23) == 45 && Str.charAt(u, 14) == 52 && (Str.charAt(u, 19) == 56 || Str.charAt(u, 19) == 57 || Str.charAt(u, 19) == 97 || Str.charAt(u, 19) == 98)
 
-def liveUuid(): IO[Unit] =
+private def liveUuid(): IO[Unit] =
   Uuid.v4().flatMap(u => IO.println(s"uuid:${if (uuidOk(u)) "ok" else "bad"}"))
 
-def liveBytes(): IO[Unit] =
+private def liveBytes(): IO[Unit] =
   IO.println(s"bytes:${Bytes.len(Bytes.fromStr(Hex.decode("c3a9")))}")
 
-def maybeKit(): IO[Unit] =
+private def maybeKit(): IO[Unit] =
   Sys.getenv("SCUZZ_KIT").flatMap(t => if (Str.len(t) == 0) IO.println("kit:skip") else Impurity.runKit())
 
-def maybeServe(): IO[Unit] =
+private def maybeServe(): IO[Unit] =
   Sys.getenv("SCUZZ_SERVE").flatMap(t => if (Str.len(t) == 0) IO.println("serve:skip") else Server.run())
 
-def envProbe(): IO[Unit] =
+private def envProbe(): IO[Unit] =
   Sys.getenv("HOME").flatMap(h => IO.println(s"env:home:$h").flatMap(_ => Sys.getenv("SCUZZ_KIT").flatMap(k => IO.println(s"env:kit:$k"))))
 
-def nestedComposition(flag: Bool): IO[Unit] =
+private def nestedComposition(flag: Bool): IO[Unit] =
   IO.pure("retained").flatMap(value => (if (flag) IO.pure(()).flatMap(_ => IO.pure(())) else IO.pure(())).flatMap(_ => IO.ensure(IO.pure(value).flatMap(actual => IO.pure(actual.require(actual == "retained"))), IO.pure(()).flatMap(_ => IO.pure(()))).flatMap(actual => IO.both(IO.pure(actual).flatMap(left => IO.pure(left.require(left == "retained"))), IO.pure(7).flatMap(right => IO.pure(right.require(right == 7)))).flatMap(pair => IO.pure(pair.require(pair._1 == "retained" && pair._2 == 7))).map(_ => ()))))
 
 @main def main: IO[Unit] =
@@ -77,7 +77,12 @@ def nestedComposition(flag: Bool): IO[Unit] =
     _ <- liveBytes()
     _ <- liveFs()
     _ <- liveRand()
-    _ <- Concurrency.run()
+    concurrencyRun <- IO.attempt(Concurrency.run())
+    concurrencyOk = concurrencyRun match {
+  case Result.Ok(_) => true
+  case Result.Err(_) => false
+}
+    _ <- Property.assert("concurrency succeeds", concurrencyOk)
     _ <- Bracket.run()
     _ <- Flow.run()
     _ <- Query.run()
