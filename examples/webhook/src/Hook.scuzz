@@ -1,8 +1,16 @@
+record Port private(value: Int)
+
+def port(value: Int): Result[String, Port] =
+  if (value >= 1 && value <= 65535) Result.Ok(Port(value)) else Result.Err("Port must be 1..65535")
+
 def signature(secret: String, body: String): String =
   Str.concat("sha256=", Hash.hmacSha256(secret, body))
 
+private def signatureHeader(headers: Map[String, String], names: List[String]): String =
+  if (List.len(names) != 1) "" else Map.getOrElse(headers, List.at(names, 0.require(index => index >= 0 && index < List.len(names))), "")
+
 def authorized(secret: String, headers: Map[String, String], body: String): Bool =
-  secret != "" && Hash.constantTimeEqual(signature(secret, body), Map.getOrElse(headers, "x-hub-signature-256", ""))
+  secret != "" && Hash.constantTimeEqual(signature(secret, body), signatureHeader(headers, List.filter(Map.keys(headers), name => Str.toLower(name) == "x-hub-signature-256")))
 
 private def reply(status: Int, text: String): IO[(Int, Map[String, String], String)] =
   IO.pure((status, Map.empty(), text))
@@ -18,6 +26,6 @@ def handle(secret: String, output: String, request: (String, String, Map[String,
     case (path, method, headers, body) => if (path != "/webhook") reply(404, "Not found") else if (method != "POST") reply(405, "POST required") else if (!authorized(secret, headers, body)) reply(401, "Invalid signature") else store(output, body)
   }
 
-def run(secret: String, port: Int, output: String): IO[Unit] =
-  if (secret == "") IO.fail("Set SCUZZ_WEBHOOK_SECRET".require(secret == "")) else Net.serve(port, request => handle(secret, output, request))
+def run(secret: String, listenPort: Port, output: String): IO[Unit] =
+  if (secret == "") IO.fail("Set SCUZZ_WEBHOOK_SECRET".require(secret == "")) else Net.serve(listenPort.value.require(value => value >= 1 && value <= 65535), request => handle(secret, output, request))
 

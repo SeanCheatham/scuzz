@@ -1,6 +1,58 @@
 oracle githubVector(): Bool =
   Hook.signature("It's a Secret to Everybody", "Hello, World!") == "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
 
+oracle portBounds(n: Int): Bool =
+  Hook.port(n) match {
+    case Result.Ok(listenPort) => n >= 1 && n <= 65535 && listenPort.value == n
+    case Result.Err(_) => n < 1 || n > 65535
+  }
+
+oracle portParsingAndConfig(): Bool =
+  for {
+    defaultPort = Main.parsePort("")
+    trimmedPort = Main.parsePort(" 8080 ")
+    loPort = Main.parsePort("1")
+    hiPort = Main.parsePort("65535")
+    badZero = Main.parsePort("0")
+    badNeg = Main.parsePort("-1")
+    badHigh = Main.parsePort("65536")
+    badBlank = Main.parsePort("   ")
+    badAlpha = Main.parsePort("abc")
+    badOverflow = Main.parsePort("999999999999999999999")
+    badPortRun = Property.force(IO.attempt(Main.runConfigured("sim-secret", "abc", "")))
+    emptySecretRun = Hook.port(18085) match {
+  case Result.Err(msg) => Result.Err(msg)
+  case Result.Ok(p) => Property.force(IO.attempt(Hook.run("", p, "webhook.json")))
+}
+  } yield defaultPort match {
+  case Result.Ok(p) => p.value == 8080
+  case Result.Err(_) => false
+} && trimmedPort match {
+  case Result.Ok(p) => p.value == 8080
+  case Result.Err(_) => false
+} && loPort match {
+  case Result.Ok(p) => p.value == 1
+  case Result.Err(_) => false
+} && hiPort match {
+  case Result.Ok(p) => p.value == 65535
+  case Result.Err(_) => false
+} && badZero == Result.Err("Port must be 1..65535") && badNeg == Result.Err("Port must be 1..65535") && badHigh == Result.Err("Port must be 1..65535") && badBlank == Result.Err("Port must be 1..65535") && badAlpha == Result.Err("Port must be 1..65535") && badOverflow == Result.Err("Port must be 1..65535") && badPortRun == Result.Err("Port must be 1..65535") && emptySecretRun == Result.Err("Set SCUZZ_WEBHOOK_SECRET")
+
+oracle headerCaseAndDuplicateGuard(): Bool =
+  for {
+    body = "{\"kind\":\"ping\"}"
+    sig = Hook.signature("sec", body)
+    lower = Map.set(Map.empty(), "x-hub-signature-256", sig)
+    upper = Map.set(Map.empty(), "X-Hub-Signature-256", sig)
+    mixed = Map.set(Map.empty(), "x-HuB-sIgNaTuRe-256", sig)
+    withExtra = Map.set(upper, "Content-Type", "application/json")
+    dupValid = Map.set(Map.set(Map.empty(), "X-Hub-Signature-256", sig), "x-hub-signature-256", sig)
+    dupSecondValid = Map.set(Map.set(Map.empty(), "X-Hub-Signature-256", "bad"), "x-hub-signature-256", sig)
+    unrelated = Map.set(Map.empty(), "X-Other-Header", sig)
+    handledDup = Property.force(Hook.handle("sec", "webhook.json", ("/webhook", "POST", dupValid, body)))
+    handledBadPath = Property.force(Hook.handle("sec", "webhook.json", ("/other", "POST", upper, body)))
+  } yield Hook.authorized("sec", lower, body) && Hook.authorized("sec", upper, body) && Hook.authorized("sec", mixed, body) && Hook.authorized("sec", withExtra, body) && !Hook.authorized("sec", dupValid, body) && !Hook.authorized("sec", dupSecondValid, body) && !Hook.authorized("sec", unrelated, body) && !Hook.authorized("", lower, body) && handledDup._1 == 401 && handledBadPath._1 == 404
+
 oracle signatureRoundTrip(n: Int): Bool =
   Hash.constantTimeEqual(Hash.hmacSha256("secret", Str.fromInt(n)), Hash.hmacSha256("secret", Str.fromInt(n))) && !Hash.constantTimeEqual(Hash.hmacSha256("secret", Str.fromInt(n)), Hash.hmacSha256("other", Str.fromInt(n)))
 
@@ -11,7 +63,15 @@ private def faulted(t: Timeline, i: Int): Bool =
   Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs")
 
 private def rejected(t: Timeline, i: Int): Bool =
-  Timeline.driveHas(t, i, "tampered") || Timeline.driveHas(t, i, "wrongKey") || Timeline.driveHas(t, i, "missingSignature") || Timeline.driveHas(t, i, "emptySecret") || Timeline.driveHas(t, i, "badJson") || Timeline.driveHas(t, i, "arrayJson") || Timeline.driveHas(t, i, "wrongPath") || Timeline.driveHas(t, i, "wrongMethod") || Timeline.driveHas(t, i, "storageFailure")
+  Timeline.driveHas(t, i, "tampered") || Timeline.driveHas(t, i, "wrongKey") || Timeline.driveHas(t, i, "missingSignature") || Timeline.driveHas(t, i, "duplicateSignature") || Timeline.driveHas(t, i, "emptySecret") || Timeline.driveHas(t, i, "badJson") || Timeline.driveHas(t, i, "arrayJson") || Timeline.driveHas(t, i, "wrongPath") || Timeline.driveHas(t, i, "wrongMethod") || Timeline.driveHas(t, i, "storageFailure") || Timeline.driveHas(t, i, "invalidConfig") || Timeline.driveHas(t, i, "customOutput")
+
+def mainIdlePreservesPrior(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  main = i == 0
+} yield !main || Timeline.fileTextIs(t, 0, "webhook.json", "prior") && !Timeline.effectHas(t, 0, "Net.httpPost"))
+
+def configErrorsSkipNetwork(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "invalidConfig") || !Timeline.effectHas(t, i, "Net.httpPost") && !Timeline.effectHas(t, i, "Fs.write"))
 
 def preservesRejected(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {
@@ -20,12 +80,17 @@ def preservesRejected(t: Timeline): Verdict =
 
 def storesAuthenticated(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {
-  case (a, b) => !Timeline.driveHas(t, b, "delivery") || Timeline.fileTextIs(t, b, "webhook.json", "{\"kind\":\"ping\"}") && Timeline.fileTextIs(t, b, "status.txt", "200") || faulted(t, b) && (Timeline.fileSame(t, a, b, "webhook.json") || Timeline.fileTextIs(t, b, "webhook.json", "{\"kind\":\"ping\"}"))
+  case (a, b) => !(Timeline.driveHas(t, b, "delivery") || Timeline.driveHas(t, b, "mixedCaseSignature")) || Timeline.fileTextIs(t, b, "webhook.json", "{\"kind\":\"ping\"}") && Timeline.fileTextIs(t, b, "status.txt", "200") && Timeline.effectHas(t, b, "Fs.write") || faulted(t, b) && (Timeline.fileSame(t, a, b, "webhook.json") || Timeline.fileTextIs(t, b, "webhook.json", "{\"kind\":\"ping\"}"))
+})
+
+def storesCustomOutput(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "customOutput") || Timeline.fileTextIs(t, b, "custom.json", "{\"kind\":\"ping\"}") && Timeline.fileTextIs(t, b, "status.txt", "200") && Timeline.effectHas(t, b, "Fs.write") || faulted(t, b) && (Timeline.fileSame(t, a, b, "custom.json") || Timeline.fileTextIs(t, b, "custom.json", "{\"kind\":\"ping\"}"))
 })
 
 def unauthorized(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {
-  case (a, b) => !(Timeline.driveHas(t, b, "tampered") || Timeline.driveHas(t, b, "wrongKey") || Timeline.driveHas(t, b, "missingSignature") || Timeline.driveHas(t, b, "emptySecret")) || Timeline.fileTextIs(t, b, "status.txt", "401") || faulted(t, b) && Timeline.fileSame(t, a, b, "status.txt")
+  case (a, b) => !(Timeline.driveHas(t, b, "tampered") || Timeline.driveHas(t, b, "wrongKey") || Timeline.driveHas(t, b, "missingSignature") || Timeline.driveHas(t, b, "duplicateSignature") || Timeline.driveHas(t, b, "emptySecret")) || Timeline.fileTextIs(t, b, "status.txt", "401") || faulted(t, b) && Timeline.fileSame(t, a, b, "status.txt")
 })
 
 def malformed(t: Timeline): Verdict =

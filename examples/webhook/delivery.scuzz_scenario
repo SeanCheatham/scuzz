@@ -1,5 +1,5 @@
 def setup(): IO[Unit] =
-  Fs.write("webhook.json", "prior").flatMap(_ => Fs.write("status.txt", "")).flatMap(_ => Fs.write("alpha.status", "")).flatMap(_ => Fs.write("beta.status", "")).flatMap(_ => Fs.write("forged.status", "")).flatMap(_ => Fs.write("final.status", ""))
+  Fs.write("webhook.json", "prior").flatMap(_ => Fs.write("custom.json", "")).flatMap(_ => Fs.write("status.txt", "")).flatMap(_ => Fs.write("alpha.status", "")).flatMap(_ => Fs.write("beta.status", "")).flatMap(_ => Fs.write("forged.status", "")).flatMap(_ => Fs.write("final.status", ""))
 
 def faults(): List[String] =
   ["net", "fs"]
@@ -21,6 +21,21 @@ private def send(secret: String, output: String, path: String, body: String, req
 
 def delivery(): IO[Unit] =
   send("sim-secret", "webhook.json", "/webhook", payload(), headers(payload(), "sim-secret"))
+
+def mixedCaseSignature(): IO[Unit] =
+  send("sim-secret", "webhook.json", "/webhook", payload(), Map.set(Map.empty(), "x-HuB-sIgNaTuRe-256", Hook.signature("sim-secret", payload())))
+
+def duplicateSignature(): IO[Unit] =
+  IO.attempt(Hook.handle("sim-secret", "webhook.json", ("/webhook", "POST", Map.set(Map.set(Map.empty(), "X-Hub-Signature-256", Hook.signature("sim-secret", payload())), "x-hub-signature-256", Hook.signature("sim-secret", payload())), payload())).flatMap(response => status(response))).map(_ => ())
+
+def invalidConfig(): IO[Unit] =
+  IO.attempt(IO.timeout(100, Main.runConfigured("sim-secret", "bad-port", "webhook.json"))).flatMap(_ => IO.attempt(IO.timeout(100, Main.runConfigured("sim-secret", "0", "webhook.json")))).map(_ => ())
+
+def customOutput(): IO[Unit] =
+  for {
+    server <- Fiber.fork(Main.runConfigured("sim-secret", "18085", "custom.json"))
+    _ <- IO.ensure(IO.attempt(IO.timeout(1000, Net.httpPost("http://127.0.0.1:18085/webhook", headers(payload(), "sim-secret"), payload())).flatMap(response => status(response))).map(_ => ()), Fiber.interrupt(server))
+  } yield ()
 
 def tampered(n: Int): IO[Unit] =
   send("sim-secret", "webhook.json", "/webhook", s"${payload()}$n", headers(payload(), "sim-secret"))
@@ -56,14 +71,14 @@ def prior(n: Int): IO[Unit] =
   IO.attempt(Fs.write("webhook.json", s"prior$n")).map(_ => ())
 
 private def batchPost(body: String, signed: String, statusFile: String): IO[Unit] =
-  IO.attempt(Net.httpPost("http://127.0.0.1:18085/webhook", headers(signed, "sim-secret"), body).flatMap(response => Fs.write(statusFile, Str.fromInt(response._1)))).map(_ => ())
+  IO.attempt(IO.timeout(1000, Net.httpPost("http://127.0.0.1:18085/webhook", headers(signed, "sim-secret"), body)).flatMap(response => Fs.write(statusFile, Str.fromInt(response._1)))).map(_ => ())
 
 private def batch(): IO[Unit] =
   IO.both(batchPost("{\"kind\":\"alpha\"}", "{\"kind\":\"alpha\"}", "alpha.status"), IO.both(batchPost("{\"kind\":\"beta\"}", "{\"kind\":\"beta\"}", "beta.status"), batchPost("{\"kind\":\"forged\"}", "{\"kind\":\"alpha\"}", "forged.status"))).map(_ => ())
 
 private def runBatch(follow: Bool): IO[Unit] =
   for {
-    server <- Fiber.fork(Hook.run("sim-secret", 18085, "webhook.json"))
+    server <- Fiber.fork(Main.runConfigured("sim-secret", "18085", if (follow) "webhook.json" else ""))
     _ <- IO.ensure(batch().flatMap(_ => if (follow) batchPost("{\"kind\":\"final\"}", "{\"kind\":\"final\"}", "final.status") else IO.pure(())), Fiber.interrupt(server))
   } yield ()
 
