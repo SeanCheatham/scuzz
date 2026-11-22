@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "2"
+events = ["tap tab:Check", "tap tab:Main.scuzz", "tap tab:count.scuzz_verify", "text oracle incAdds(n: Int): Int = n", "tap button:Check"]

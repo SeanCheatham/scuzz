@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "2"
+events = ["tap button:Continue", "text @main def main: IO[Unit] = IO.println(1)", "tap button:Run", "tap tab:View", "text def broken(", "tap button:Run", "tap tab:State", "tap button:Run", "tap button:+1", "text @main def main: IO[Unit] = Ui.run(_ => View.text(1))", "tap button:Run"]
