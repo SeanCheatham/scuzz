@@ -8,10 +8,68 @@ oracle idsStable(): Bool =
   Manual.idsLine() == "start|install|language|gui|signals|packages|verify|commands|manifest|ios|android|web|ide|try|how"
 
 oracle snippetsFmt(): Bool =
-  List.forall(Manual.allCode(), s => !Manual.isSnippet(s) || Manual.formatSrc(s) == s) && Manual.formatSrc(Topics.campSource()) == Topics.campSource()
+  List.forall(Manual.allCode(), s => !Manual.isSnippet(s) || Manual.formatSrc(s) == s) && Manual.formatSrc(Topics.campSource()) == Topics.campSource() && Manual.isSnippet("def f(): Int = 1") && Manual.isSnippet("record R(x: Int)") && Manual.isSnippet("""enum E:
+  case A""") && Manual.isSnippet("@main def main: IO[Unit] = IO.pure(())") && !Manual.isSnippet("curl -fsSL")
+
+private def validSource(src: String): Bool =
+  src != "" && !Parse.hasParseError(Parse.parse(Lexer.lex(src))) && List.isEmpty(Parse.parseErrorOffs(src)) && Manual.formatSrc(src) == src
+
+oracle walkthroughSourcesValid(): Bool =
+  validSource(Topics.trySource()) && validSource(Topics.campSource()) && validSource(Topics.schedSource()) && validSource(Topics.traceSource()) && validSource(Topics.coverSource()) && validSource(Topics.mutSource()) && Str.contains(Topics.trySource(), "Clicks: ") && Str.contains(Topics.campSource(), "oracle hidden") && Str.contains(Topics.schedSource(), "Queue.offer") && Str.contains(Topics.traceSource(), "n = 1 + 2") && Str.contains(Topics.coverSource(), "def countdown") && Str.contains(Topics.mutSource(), "n = 1 + 2")
 
 oracle cmdsOk(): Bool =
-  List.forall(Manual.allCmd(), s => Str.startsWith(s, "scuzz ")) && List.forall(Manual.allCmd(), s => Manual.hasVerb(Manual.cmdVerb(s)))
+  List.forall(Manual.allCmd(), s => Str.startsWith(s, "scuzz ")) && List.forall(Manual.allCmd(), s => Manual.hasVerb(Manual.cmdVerb(s))) && Manual.cmdVerb("") == "" && Manual.cmdVerb("scuzz") == "" && Manual.cmdVerb("scuzz docs verify") == "docs" && !Manual.hasVerb("") && !Manual.hasVerb("unknown")
+
+oracle topicLookupAndList(): Bool =
+  Manual.hasTopic("start") && Manual.hasTopic("try") && Manual.hasTopic("how") && !Manual.hasTopic("missing") && !Manual.hasTopic("") && Topics.all() == Manual.topics() && Str.startsWith(Manual.renderList(), """start  Start
+install  Install
+""") && Str.endsWith(Manual.renderList(), """
+try  Try it
+how  How it runs
+""") && List.len(Str.split(Manual.renderList(), """
+""")) == 16
+
+oracle renderTopicAndBlocks(): Bool =
+  for {
+    tryBody = Manual.renderTopic("try")
+    startBody = Manual.renderTopic("start")
+    howBody = Manual.renderTopic("how")
+    missing = Manual.renderTopic("missing-topic")
+    paraOut = Manual.renderBlock(Manual.Block.Para("alpha   beta"))
+    codeOut = Manual.renderBlock(Manual.Block.Code("""x
+y"""))
+    cmdOut = Manual.renderBlock(Manual.Block.Cmd("scuzz check"))
+    linkOut = Manual.renderBlock(Manual.Block.Link(Manual.NavLink("Open GUI", "gui")))
+    vizOut = Manual.renderBlock(Manual.Block.Viz("trace", """line1
+line2"""))
+  } yield Str.startsWith(tryBody, """Try it
+
+Edit the program""") && Str.endsWith(tryBody, """bound text.
+""") && Str.contains(startBody, "Open the GUI topic -> gui") && Str.contains(howBody, """[schedule]
+  @main def main""") && missing == Str.concat("""scuzz docs: unknown topic 'missing-topic'
+
+""", Manual.renderList()) && paraOut == "alpha beta" && codeOut == """  x
+  y""" && cmdOut == "  scuzz check" && linkOut == "Open GUI -> gui" && vizOut == """[trace]
+  line1
+  line2"""
+
+private def repChar(n: Int): String =
+  if (n <= 0) "" else Str.concat("a", repChar(n - 1))
+
+oracle wrapParaBoundaries(): Bool =
+  for {
+    w75 = repChar(75)
+    w85 = repChar(85)
+    fit80 = Str.concat(w75, " four")
+    wrap81 = Str.concat(w75, " five5")
+    threeLines = Str.concat(w75, Str.concat(" ", Str.concat(w75, " tail5")))
+    overlong = Str.concat("hi ", Str.concat(w85, " ok"))
+  } yield Manual.wrapPara("") == "" && Manual.wrapPara("   ") == "" && Manual.wrapPara("   alpha   beta   ") == "alpha beta" && Manual.wrapPara(fit80) == fit80 && Manual.wrapPara(wrap81) == Str.concat(w75, """
+five5""") && Manual.wrapPara(threeLines) == Str.concat(w75, Str.concat("""
+""", Str.concat(w75, """
+tail5"""))) && Manual.wrapPara(w85) == w85 && Manual.wrapPara(overlong) == Str.concat("""hi
+""", Str.concat(w85, """
+ok"""))
 
 private def flatTopic(name: String): String =
   Str.replace(Manual.renderTopic(name), """
@@ -24,5 +82,5 @@ oracle topicsReconciled(): Bool =
     ver = flatTopic("verify")
     cmds = flatTopic("commands")
     ide = flatTopic("ide")
-  } yield Str.contains(lang, "user-defined record, or enum") && Str.contains(lang, "Map and Ref bindings remain outside this check.") && Str.contains(lang, "guarded only by erased checks") && !Str.contains(lang, "Other whole container bindings remain outside this check.") && Str.contains(gui, "View.rotate(degrees, child)") && Str.contains(gui, "View.animatedRotation(value, pumps, child)") && Str.contains(gui, "View.focusGroup") && Str.contains(ver, "mutate.survivors") && Str.contains(ver, "diverged_workloads") && Str.contains(ver, "passed_claims") && Str.contains(cmds, "declaration boundaries at delimiter depth zero") && Str.contains(ide, "Need another scenario") && Str.contains(ide, "Rule review") && Str.contains(ide, "Refresh summary") && Str.contains(ide, "Retain region") && Str.contains(ide, "sixteen chronological feedback records") && !Str.contains(ide, "Local IDE requests use the latest three.")
+  } yield Str.contains(lang, "user-defined record, or enum") && Str.contains(lang, "Map and Ref bindings remain outside this check.") && Str.contains(lang, "guarded only by erased checks") && !Str.contains(lang, "Other whole container bindings remain outside this check.") && Str.contains(gui, "View.rotate(degrees, child)") && Str.contains(gui, "View.animatedRotation(value, pumps, child)") && Str.contains(gui, "View.focusGroup") && Str.contains(gui, "leading and trailing caret affinity") && Str.contains(gui, "bidirectional run boundaries") && Str.contains(gui, "Other contextual scripts and mark placement across font changes remain open.") && !Str.contains(gui, "full bidi caret affinity") && Str.contains(ver, "mutate.survivors") && Str.contains(ver, "diverged_workloads") && Str.contains(ver, "passed_claims") && Str.contains(cmds, "declaration boundaries at delimiter depth zero") && Str.contains(cmds, "for bindings, match case arms") && Str.contains(cmds, "unclosed delimiters") && Str.contains(ide, "Need another scenario") && Str.contains(ide, "Rule review") && Str.contains(ide, "Refresh summary") && Str.contains(ide, "Retain region") && Str.contains(ide, "sixteen chronological feedback records") && !Str.contains(ide, "Local IDE requests use the latest three.")
 
