@@ -146,6 +146,31 @@ private def parseErr(): IO[Unit] =
     case Result.Ok(_) => IO.println("parse:ok")
   }
 
+private def validRow(row: Json): Bool =
+  Json.field(row, "name") match {
+    case Result.Ok(Json.Str(_)) => Json.field(row, "active") match {
+  case Result.Ok(Json.Bool(_)) => Json.field(row, "score") match {
+  case Result.Ok(Json.Int(_)) => true
+  case Result.Ok(_) => false
+  case Result.Err(_) => false
+}
+  case Result.Ok(_) => false
+  case Result.Err(_) => false
+}
+    case Result.Ok(_) => false
+    case Result.Err(_) => false
+  }
+
+def selectNames(raw: String, minScore: Int): Result[String, List[String]] =
+  Json.parse(raw) match {
+    case Result.Err(_) => Result.Err("Invalid JSON")
+    case Result.Ok(doc) => Json.field(doc, "items") match {
+  case Result.Ok(Json.Arr(rows)) => if (!List.forall(rows, row => validRow(row))) Result.Err("Invalid item") else Result.Ok(List.map(List.filter(rows, row => Json.getBool(row, "active", false) && Json.getInt(row, "score", 0) >= minScore), row => Json.getStr(row, "name", "")))
+  case Result.Ok(_) => Result.Err("Missing items array")
+  case Result.Err(_) => Result.Err("Missing items array")
+}
+  }
+
 def run(): IO[Unit] =
   for {
     _ <- objKit()

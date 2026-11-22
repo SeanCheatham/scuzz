@@ -1,3 +1,82 @@
+private def sumInts(xs: List[Int]): Int =
+  List.foldLeft(xs, 0, __tup => __tup match {
+  case (acc, n) => acc + n
+})
+
+oracle flowComposition(n: Int): Bool =
+  for {
+    m = n % 10000
+    _ = Property.force(Flow.composition(m))
+    _ = Property.force(Flow.namedComposition(m))
+    _ = Property.force(Flow.attempted(m))
+    _ = Property.force(Flow.recoverInt(m))
+    _ = Property.force(Flow.recoverRecord(m))
+    _ = Property.force(Flow.recoverEnum(m))
+    _ = Property.force(Flow.copyPayload(m, n > 0, 1.5, Str.fromInt(m)))
+    store = Property.force(Flow.openStore())
+  } yield store == "sim-store"
+
+oracle streamPipeline(xs: List[Int]): Bool =
+  for {
+    expected = List.take(List.map(List.filter(xs, x => x >= 0), x => x + 1), 3)
+    hasLarge = List.exists(expected, n => n > 1)
+    got = Property.force(Flow.streamSlice(xs, 3))
+    emptyGot = Property.force(Flow.streamSlice(xs, -1))
+  } yield got == (expected, sumInts(expected), hasLarge) && emptyGot == ([], 0, false)
+
+oracle streamAndBracketContracts(): Bool =
+  for {
+    childErr = Property.force(IO.attempt(Bracket.failedChild()))
+    _ = Property.force(Bracket.joinedFailure())
+    _ = Property.force(Bracket.canceled())
+    t0 = Property.force(Clock.monotonic())
+    _ = Property.force(Bracket.timedOut())
+    t1 = Property.force(Clock.monotonic())
+    _ = Property.force(Bracket.recovered())
+    _ = Property.force(Bracket.lifecycle())
+    tRun0 = Property.force(Clock.monotonic())
+    _ = Property.force(Bracket.run())
+    tRun1 = Property.force(Clock.monotonic())
+    concurrencyRes = Property.force(IO.attempt(Concurrency.run()))
+    _ = Property.force(Flow.run())
+    ranged = Property.force(Stream.compileToList(Stream.range(2, 6)))
+    deduped = Property.force(Stream.compileToList(Stream.changes(Stream.emits([1, 1, 2, 2, 3, 2]))))
+    windows = Property.force(Stream.compileToList(Stream.sliding(Stream.emits(["a", "b", "c"]), 2)))
+  } yield childErr == Result.Err("expected joined failure") && t1 - t0 == 1 && tRun1 - tRun0 == 6 && concurrencyRes == Result.Ok(()) && ranged == [2, 3, 4, 5] && deduped == [1, 2, 3, 2] && windows == [["a", "b"], ["b", "c"]]
+
+oracle clockAndUuidContracts(): Bool =
+  for {
+    generatedUuid = Property.force(Uuid.v4())
+    v8 = "00000000-0000-4000-8000-000000000000"
+    v9 = "00000000-0000-4000-9000-000000000000"
+    va = "00000000-0000-4000-a000-000000000000"
+    vb = "00000000-0000-4000-b000-000000000000"
+    badLen = "00000000-0000-4000-8000-00000000000"
+    badDash8 = "00000000x0000-4000-8000-000000000000"
+    badDash13 = "00000000-0000x4000-8000-000000000000"
+    badDash18 = "00000000-0000-4000x8000-000000000000"
+    badDash23 = "00000000-0000-4000-8000x000000000000"
+    badVer = "00000000-0000-3000-8000-000000000000"
+    badVarLow = "00000000-0000-4000-7000-000000000000"
+    badVarHigh = "00000000-0000-4000-c000-000000000000"
+    shaOk = Hash.sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    hmacOk = Hash.constantTimeEqual(Hash.hmacSha256("key", "msg"), Hash.hmacSha256("key", "msg")) && !Hash.constantTimeEqual(Hash.hmacSha256("key", "msg"), Hash.hmacSha256("other", "msg"))
+    codecOk = Hex.decode(Hex.encode("scuzz")) == "scuzz" && Hex.decode("zz") == "" && Base64.decode(Base64.encode("scuzz")) == "scuzz" && Base64.decode("!!!!") == "" && Bytes.len(Bytes.fromStr(Hex.decode("c3a9"))) == 2
+    parseOk = Main.showParse(Clock.iso8601(0)) == "0" && Main.showParse(Clock.iso8601(-1)) == "-1" && Main.showParse(Clock.zone(0, 330)) == "0" && Main.showParse(Clock.zone(1582934400000, -480)) == "1582934400000" && Main.showParse("1970-01-01T00:00:00.1Z") == "100" && Main.showParse("1970-01-01T00:00:01Z") == "1000" && Main.showParse("nope") == "none" && Main.showParse("2020-02-29T23:59:60.000Z") == "none" && Clock.zone(0, 1080) != "" && Clock.zone(0, -1080) != "" && Clock.zone(0, 1081) == "" && Clock.zone(0, -1081) == ""
+  } yield Main.uuidOk(generatedUuid) && Main.uuidOk(v8) && Main.uuidOk(v9) && Main.uuidOk(va) && Main.uuidOk(vb) && !Main.uuidOk(badLen) && !Main.uuidOk(badDash8) && !Main.uuidOk(badDash13) && !Main.uuidOk(badDash18) && !Main.uuidOk(badDash23) && !Main.uuidOk(badVer) && !Main.uuidOk(badVarLow) && !Main.uuidOk(badVarHigh) && shaOk && hmacOk && codecOk && parseOk
+
+oracle clockRoundTrip(n: Int): Bool =
+  for {
+    ms = n % 3153600000000
+    expected = Str.fromInt(ms)
+  } yield Main.showParse(Clock.iso8601(ms)) == expected && Main.showParse(Clock.zone(ms, 330)) == expected && Main.showParse(Clock.zone(ms, -480)) == expected
+
+def mainStoreSeeded(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  main = i == 0 && Timeline.driveHas(t, 0, "setup")
+  idleRun = i == 1 && Timeline.driveHas(t, i, "setup")
+} yield (!main || Timeline.fileTextIs(t, 0, "store/note.txt", "sim-store:init") && Timeline.fileTextIs(t, 0, "store/backup.txt", "sim-store:init") && Timeline.fileTextIs(t, 0, "store/net-probe.txt", "0:idle")) && (!idleRun || Timeline.fileTextIs(t, i, "note.txt", "kit-note") && Timeline.effectHas(t, i, "Net.udpSend")))
+
 def fibersStayNonNeg(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.fiberLive(t, i) >= 0 && Timeline.fiberReady(t, i) >= 0 && Timeline.fiberParked(t, i) >= 0 && Timeline.fiberDone(t, i) >= 0)
 
@@ -6,4 +85,7 @@ def effectsStayNonNeg(t: Timeline): Verdict =
 
 def setupRan(t: Timeline): Verdict =
   Verdict.any(t, i => Timeline.driveHas(t, i, "setup"))
+
+def concurrencyStaysQuiescent(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "runConcurrency") || Timeline.fiberParked(t, i) >= 0 && Timeline.fiberLive(t, i) >= 0)
 
