@@ -1,0 +1,9 @@
+[fuzz]
+schedule_seed = "14"
+fault_seed = "55"
+events = [
+  "tap textbutton:Skip",
+  "tap textbutton:Skip",
+  "tap textbutton:Skip",
+  "tap button:Sync",
+]

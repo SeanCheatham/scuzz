@@ -1,0 +1,6 @@
+[fuzz]
+schedule_seed = "2"
+fault_seed = "1"
+events = [
+  "tap button:Sync",
+]

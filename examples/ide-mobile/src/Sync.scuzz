@@ -2,7 +2,7 @@ import Deck.ClientState
 import Deck.OutboxAction
 import Deck.Pairing
 
-def defaultDir(): String =
+private def defaultDir(): String =
   ".scuzz/ide-mobile"
 
 def statePath(dir: String): String =
@@ -36,15 +36,14 @@ private def envPairing(): IO[Pairing] =
     tok = if (Deck.validToken(Str.trim(tokEnv))) Str.trim(tokEnv) else ""
   } yield Pairing(host, port, tok)
 
+private def clearStorageWriteError(st: ClientState): ClientState =
+  if (st.syncStatus != "Storage write failed") st else st.copy(syncStatus = if (Deck.validToken(st.pairing.token)) "Ready" else "Unpaired")
+
 def persist(dir: String, cell: Signal[String]): IO[Unit] =
-  for {
-    encoded = Signal.get(cell)
-    res <- IO.attempt(Fs.mkdirs(dir).flatMap(_ => Fs.write(statePath(dir), encoded)))
-    _ = res match {
-  case Result.Ok(_) => ()
+  IO.attempt(Fs.mkdirs(dir).flatMap(_ => Fs.write(statePath(dir), Deck.encodeState(clearStorageWriteError(readCell(cell)))))).map(res => res match {
+  case Result.Ok(_) => if (readCell(cell).syncStatus == "Storage write failed") writeCell(cell, clearStorageWriteError(readCell(cell))) else ()
   case Result.Err(_) => writeCell(cell, readCell(cell).copy(syncStatus = "Storage write failed"))
-}
-  } yield ()
+})
 
 def loadOrInit(dir: String): IO[ClientState] =
   IO.attempt(Fs.exists(statePath(dir))).flatMap(existsRes => existsRes match {
@@ -134,7 +133,7 @@ def syncNow(dir: String, cell: Signal[String], busy: Signal[Int]): IO[Unit] =
   _ <- IO.ensure(for {
   flushed <- if (List.isEmpty(readCell(cell).outbox)) IO.pure(true) else flushBatches(dir, cell, url, headers)
   _ <- if (flushed) refreshFeed(dir, cell, url, headers) else IO.pure(())
-} yield (), IO.pure(Signal.set(busy, 0)))
+} yield (), IO.pure(()).map(_ => Signal.set(busy, 0)))
 } yield ()
 }
 

@@ -1,0 +1,22 @@
+[fuzz]
+events = [
+  "tap button:Queue steer",
+  "tap outlined:Pair",
+  "text 0 bad/host",
+  "tap button:Save pairing",
+  "tap textbutton:Close pairing",
+  "tap outlined:Pair",
+  "text 1 70000",
+  "tap button:Save pairing",
+  "key Escape",
+  "tap outlined:Pair",
+  "text 2 short",
+  "tap button:Save pairing",
+  "text 2 wrong-token-123456",
+  "tap button:Save pairing",
+  "tap textbutton:Dismiss alert",
+  "tap outlined:Pair",
+  "text 2 pairing-token-1234",
+  "tap button:Save pairing",
+  "tap button:Sync",
+]
