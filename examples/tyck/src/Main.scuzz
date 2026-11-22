@@ -2,6 +2,7 @@ import Parse.Fun
 import Parse.En
 import Parse.EnCase
 import Parse.Param
+import Parse.ErrAt
 
 def srcOk(): String =
   """def add(n: Int, m: Int): Int =
@@ -265,7 +266,7 @@ def tyckFiles(): Bool =
   Str.contains(Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []), "arithmetic needs Int") && duplicateMain()
 
 def duplicateMain(): Bool =
-  Str.contains(Check.check("@main def main: IO[Unit] = IO.println(\"a\")\n@main def main: IO[Unit] = IO.println(\"b\")"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":1,\"end_line\":2,\"end_column\":6")
+  Str.contains(Check.check("@main def main: IO[Unit] = IO.println(\"a\")\n@main def main: IO[Unit] = IO.println(\"b\")"), "\"message\":\"unexpected token; expected declaration\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":1,\"end_line\":2,\"end_column\":6")
 
 def srcLeftover(): String =
   """def n(): Int = 0b21
@@ -698,34 +699,56 @@ def ioTypeCompatibility(): Bool =
   Type.eqStr("IO[Int]", "IO[String, Int]") && !Type.eqStr("IO[String]", "IO[String, Int]") && !Type.eqStr("IO[Int]", "IO[Int, String]") && !Type.eqStr("IO[String, Int]", "IO[Bool, Int]") && rejects("def wrong(x: IO[String]): IO[String, Int] = x", "does not match declared")
 
 def tyckParse(): Bool =
-  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && invalidTokens() && stringDelimiters() && interpolationTypes() && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && parseErrorSpans() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && invalidTokens() && stringDelimiters() && interpolationTypes() && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && parseErrorSpans() && expectedTokenHints() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
 
-def wantParseItem(file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
-  Str.concat("{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":", Str.concat(Check.jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))
+def parseExpect(hint: String): String =
+  if (hint == "") "unexpected token" else Str.concat("unexpected token; expected ", hint)
 
-def wantParseSpan(file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
-  Str.concat("[", Str.concat(wantParseItem(file, line, col, eline, ecol), "]"))
+def noteHint1(xs: List[ErrAt]): String =
+  if (List.isEmpty(xs)) "" else List.at(xs, 0).hint
 
-def wantParseSpans(spans: List[(String, Int, Int, Int, Int)]): String =
-  Str.concat("[", Str.concat(List.join(List.map(spans, sp => sp match {
-  case (file, line, col, eline, ecol) => wantParseItem(file, line, col, eline, ecol)
-}), ","), "]"))
+def wantParseItem(file: String, sp: (Int, Int, Int, Int), msg: String): String =
+  sp match {
+    case (line, col, eline, ecol) => Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(Check.jsonStr(msg), Str.concat(",\"file\":", Str.concat(Check.jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))))
+  }
 
-def wantHumanSpans(spans: List[(String, Int, Int, Int, Int)]): String =
-  List.join(List.map(spans, sp => sp match {
-  case (file, line, col, _, _) => Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), ": error: unexpected token")))))
-}), """
+def itemMsgs(file: String, spans: List[(Int, Int, Int, Int)], notes: List[ErrAt]): List[String] =
+  if (List.isEmpty(spans) || List.isEmpty(notes)) [] else wantParseItem(file, List.at(spans, 0), parseExpect(List.at(notes, 0).hint)) :: itemMsgs(file, List.tail(spans), List.tail(notes))
+
+def humanMsgs(file: String, spans: List[(Int, Int, Int, Int)], notes: List[ErrAt]): List[String] =
+  if (List.isEmpty(spans) || List.isEmpty(notes)) [] else humanMsg(file, List.at(spans, 0), parseExpect(List.at(notes, 0).hint)) :: humanMsgs(file, List.tail(spans), List.tail(notes))
+
+def humanMsg(file: String, sp: (Int, Int, Int, Int), msg: String): String =
+  sp match {
+    case (line, col, _, _) => Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: ", msg))))))
+  }
+
+def wantJoined(items: List[String]): String =
+  Str.concat("[", Str.concat(List.join(items, ","), "]"))
+
+def checkSpanNotes(file: String, spans: List[(Int, Int, Int, Int)], notes: List[ErrAt], json: String, human: String): Bool =
+  List.len(spans) == List.len(notes) && json == wantJoined(itemMsgs(file, spans, notes)) && human == List.join(humanMsgs(file, spans, notes), """
 """)
 
 def checkParseSpan(src: String, line: Int, col: Int, eline: Int, ecol: Int): Bool =
-  Check.check(src) == wantParseSpan("Main.scuzz", line, col, eline, ecol) && Check.humanFiles([("Main", src)]) == Str.concat("Main.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), ": error: unexpected token"))))
+  checkSpanNotes("Main.scuzz", [(line, col, eline, ecol)], Parse.parseErrorNotes(src), Check.check(src), Check.humanFiles([("Main", src)]))
 
 def checkParseMulti(src: String, spans: List[(Int, Int, Int, Int)]): Bool =
+  checkSpanNotes("Main.scuzz", spans, Parse.parseErrorNotes(src), Check.check(src), Check.humanFiles([("Main", src)]))
+
+def hintIs(src: String, hint: String): Bool =
   for {
-    full = List.map(spans, sp => sp match {
-  case (line, col, eline, ecol) => ("Main.scuzz", line, col, eline, ecol)
-})
-  } yield Check.check(src) == wantParseSpans(full) && Check.humanFiles([("Main", src)]) == wantHumanSpans(full)
+    got = noteHint1(Parse.parseErrorNotes(src))
+    raw = Check.check(src)
+  } yield got == hint && Str.contains(raw, Str.concat("\"message\":", Check.jsonStr(parseExpect(hint)))) && (hint != "" || !Str.contains(raw, "; expected"))
+
+def expectedTokenHints(): Bool =
+  hintIs("def record(): Int = 1", "identifier") && hintIs("private oracle hidden(): Bool = true", "def") && hintIs("def f(): Int 1", "=") && hintIs("def f(): Int = (1 + 2", ")") && hintIs("def f(): List[Int] = [1, 2", "]") && hintIs("def f(): Int = for { x = 1", "}") && hintIs("def f(): Int = 1 match { case n n }", "=>") && hintIs("def f(): Int = 1 match { case n if => n }", "expression") && hintIs("""import Domain
+def f(): Int = 1""", ".") && hintIs("""def broken(): Int = 1
+)
+""", "declaration") && hintIs("@main def main: IO[Unit] = IO.println(\"a\")\n@main def main: IO[Unit] = IO.println(\"b\")", "declaration") && hintIs("""def n(): Int = 0b21
+""", "") && hintIs("""def n(): Int = 5X
+""", "")
 
 def parseErrorSpans(): Bool =
   parseDeclSpans() && parseParamSpans() && parseSyntaxSpans() && parseMultiErrorSpans() && parseMultiFileSpans()
@@ -777,19 +800,36 @@ def parseMultiErrorSpans(): Bool =
   checkParseMulti(parseMultiAllBoundariesSrc(), [(1, 8, 1, 14), (2, 9, 2, 15), (3, 8, 3, 14), (4, 6, 4, 12), (6, 8, 6, 14), (7, 6, 7, 12), (8, 7, 8, 13), (10, 11, 10, 16), (12, 20, 12, 21), (14, 11, 14, 17)]) && checkParseMulti(parseMultiDepthSrc(), [(3, 1, 3, 7), (7, 1, 7, 7), (11, 1, 11, 4), (13, 21, 13, 22)]) && checkParseMulti(parseMultiTokensSrc(), [(1, 33, 1, 34), (2, 23, 2, 24), (4, 1, 4, 6)]) && checkParseMulti(parseMultiPkgSrc(), [(1, 9, 1, 15), (3, 11, 3, 12)])
 
 def parseMultiFileSpans(): Bool =
-  Check.checkFiles([("Good", """def good(): Int = 1
-"""), ("Broken", """def good2(): Int = 2
+  multiBrokenFile() && multiTwoFiles()
+
+def multiBrokenFile(): Bool =
+  for {
+    good = """def good(): Int = 1
+"""
+    broken = """def good2(): Int = 2
 record record(value: Int)
-""")]) == wantParseSpan("Broken.scuzz", 2, 8, 2, 14) && Check.humanFiles([("Good", """def good(): Int = 1
-"""), ("Broken", """def good2(): Int = 2
-record record(value: Int)
-""")]) == "Broken.scuzz:2:8: error: unexpected token" && Check.checkFiles([("First", "import record.Item\ndef ok(): Int = \"bad\" + 1\ntype record = Int\n"), ("Good", """def good(): Int = 1
-"""), ("Second", """record record(value: Int)
+"""
+    spans = [(2, 8, 2, 14)]
+    notes = Parse.parseErrorNotes(broken)
+  } yield List.len(spans) == List.len(notes) && Check.checkFiles([("Good", good), ("Broken", broken)]) == wantJoined(itemMsgs("Broken.scuzz", spans, notes)) && Check.humanFiles([("Good", good), ("Broken", broken)]) == List.join(humanMsgs("Broken.scuzz", spans, notes), """
+""")
+
+def multiTwoFiles(): Bool =
+  for {
+    first = "import record.Item\ndef ok(): Int = \"bad\" + 1\ntype record = Int\n"
+    good = """def good(): Int = 1
+"""
+    second = """record record(value: Int)
 def f(x: Int = ): Int = 1
-""")]) == wantParseSpans([("First.scuzz", 1, 8, 1, 14), ("First.scuzz", 3, 6, 3, 12), ("Second.scuzz", 1, 8, 1, 14), ("Second.scuzz", 2, 16, 2, 17)]) && Check.humanFiles([("First", "import record.Item\ndef ok(): Int = \"bad\" + 1\ntype record = Int\n"), ("Good", """def good(): Int = 1
-"""), ("Second", """record record(value: Int)
-def f(x: Int = ): Int = 1
-""")]) == wantHumanSpans([("First.scuzz", 1, 8, 1, 14), ("First.scuzz", 3, 6, 3, 12), ("Second.scuzz", 1, 8, 1, 14), ("Second.scuzz", 2, 16, 2, 17)])
+"""
+    firstSpans = [(1, 8, 1, 14), (3, 6, 3, 12)]
+    secondSpans = [(1, 8, 1, 14), (2, 16, 2, 17)]
+    firstNotes = Parse.parseErrorNotes(first)
+    secondNotes = Parse.parseErrorNotes(second)
+    items = List.concat(itemMsgs("First.scuzz", firstSpans, firstNotes), itemMsgs("Second.scuzz", secondSpans, secondNotes))
+    humans = List.concat(humanMsgs("First.scuzz", firstSpans, firstNotes), humanMsgs("Second.scuzz", secondSpans, secondNotes))
+  } yield List.len(firstSpans) == List.len(firstNotes) && List.len(secondSpans) == List.len(secondNotes) && Check.checkFiles([("First", first), ("Good", good), ("Second", second)]) == wantJoined(items) && Check.humanFiles([("First", first), ("Good", good), ("Second", second)]) == List.join(humans, """
+""")
 
 def stringDelimiters(): Bool =
   rejects("def wrong(): String = \"open", "unexpected token") && rejects("def wrong(): String = \"open\\\"", "unexpected token") && rejects("def wrong(): String = \"\"\"open", "unexpected token") && rejects("def wrong(): String = s\"open", "unexpected token") && rejects("def wrong(): String = s\"${1", "unexpected token") && rejects("def wrong(): String = s\"${\"open", "unexpected token") && Check.check("def right(): String = \"closed\"") == "[]" && Check.check("def right(): String = \"\"\"closed\"\"\"") == "[]" && Check.check("def right(): String = s\"${\"closed\"}\"") == "[]"
@@ -810,7 +850,7 @@ def interpolationAliases(): Bool =
   Check.check("type Id = Int\ndef right(): String = s\"${1: Id}\"") == "[]" && Check.check("type Id = Int\ndef right(): String = s\"${((x: Id) => x + 1)(2)}\"") == "[]" && rejects("type Id[T] = T\ndef wrong(): String = s\"${1: Id[Int, String]}\"", "Id expects 1 type arg")
 
 def invalidTokens(): Bool =
-  Str.contains(Check.check("@main def main: IO[Unit] = for { x = 1; y = 2; _ <- IO.println(Str.fromInt(x + y)) } yield ()"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":39") && Str.contains(Check.check("def wrong(): Int = 1 $ 2"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":22") && Check.check("def right(): String = \"$\"") == "[]"
+  Str.contains(Check.check("@main def main: IO[Unit] = for { x = 1; y = 2; _ <- IO.println(Str.fromInt(x + y)) } yield ()"), "\"message\":\"unexpected token; expected binding\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":39") && Str.contains(Check.check("def wrong(): Int = 1 $ 2"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":22") && Check.check("def right(): String = \"$\"") == "[]"
 
 def expressionTypeAnnotations(): Bool =
   rejects("def wrong(): Int = 1: Int[String]", "Int expects 0 type args") && rejects("""type Id[T] = T
