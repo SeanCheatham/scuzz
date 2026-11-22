@@ -5,4 +5,6 @@ events = [
   "text 2 wrong-token-123456",
   "tap button:Save pairing",
   "tap button:Sync",
+  "type 0 keep 401 notice",
+  "tap button:Queue steer",
 ]

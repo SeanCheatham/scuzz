@@ -62,12 +62,30 @@ oracle steerBoundsAndFormatting(): Bool =
     emptyErr = Deck.queueSteer(st0, "   ")
     ok512 = Deck.queueSteer(st0, Str.repeat("p", 512))
     over513 = Deck.queueSteer(st0, Str.repeat("p", 513))
+    utf8Exact = Str.repeat("é", 256)
+    utf8Over2 = Str.concat(utf8Exact, "a")
+    utf8Over3 = Str.repeat("✓", 171)
+    fromEmptyErr = Deck.queueSteer(st0.copy(syncStatus = "Enter a steer prompt", alert = "Enter a steer prompt"), utf8Exact)
+    fromOverErr = Deck.queueSteer(st0.copy(syncStatus = "Steer prompt exceeds 512 bytes", alert = "Steer prompt exceeds 512 bytes"), "ok")
+    fromAuthErr = Deck.queueSteer(st0.copy(syncStatus = "401 unauthorized", alert = "401 unauthorized: check bearer token; outbox kept"), "ok")
+    utf8Ok = fromEmptyErr match {
+  case Result.Ok(s) => s.syncStatus == "Queued steer" && s.alert == "" && List.len(s.outbox) == 1 && Str.len(List.at(s.outbox, 0).prompt) == 256 && Str.byteLen(List.at(s.outbox, 0).prompt) == 512
+  case Result.Err(_) => false
+}
+    overClearedOk = fromOverErr match {
+  case Result.Ok(s) => s.syncStatus == "Queued steer" && s.alert == ""
+  case Result.Err(_) => false
+}
+    authKeptOk = fromAuthErr match {
+  case Result.Ok(s) => s.syncStatus == "Queued steer" && s.alert == "401 unauthorized: check bearer token; outbox kept"
+  case Result.Err(_) => false
+}
     withSteer = ok512 match {
   case Result.Ok(s) => s.copy(snapshot = s.snapshot.copy(steer = [Deck.SteerRow(1, "r1", "server steer", sampleHex("0"), "queued")]))
   case Result.Err(_) => st0
 }
     lines = Deck.steerLines(withSteer)
-  } yield emptyErr == Result.Err("Enter a steer prompt") && over513 == Result.Err("Steer prompt exceeds 512 bytes") && List.len(lines) == 2 && List.at(lines, 1) == "[#1 queued] server steer" && Deck.formatFiles([]) == "(no file changes)" && Deck.formatFiles([Deck.FilePair("src/A.scuzz", "1")]) == """src/A.scuzz
+  } yield emptyErr == Result.Err("Enter a steer prompt") && over513 == Result.Err("Steer prompt exceeds 512 bytes") && Deck.queueSteer(st0, utf8Over2) == Result.Err("Steer prompt exceeds 512 bytes") && Deck.queueSteer(st0, utf8Over3) == Result.Err("Steer prompt exceeds 512 bytes") && utf8Ok && overClearedOk && authKeptOk && List.len(lines) == 2 && List.at(lines, 1) == "[#1 queued] server steer" && Deck.formatFiles([]) == "(no file changes)" && Deck.formatFiles([Deck.FilePair("src/A.scuzz", "1")]) == """src/A.scuzz
 1"""
 
 oracle statePersistenceAndWireProtocol(): Bool =
@@ -119,6 +137,56 @@ oracle statePersistenceAndWireProtocol(): Bool =
   case Result.Err(_) => true
 })
   } yield stEmpty == st2 && batchOk && snapped.snapshot == snap7 && snapped.syncStatus == "Synced rev 7" && offline.syncStatus == "Offline" && offline.outbox == st3.outbox && roundTrip == Result.Ok(st3) && Str.contains(batchWire, "\"outside-my-goal\"") && List.len(merged.outbox) == 1 && List.at(merged.outbox, 0).prompt == "added during flight" && Str.contains(merged.alert, "stale baseline") && err401.syncStatus == "401 unauthorized" && List.len(err401.outbox) == 3 && err503.syncStatus == "Sync HTTP 503" && List.len(err503.outbox) == 3 && badStates && badBatch && badSnap
+
+private def padToBytes(raw: String, totalBytes: Int): String =
+  Str.concat(raw, Str.repeat(" ", totalBytes - Str.byteLen(raw)))
+
+private def mkBatchReply(h1: String, h0: String, r1: String, r2: String): String =
+  List.join(["{\"v\":1,\"baseline\":\"", h1, "\",\"cursor\":\"", h0, "\",\"revision\":2,\"results\":[", r1, ",", r2, "]}"], "")
+
+oracle wireBoundsAndReceiptRules(): Bool =
+  for {
+    h0 = sampleHex("0")
+    h1 = sampleHex("1")
+    ha = sampleHex("a")
+    hb = sampleHex("b")
+    hc = sampleHex("c")
+    tok = Str.repeat("m", 16)
+    utf8Prompt512 = Str.repeat("é", 256)
+    utf8Prompt513 = Str.concat(utf8Prompt512, "a")
+    baseSt = Deck.ClientState("mob", 3, Deck.Pairing("127.0.0.1", 8787, tok), Deck.Snapshot(h0, h1, 1, "ship", [], []), [Deck.OutboxAction("mob-1", "accept", ha, h0, "", ""), Deck.OutboxAction("mob-2", "steer", "", h0, "", utf8Prompt512)], "Queued steer", "")
+    stateRaw = Deck.encodeState(baseSt)
+    stateExact = Deck.decodeState(padToBytes(stateRaw, 1048576))
+    stateOver = Deck.decodeState(padToBytes(stateRaw, 1048577))
+    savedOverUtf8 = Deck.decodeState(Deck.encodeState(baseSt.copy(outbox = [Deck.OutboxAction("mob-2", "steer", "", h0, "", utf8Prompt513)])))
+    savedEmptySteer = Deck.decodeState(Deck.encodeState(baseSt.copy(outbox = [Deck.OutboxAction("mob-2", "steer", "", h0, "", "")])))
+    cardOk0 = List.join(["{\"id\":\"", ha, "\",\"objective\":\"ship\",\"baseline\":\"", h0, "\",\"after\":\"", h1, "\",\"flip\":0,\"question\":{\"workload\":\"idle\",\"step\":0},\"changes\":[],\"before\":[],\"proposed\":[]}"], "")
+    cardNoStep = List.join(["{\"id\":\"", hb, "\",\"objective\":\"ship\",\"baseline\":\"", h0, "\",\"after\":\"", h1, "\",\"flip\":1,\"question\":{\"workload\":\"idle\"},\"changes\":[],\"before\":[],\"proposed\":[]}"], "")
+    cardBadId = List.join(["{\"id\":\"bad\",\"objective\":\"ship\",\"baseline\":\"", h0, "\",\"after\":\"", h1, "\",\"flip\":0,\"question\":{\"workload\":\"idle\",\"step\":0}}"], "")
+    cardBadBase = List.join(["{\"id\":\"", hc, "\",\"objective\":\"ship\",\"baseline\":\"bad\",\"after\":\"", h1, "\",\"flip\":0,\"question\":{\"workload\":\"idle\",\"step\":0}}"], "")
+    cardBadAfter = List.join(["{\"id\":\"", hc, "\",\"objective\":\"ship\",\"baseline\":\"", h0, "\",\"after\":\"bad\",\"flip\":0,\"question\":{\"workload\":\"idle\",\"step\":0}}"], "")
+    cardEmptyAfter = List.join(["{\"id\":\"", hc, "\",\"objective\":\"ship\",\"baseline\":\"", h0, "\",\"flip\":0,\"question\":{\"workload\":\"idle\",\"step\":0}}"], "")
+    cardNegStep = List.join(["{\"id\":\"", hc, "\",\"objective\":\"ship\",\"baseline\":\"", h0, "\",\"after\":\"", h1, "\",\"flip\":0,\"question\":{\"workload\":\"idle\",\"step\":-1}}"], "")
+    snapRaw = List.join(["{\"v\":1,\"baseline\":\"", h0, "\",\"cursor\":\"", h1, "\",\"revision\":1,\"objective\":\"ship\",\"cards\":[1,", cardOk0, ",", cardNoStep, ",", cardBadId, ",", cardBadBase, ",", cardBadAfter, ",", cardEmptyAfter, ",", cardNegStep, "],\"steer\":[]}"], "")
+    snapDecoded = Deck.decodeSnapshot(padToBytes(snapRaw, 1048576))
+    snapOver = Deck.decodeSnapshot(padToBytes(snapRaw, 1048577))
+    cardsFilteredOk = snapDecoded match {
+  case Result.Ok(sn) => List.map(sn.cards, c => c.id) == [ha, hb] && List.map(sn.cards, c => c.step) == [0, 0]
+  case Result.Err(_) => false
+}
+    sent = baseSt.outbox
+    okR1 = List.join(["{\"v\":1,\"id\":\"mob-1\",\"kind\":\"accept\",\"card\":\"", ha, "\",\"status\":\"applied\",\"baseline\":\"", h1, "\",\"replayed\":false}"], "")
+    okR2 = List.join(["{\"v\":1,\"id\":\"mob-2\",\"kind\":\"steer\",\"status\":\"queued\",\"baseline\":\"", h1, "\",\"replayed\":false}"], "")
+    batchRaw = mkBatchReply(h1, h0, okR1, okR2)
+    batchExact = Deck.decodeBatchReply(padToBytes(batchRaw, 1048576), sent)
+    batchOver = Deck.decodeBatchReply(padToBytes(batchRaw, 1048577), sent)
+    badReceipts = [mkBatchReply(h1, h0, "1", okR2), mkBatchReply(h1, h0, List.join(["{\"v\":2,\"id\":\"mob-1\",\"kind\":\"accept\",\"card\":\"", ha, "\",\"status\":\"applied\",\"baseline\":\"", h1, "\"}"], ""), okR2), mkBatchReply(h1, h0, List.join(["{\"v\":1,\"id\":\"mob-9\",\"kind\":\"accept\",\"card\":\"", ha, "\",\"status\":\"applied\",\"baseline\":\"", h1, "\"}"], ""), okR2), mkBatchReply(h1, h0, List.join(["{\"v\":1,\"id\":\"mob-1\",\"kind\":\"reject\",\"card\":\"", ha, "\",\"status\":\"applied\",\"baseline\":\"", h1, "\"}"], ""), okR2), mkBatchReply(h1, h0, okR1, List.join(["{\"v\":1,\"id\":\"mob-2\",\"kind\":\"accept\",\"card\":\"", ha, "\",\"status\":\"queued\",\"baseline\":\"", h1, "\"}"], "")), mkBatchReply(h1, h0, List.join(["{\"v\":1,\"id\":\"mob-1\",\"kind\":\"accept\",\"card\":\"", hb, "\",\"status\":\"applied\",\"baseline\":\"", h1, "\"}"], ""), okR2), mkBatchReply(h1, h0, List.join(["{\"v\":1,\"id\":\"mob-1\",\"kind\":\"accept\",\"status\":\"applied\",\"baseline\":\"", h1, "\"}"], ""), okR2), mkBatchReply(h1, h0, List.join(["{\"v\":1,\"id\":\"mob-1\",\"kind\":\"accept\",\"card\":\"", ha, "\",\"status\":\"\",\"baseline\":\"", h1, "\"}"], ""), okR2), mkBatchReply(h1, h0, List.join(["{\"v\":1,\"id\":\"mob-1\",\"kind\":\"accept\",\"card\":\"", ha, "\",\"status\":\"applied\",\"baseline\":\"bad\"}"], ""), okR2)]
+    receiptsRejected = List.forall(badReceipts, s => Deck.decodeBatchReply(s, sent) == Result.Err("Invalid batch receipt"))
+    batchOk = batchExact match {
+  case Result.Ok(rep) => List.map(rep.results, r => r.id) == ["mob-1", "mob-2"] && List.map(rep.results, r => r.kind) == ["accept", "steer"] && List.map(rep.results, r => r.card) == [ha, ""]
+  case Result.Err(_) => false
+}
+  } yield stateExact == Result.Ok(baseSt) && stateOver == Result.Err("Saved state exceeds 1 MiB") && savedOverUtf8 == Result.Err("Invalid saved outbox") && savedEmptySteer == Result.Err("Invalid saved outbox") && cardsFilteredOk && snapOver == Result.Err("Snapshot exceeds 1 MiB") && batchOk && batchOver == Result.Err("Batch reply exceeds 1 MiB") && receiptsRejected
 
 private def checkPersistCase(dir: String, init: Deck.ClientState, wantStatus: String): Bool =
   for {
@@ -267,9 +335,22 @@ def swipeSliderCommitsOrResets(t: Timeline): Verdict =
   case (before, after) => Timeline.signalInt(t, after, "swipe") == 0 && (Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") || Timeline.signalInt(t, before, "cardCount") > 0 && Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalInt(t, after, "cardCount") == Timeline.signalInt(t, before, "cardCount") - 1)
 })
 
+private def checkQueueSteerHit(t: Timeline, before: Int, after: Int): Bool =
+  for {
+    prevOut = Timeline.signalInt(t, before, "outboxCount")
+    nextOut = Timeline.signalInt(t, after, "outboxCount")
+    hadSteerAlert = Timeline.signalStrHas(t, before, "store", "\"alert\":\"Enter a steer prompt\"") || Timeline.signalStrHas(t, before, "store", "\"alert\":\"Steer prompt exceeds 512 bytes\"")
+    hadAuthAlert = Timeline.signalStrHas(t, before, "store", "\"alert\":\"401 ")
+    alertClearedOk = (!hadSteerAlert || Timeline.signalInt(t, after, "hasAlert") == 0 && Timeline.signalStrHas(t, after, "alert", "")) && (!hadAuthAlert || Timeline.signalInt(t, after, "hasAlert") == 1 && Timeline.signalStrHas(t, after, "alert", "401 ")) && !Timeline.signalStrHas(t, after, "alert", "Enter a steer prompt") && !Timeline.signalStrHas(t, after, "alert", "Steer prompt exceeds 512 bytes")
+    statusAfterOk = Timeline.signalStrHas(t, after, "syncStatus", "Queued steer") || Timeline.signalStrHas(t, after, "syncStatus", "Storage write failed")
+    okBranch = nextOut == prevOut + 1 && Timeline.signalStrHas(t, after, "steerInput", "") && statusAfterOk && alertClearedOk
+    errMsgOk = Timeline.signalStrHas(t, after, "syncStatus", "Enter a steer prompt") && Timeline.signalStrHas(t, after, "alert", "Enter a steer prompt") || Timeline.signalStrHas(t, after, "syncStatus", "Steer prompt exceeds 512 bytes") && Timeline.signalStrHas(t, after, "alert", "Steer prompt exceeds 512 bytes")
+    errBranch = nextOut == prevOut && Timeline.signalInt(t, after, "hasAlert") == 1 && errMsgOk && Timeline.fileSame(t, before, after, ".scuzz/ide-mobile/state.json")
+  } yield okBranch || errBranch
+
 def queueSteerUpdatesOutboxOrAlerts(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Queue steer", pair => pair match {
-  case (before, after) => Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") + 1 && Timeline.signalStrHas(t, after, "steerInput", "") || Timeline.signalInt(t, after, "outboxCount") == Timeline.signalInt(t, before, "outboxCount") && Timeline.signalInt(t, after, "hasAlert") == 1
+  case (before, after) => checkQueueSteerHit(t, before, after)
 })
 
 def dismissAlertHidesBanner(t: Timeline): Verdict =
@@ -337,6 +418,6 @@ def idempotentAndChunkedBatchClaims(t: Timeline): Verdict =
 
 def conflictAuthAndRecoveryClaims(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {
-  case (a, b) => (!Timeline.driveHas(t, b, "staleAndDirtyHandling") || Timeline.fileTextIs(t, b, "obs/conflicts.txt", "ok:dirty-and-stale-flagged") && Timeline.fileTextIs(t, b, "sim/conf/main.txt", "external") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/conflicts.txt") || Timeline.fileTextIs(t, b, "obs/conflicts.txt", "mismatch"))) && (!Timeline.driveHas(t, b, "unauthorizedKeepsOutbox") || Timeline.fileTextIs(t, b, "obs/auth.txt", "ok:401-kept=2;flushed=0;main=alpha") && Timeline.fileTextIs(t, b, "sim/auth/main.txt", "alpha") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/auth.txt") || Timeline.fileTextIs(t, b, "obs/auth.txt", "mismatch"))) && (!Timeline.driveHas(t, b, "corruptStoreRecovery") || Timeline.fileTextIs(t, b, "obs/corrupt.txt", "ok:recovered") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/corrupt.txt") || Timeline.fileTextIs(t, b, "obs/corrupt.txt", "mismatch")))
+  case (a, b) => (!Timeline.driveHas(t, b, "staleAndDirtyHandling") || Timeline.fileTextIs(t, b, "obs/conflicts.txt", "ok:dirty-and-stale-flagged") && Timeline.fileTextIs(t, b, "sim/conf/main.txt", "external") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/conflicts.txt") || Timeline.fileTextIs(t, b, "obs/conflicts.txt", "mismatch"))) && (!Timeline.driveHas(t, b, "unauthorizedKeepsOutbox") || Timeline.fileTextIs(t, b, "obs/auth.txt", "ok:401-kept=2;flushed=0;main=alpha") && Timeline.fileTextIs(t, b, "sim/auth/main.txt", "alpha") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/auth.txt") || Timeline.fileTextIs(t, b, "obs/auth.txt", "mismatch"))) && (!Timeline.driveHas(t, b, "corruptStoreRecovery") || Timeline.fileTextIs(t, b, "obs/corrupt.txt", "ok:recovered") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/corrupt.txt") || Timeline.fileTextIs(t, b, "obs/corrupt.txt", "mismatch"))) && (!Timeline.driveHas(t, b, "wireBoundsAndReceiptIntegrity") || Timeline.fileTextIs(t, b, "obs/wire.txt", "ok:utf8-clear-bounds-receipts") && Timeline.fileTextIs(t, b, "sim/wire/main.txt", "v0") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/wire.txt") || Timeline.fileTextIs(t, b, "obs/wire.txt", "mismatch")))
 })
 

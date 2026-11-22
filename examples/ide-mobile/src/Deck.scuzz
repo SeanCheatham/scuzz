@@ -106,12 +106,16 @@ def queueLaneChoice(st: ClientState, lane: Int): ClientState =
 def applySwipeDelta(st: ClientState, delta: Int): ClientState =
   if (delta >= 60) queueCardAction(st, "accept", "") else if (delta <= -60) queueCardAction(st, "reject", "") else st
 
+private def steerValidationError(msg: String): Bool =
+  msg == "Enter a steer prompt" || msg == "Steer prompt exceeds 512 bytes"
+
 def queueSteer(st: ClientState, rawPrompt: String): Result[String, ClientState] =
   for {
     prompt = Str.trim(rawPrompt)
-  } yield if (prompt == "") Result.Err("Enter a steer prompt") else if (Str.len(prompt) > 512) Result.Err("Steer prompt exceeds 512 bytes") else for {
+  } yield if (prompt == "") Result.Err("Enter a steer prompt") else if (Str.byteLen(prompt) > 512) Result.Err("Steer prompt exceeds 512 bytes") else for {
   act = OutboxAction(nextActionId(st), "steer", "", st.snapshot.baseline, "", prompt)
-} yield Result.Ok(st.copy(nextSeq = st.nextSeq + 1, outbox = List.append(st.outbox, act)))
+  cleared = if (steerValidationError(st.alert)) "" else st.alert
+} yield Result.Ok(st.copy(nextSeq = st.nextSeq + 1, outbox = List.append(st.outbox, act), syncStatus = "Queued steer", alert = cleared))
 
 def steerLines(st: ClientState): List[String] =
   for {
@@ -157,8 +161,9 @@ private def decodeCard(j: Json): Option[CardItem] =
     base = Json.getStr(j, "baseline", "")
     after = Json.getStr(j, "after", "")
     q = jField(j, "question")
+    step = Json.getInt(q, "step", 0)
     flip = if (Json.getInt(j, "flip", 0) == 1) 1 else 0
-  } yield if (!Json.isObj(j) || !validHex(id) || !validHex(base)) None else Some(CardItem(id, Json.getStr(j, "objective", ""), base, after, flip, Json.getStr(q, "workload", "idle"), Json.getInt(q, "step", 0), decodeChanges(jField(j, "changes")), decodeFilePairs(jField(j, "before")), decodeFilePairs(jField(j, "proposed"))))
+  } yield if (!Json.isObj(j) || !validHex(id) || !validHex(base) || !validHex(after) || step < 0) None else Some(CardItem(id, Json.getStr(j, "objective", ""), base, after, flip, Json.getStr(q, "workload", "idle"), step, decodeChanges(jField(j, "changes")), decodeFilePairs(jField(j, "before")), decodeFilePairs(jField(j, "proposed"))))
 
 private def collectCards(xs: List[Json]): List[CardItem] =
   List.foldLeft(xs, [], __tup => __tup match {
@@ -183,32 +188,35 @@ private def collectSteers(xs: List[Json]): List[SteerRow] =
 })
 
 def decodeSnapshot(raw: String): Result[String, Snapshot] =
-  Json.parse(raw) match {
-    case Result.Err(_) => Result.Err("Invalid snapshot JSON")
-    case Result.Ok(doc) => for {
+  if (Str.byteLen(raw) > 1048576) Result.Err("Snapshot exceeds 1 MiB") else Json.parse(raw) match {
+  case Result.Err(_) => Result.Err("Invalid snapshot JSON")
+  case Result.Ok(doc) => for {
   v = Json.getInt(doc, "v", 0)
   base = Json.getStr(doc, "baseline", "")
   cursor = Json.getStr(doc, "cursor", "")
   rev = Json.getInt(doc, "revision", -1)
 } yield if (!Json.isObj(doc) || v != 1 || !validHex(base) || !validHex(cursor) || rev < 0 || !Json.isArr(jField(doc, "cards")) || !Json.isArr(jField(doc, "steer"))) Result.Err("Invalid snapshot schema") else Result.Ok(Snapshot(base, cursor, rev, Json.getStr(doc, "objective", ""), collectCards(Json.arr(jField(doc, "cards"))), collectSteers(Json.arr(jField(doc, "steer")))))
-  }
+}
 
 private def decodeReceipts(rows: List[Json], sent: List[OutboxAction], acc: List[Receipt]): Result[String, List[Receipt]] =
   (List.head(rows), List.head(sent)) match {
     case (None, None) => Result.Ok(acc)
     case (Some(r), Some(exp)) => for {
   id = Json.getStr(r, "id", "")
+  kind = Json.getStr(r, "kind", "")
+  card = Json.getStr(r, "card", "")
   status = Json.getStr(r, "status", "")
   base = Json.getStr(r, "baseline", "")
-  ok = Json.isObj(r) && Json.getInt(r, "v", 0) == 1 && id == exp.id && status != "" && validHex(base)
-} yield if (!ok) Result.Err("Invalid batch receipt") else decodeReceipts(List.tail(rows), List.tail(sent), List.append(acc, Receipt(id, Json.getStr(r, "kind", exp.kind), Json.getStr(r, "card", exp.card), status, base, Json.getBool(r, "replayed", false))))
+  cardOk = exp.kind == "steer" || card == exp.card
+  ok = Json.isObj(r) && Json.getInt(r, "v", 0) == 1 && id == exp.id && kind == exp.kind && cardOk && status != "" && validHex(base)
+} yield if (!ok) Result.Err("Invalid batch receipt") else decodeReceipts(List.tail(rows), List.tail(sent), List.append(acc, Receipt(id, kind, card, status, base, Json.getBool(r, "replayed", false))))
     case _ => Result.Err("Invalid batch receipt")
   }
 
 def decodeBatchReply(raw: String, sent: List[OutboxAction]): Result[String, BatchReply] =
-  Json.parse(raw) match {
-    case Result.Err(_) => Result.Err("Invalid batch JSON")
-    case Result.Ok(doc) => for {
+  if (Str.byteLen(raw) > 1048576) Result.Err("Batch reply exceeds 1 MiB") else Json.parse(raw) match {
+  case Result.Err(_) => Result.Err("Invalid batch JSON")
+  case Result.Ok(doc) => for {
   v = Json.getInt(doc, "v", 0)
   base = Json.getStr(doc, "baseline", "")
   cursor = Json.getStr(doc, "cursor", "")
@@ -219,7 +227,7 @@ def decodeBatchReply(raw: String, sent: List[OutboxAction]): Result[String, Batc
   case Result.Err(e) => Result.Err(e)
   case Result.Ok(receipts) => Result.Ok(BatchReply(base, cursor, rev, receipts))
 }
-  }
+}
 
 private def conflictAlerts(results: List[Receipt]): List[String] =
   List.foldLeft(results, [], __tup => __tup match {
@@ -270,7 +278,7 @@ private def decodeOutboxItem(j: Json): Option[OutboxAction] =
     base = Json.getStr(j, "baseline", "")
     reason = Json.getStr(j, "reason", "")
     prompt = Json.getStr(j, "prompt", "")
-    okKind = kind == "accept" && validHex(card) && validHex(base) || kind == "reject" && validHex(card) && (base == "" || validHex(base)) || kind == "skip" && validHex(card) && (base == "" || validHex(base)) && validReason(reason) || kind == "steer" && prompt != "" && Str.len(prompt) <= 512 && (base == "" || validHex(base))
+    okKind = kind == "accept" && validHex(card) && validHex(base) || kind == "reject" && validHex(card) && (base == "" || validHex(base)) || kind == "skip" && validHex(card) && (base == "" || validHex(base)) && validReason(reason) || kind == "steer" && prompt != "" && Str.byteLen(prompt) <= 512 && (base == "" || validHex(base))
   } yield if (!Json.isObj(j) || !validActionId(id) || !okKind) None else Some(OutboxAction(id, kind, card, base, reason, prompt))
 
 private def decodeOutboxAll(xs: List[Json], acc: List[OutboxAction]): Result[String, List[OutboxAction]] =
@@ -290,9 +298,9 @@ def encodeState(st: ClientState): String =
   } yield jsonText(doc)
 
 def decodeState(raw: String): Result[String, ClientState] =
-  Json.parse(raw) match {
-    case Result.Err(_) => Result.Err("Invalid saved state JSON")
-    case Result.Ok(doc) => for {
+  if (Str.byteLen(raw) > 1048576) Result.Err("Saved state exceeds 1 MiB") else Json.parse(raw) match {
+  case Result.Err(_) => Result.Err("Invalid saved state JSON")
+  case Result.Ok(doc) => for {
   v = Json.getInt(doc, "v", 0)
   cid = Json.getStr(doc, "client_id", "")
   seq = Json.getInt(doc, "next_seq", 0)
@@ -311,5 +319,5 @@ def decodeState(raw: String): Result[String, ClientState] =
   case Result.Err(e) => Result.Err(e)
   case Result.Ok(outbox) => Result.Ok(ClientState(cid, seq, Pairing(host, port, tok), Snapshot(sBase, sCur, sRev, Json.getStr(sObj, "objective", ""), collectCards(Json.arr(jField(sObj, "cards"))), collectSteers(Json.arr(jField(sObj, "steer")))), outbox, Json.getStr(doc, "sync_status", "Ready"), Json.getStr(doc, "alert", "")))
 }
-  }
+}
 
