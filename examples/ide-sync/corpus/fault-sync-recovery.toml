@@ -1,0 +1,11 @@
+[fuzz]
+schedule_seed = "7"
+fault_seed = "31"
+events = [
+  "drive offlineBatchReplay",
+  "drive dirtyAccept",
+  "drive recoverUndoJournal",
+  "drive mintFreshToken",
+  "drive offlineBatchReplay",
+  "drive fetchFeed",
+]

@@ -5,7 +5,36 @@ oracle authChecks(): Bool =
     upper = Map.set(Map.empty(), "AUTHORIZATION", Str.concat("Bearer ", tok))
     dup = Map.set(good, "authorization", Str.concat("Bearer ", tok))
     wrong = IdeSync.authHeaders("pairing-token-9999")
-  } yield IdeSync.authorized(tok, good) && IdeSync.authorized(tok, upper) && !IdeSync.authorized(tok, dup) && !IdeSync.authorized(tok, wrong) && !IdeSync.authorized(tok, Map.empty()) && !IdeSync.authorized("short", IdeSync.authHeaders("short")) && IdeSync.validToken(Str.repeat("x", 16)) && IdeSync.validToken(Str.repeat("x", 128)) && !IdeSync.validToken(Str.repeat("x", 15)) && !IdeSync.validToken(Str.repeat("x", 129))
+    hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    hexOk = IdeSync.validHex(hex64) && !IdeSync.validHex("") && !IdeSync.validHex(Str.repeat("a", 63)) && !IdeSync.validHex(Str.repeat("a", 65)) && !IdeSync.validHex(Str.concat("A", Str.repeat("a", 63))) && !IdeSync.validHex(Str.concat("g", Str.repeat("a", 63)))
+    idOk = IdeSync.validActionId("a") && IdeSync.validActionId("Az_0-9") && IdeSync.validActionId(Str.repeat("z", 128)) && !IdeSync.validActionId("") && !IdeSync.validActionId(Str.repeat("z", 129)) && !IdeSync.validActionId("bad/id") && !IdeSync.validActionId("bad id") && !IdeSync.validActionId("bad.id")
+    skipOk = IdeSync.validSkipReason("") && IdeSync.validSkipReason("no-visible-difference") && IdeSync.validSkipReason("need-another-scenario") && IdeSync.validSkipReason("outside-my-goal") && !IdeSync.validSkipReason("other") && !IdeSync.validSkipReason("No-visible-difference") && !IdeSync.validSkipReason(" outside-my-goal")
+  } yield IdeSync.authorized(tok, good) && IdeSync.authorized(tok, upper) && !IdeSync.authorized(tok, dup) && !IdeSync.authorized(tok, wrong) && !IdeSync.authorized(tok, Map.empty()) && !IdeSync.authorized("short", IdeSync.authHeaders("short")) && IdeSync.validToken(Str.repeat("x", 16)) && IdeSync.validToken(Str.repeat("x", 128)) && !IdeSync.validToken(Str.repeat("x", 15)) && !IdeSync.validToken(Str.repeat("x", 129)) && hexOk && idOk && skipOk
+
+oracle jsonAndPathHelpers(): Bool =
+  for {
+    obj = Json.Obj([("k", Json.Str("val")), ("n", Json.Int(7))])
+    encoded = IdeSync.pairsJson([("src/B.scuzz", "2"), ("src/A.scuzz", "1")])
+    nanText = IdeSync.text(Json.Float(0.0 / 0.0))
+  } yield IdeSync.text(Json.Obj([("v", Json.Int(1))])) == "{\"v\":1}" && nanText != "" && IdeSync.field(obj, "n") == Json.Int(7) && Json.isNull(IdeSync.field(obj, "missing")) && Json.isNull(IdeSync.field(Json.Arr([]), "k")) && IdeSync.str(obj, "k") == "val" && IdeSync.str(obj, "n") == "" && IdeSync.str(obj, "missing") == "" && IdeSync.pairs(encoded) == [("src/A.scuzz", "1"), ("src/B.scuzz", "2")] && IdeSync.storage("ws") == "ws/.scuzz/ide" && IdeSync.cardFile("ws", "cid") == "ws/.scuzz/ide/cards/cid/card.json" && IdeSync.recordPath("ws", "rec1") == "ws/.scuzz/ide/records/rec1.json" && IdeSync.steerPath("ws") == "ws/.scuzz/ide/steer.json"
+
+oracle parseStoredAndRunGuards(): Bool =
+  for {
+    exact1M = Str.concat("{\"k\":\"", Str.concat(Str.repeat("x", 1048568), "\"}"))
+    over1M = Str.concat("{\"k\":\"", Str.concat(Str.repeat("x", 1048569), "\"}"))
+    smallOk = Property.force(IO.attempt(IdeSync.parseStored("{\"v\":1}", "bad-doc"))) match {
+  case Result.Ok(j) => Json.getInt(j, "v", 0) == 1
+  case Result.Err(_) => false
+}
+    limitOk = Property.force(IO.attempt(IdeSync.parseStored(exact1M, "too-big"))) match {
+  case Result.Ok(j) => Json.isObj(j)
+  case Result.Err(_) => false
+}
+    overErr = Property.force(IO.attempt(IdeSync.parseStored(over1M, "too-big"))) == Result.Err("too-big")
+    syntaxErr = Property.force(IO.attempt(IdeSync.parseStored("{", "bad-json"))) == Result.Err("bad-json")
+    nonObjErr = List.forall(["[]", "1", "true", "null", "\"str\""], raw => Property.force(IO.attempt(IdeSync.parseStored(raw, "not-obj"))) == Result.Err("not-obj"))
+    badRunTok = Property.force(IO.attempt(IdeSync.run("ws", 18799, "short"))) == Result.Err("scuzz ide serve: invalid bearer token")
+  } yield Str.byteLen(exact1M) == 1048576 && Str.byteLen(over1M) == 1048577 && smallOk && limitOk && overErr && syntaxErr && nonObjErr && badRunTok
 
 private def isOkDecode(raw: String): Bool =
   IdeSync.decodeActions(raw) match {
@@ -69,8 +98,10 @@ oracle recordEncoding(): Bool =
   for {
     cid = Str.repeat("9", 64)
     work = Json.Obj([("label", Json.Str("idle")), ("delta", Json.Obj([("changes", Json.Arr([Json.Str("c1")]))]))])
+    badWork = Json.Obj([("label", Json.Str("idle")), ("delta", Json.Obj([("changes", Json.Int(1))]))])
     card0 = Json.Obj([("id", Json.Str(cid)), ("proposal", Json.Str("p0")), ("publication", Json.Str("{\"generator\":\"g1\"}")), ("objective", Json.Str("obj")), ("baseline", IdeSync.pairsJson([("src/Main.scuzz", "v0"), ("src/Keep.scuzz", "k")])), ("proposed", IdeSync.pairsJson([("src/Main.scuzz", "v1")])), ("a", Json.Str("ha")), ("b", Json.Str("hb")), ("status", Json.Str("ready")), ("question", Json.Obj([("workload", Json.Str("idle"))])), ("evidence", Json.Obj([("workloads", Json.Arr([work]))]))])
     card1 = Json.set(Json.set(Json.set(card0, "flip", Json.Int(1)), "publication", Json.Str("{")), "question", Json.Obj([("workload", Json.Str("miss"))]))
+    card2 = Json.set(card0, "evidence", Json.Obj([("workloads", Json.Arr([badWork]))]))
     opAcc0 = IdeSync.buildOperation(card0, IdeSync.SyncAction("a0", "accept", cid, "ha", "", ""), true, 10)
     opRej0 = IdeSync.buildOperation(card0, IdeSync.SyncAction("r0", "reject", cid, "ha", "", ""), false, 11)
     opAcc1 = IdeSync.buildOperation(card1, IdeSync.SyncAction("a1", "accept", cid, "ha", "", ""), true, 12)
@@ -78,10 +109,142 @@ oracle recordEncoding(): Bool =
     opSkip = IdeSync.buildOperation(card1, IdeSync.SyncAction("s1", "skip", cid, "ha", "outside-my-goal", ""), false, 14)
     sum0 = IdeSync.cardSummary(card0)
     sum1 = IdeSync.cardSummary(card1)
-  } yield Json.getInt(opAcc0, "v", 0) == 1 && Json.getInt(opAcc0, "lane", -9) == 1 && Json.getInt(opRej0, "lane", -9) == 0 && Json.getInt(opAcc1, "lane", -9) == 0 && Json.getInt(opRej1, "lane", -9) == 1 && Json.getInt(opSkip, "lane", -9) == -1 && IdeSync.str(opAcc0, "generator") == "g1" && IdeSync.str(opAcc1, "generator") == "" && IdeSync.str(opSkip, "decision") == "abstain" && IdeSync.str(opSkip, "reason") == "outside-my-goal" && List.len(Json.arr(IdeSync.field(opAcc0, "writes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(opRej0, "writes"))) && List.len(Json.arr(IdeSync.field(sum0, "before"))) == 1 && List.len(Json.arr(IdeSync.field(sum0, "changes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(sum1, "changes"))) && Json.getInt(sum0, "flip", -1) == 0 && Json.getInt(sum1, "flip", -1) == 1
+    sum2 = IdeSync.cardSummary(card2)
+  } yield Json.getInt(opAcc0, "v", 0) == 1 && Json.getInt(opAcc0, "lane", -9) == 1 && Json.getInt(opRej0, "lane", -9) == 0 && Json.getInt(opAcc1, "lane", -9) == 0 && Json.getInt(opRej1, "lane", -9) == 1 && Json.getInt(opSkip, "lane", -9) == -1 && IdeSync.str(opAcc0, "generator") == "g1" && IdeSync.str(opAcc1, "generator") == "" && IdeSync.str(opSkip, "decision") == "abstain" && IdeSync.str(opSkip, "reason") == "outside-my-goal" && List.len(Json.arr(IdeSync.field(opAcc0, "writes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(opRej0, "writes"))) && List.len(Json.arr(IdeSync.field(sum0, "before"))) == 1 && List.len(Json.arr(IdeSync.field(sum0, "changes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(sum1, "changes"))) && List.isEmpty(Json.arr(IdeSync.field(sum2, "changes"))) && Json.getInt(sum0, "flip", -1) == 0 && Json.getInt(sum1, "flip", -1) == 1
 
 oracle hashOrderCanonical(): Bool =
   Str.contains(Main.usageLine(), "scuzz ide serve") && Str.contains(Main.usageLine(), "scuzz ide crank") && IdeSync.setHash([("src/B.scuzz", "2"), ("src/A.scuzz", "1")]) == IdeSync.setHash([("src/A.scuzz", "1"), ("src/B.scuzz", "2")]) && IdeSync.applyPaths([("src/Main.scuzz", "v0")], [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]) == [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]
+
+private def isSimFsFault(err: String): Bool =
+  err == "Fs: injected fault" || err == "Fs: partial write" || err == "Fs: error after replacement"
+
+private def resultFirstStatus(body: String): String =
+  Json.parse(body) match {
+    case Result.Err(_) => "bad-json"
+    case Result.Ok(doc) => List.head(Json.arr(IdeSync.field(doc, "results"))) match {
+  case Option.None => "empty"
+  case Option.Some(row) => IdeSync.str(row, "status")
+}
+  }
+
+oracle syncStorageAndHandleContracts(): Bool =
+  for {
+    tok = "pairing-token-1234"
+    cidA = Str.repeat("1", 64)
+    cidB = Str.repeat("2", 64)
+    cidMiss = Str.repeat("3", 64)
+    traversalRejected = List.forall(["", "../escape.scuzz", "src/../escape.scuzz", "src/./Main.scuzz", "src//Main.scuzz", "/abs/Main.scuzz", "a\\b", "a:b"], p => Property.force(IO.attempt(IdeSync.checkInside("ora-unused", p))) == Result.Err(Str.concat("invalid relative path: ", p)))
+    route404 = Property.force(IdeSync.handle("ora-unused", tok, ("/wrong", "GET", IdeSync.authHeaders(tok), "")))
+    method405 = Property.force(IdeSync.handle("ora-unused", tok, ("/v1/ide/sync", "PUT", IdeSync.authHeaders(tok), "")))
+    auth401 = Property.force(IdeSync.handle("ora-unused", tok, ("/v1/ide/sync", "GET", Map.empty(), "")))
+    badBody400 = Property.force(IdeSync.handle("ora-unused", tok, ("/v1/ide/sync", "POST", IdeSync.authHeaders(tok), "{")))
+    ioChecks = Property.force(IO.attempt(for {
+  u <- Uuid.v4()
+  root = Str.concat("ora-sync-", u)
+  _ <- Fs.mkdirs(Fs.join(root, "src/Subdir.scuzz"))
+  _ <- Fs.write(Fs.join(root, "src/B.scuzz"), "b0")
+  _ <- Fs.write(Fs.join(root, "src/A.scuzz"), "a0")
+  _ <- Fs.write(Fs.join(root, "src/notes.txt"), "ignore")
+  _ <- IdeSync.checkInside(root, "src/A.scuzz")
+  _ <- IdeSync.checkInside(root, "src/New.scuzz")
+  missParent <- IO.attempt(IdeSync.checkInside(root, "missing/New.scuzz"))
+  missRoot <- IO.attempt(IdeSync.checkInside(Str.concat(root, "-none"), "src/A.scuzz"))
+  optMiss <- IdeSync.readOptional(Fs.join(root, "missing.txt"))
+  optHit <- IdeSync.readOptional(Fs.join(root, "src/A.scuzz"))
+  owned <- IdeSync.own(root)
+  _ <- Fs.write(Fs.join(root, "src/1Bad.scuzz"), "bad")
+  badOwn <- IO.attempt(IdeSync.own(root))
+  _ <- Fs.delete(Fs.join(root, "src/1Bad.scuzz"))
+  minted <- IdeSync.ensureToken(root, "")
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "sync-token.txt"), Str.concat("  ", Str.concat(minted, """
+""")))
+  reusedTrim <- IdeSync.ensureToken(root, "")
+  explicit <- IdeSync.ensureToken(root, tok)
+  badTok <- IO.attempt(IdeSync.ensureToken(root, "bad"))
+  objEmpty <- IdeSync.sessionObjective(root)
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "session.json"), "{\"objective\":\"ship contracts\"}")
+  objSet <- IdeSync.sessionObjective(root)
+  dirtyEmpty <- IdeSync.readDirties(root)
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "dirty.json"), "[\"src/A.scuzz\"]")
+  dirtyOne <- IdeSync.readDirties(root)
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "dirty.json"), "{")
+  dirtySyntaxErr <- IO.attempt(IdeSync.readDirties(root))
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "session.json"), "{")
+  unavail503 <- IdeSync.handle(root, tok, ("/v1/ide/sync", "GET", IdeSync.authHeaders(tok), ""))
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "session.json"), "{\"objective\":\"ship contracts\"}")
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "dirty.json"), "{}")
+  dirtyObjErr <- IO.attempt(IdeSync.readDirties(root))
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "dirty.json"), "[1]")
+  dirtyElemErr <- IO.attempt(IdeSync.readDirties(root))
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "dirty.json"), "")
+  steerEmpty <- IdeSync.readSteer(root)
+  _ <- Fs.write(IdeSync.steerPath(root), "{\"v\":2,\"items\":[]}")
+  steerBadErr <- IO.attempt(IdeSync.readSteer(root))
+  _ <- Fs.write(IdeSync.steerPath(root), "{\"v\":1,\"items\":[{\"id\":\"s1\",\"status\":\"queued\"}]}")
+  steerLoaded <- IdeSync.readSteer(root)
+  _ <- Fs.write(IdeSync.steerPath(root), "")
+  dec0 <- IdeSync.cardDecided(root, cidA)
+  _ <- Fs.write(IdeSync.recordPath(root, cidB), "{\"v\":1,\"action_id\":\"r-b\",\"decision\":\"baseline\"}")
+  decChoice <- IdeSync.cardDecided(root, cidB)
+  baseHash = IdeSync.setHash(owned)
+  afterFiles = IdeSync.applyPaths(owned, [("src/A.scuzz", "a1")])
+  afterHash = IdeSync.setHash(afterFiles)
+  cardDocA = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(cidA)), ("proposal", Json.Str("p-a")), ("publication", Json.Str("{\"generator\":\"sim\"}")), ("objective", Json.Str("ship contracts")), ("baseline", IdeSync.pairsJson(owned)), ("proposed", IdeSync.pairsJson([("src/A.scuzz", "a1")])), ("a", Json.Str(baseHash)), ("b", Json.Str(afterHash)), ("flip", Json.Int(0)), ("started", Json.Int(1)), ("ready", Json.Int(2)), ("status", Json.Str("ready")), ("question", Json.Obj([("workload", Json.Str("idle")), ("step", Json.Int(0))])), ("evidence", Json.Obj([("workloads", Json.Arr([]))]))])
+  cardDocRetired = Json.set(Json.set(cardDocA, "id", Json.Str(cidB)), "status", Json.Str("retired"))
+  _ <- Fs.mkdirs(Fs.dirname(IdeSync.cardFile(root, cidA)))
+  _ <- Fs.write(IdeSync.cardFile(root, cidA), IdeSync.text(cardDocA))
+  _ <- Fs.mkdirs(Fs.dirname(IdeSync.cardFile(root, cidB)))
+  _ <- Fs.write(IdeSync.cardFile(root, cidB), IdeSync.text(cardDocRetired))
+  _ <- IdeSync.recover(root)
+  recWs = [Json.Obj([("path", Json.Str("src/A.scuzz")), ("before", Json.Str("a0")), ("before_exists", Json.Bool(true)), ("after", Json.Str("a1")), ("after_exists", Json.Bool(true))])]
+  recOp = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(Str.concat("accept-", cidA))), ("action_id", Json.Str("act-rec")), ("card", Json.Str(cidA)), ("decision", Json.Str("accept")), ("b", Json.Str(afterHash)), ("writes", Json.Arr(recWs))])
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "journal.json"), IdeSync.text(recOp))
+  _ <- IdeSync.recover(root)
+  decAccept <- IdeSync.cardDecided(root, cidA)
+  missAcc <- IdeSync.handle(root, tok, ("/v1/ide/sync", "POST", IdeSync.authHeaders(tok), Str.concat("{\"v\":1,\"id\":\"m1\",\"kind\":\"accept\",\"card\":\"", Str.concat(cidMiss, Str.concat("\",\"baseline\":\"", Str.concat(afterHash, "\"}"))))))
+  retiredAcc <- IdeSync.handle(root, tok, ("/v1/ide/sync", "POST", IdeSync.authHeaders(tok), Str.concat("{\"v\":1,\"id\":\"m2\",\"kind\":\"accept\",\"card\":\"", Str.concat(cidB, Str.concat("\",\"baseline\":\"", Str.concat(afterHash, "\"}"))))))
+  dupAcc <- IdeSync.handle(root, tok, ("/v1/ide/sync", "POST", IdeSync.authHeaders(tok), Str.concat("{\"v\":1,\"id\":\"m3\",\"kind\":\"accept\",\"card\":\"", Str.concat(cidA, Str.concat("\",\"baseline\":\"", Str.concat(afterHash, "\"}"))))))
+  dupRej <- IdeSync.handle(root, tok, ("/v1/ide/sync", "POST", IdeSync.authHeaders(tok), Str.concat("{\"v\":1,\"id\":\"m4\",\"kind\":\"reject\",\"card\":\"", Str.concat(cidA, "\"}"))))
+  snapOk <- IdeSync.handle(root, tok, ("/v1/ide/sync", "GET", IdeSync.authHeaders(tok), ""))
+  _ <- Fs.write(Fs.join(root, "src/A.scuzz"), "external")
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "journal.json"), IdeSync.text(recOp))
+  conflict409 <- IdeSync.handle(root, tok, ("/v1/ide/sync", "GET", IdeSync.authHeaders(tok), ""))
+  parentFailed = missParent match {
+  case Result.Ok(_) => false
+  case Result.Err(e) => !isSimFsFault(e) || true
+}
+  rootFailed = missRoot match {
+  case Result.Ok(_) => false
+  case Result.Err(_) => true
+}
+  badTokFailed = badTok match {
+  case Result.Ok(_) => false
+  case Result.Err(_) => true
+}
+  badOwnFailed = badOwn == Result.Err("unsafe source path: src/1Bad.scuzz") || badOwn match {
+  case Result.Ok(_) => false
+  case Result.Err(e) => isSimFsFault(e)
+}
+  dirtyFailed = (dirtySyntaxErr == Result.Err("invalid dirty buffer file") || dirtySyntaxErr match {
+  case Result.Ok(_) => false
+  case Result.Err(e) => isSimFsFault(e)
+}) && (dirtyObjErr == Result.Err("invalid dirty buffer file") || dirtyObjErr match {
+  case Result.Ok(_) => false
+  case Result.Err(e) => isSimFsFault(e)
+}) && (dirtyElemErr == Result.Err("invalid dirty buffer file") || dirtyElemErr match {
+  case Result.Ok(_) => false
+  case Result.Err(e) => isSimFsFault(e)
+})
+  steerFailed = steerBadErr == Result.Err("invalid steer store") || steerBadErr match {
+  case Result.Ok(_) => false
+  case Result.Err(e) => isSimFsFault(e)
+}
+  handleStatusesOk = unavail503._1 == 503 && (missAcc._1 == 200 && resultFirstStatus(missAcc._3) == "missing-card" || missAcc._1 == 503) && (retiredAcc._1 == 200 && resultFirstStatus(retiredAcc._3) == "missing-card" || retiredAcc._1 == 503) && (dupAcc._1 == 200 && resultFirstStatus(dupAcc._3) == "already-decided" || dupAcc._1 == 503) && (dupRej._1 == 200 && resultFirstStatus(dupRej._3) == "already-decided" || dupRej._1 == 503) && (snapOk._1 == 200 || snapOk._1 == 503) && (conflict409._1 == 409 || conflict409._1 == 503)
+} yield parentFailed && rootFailed && optMiss == "" && optHit == "a0" && owned == [("src/A.scuzz", "a0"), ("src/B.scuzz", "b0")] && badOwnFailed && IdeSync.validHex(minted) && reusedTrim == minted && explicit == tok && badTokFailed && objEmpty == "" && objSet == "ship contracts" && List.isEmpty(dirtyEmpty) && dirtyOne == ["src/A.scuzz"] && dirtyFailed && List.isEmpty(steerEmpty) && steerFailed && List.len(steerLoaded) == 1 && !dec0 && decChoice && decAccept && handleStatusesOk))
+  } yield traversalRejected && route404._1 == 404 && method405._1 == 405 && auth401._1 == 401 && badBody400._1 == 400 && ioChecks match {
+  case Result.Ok(ok) => ok
+  case Result.Err(e) => isSimFsFault(e)
+}
 
 private def faulted(t: Timeline, i: Int): Bool =
   Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs")
@@ -91,6 +254,11 @@ private def isUnauthorizedDrive(t: Timeline, i: Int): Bool =
 
 private def isRejectedDrive(t: Timeline, i: Int): Bool =
   isUnauthorizedDrive(t, i) || Timeline.driveHas(t, i, "wrongRoute") || Timeline.driveHas(t, i, "wrongMethod") || Timeline.driveHas(t, i, "malformedRequest")
+
+def mainIdlePreservesWorkspaces(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  main = i == 0
+} yield !main || Timeline.fileTextIs(t, 0, "ws/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, 0, "ws-dirty/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, 0, "ws-rec/src/Main.scuzz", "beta") && Timeline.fileTextIs(t, 0, "ws-undo/src/Main.scuzz", "beta") && Timeline.fileTextIs(t, 0, "ws-conflict/src/Main.scuzz", "external-edit") && Timeline.fileTextIs(t, 0, "ws-token/.scuzz/ide/sync-token.txt", "") && !Timeline.effectHas(t, 0, "Net.httpGet") && !Timeline.effectHas(t, 0, "Net.httpPost"))
 
 def sourceIntegrity(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.fileTextIs(t, i, "ws/src/Main.scuzz", "v0") || Timeline.fileTextIs(t, i, "ws/src/Main.scuzz", "alpha") || Timeline.fileTextIs(t, i, "ws/src/Main.scuzz", "beta"))
@@ -148,7 +316,12 @@ def feedInitialSnapshot(t: Timeline): Verdict =
 
 def recoveryAndDirtySafety(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {
-  case (a, b) => (!Timeline.driveHas(t, b, "dirtyAccept") || Timeline.fileTextIs(t, b, "ws-dirty/src/Main.scuzz", "v0") && (Timeline.fileTextIs(t, b, "obs/status.txt", "200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "act-dirty:dirty:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-dirty:dirty:true")) || faulted(t, b) && Timeline.fileSame(t, a, b, "ws-dirty/src/Main.scuzz"))) && (!Timeline.driveHas(t, b, "recoverAcceptJournal") || Timeline.fileTextIs(t, b, "ws-rec/src/Main.scuzz", "beta") && Timeline.fileTextIs(t, b, "ws-rec/src/Extra.scuzz", "extra") && Timeline.fileTextIs(t, b, "ws-rec/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "rec-beta:applied:true,rec-gamma:applied:false,rec-steer:queued:false#1@b") || Timeline.fileTextIs(t, b, "obs/summary.txt", "rec-beta:applied:true,rec-gamma:applied:true,rec-steer:queued:true#1@b")) || faulted(t, b) && Timeline.fileTextIs(t, b, "ws-rec/src/Main.scuzz", "beta")) && (!Timeline.driveHas(t, b, "recoverUndoJournal") || Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, b, "ws-undo/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "ws-undo/.scuzz/ide/last.json", "") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "beta") || Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "v0"))) && (!Timeline.driveHas(t, b, "conflictJournal") || Timeline.fileTextIs(t, b, "ws-conflict/src/Main.scuzz", "external-edit") && (Timeline.fileTextIs(t, b, "obs/status.txt", "409") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/status.txt") || Timeline.fileTextIs(t, b, "obs/status.txt", "503")))) && (!Timeline.driveHas(t, b, "mintFreshToken") || Timeline.fileTextIs(t, b, "obs/summary.txt", "token-minted-and-reused") || faulted(t, b) && Timeline.fileSame(t, a, b, "ws-token/src/Main.scuzz"))
+  case (a, b) => (!Timeline.driveHas(t, b, "dirtyAccept") || Timeline.fileTextIs(t, b, "ws-dirty/src/Main.scuzz", "v0") && (Timeline.fileTextIs(t, b, "obs/status.txt", "200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "act-dirty:dirty:false") || Timeline.fileTextIs(t, b, "obs/summary.txt", "act-dirty:dirty:true")) || faulted(t, b) && Timeline.fileSame(t, a, b, "ws-dirty/src/Main.scuzz"))) && (!Timeline.driveHas(t, b, "recoverAcceptJournal") || Timeline.fileTextIs(t, b, "ws-rec/src/Main.scuzz", "beta") && Timeline.fileTextIs(t, b, "ws-rec/src/Extra.scuzz", "extra") && Timeline.fileTextIs(t, b, "ws-rec/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") && (Timeline.fileTextIs(t, b, "obs/summary.txt", "rec-beta:applied:true,rec-gamma:applied:false,rec-steer:queued:false#1@b") || Timeline.fileTextIs(t, b, "obs/summary.txt", "rec-beta:applied:true,rec-gamma:applied:true,rec-steer:queued:true#1@b")) || faulted(t, b) && Timeline.fileTextIs(t, b, "ws-rec/src/Main.scuzz", "beta")) && (!Timeline.driveHas(t, b, "recoverUndoJournal") || Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, b, "ws-undo/.scuzz/ide/journal.json", "") && Timeline.fileTextIs(t, b, "ws-undo/.scuzz/ide/last.json", "") && Timeline.fileTextIs(t, b, "obs/status.txt", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "beta") || Timeline.fileTextIs(t, b, "ws-undo/src/Main.scuzz", "v0"))) && (!Timeline.driveHas(t, b, "conflictJournal") || Timeline.fileTextIs(t, b, "ws-conflict/src/Main.scuzz", "external-edit") && (Timeline.fileTextIs(t, b, "obs/status.txt", "409") || faulted(t, b) && (Timeline.fileSame(t, a, b, "obs/status.txt") || Timeline.fileTextIs(t, b, "obs/status.txt", "503")))) && (!Timeline.driveHas(t, b, "mintFreshToken") || Timeline.fileTextIs(t, b, "obs/summary.txt", "token-minted-and-reused") && Timeline.fileTextIs(t, b, "ws-token/.scuzz/ide/sync-token.txt", "explicit-token-123456") && Timeline.fileSame(t, a, b, "ws-token/src/Main.scuzz") || faulted(t, b) && Timeline.fileSame(t, a, b, "ws-token/src/Main.scuzz"))
+})
+
+def tokenPersistenceAndConflictInvariants(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => Timeline.fileTextIs(t, b, "ws/.scuzz/ide/sync-token.txt", "pairing-token-1234") && Timeline.fileTextIs(t, b, "ws-dirty/.scuzz/ide/journal.json", "") && Timeline.fileSame(t, a, b, "ws-conflict/.scuzz/ide/journal.json") && Timeline.fileTextIs(t, b, "ws-conflict/src/Main.scuzz", "external-edit")
 })
 
 private def noteDiag(n: IdeLoop.AutoNote): String =
@@ -157,7 +330,11 @@ private def noteDiag(n: IdeLoop.AutoNote): String =
 oracle loopPureBoundaries(): Bool =
   for {
     p1 = IdeLoop.Preference("reject", "c1", "p1", "", ["src/Main.scuzz"], 1)
-    p2 = IdeLoop.Preference("skip", "c2", "p2", "outside-my-goal", ["src/Main.scuzz"], 2)
+    p2 = IdeLoop.Preference("skip", "c2", "p2", "outside-my-goal", ["src/Main.scuzz", "src/Extra.scuzz"], 2)
+    pj = IdeLoop.prefJson(p2)
+    nj = IdeLoop.noteJson(IdeLoop.AutoNote("candidate-failed", "err", [("src/B.scuzz", "2"), ("src/A.scuzz", "1")], 3))
+    prefSerOk = IdeSync.str(pj, "kind") == "preference" && IdeSync.str(pj, "decision") == "skip" && IdeSync.str(pj, "card") == "c2" && IdeSync.str(pj, "proposal") == "p2" && IdeSync.str(pj, "reason") == "outside-my-goal" && Json.arr(IdeSync.field(pj, "paths")) == [Json.Str("src/Main.scuzz"), Json.Str("src/Extra.scuzz")] && Json.getInt(pj, "time", 0) == 2
+    noteSerOk = IdeSync.str(nj, "kind") == "automatic" && IdeSync.str(nj, "decision") == "candidate-failed" && IdeSync.str(nj, "diagnostic") == "err" && IdeSync.pairs(IdeSync.field(nj, "source")) == [("src/A.scuzz", "1"), ("src/B.scuzz", "2")] && Json.getInt(nj, "time", 0) == 3
     fbNone = IdeLoop.buildFeedback([p1], "", "", 0, [])
     fbSteer = IdeLoop.buildFeedback([p1], "s1", "focus", 1, [IdeLoop.AutoNote("candidate-failed", "err", [("src/Main.scuzz", "bad")], 3)])
     humanRecs = List.map(List.range(0, 9), i => Json.Obj([("decision", Json.Str(if (i == 0) "baseline" else if (i == 1) "abstain" else if (i == 2) "undo" else "accept")), ("card", Json.Str(Str.concat("c", Str.fromInt(i)))), ("proposal", Json.Str(Str.concat("p", Str.fromInt(i)))), ("reason", Json.Str(if (i == 1) "no-visible-difference" else "")), ("region", Json.Arr(if (i == 2) [] else [Json.Str("src/Main.scuzz")])), ("writes", Json.Arr(if (i == 2) [Json.Obj([("path", Json.Str("src/Undo.scuzz"))])] else [])), ("time", Json.Int(10 - i))]))
@@ -166,10 +343,54 @@ oracle loopPureBoundaries(): Bool =
     autoRecs = [Json.Obj([("v", Json.Int(0)), ("kind", Json.Str("automatic")), ("decision", Json.Str("candidate-failed")), ("a", Json.Str("h1")), ("diagnostic", Json.Str("bad-v")), ("source", Json.Arr([])), ("time", Json.Int(60))]), Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("automatic")), ("decision", Json.Str("candidate-failed")), ("a", Json.Str("other")), ("diagnostic", Json.Str("wrong-base")), ("source", Json.Arr([])), ("time", Json.Int(50))]), Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("automatic")), ("decision", Json.Str("candidate-failed")), ("a", Json.Str("h1")), ("diagnostic", Json.Str("d4")), ("source", Json.Arr([])), ("time", Json.Int(4))]), Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("automatic")), ("decision", Json.Str("candidate-failed")), ("a", Json.Str("h1")), ("diagnostic", Json.Str("d1")), ("source", Json.Arr([])), ("time", Json.Int(1))]), Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("automatic")), ("decision", Json.Str("candidate-failed")), ("a", Json.Str("h1")), ("diagnostic", Json.Str("d3")), ("source", Json.Arr([])), ("time", Json.Int(3))]), Json.Obj([("v", Json.Int(1)), ("kind", Json.Str("automatic")), ("decision", Json.Str("candidate-failed")), ("a", Json.Str("h1")), ("diagnostic", Json.Str("d2")), ("source", Json.Arr([])), ("time", Json.Int(2))])]
     notes = IdeLoop.extractAutoNotes(List.concat(humanRecs, autoRecs), "h1")
     goodEv = IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "b", [], 1, 0, 0)
-  } yield IdeLoop.maxSteerAttempts() == 2 && IdeLoop.flipOf(Str.repeat("0", 64)) == 0 && IdeLoop.flipOf(Str.repeat("1", 64)) == 1 && IdeLoop.decisionLabel("baseline") == "reject" && IdeLoop.decisionLabel("abstain") == "skip" && IdeLoop.decisionLabel("accept") == "accept" && IdeLoop.decisionLabel("undo") == "undo" && IdeLoop.composePrompt("", "only-steer", []) == "only-steer" && IdeLoop.composePrompt("only-obj", "", []) == "only-obj" && IdeLoop.composePrompt("obj", "st", [p1, p2]) == "obj | steer: st | prefs: reject:p1,skip:p2#outside-my-goal" && List.len(fbNone) == 1 && List.len(fbSteer) == 3 && List.len(prefs) == 8 && List.at(prefs, 0).time == 3 && List.at(prefs, 5).decision == "undo" && List.at(prefs, 5).paths == ["src/Undo.scuzz"] && List.at(prefs, 6).decision == "skip" && List.at(prefs, 7).decision == "reject" && List.len(notes) == 3 && List.map(notes, n => noteDiag(n)) == ["d2", "d3", "d4"] && IdeLoop.verifiedPass(goodEv) == (true, "") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(false, "", "idle", 0, "a", "b", [], 1, 0, 0)) == (false, "candidate-check-failed") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(false, "custom", "idle", 0, "a", "b", [], 1, 0, 0)) == (false, "custom") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "b", [], 1, 1, 0)) == (false, "candidate-regressed") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "b", [], 1, 0, 1)) == (false, "mutation-survived") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "b", [], 0, 0, 0)) == (false, "no-observed-difference") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "", 0, "a", "b", [], 1, 0, 0)) == (false, "incomplete-evidence") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", -1, "a", "b", [], 1, 0, 0)) == (false, "incomplete-evidence") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "", "b", [], 1, 0, 0)) == (false, "incomplete-evidence") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "", [], 1, 0, 0)) == (false, "incomplete-evidence")
+  } yield prefSerOk && noteSerOk && IdeLoop.maxSteerAttempts() == 2 && IdeLoop.flipOf(Str.repeat("0", 64)) == 0 && IdeLoop.flipOf(Str.repeat("1", 64)) == 1 && IdeLoop.flipOf(Str.concat("0", Str.repeat("1", 63))) == 0 && IdeLoop.flipOf(Str.concat("1", Str.repeat("0", 63))) == 1 && IdeLoop.decisionLabel("baseline") == "reject" && IdeLoop.decisionLabel("abstain") == "skip" && IdeLoop.decisionLabel("accept") == "accept" && IdeLoop.decisionLabel("undo") == "undo" && IdeLoop.composePrompt("", "only-steer", []) == "only-steer" && IdeLoop.composePrompt("only-obj", "", []) == "only-obj" && IdeLoop.composePrompt("obj", "st", [p1, p2]) == "obj | steer: st | prefs: reject:p1,skip:p2#outside-my-goal" && List.len(fbNone) == 1 && List.len(fbSteer) == 3 && List.len(prefs) == 8 && List.at(prefs, 0).time == 3 && List.at(prefs, 5).decision == "undo" && List.at(prefs, 5).paths == ["src/Undo.scuzz"] && List.at(prefs, 6).decision == "skip" && List.at(prefs, 7).decision == "reject" && List.len(notes) == 3 && List.map(notes, n => noteDiag(n)) == ["d2", "d3", "d4"] && IdeLoop.verifiedPass(goodEv) == (true, "") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(false, "", "idle", 0, "a", "b", [], 1, 0, 0)) == (false, "candidate-check-failed") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(false, "custom", "idle", 0, "a", "b", [], 1, 0, 0)) == (false, "custom") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "b", [], 1, 1, 0)) == (false, "candidate-regressed") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "b", [], 1, 0, 1)) == (false, "mutation-survived") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "b", [], 0, 0, 0)) == (false, "no-observed-difference") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "", 0, "a", "b", [], 1, 0, 0)) == (false, "incomplete-evidence") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", -1, "a", "b", [], 1, 0, 0)) == (false, "incomplete-evidence") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "", "b", [], 1, 0, 0)) == (false, "incomplete-evidence") && IdeLoop.verifiedPass(IdeLoop.VerifyEvidence(true, "", "idle", 0, "a", "", [], 1, 0, 0)) == (false, "incomplete-evidence")
+
+oracle loopCrankAndSteerContracts(): Bool =
+  for {
+    cidPre = Str.repeat("7", 64)
+    cidRetired = Str.repeat("8", 64)
+    propose = (ctx: IdeLoop.GenContext) => if (ctx.steerPrompt == "fail-twice") IO.pure(Result.Err("bad-gen")) else IO.pure(Result.Ok(IdeLoop.Candidate("p-ok", "sim", [("src/Main.scuzz", "v1")])))
+    verify = (_v: IdeLoop.VerifyInput) => IO.pure(IdeLoop.VerifyEvidence(true, "", "idle", 1, "tl-a", "tl-b", [Json.Obj([("section", Json.Str("signals"))])], 1, 0, 0))
+    ioChecks = Property.force(IO.attempt(for {
+  u <- Uuid.v4()
+  root = Str.concat("ora-loop-", u)
+  _ <- Fs.mkdirs(Fs.join(root, "src"))
+  _ <- Fs.write(Fs.join(root, "src/Main.scuzz"), "v0")
+  _ <- IdeSync.recover(root)
+  base0 = IdeSync.setHash([("src/Main.scuzz", "v0")])
+  unchangedItems <- IdeLoop.recoverSteerItems(root, [Json.Obj([("id", Json.Str("q0")), ("status", Json.Str("queued"))])])
+  preCard = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(cidPre)), ("a", Json.Str(base0)), ("steer_id", Json.Str("s-done")), ("status", Json.Str("ready"))])
+  retiredCard = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(cidRetired)), ("a", Json.Str("old-base")), ("status", Json.Str("retired"))])
+  _ <- Fs.mkdirs(Fs.dirname(IdeSync.cardFile(root, cidPre)))
+  _ <- Fs.write(IdeSync.cardFile(root, cidPre), IdeSync.text(preCard))
+  _ <- Fs.mkdirs(Fs.dirname(IdeSync.cardFile(root, cidRetired)))
+  _ <- Fs.write(IdeSync.cardFile(root, cidRetired), IdeSync.text(retiredCard))
+  rawSteer = [Json.Obj([("id", Json.Str("s-done")), ("prompt", Json.Str("done")), ("status", Json.Str("active"))]), Json.Obj([("id", Json.Str("s-requeue")), ("prompt", Json.Str("fail-twice")), ("status", Json.Str("active")), ("attempts", Json.Int(0))])]
+  recovered <- IdeLoop.recoverSteerItems(root, rawSteer)
+  zeroRounds <- IdeLoop.crankRounds(root, 0, propose, verify)
+  exhaustRounds <- IdeLoop.crankRounds(root, 3, propose, verify)
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "dirty.json"), "[\"src/Main.scuzz\"]")
+  dirtyStop <- IdeLoop.crankRounds(root, 3, propose, verify)
+  _ <- Fs.write(Fs.join(IdeSync.storage(root), "dirty.json"), "")
+  _ <- Fs.write(IdeSync.steerPath(root), "{\"v\":1,\"items\":[{\"seq\":1,\"id\":\"s-go\",\"prompt\":\"ship\",\"status\":\"queued\",\"attempts\":0}]}")
+  onePub <- IdeLoop.crankOne(root, propose, verify)
+  idleSameBase <- IdeLoop.crankRounds(root, 3, propose, verify)
+  preBeforeRaw <- IdeSync.readOptional(IdeSync.cardFile(root, cidPre))
+  preBeforeDoc <- IdeSync.parseStored(preBeforeRaw, "pre-before")
+  _ <- Fs.write(Fs.join(root, "src/Main.scuzz"), "v2")
+  retireOnce <- IdeLoop.crankOne(root, propose, verify)
+  preAfterRaw <- IdeSync.readOptional(IdeSync.cardFile(root, cidPre))
+  preAfterDoc <- IdeSync.parseStored(preAfterRaw, "pre-after")
+  retAfterRaw <- IdeSync.readOptional(IdeSync.cardFile(root, cidRetired))
+  retAfterDoc <- IdeSync.parseStored(retAfterRaw, "ret-after")
+} yield List.len(unchangedItems) == 1 && IdeSync.str(List.at(recovered, 0), "status") == "consumed" && IdeSync.str(List.at(recovered, 0), "card") == cidPre && IdeSync.str(List.at(recovered, 1), "status") == "queued" && List.isEmpty(zeroRounds) && List.len(exhaustRounds) == 3 && List.at(exhaustRounds, 0).status == "rejected" && List.at(exhaustRounds, 1).status == "rejected" && List.at(exhaustRounds, 2).status == "idle" && List.len(dirtyStop) == 1 && List.at(dirtyStop, 0).status == "dirty" && onePub.status == "published" && IdeSync.validHex(onePub.cardId) && List.len(idleSameBase) == 1 && List.at(idleSameBase, 0).status == "idle" && IdeSync.str(preBeforeDoc, "status") == "ready" && retireOnce.status == "idle" && IdeSync.str(preAfterDoc, "status") == "stale" && IdeSync.str(retAfterDoc, "status") == "retired"))
+  } yield ioChecks match {
+  case Result.Ok(ok) => ok
+  case Result.Err(e) => isSimFsFault(e)
+}
 
 def generationPreservesWorkspaceSources(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.fileTextIs(t, i, "ws-gen/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, i, "ws-gen-dirty/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, i, "ws-gen-crash/src/Main.scuzz", "v0") && (Timeline.fileTextIs(t, i, "ws-adv/src/Main.scuzz", "v0") || Timeline.fileTextIs(t, i, "ws-adv/src/Main.scuzz", "alpha")))
+  Verdict.every(t, i => Timeline.fileTextIs(t, i, "ws-gen/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, i, "ws-gen-dirty/src/Main.scuzz", "v0") && Timeline.fileTextIs(t, i, "ws-gen-dirty/.scuzz/ide/dirty.json", "[\"src/Main.scuzz\"]") && Timeline.fileTextIs(t, i, "ws-gen-crash/src/Main.scuzz", "v0") && (Timeline.fileTextIs(t, i, "ws-adv/src/Main.scuzz", "v0") || Timeline.fileTextIs(t, i, "ws-adv/src/Main.scuzz", "alpha")))
 
 def steerPreferencesAndVerifiedFeed(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {

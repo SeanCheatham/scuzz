@@ -74,13 +74,13 @@ def recoverSteerItems(root: String, items: List[Json]): IO[List[Json]] =
 } yield fixed
   } yield out
 
-def recoverSteer(root: String): IO[Unit] =
+private def recoverSteer(root: String): IO[Unit] =
   IdeSync.readSteer(root).flatMap(items => recoverSteerItems(root, items)).map(_ => ())
 
 private def updateSteerItem(root: String, steerId: String, f: Json => Json): IO[Unit] =
   if (steerId == "") IO.pure(()) else IdeSync.readSteer(root).flatMap(items => writeSteerItems(root, List.map(items, s => if (IdeSync.str(s, "id") == steerId) f(s) else s)))
 
-def retireStaleCards(root: String, base: String): IO[Int] =
+private def retireStaleCards(root: String, base: String): IO[Int] =
   for {
     ids <- cardIds(root)
     counts <- IO.foreach(ids, id => for {
