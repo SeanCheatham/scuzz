@@ -64,11 +64,11 @@ var Module = {
       });
       if (character === undefined) continue;
       const promise = Promise.all([document.fonts.load('400 16px ' + font.family, character),
-        ...(font.family.includes('Scuzz arabic') ? [document.fonts.load('400 16px "Arabic context"', character)] : [])]);
-      this.fontLoads.set(font.family, promise);
-      promise.then(() => {
+        ...(font.family.includes('Scuzz arabic') ? [document.fonts.load('400 16px "Arabic context"', character)] : [])]).then(() => {
         if (Module.ready) Module.ccall('sz_web_fonts_changed', null, [], []);
-      }).catch(error => console.error('Font load failed:', error));
+      });
+      this.fontLoads.set(font.family, promise);
+      promise.catch(error => console.error('Font load failed:', error));
     }
   },
   cssColor(argb) {

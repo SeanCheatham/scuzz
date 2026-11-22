@@ -45,7 +45,7 @@ Complete one slice before starting the next slice.
 3. Establish claim reach. Separate claim execution, trigger reach, and verdicts. Require relevant workloads for conditional and absence rules.
 4. Examine rule strength with mutation. Survivor records report the source span, mutation kind, diverged workloads, and passing claims. Reports separate invalid, excluded, incomplete, and inert mutations, and list incomplete and excluded site indices. Infrastructure failures do not count as detected defects. Equivalent-mutant detection beyond timeline comparison remains open.
 5. Exercise failure and recovery. Cover cancellation, timeout, duplicate requests, interrupted writes, and recovery. Check safety, bounded progress, and relations between executions.
-6. Improve tool evidence. Separate passed, failed, incomplete, and unguarded results. Retain small replay workloads and full input identities. Use the same project checks in the IDE and CLI.
+6. Improve tool evidence. Separate passed, failed, incomplete, and unguarded results. Failure records report the source span, rule kind, rule name, failing workload, replay path, and shrunken witness events. Retain small replay workloads and full input identities. Use the same project checks in the IDE and CLI.
 7. Check compiler and runtime behavior independently. Extend generated compiler checks and native replay. Use independent expected results. Run undefined behavior checks on the C runtime. Keep live platform proof limits explicit.
 
 For each topic, inspect existing behavior before changing it. Preserve working guarantees. Record the exact scope of each proof. Finite campaigns do not prove all programs correct.

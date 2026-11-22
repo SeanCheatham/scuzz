@@ -402,6 +402,10 @@ EMSCRIPTEN_KEEPALIVE unsigned sz_web_paints(void) {
   return active ? sz_ui_session_paints(active) : 0;
 }
 
+EMSCRIPTEN_KEEPALIVE int sz_web_needs_paint(void) {
+  return active ? sz_ui_session_needs_paint(active) : 0;
+}
+
 void sz_web_stop(void) {
   active = NULL;
   if (snapshot) sz_release(snapshot);

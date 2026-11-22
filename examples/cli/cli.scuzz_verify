@@ -270,3 +270,55 @@ oracle mutationSurvivorAttribution(): Bool =
     human = Mutate.survivorHuman(s3, ["idle", "corpus/a.toml"], ["claimOne", "claimTwo"])
   } yield Mutate.countFiles(built, false) == 13 && spanEq(s0, "Shared.scuzz", "logic-flip", 2, 16, 2, 18) && spanEq(s1, "Shared.scuzz", "and-left", 2, 16, 2, 18) && spanEq(s2, "Shared.scuzz", "and-right", 2, 16, 2, 18) && spanEq(s3, "Shared.scuzz", "rel-flip", 2, 10, 2, 12) && spanEq(s4, "Shared.scuzz", "arith-flip", 2, 6, 2, 7) && spanEq(s5, "Shared.scuzz", "int-flip", 2, 8, 2, 9) && spanEq(s6, "Shared.scuzz", "bool-flip", 2, 19, 2, 23) && spanEq(s7, "Main.scuzz", "if-swap", 2, 4, 2, 6) && spanEq(s8, "Main.scuzz", "int-flip", 2, 14, 2, 15) && spanEq(s9, "Main.scuzz", "int-flip", 2, 21, 2, 22) && spanEq(s10, "Main.scuzz", "signal-map", 5, 30, 5, 40) && spanEq(s11, "Main.scuzz", "handler-swap", 5, 67, 5, 78) && spanEq(o0, "Main.scuzz", "logic-flip", 2, 43, 2, 45) && spanEq(o1, "Main.scuzz", "not-drop", 2, 37, 2, 38) && spanEq(o2, "Main.scuzz", "rel-flip", 2, 48, 2, 50) && spanEq(o3, "Main.scuzz", "int-flip", 2, 51, 2, 52) && dec._1 == ["idle", "corpus/a.toml"] && dec._2 == ["claimOne", "claimTwo"] && reused3 == enc && reused5 == "" && List.len(survivors) == 1 && human == "  mutant 3: survived at Shared.scuzz:2:10 (Shared.helper, rel-flip; diverged: idle, corpus/a.toml; claims: claimOne, claimTwo)" && Str.contains(rawJson, "\"incomplete_sites\":[5],\"excluded_sites\":[4],\"survivors\":[{\"site\":3,\"kind\":\"rel-flip\",\"file\":\"Shared.scuzz\",\"line\":2,\"column\":10,\"end_line\":2,\"end_column\":12,\"diverged_workloads\":[\"idle\",\"corpus/a.toml\"],\"passed_claims\":[\"claimOne\",\"claimTwo\"]}]")
 
+private def failEq(f: Verify.RuleFailure, kind: String, rule: String, file: String, line: Int, col: Int, eline: Int, ecol: Int): Bool =
+  f.kind == kind && f.rule == rule && f.file == file && f.line == line && f.column == col && f.endLine == eline && f.endColumn == ecol
+
+oracle failedRuleAttribution(): Bool =
+  for {
+    sharedSrc = """def guardVal(n: Int where n >= 0): Int =
+  n
+"""
+    mainSrc = "def twoReqs(x: Int): Int =\n  x.require(v => v >= 0).require(v => v <= 10)\n\ndef checks(flag: Bool): IO[Unit] =\n  for {\n    _ = Property.check(\"checkedFlag\", flag, true)\n    _ <- Property.assert(\"assertedFlag\", flag)\n  } yield ()\n"
+    verSrc = """oracle holds(n: Int): Bool =
+  Shared.guardVal(n) == Main.twoReqs(n)
+
+def safe(t: Timeline): Verdict =
+  Verdict.every(t, i => i >= 0)
+"""
+    live = [("Shared", sharedSrc), ("Main", mainSrc)]
+    verPairs = [("rules.scuzz_verify", verSrc)]
+    sites = Verify.ruleSitesOf(live, ("", ""), verPairs)
+    ev = ["drive holds 11"]
+    fOra = Verify.resolveFailure(sites, """v1
+oracle holds rejected
+""", "search", "build/fuzz/repro.toml", ev)
+    fClaim = Verify.resolveFailure(sites, """v1
+claim safe rejected
+""", "idle", "build/fuzz/repro.toml", [])
+    fReq0 = Verify.resolveFailure(sites, """v1
+property check failed: @sz:Main.twoReqs#0@require
+""", "search", "build/fuzz/repro.toml", ev)
+    fReq1 = Verify.resolveFailure(sites, """v1
+property check failed: @sz:Main.twoReqs#1@require
+""", "corpus/a.toml", "build/fuzz/repro.toml", ev)
+    fChk = Verify.resolveFailure(sites, """v1
+property check failed: checkedFlag
+""", "idle", "build/fuzz/repro.toml", [])
+    fAst = Verify.resolveFailure(sites, """v1
+oracle assertedFlag rejected
+""", "idle", "build/fuzz/repro.toml", [])
+    fWhr = Verify.resolveFailure(sites, """v1
+property check failed: @sz:where:Shared.guardVal#0@Shared.guardVal n >= 0
+""", "search", "build/fuzz/repro.toml", ev)
+    fPlain = Verify.resolveFailure(sites, """ordinary error
+""", "idle", "", [])
+    scope = Verify.InputScope(1, [Verify.Workload("corpus/a.toml", true, """drive holds 11
+""", "", "", [], "evaluator", "failed", "property check failed: require")], [], [], ["safe"], ["safe"])
+    failJson = Verify.summaryJsonMutFail(false, 42, 8, 1, 1, 1, 1, "0", "build/fuzz/repro.toml", 0, 0, 0, 0, 4, true, "", 0, 0, [], [], [], [], [], [], [], [], [], [], [], Verify.noBreadth(), scope, ["require"], fReq1)
+    okJson = Verify.summaryJsonMut(true, 42, 8, 5, 0, 1, 0, "0", "", 0, 0, 0, 0, 4, true, "", 0, 0, [], [], [], [], [], [], [], [], [], [], [], Verify.noBreadth(), Verify.noScope(), [])
+    repFail = Verify.replayJsonFail("build/fuzz/repro.toml", "simulation", false, [], scope, ["require"], fReq1)
+    repOk = Verify.replayJson("build/fuzz/repro.toml", "simulation", false, [], Verify.InputScope(1, [Verify.Workload("build/fuzz/repro.toml", true, "", "", "", [], "compiled", "passed", "")], [], [], [], []), [])
+    wrap = Verify.wrapSrc("rules", verSrc)
+    cleaned = Verify.cleanProbeText("at __verify.scuzz:2:3: @sz:Main.twoReqs#1@require", wrap, sites, "")
+  } yield failEq(fOra, "oracle", "holds", "rules.scuzz_verify", 1, 8, 1, 13) && failEq(fClaim, "claim", "safe", "rules.scuzz_verify", 4, 5, 4, 9) && failEq(fReq0, "require", "require", "Main.scuzz", 2, 5, 2, 12) && failEq(fReq1, "require", "require", "Main.scuzz", 2, 26, 2, 33) && failEq(fChk, "property-check", "checkedFlag", "Main.scuzz", 6, 9, 6, 23) && failEq(fAst, "property-assert", "assertedFlag", "Main.scuzz", 7, 10, 7, 25) && failEq(fWhr, "where", "Shared.guardVal n >= 0", "Shared.scuzz", 1, 21, 1, 26) && fPlain.kind == "" && Verify.failureHuman(fReq1) == "Main.scuzz:2:26: error: require require failed on corpus/a.toml (drive holds 11)" && Verify.failureHuman(fClaim) == "rules.scuzz_verify:4:5: error: claim safe failed on idle (no events)" && Str.contains(failJson, "\"failure\":{\"kind\":\"require\",\"rule\":\"require\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":26,\"end_line\":2,\"end_column\":33,\"workload\":\"corpus/a.toml\",\"repro\":\"build/fuzz/repro.toml\",\"events\":[\"drive holds 11\"]}") && !Str.contains(okJson, "\"failure\":") && Str.contains(repFail, "\"failure\":{\"kind\":\"require\"") && !Str.contains(repOk, "\"failure\":") && !Str.contains(cleaned, "__verify") && !Str.contains(cleaned, "@sz:") && Str.contains(cleaned, "rules.scuzz_verify:1:8")
+
