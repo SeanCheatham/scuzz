@@ -48,4 +48,5 @@ void sz_web_control(SzView *view, int role, const char *label, const char *route
 void sz_web_copy(SzView *view, const char *text);
 SzView *sz_view_web_find(SzView *root, uintptr_t id);
 int sz_view_web_navigate(SzView *root, const char *title);
+int sz_view_web_in_group(SzView *view);
 #endif

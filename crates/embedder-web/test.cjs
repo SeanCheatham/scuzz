@@ -2576,6 +2576,108 @@ async function checkDisclosure(browserType, url, mobile) {
     await activate(open); await state(header, true); await focused(open);
     assert.equal(await name.inputValue(), 'retained');
     assert.equal(await note.inputValue(), 'nested text');
+    await activate(hide); await state(header, false); await focused(hide);
+
+    const overviewTab = page.getByRole('tab', {name: 'Overview', exact: true});
+    const metricsTab = page.getByRole('tab', {name: 'Metrics', exact: true});
+    const logsTab = page.getByRole('tab', {name: 'Logs', exact: true});
+    await page.keyboard.press('Tab'); await focused(overviewTab);
+    await page.waitForFunction(() => document.activeElement.tabIndex === 0 &&
+      document.activeElement.closest('[role=tablist]').querySelectorAll('[tabindex="0"]').length === 1);
+    await page.keyboard.press('End'); await focused(logsTab);
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Logs panel'));
+    await page.keyboard.press('Home'); await focused(overviewTab);
+    await page.keyboard.press('ArrowRight'); await focused(metricsTab);
+    await page.keyboard.press('ArrowDown'); await focused(metricsTab);
+    await page.keyboard.press('Enter');
+    const applyMetric = page.getByRole('button', {name: 'Apply metric', exact: true});
+    await applyMetric.waitFor();
+    await page.keyboard.press('Tab'); await focused(applyMetric);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Picks: 1'));
+    await page.keyboard.press('Shift+Tab'); await focused(metricsTab);
+    await page.keyboard.press('Tab'); await focused(applyMetric);
+
+    const guideLink = page.getByRole('link', {name: 'Guide', exact: true});
+    const keysLink = page.getByRole('link', {name: 'Keys', exact: true});
+    const boundsLink = page.getByRole('link', {name: 'Bounds', exact: true});
+    await page.keyboard.press('Tab'); await focused(guideLink);
+    await page.waitForFunction(({g, k, b}) => g.tabIndex === 0 && k.tabIndex === -1 && b.tabIndex === -1,
+      {g: await guideLink.elementHandle(), k: await keysLink.elementHandle(), b: await boundsLink.elementHandle()});
+    await page.keyboard.press('ArrowLeft'); await focused(boundsLink);
+    await page.keyboard.press('Home'); await focused(guideLink);
+    await page.keyboard.press('End'); await focused(boundsLink);
+    await page.keyboard.press('ArrowUp'); await focused(keysLink);
+    await page.keyboard.press('Space');
+    const runKey = page.getByRole('button', {name: 'Run key', exact: true});
+    await runKey.waitFor();
+    await page.keyboard.press('Tab'); await focused(runKey);
+    await page.keyboard.press('Shift+Tab'); await focused(keysLink);
+    await page.keyboard.press('Tab'); await focused(runKey);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Picks: 11'));
+
+    const pin = page.getByRole('button', {name: 'Pin', exact: true});
+    const openModal = page.getByRole('button', {name: 'Open modal', exact: true});
+    const resetPicks = page.getByRole('button', {name: 'Reset picks', exact: true});
+    await page.keyboard.press('Tab'); await focused(pin);
+    await page.waitForFunction(({p, o, r}) => p.tabIndex === 0 && o.tabIndex === -1 && r.tabIndex === -1,
+      {p: await pin.elementHandle(), o: await openModal.elementHandle(), r: await resetPicks.elementHandle()});
+    await page.keyboard.press('ArrowLeft'); await focused(resetPicks);
+    await page.keyboard.press('ArrowDown'); await focused(pin);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Picks: 111'));
+    await page.keyboard.press('End'); await focused(resetPicks);
+    await page.keyboard.press('Home'); await focused(pin);
+    await page.keyboard.press('ArrowRight'); await focused(openModal);
+    await page.keyboard.press('Enter');
+
+    const dialog = page.getByRole('dialog', {name: 'Composite dialog', exact: true});
+    await dialog.waitFor();
+    assert.equal(await header.count(), 0);
+    assert.equal(await pin.count(), 0);
+    const alphaTab = page.getByRole('tab', {name: 'Alpha', exact: true});
+    const betaTab = page.getByRole('tab', {name: 'Beta', exact: true});
+    const firstLink = page.getByRole('link', {name: 'First', exact: true});
+    const secondLink = page.getByRole('link', {name: 'Second', exact: true});
+    await page.waitForFunction(node => document.activeElement === node, await alphaTab.elementHandle());
+    await page.keyboard.press('Shift+Tab'); await focused(firstLink);
+    await page.keyboard.press('Tab'); await focused(alphaTab);
+    await page.keyboard.press('ArrowRight'); await focused(betaTab);
+    await page.keyboard.press('Enter');
+    const modalPick = page.getByRole('button', {name: 'Modal pick', exact: true});
+    const doneModal = page.getByRole('button', {name: 'Done modal', exact: true});
+    await modalPick.waitFor();
+    await page.keyboard.press('Tab'); await focused(modalPick);
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Modal picks: 1'));
+    await page.keyboard.press('End'); await focused(doneModal);
+    await page.keyboard.press('Home'); await focused(modalPick);
+    await page.keyboard.press('Tab'); await focused(firstLink);
+    await page.keyboard.press('ArrowDown'); await focused(secondLink);
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Second note'));
+
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('[role=dialog]'));
+    await page.waitForFunction(node => document.activeElement === node,
+      await page.getByRole('button', {name: 'Open modal', exact: true}).elementHandle());
+    assert(await page.evaluate(() => Module.textBlocks.some(block => block.text === 'Picks: 111')));
+
+    await page.keyboard.press('Enter');
+    await dialog.waitFor();
+    await page.waitForFunction(node => document.activeElement === node, await betaTab.elementHandle());
+    await page.keyboard.press('Tab'); await focused(modalPick);
+    await page.keyboard.press('ArrowRight'); await focused(doneModal);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => !document.querySelector('[role=dialog]'));
+    await page.waitForFunction(node => document.activeElement === node,
+      await page.getByRole('button', {name: 'Open modal', exact: true}).elementHandle());
+    await page.keyboard.press('ArrowRight');
+    await focused(page.getByRole('button', {name: 'Reset picks', exact: true}));
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => Module.textBlocks.some(block => block.text === 'Picks: 0'));
     assert.deepEqual(errors, []);
     console.log(`web disclosure: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }

@@ -8497,30 +8497,33 @@ static void clear_group_memories(SzView *v) {
     sz_free(v->text);
     v->text = NULL;
     v->caret = -1;
-    if (v->a11y_role != SZ_A11Y_TAB_LIST) v->focus_id = 0;
   }
   for (i = 0; i < v->child_count; i++)
     clear_group_memories(v->children[i]);
 }
 
-static SzView *ancestor_focus_group(SzView *v) {
-  for (; v; v = v->parent) {
-    if (v->kind == SZ_VIEW_FOCUS_GROUP)
-      return v;
-  }
+static SzView *ancestor_focus_group_in(SzView *v, SzView *boundary) {
+  for (SzView *p = v ? v->parent : NULL; p && p != boundary; p = p->parent)
+    if (p->kind == SZ_VIEW_FOCUS_GROUP) return p;
   return NULL;
+}
+
+static int group_tap_item(const SzView *v) {
+  return sz_view_is_tap_target(v) && v->kind != SZ_VIEW_SELECT_OPTION;
 }
 
 typedef struct SzGroupScan {
   int count, index, hit_index;
-  SzView *hit, *at, *by_id, *by_label;
+  SzView *group, *hit, *at, *by_id, *by_label;
   uintptr_t id;
   const char *label;
 } SzGroupScan;
 
 static void group_scan(SzView *v, SzGroupScan *scan) {
   if (collect_walk_hidden(v)) return;
-  if (sz_view_is_tap_target(v)) {
+  if (v != scan->group && (v->kind == SZ_VIEW_FOCUS_GROUP || v->a11y_role == SZ_A11Y_RADIO_GROUP))
+    return;
+  if (group_tap_item(v)) {
     if (scan->count == scan->index) scan->at = v;
     if (v == scan->hit) scan->hit_index = scan->count;
     if (v->id == scan->id) scan->by_id = v;
@@ -8531,15 +8534,17 @@ static void group_scan(SzView *v, SzGroupScan *scan) {
   for (int i = 0; i < v->child_count; i++) group_scan(v->children[i], scan);
 }
 
-static void group_mark_focus(SzView *v, SzView *target) {
+static void group_mark_focus(SzView *v, SzView *group, SzView *target) {
   if (collect_walk_hidden(v)) return;
-  if (sz_view_is_tap_target(v)) v->focused = v == target;
-  for (int i = 0; i < v->child_count; i++) group_mark_focus(v->children[i], target);
+  if (v != group && (v->kind == SZ_VIEW_FOCUS_GROUP || v->a11y_role == SZ_A11Y_RADIO_GROUP))
+    return;
+  if (group_tap_item(v)) v->focused = v == target;
+  for (int i = 0; i < v->child_count; i++) group_mark_focus(v->children[i], group, target);
 }
 
 static void remember_group_focus(SzView *group, SzView *hit) {
   if (!group || !hit) return;
-  SzGroupScan scan = {.hit = hit, .hit_index = -1, .index = -1};
+  SzGroupScan scan = {.group = group, .hit = hit, .hit_index = -1, .index = -1};
   group_scan(group, &scan);
   sz_free(group->text);
   group->text = sz_strdup(hit->a11y_label ? hit->a11y_label : "");
@@ -8550,15 +8555,15 @@ static void remember_group_focus(SzView *group, SzView *hit) {
 static void restore_group_focus(SzView *group) {
   if (!group || group->kind != SZ_VIEW_FOCUS_GROUP ||
       (group->caret < 0 && (!group->text || !group->text[0]))) return;
-  SzGroupScan scan = {.id = group->focus_id, .label = group->text, .index = group->caret};
+  SzGroupScan scan = {.group = group, .id = group->focus_id, .label = group->text, .index = group->caret};
   group_scan(group, &scan);
   SzView *target = scan.by_id ? scan.by_id : scan.by_label ? scan.by_label : scan.at;
   if (!target && scan.count > 0) {
-    SzGroupScan last = {.index = scan.count - 1};
+    SzGroupScan last = {.group = group, .index = scan.count - 1};
     group_scan(group, &last);
     target = last.at;
   }
-  group_mark_focus(group, target);
+  group_mark_focus(group, group, target);
   if (target) remember_group_focus(group, target);
 }
 
@@ -8589,26 +8594,27 @@ static SzView *find_active_focus_group(SzView *v) {
 static SzView *group_focused_target(SzView *group) {
   if (!group) return NULL;
   restore_group_focus(group);
-  SzGroupScan scan = {.index = group->caret};
+  SzGroupScan scan = {.group = group, .index = group->caret};
   group_scan(group, &scan);
   return scan.at;
 }
 
-static int move_group_focus(SzView *group, int dir) {
+static int step_group_focus(SzView *root, SzView *scope, SzView *group, int dir, int edge) {
   if (!group) return 0;
   restore_group_focus(group);
-  SzGroupScan scan = {.index = -1};
+  SzGroupScan scan = {.group = group, .index = -1};
   group_scan(group, &scan);
   if (!scan.count) return 0;
   int index = group->caret < 0 ? 0 : group->caret;
-  index += dir;
-  if (index < 0) index = 0;
-  if (index >= scan.count) index = scan.count - 1;
-  scan = (SzGroupScan){.index = index};
+  if (edge < 0) index = 0;
+  else if (edge > 0) index = scan.count - 1;
+  else index = (index + dir % scan.count + scan.count) % scan.count;
+  scan = (SzGroupScan){.group = group, .index = index};
   group_scan(group, &scan);
+  clear_focus(root);
   remember_group_focus(group, scan.at);
   restore_group_focus(group);
-  sz_view_reveal_focus(group);
+  sz_view_reveal_focus(scope ? scope : group);
   return 1;
 }
 
@@ -9128,6 +9134,8 @@ SzView *sz_view_heading(int level, SzView *child) {
   return v;
 }
 
+static int focus_path_shown(SzView *v);
+
 int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
   SzView *group;
   if (!root || !hit || !view_is_path_shown(hit))
@@ -9157,7 +9165,7 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
   }
   if (hit->kind == SZ_VIEW_TOOLTIP || (modal && hit->kind == SZ_VIEW_CARD)) return 1;
   if (hit->copy_text) { hit->copy_pending = 1; return 1; }
-  group = ancestor_focus_group(hit);
+  group = ancestor_focus_group_in(hit, modal);
   if (hit->kind != SZ_VIEW_TEXT_FIELD && hit->kind != SZ_VIEW_EDITOR)
     clear_focus(root);
   if (sz_view_is_tap_target(hit)) hit->focused = 1;
@@ -9176,6 +9184,10 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
     if (hit->kind == SZ_VIEW_BUTTON)
       motion_start(hit, SZ_MOTION_PRESS);
     hit->on_tap(hit, hit->tap_env);
+    if (modal && !focus_path_shown(modal)) {
+      clear_focus(root);
+      sync_modal_focus(root);
+    }
     return 1;
   }
   if (hit->kind == SZ_VIEW_LINK || hit->kind == SZ_VIEW_NAV_TILE) {
@@ -9193,12 +9205,20 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
       hit->sig_int) {
     int64_t n = sz_signal_int_get(hit->sig_int);
     sz_signal_int_set(hit->sig_int, n == 0 ? 1 : 0);
+    if (modal && !focus_path_shown(modal)) {
+      clear_focus(root);
+      sync_modal_focus(root);
+    }
     return 1;
   }
   if ((hit->kind == SZ_VIEW_RADIO || hit->kind == SZ_VIEW_RADIO_LIST_TILE ||
        hit->kind == SZ_VIEW_CHOICE_CHIP) &&
       hit->sig_int) {
     sz_signal_int_set(hit->sig_int, hit->radio_value);
+    if (modal && !focus_path_shown(modal)) {
+      clear_focus(root);
+      sync_modal_focus(root);
+    }
     return 1;
   }
   if (hit->kind == SZ_VIEW_SLIDER)
@@ -9209,6 +9229,7 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
     if (hit->sig_int)
       sz_signal_int_set(hit->sig_int, 0);
     clear_focus(root);
+    sync_modal_focus(root);
     return 1;
   }
   if (hit->kind == SZ_VIEW_TEXT_FIELD) {
@@ -9497,20 +9518,29 @@ static SzView *radio_scope(SzView *v) {
   return NULL;
 }
 
+static SzView *view_root(SzView *v) {
+  while (v && v->parent) v = v->parent;
+  return v;
+}
+
 typedef struct SzChoiceStop {
-  SzView *member, *scope, *first, *selected, *focused, *remembered;
-  int tab;
+  SzView *member, *scope, *overlay, *first, *selected, *focused, *remembered;
+  int group_stop;
 } SzChoiceStop;
 
 static void choice_stop_scan(SzView *v, SzChoiceStop *scan) {
   if (focus_hidden(v)) return;
-  int member = scan->tab ? v->a11y_role == SZ_A11Y_TAB && ancestor_focus_group(v) == scan->scope :
-    focus_radio(v) && v->sig_int == scan->member->sig_int && radio_scope(v) == scan->scope;
+  int member = scan->group_stop
+    ? group_tap_item(v) && !(focus_radio(v) && radio_scope(v)) &&
+        ancestor_focus_group_in(v, scan->overlay) == scan->scope
+    : focus_radio(v) && v->sig_int == scan->member->sig_int && radio_scope(v) == scan->scope;
   if (member && v->frame.w > 0.f && v->frame.h > 0.f) {
     if (!scan->first) scan->first = v;
-    if (scan->tab && scan->scope && v->id == scan->scope->focus_id) scan->remembered = v;
+    if (scan->group_stop && scan->scope && v->id == scan->scope->focus_id) scan->remembered = v;
     if (v->focused && !scan->focused) scan->focused = v;
-    if (v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value && !scan->selected)
+    if ((v->kind == SZ_VIEW_CHOICE_CHIP || v->kind == SZ_VIEW_RADIO ||
+         v->kind == SZ_VIEW_RADIO_LIST_TILE) &&
+        v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value && !scan->selected)
       scan->selected = v;
   }
   for (int i = 0; i < v->child_count; i++) choice_stop_scan(v->children[i], scan);
@@ -9531,21 +9561,27 @@ static SzView *panel_first_content(SzView *v) {
 }
 
 int sz_view_tab_stop(SzView *v) {
-  if (v && v->kind == SZ_VIEW_SELECT_OPTION) return 0;
-  if (focus_hidden(v) || v->frame.w <= 0.f || v->frame.h <= 0.f) return 0;
+  if (!v || v->kind == SZ_VIEW_SELECT_OPTION) return 0;
+  if (!focus_path_shown(v) || v->frame.w <= 0.f || v->frame.h <= 0.f) return 0;
+  SzView *root = view_root(v);
+  SzView *overlay = find_open_overlay(root);
+  if (overlay && !sz_view_find(overlay, v->id)) return 0;
   if (v->a11y_role == SZ_A11Y_TAB_PANEL) {
     SzView *first = panel_first_content(v);
     return !first || !(view_is_edit(first) || sz_view_is_tap_target(first));
   }
-  int tab = v->a11y_role == SZ_A11Y_TAB;
-  if (tab || focus_radio(v)) {
-    SzView *scope = tab ? ancestor_focus_group(v) : radio_scope(v);
-    SzView *boundary = scope ? scope : v;
-    if (!scope) while (boundary->parent) boundary = boundary->parent;
-    SzView *overlay = find_open_overlay(boundary);
-    if (overlay) boundary = overlay;
-    SzChoiceStop scan = {.member = v, .scope = scope, .tab = tab};
+  SzView *group = ancestor_focus_group_in(v, overlay);
+  if (focus_radio(v) && (radio_scope(v) || !group)) {
+    SzView *scope = radio_scope(v);
+    SzView *boundary = scope && (!overlay || sz_view_find(overlay, scope->id)) ? scope :
+      overlay ? overlay : root;
+    SzChoiceStop scan = {.member = v, .scope = scope, .overlay = overlay};
     choice_stop_scan(boundary, &scan);
+    return v == (scan.focused ? scan.focused : scan.selected ? scan.selected : scan.first);
+  }
+  if (group && group_tap_item(v)) {
+    SzChoiceStop scan = {.member = v, .scope = group, .overlay = overlay, .group_stop = 1};
+    choice_stop_scan(group, &scan);
     return v == (scan.focused ? scan.focused : scan.remembered ? scan.remembered :
                  scan.selected ? scan.selected : scan.first);
   }
@@ -9600,6 +9636,10 @@ static SzView *modal_restore_target(SzView *root, uintptr_t id) {
     id = closed->return_focus_id;
     target = sz_view_find(root, id);
   }
+  if (target && (target->frame.w <= 0.f || target->frame.h <= 0.f ||
+      !(view_is_edit(target) || sz_view_is_tap_target(target) ||
+        target->a11y_role == SZ_A11Y_TAB_PANEL || target->kind == SZ_VIEW_OVERLAY)))
+    return NULL;
   return target;
 }
 
@@ -10117,7 +10157,8 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
   if (!strcmp(key, "Tab") && !(mods & (SZ_KEY_CMD | SZ_KEY_ALT)) &&
       (!focused || focused->kind != SZ_VIEW_EDITOR || (mods & SZ_KEY_CTRL)))
     return focus_step(root, overlay ? overlay : root, extend, 1);
-  if (focus_radio(focused) && focused->sig_int && (radio_scope(focused) || !ancestor_focus_group(focused)) &&
+  if (focus_radio(focused) && focused->sig_int &&
+      (radio_scope(focused) || !ancestor_focus_group_in(focused, overlay)) &&
       !(mods & (SZ_KEY_CTRL | SZ_KEY_CMD | SZ_KEY_ALT))) {
     int backwards = !strcmp(key, "ArrowLeft") || !strcmp(key, "ArrowUp");
     int forwards = !strcmp(key, "ArrowRight") || !strcmp(key, "ArrowDown");
@@ -10174,41 +10215,64 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
     if (!sz_view_focused(root)) sz_view_focus(root, focused);
     return handled;
   }
-  if (focus_radio(focused) && (radio_scope(focused) || !ancestor_focus_group(focused))) return 1;
-  if (!overlay) {
-    if (!find_focused_edit(root)) {
-      group = find_active_focus_group(root);
-      if (group && (!focused || ancestor_focus_group(focused) == group)) {
+  if (focus_radio(focused) && (radio_scope(focused) || !ancestor_focus_group_in(focused, overlay)))
+    return 1;
+  {
+    SzView *scope = overlay ? overlay : root;
+    if (!find_focused_edit(scope)) {
+      group = focused ? ancestor_focus_group_in(focused, overlay) : find_active_focus_group(scope);
+      if (group) {
         if (group->a11y_role == SZ_A11Y_TAB_LIST) {
           SzView *tabs = group->parent;
           int n = tabs->child_count - 1;
           int next = group->caret;
-          if (strcmp(key, "ArrowLeft") == 0) next = (next + n - 1) % n;
-          else if (strcmp(key, "ArrowRight") == 0) next = (next + 1) % n;
-          else if (strcmp(key, "Home") == 0) next = 0;
-          else if (strcmp(key, "End") == 0) next = n - 1;
-          else next = -1;
-          if (next >= 0 && !(mods & (SZ_KEY_CTRL | SZ_KEY_CMD | SZ_KEY_ALT))) {
-            SzView *tab = group->children[0]->children[0]->children[next];
-            remember_group_focus(group, tab);
-            restore_group_focus(group);
-            sz_view_reveal_focus(root);
+          if (next < 0 && focused) {
+            remember_group_focus(group, focused);
+            next = group->caret;
+          }
+          if (n > 0 && !(mods & (SZ_KEY_CTRL | SZ_KEY_CMD | SZ_KEY_ALT))) {
+            if (strcmp(key, "ArrowLeft") == 0) next = (next + n - 1) % n;
+            else if (strcmp(key, "ArrowRight") == 0) next = (next + 1) % n;
+            else if (strcmp(key, "Home") == 0) next = 0;
+            else if (strcmp(key, "End") == 0) next = n - 1;
+            else next = -1;
+            if (next >= 0) {
+              SzView *tab = group->children[0]->children[0]->children[next];
+              clear_focus(root);
+              remember_group_focus(group, tab);
+              restore_group_focus(group);
+              sz_view_reveal_focus(scope);
+              return 1;
+            }
+            if (strcmp(key, "Enter") == 0 || strcmp(key, "Space") == 0) {
+              (void)activate_group_focus(root, group);
+              return 1;
+            }
+          }
+          if (!strcmp(key, "ArrowUp") || !strcmp(key, "ArrowDown")) return 0;
+          return 1;
+        }
+        if (!(mods & (SZ_KEY_CTRL | SZ_KEY_CMD | SZ_KEY_ALT))) {
+          if (!strcmp(key, "ArrowUp") || !strcmp(key, "ArrowLeft")) {
+            (void)step_group_focus(root, scope, group, -1, 0);
             return 1;
           }
-        }
-        if (group->a11y_role == SZ_A11Y_TAB_LIST &&
-            (!strcmp(key, "ArrowUp") || !strcmp(key, "ArrowDown"))) return 0;
-        if (strcmp(key, "ArrowUp") == 0) {
-          (void)move_group_focus(group, -1);
-          return 1;
-        }
-        if (strcmp(key, "ArrowDown") == 0) {
-          (void)move_group_focus(group, 1);
-          return 1;
-        }
-        if (strcmp(key, "Enter") == 0 || strcmp(key, "Space") == 0) {
-          (void)activate_group_focus(root, group);
-          return 1;
+          if (!strcmp(key, "ArrowDown") || !strcmp(key, "ArrowRight")) {
+            (void)step_group_focus(root, scope, group, 1, 0);
+            return 1;
+          }
+          if (!strcmp(key, "Home")) {
+            (void)step_group_focus(root, scope, group, 0, -1);
+            return 1;
+          }
+          if (!strcmp(key, "End")) {
+            (void)step_group_focus(root, scope, group, 0, 1);
+            return 1;
+          }
+          if (!strcmp(key, "Enter") || !strcmp(key, "Space")) {
+            (void)activate_group_focus(root, group);
+            return 1;
+          }
         }
         return 1;
       }
@@ -10408,12 +10472,15 @@ static SzView *first_book(SzView *v) {
 int sz_view_navigate(SzView *root, const char *id) {
   SzView *v;
   if (!root || !id || !id[0]) return 0;
-  v = first_book(root);
+  SzView *modal = find_open_overlay(root);
+  v = first_book(modal ? modal : root);
   if (!v) return 0;
   for (int i = 1; i < v->child_count; i++) {
     SzView *section = v->children[i]->children[0];
     if (section->route_id && !strcmp(section->route_id, id)) {
       sz_signal_int_set(v->sig_int, i - 1);
+      if (v->children[0]->kind == SZ_VIEW_FOCUS_GROUP && v->children[0]->caret < 0)
+        v->children[0]->focus_id = 0;
       return 1;
     }
   }
@@ -10453,6 +10520,12 @@ SzView *sz_view_web_find(SzView *v, uintptr_t id) {
   }
   return NULL;
 }
+
+int sz_view_web_in_group(SzView *view) {
+  if (!view || !group_tap_item(view)) return 0;
+  SzView *overlay = find_open_overlay(view_root(view));
+  return ancestor_focus_group_in(view, overlay) != NULL;
+}
 #endif
 
 static void reveal_view(SzView *view) {
@@ -10487,14 +10560,14 @@ void sz_view_focus(SzView *root, SzView *view) {
   if (select && view != select && select_owner(view) != select) select_commit(select);
   SzView *modal = find_open_overlay(root);
   if (view && modal && !sz_view_find(modal, view->id)) return;
-  if (view && !view_is_path_shown(view))
+  if (view && !focus_path_shown(view))
     return;
   clear_focus(root);
   clear_group_memories(root);
   if (view) {
     view->focused = 1;
     reveal_view(view);
-    SzView *group = ancestor_focus_group(view);
+    SzView *group = ancestor_focus_group_in(view, modal);
     if (group) remember_group_focus(group, view);
   }
   sync_tooltips(root);

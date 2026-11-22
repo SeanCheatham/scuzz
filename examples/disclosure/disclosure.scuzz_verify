@@ -13,6 +13,21 @@ def headersFollowState(t: Timeline): Verdict =
 def countLabelMatches(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "open") == 0 || Timeline.a11yHas(t, i, Str.concat("text:Count: ", Str.fromInt(Timeline.signalInt(t, i, "count")))))
 
+def compositeIndicesStayValid(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "tab") >= 0 && Timeline.signalInt(t, i, "tab") < 3 && Timeline.signalInt(t, i, "book") >= 0 && Timeline.signalInt(t, i, "book") < 3 && Timeline.signalInt(t, i, "modalTab") >= 0 && Timeline.signalInt(t, i, "modalTab") < 2 && Timeline.signalInt(t, i, "modalBook") >= 0 && Timeline.signalInt(t, i, "modalBook") < 2)
+
+def tabsFollowSelection(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "tab") == 0 == Timeline.a11yHas(t, i, "tabpanel:Overview") && Timeline.signalInt(t, i, "tab") == 1 == Timeline.a11yHas(t, i, "button:Apply metric") && Timeline.signalInt(t, i, "tab") == 2 == Timeline.a11yHas(t, i, "tabpanel:Logs"))
+
+def indexBookFollowsSelection(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "book") == 0 == Timeline.a11yHas(t, i, "text:Guide page") && Timeline.signalInt(t, i, "book") == 1 == Timeline.a11yHas(t, i, "button:Run key") && Timeline.signalInt(t, i, "book") == 2 == Timeline.a11yHas(t, i, "text:Bounds page"))
+
+def picksLabelMatches(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, Str.concat("text:Picks: ", Str.fromInt(Timeline.signalInt(t, i, "picks")))))
+
+def modalGatesCompositeDialog(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "modal") != 0 == Timeline.a11yHas(t, i, "overlay:Composite dialog=1") && Timeline.signalInt(t, i, "modal") != 0 == Timeline.a11yHas(t, i, "tab:Alpha=") && (Timeline.signalInt(t, i, "modal") != 0 && Timeline.signalInt(t, i, "modalTab") == 0) == Timeline.a11yHas(t, i, "text:Alpha body") && (Timeline.signalInt(t, i, "modal") != 0 && Timeline.signalInt(t, i, "modalTab") == 1) == Timeline.a11yHas(t, i, "button:Done modal") && (Timeline.signalInt(t, i, "modal") != 0 && Timeline.signalInt(t, i, "modalBook") == 0) == Timeline.a11yHas(t, i, "text:First note") && (Timeline.signalInt(t, i, "modal") != 0 && Timeline.signalInt(t, i, "modalBook") == 1) == Timeline.a11yHas(t, i, "text:Second note") && (Timeline.signalInt(t, i, "modal") == 0 || Timeline.a11yHas(t, i, Str.concat("text:Modal picks: ", Str.fromInt(Timeline.signalInt(t, i, "modalPicks"))))))
+
 def addChangesCount(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Add", pair => pair match {
   case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") + 1 && Timeline.signalInt(t, after, "open") == Timeline.signalInt(t, before, "open")
@@ -33,6 +48,41 @@ def hideClosesDetails(t: Timeline): Verdict =
   case (before, after) => Timeline.signalInt(t, after, "open") == 0
 })
 
+def applyMetricIncrementsPicks(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Apply metric", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "picks") == Timeline.signalInt(t, before, "picks") + 1 && Timeline.signalInt(t, after, "modal") == 0
+})
+
+def runKeyIncrementsPicks(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Run key", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "picks") == Timeline.signalInt(t, before, "picks") + 10 && Timeline.signalInt(t, after, "modal") == 0
+})
+
+def pinIncrementsPicks(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Pin", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "picks") == Timeline.signalInt(t, before, "picks") + 100 && Timeline.signalInt(t, after, "modal") == 0
+})
+
+def resetClearsPicks(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Reset picks", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "picks") == 0 && Timeline.signalInt(t, after, "modal") == 0
+})
+
+def openModalShowsDialog(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Open modal", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "modal") == 1 && Timeline.lastHitHas(t, after, "button:Open modal")
+})
+
+def modalPickKeepsBackgroundInert(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Modal pick", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "modalPicks") == Timeline.signalInt(t, before, "modalPicks") + 1 && Timeline.signalInt(t, after, "tab") == Timeline.signalInt(t, before, "tab") && Timeline.signalInt(t, after, "book") == Timeline.signalInt(t, before, "book") && Timeline.signalInt(t, after, "picks") == Timeline.signalInt(t, before, "picks")
+})
+
+def doneModalClosesDialog(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Done modal", pair => pair match {
+  case (before, after) => Timeline.signalInt(t, after, "modal") == 0 && Timeline.signalInt(t, after, "tab") == Timeline.signalInt(t, before, "tab") && Timeline.signalInt(t, after, "book") == Timeline.signalInt(t, before, "book") && Timeline.signalInt(t, after, "picks") == Timeline.signalInt(t, before, "picks")
+})
+
 def startsWithClosedDetails(t: Timeline): Verdict =
-  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "open") == 0 && Timeline.signalInt(t, i, "nested") == 0 && Timeline.signalInt(t, i, "show") == 0 && Timeline.signalInt(t, i, "conditional") == 1 && Timeline.signalInt(t, i, "count") == 0)
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "open") == 0 && Timeline.signalInt(t, i, "nested") == 0 && Timeline.signalInt(t, i, "show") == 0 && Timeline.signalInt(t, i, "conditional") == 1 && Timeline.signalInt(t, i, "count") == 0 && Timeline.signalInt(t, i, "tab") == 0 && Timeline.signalInt(t, i, "book") == 0 && Timeline.signalInt(t, i, "picks") == 0 && Timeline.signalInt(t, i, "modal") == 0 && Timeline.signalInt(t, i, "modalTab") == 0 && Timeline.signalInt(t, i, "modalBook") == 0 && Timeline.signalInt(t, i, "modalPicks") == 0)
 

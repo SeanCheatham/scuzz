@@ -125,7 +125,8 @@ Physical-device and real screen-reader checks for expansion controls remain open
 Tooltip checks cover focus, hover, popup input, Escape, composition, clipping, themes, and browser descriptions.
 Native and evaluator checks compare exact visibility, timelines, and claims.
 Physical-device and real screen-reader checks for tooltips remain open.
-Keyboard behavior for other composite controls remains unproven.
+Composite keyboard checks cover `View.tabs`, `View.indexBook`, `View.focusGroup`, modal `View.overlay` focus traps, and focus return.
+Physical-device and real screen-reader checks for composite controls remain open.
 Inline action checks cover wrapped fragments, Int keys, callbacks, focus, source copying, and browser button order.
 Physical-device and real screen-reader checks for inline actions remain open.
 Default native Skia checks cover kerning, ligatures, combining accents, Arabic joining, and mixed-direction lines.

@@ -20837,6 +20837,285 @@ static void test_composite_panel_stop(void) {
   sz_signal_int_free(selected);
 }
 
+static void modal_open_tap(SzView *view, void *env) {
+  (void)view;
+  sz_signal_int_set((SzSignalInt *)env, 1);
+}
+
+static void modal_close_tap(SzView *view, void *env) {
+  (void)view;
+  sz_signal_int_set((SzSignalInt *)env, 0);
+}
+
+static void test_composite_index_book_and_focus_group_keys(void) {
+  for (int wide = 0; wide < 2; wide++) {
+    float width = wide ? 800.f : 400.f;
+    SzSignalInt *selected = sz_signal_int(1);
+    SzSignalInt *first_hits = sz_signal_int(0);
+    SzSignalInt *middle_hits = sz_signal_int(0);
+    SzSignalInt *last_hits = sz_signal_int(0);
+    SzView *root = sz_view_column();
+    SzView *before = sz_view_button("Before", NULL, NULL);
+    SzView *sections = sz_view_column();
+    SzView *body1 = sz_view_button("Body 1", NULL, NULL);
+    sz_view_add_child(sections, sz_view_section("sec0", "Sec 0", sz_view_text("Zero")));
+    sz_view_add_child(sections, sz_view_section("sec1", "Sec 1", body1));
+    sz_view_add_child(sections, sz_view_section("sec2", "Sec 2", sz_view_text("Two")));
+    SzView *book = sz_view_index_book(selected, sections);
+    SzView *row = sz_view_row();
+    SzView *first = sz_view_button("First", keyboard_count, first_hits);
+    SzView *middle = sz_view_button("Middle", keyboard_count, middle_hits);
+    SzView *last = sz_view_button("Last", keyboard_count, last_hits);
+    sz_view_add_child(row, first);
+    sz_view_add_child(row, middle);
+    sz_view_add_child(row, last);
+    SzView *group = sz_view_focus_group(row);
+    SzView *after = sz_view_button("After", NULL, NULL);
+    sz_view_add_child(root, before);
+    sz_view_add_child(root, book);
+    sz_view_add_child(root, group);
+    sz_view_add_child(root, after);
+    sz_view_layout(root, width, 600, sz_theme_default());
+
+    assert(sz_view_tab_stop(first) && !sz_view_tab_stop(middle) && !sz_view_tab_stop(last));
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == before);
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) && !strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 1"));
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == body1);
+    sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+    assert(sz_view_focused(root) && !strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 1"));
+
+    sz_view_handle_key(root, "ArrowRight", "", SZ_KEY_CTRL);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 1"));
+    sz_view_handle_key(root, "ArrowRight", "", 0);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 2"));
+    assert(sz_signal_int_get(selected) == 1);
+    sz_view_handle_key(root, "ArrowRight", "", 0);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 0"));
+    sz_view_handle_key(root, "ArrowLeft", "", 0);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 2"));
+    sz_view_handle_key(root, "Home", "", 0);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 0"));
+    sz_view_handle_key(root, "End", "", 0);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 2"));
+    sz_view_handle_key(root, "Space", "", 0);
+    sz_view_layout(root, width, 600, sz_theme_default());
+    assert(sz_signal_int_get(selected) == 2);
+
+    sz_view_handle_key(root, "ArrowUp", "", 0);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 1"));
+    assert(sz_signal_int_get(selected) == 2);
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == first);
+    sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 1"));
+    sz_view_handle_key(root, "ArrowDown", "", 0);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 2"));
+
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == first);
+    sz_view_handle_key(root, "ArrowLeft", "", 0);
+    assert(sz_view_focused(root) == last);
+    sz_view_handle_key(root, "ArrowDown", "", 0);
+    assert(sz_view_focused(root) == first);
+    sz_view_handle_key(root, "End", "", 0);
+    assert(sz_view_focused(root) == last);
+    sz_view_handle_key(root, "Home", "", 0);
+    assert(sz_view_focused(root) == first);
+    sz_view_handle_key(root, "ArrowRight", "", 0);
+    assert(sz_view_focused(root) == middle);
+    sz_view_handle_key(root, "ArrowRight", "", SZ_KEY_ALT);
+    assert(sz_view_focused(root) == middle);
+    sz_view_handle_key(root, "Enter", "", 0);
+    assert(sz_signal_int_get(middle_hits) == 1);
+    assert(!sz_view_tab_stop(first) && sz_view_tab_stop(middle) && !sz_view_tab_stop(last));
+    sz_view_handle_key(root, "Tab", "", 0);
+    assert(sz_view_focused(root) == after);
+    sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+    assert(sz_view_focused(root) == middle);
+
+    assert(sz_view_navigate(root, "sec0"));
+    sz_view_layout(root, width, 600, sz_theme_default());
+    assert(sz_signal_int_get(selected) == 0);
+    sz_view_handle_key(root, "Tab", "", SZ_KEY_SHIFT);
+    assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Sec 0"));
+
+    sz_view_free(root);
+    sz_signal_int_free(selected);
+    sz_signal_int_free(first_hits);
+    sz_signal_int_free(middle_hits);
+    sz_signal_int_free(last_hits);
+  }
+}
+
+static void test_composite_modal_focus_parity(void) {
+  size_t before_bytes, before_count, after_bytes, after_count;
+  sz_alloc_stats(&before_bytes, &before_count);
+  SzSignalInt *bg_tab = sz_signal_int(0);
+  SzSignalInt *bg_book = sz_signal_int(0);
+  SzSignalInt *bg_hits = sz_signal_int(0);
+  SzSignalInt *open = sz_signal_int(0);
+  SzSignalInt *nested = sz_signal_int(0);
+  SzSignalInt *modal_tab = sz_signal_int(0);
+  SzSignalInt *modal_book = sz_signal_int(0);
+  SzSignalInt *modal_hits = sz_signal_int(0);
+  SzSignalInt *confirm_hits = sz_signal_int(0);
+
+  SzView *root = sz_view_stack();
+  SzView *page = sz_view_column();
+  SzView *bg_tabs_sections = sz_view_column();
+  sz_view_add_child(bg_tabs_sections, sz_view_section("bt0", "BgTab 0", sz_view_text("B0")));
+  sz_view_add_child(bg_tabs_sections, sz_view_section("bt1", "BgTab 1", sz_view_text("B1")));
+  SzView *bg_tabs_view = sz_view_tabs(bg_tab, bg_tabs_sections);
+  SzView *bg_book_sections = sz_view_column();
+  sz_view_add_child(bg_book_sections, sz_view_section("bb0", "BgSec 0", sz_view_text("S0")));
+  sz_view_add_child(bg_book_sections, sz_view_section("bb1", "BgSec 1", sz_view_text("S1")));
+  SzView *bg_book_view = sz_view_index_book(bg_book, bg_book_sections);
+  SzView *bg_row = sz_view_row();
+  SzView *pin_btn = sz_view_button("Pin", keyboard_count, bg_hits);
+  SzView *open_btn = sz_view_button("Open modal", modal_open_tap, open);
+  SzView *reset_btn = sz_view_button("Reset", keyboard_count, bg_hits);
+  sz_view_add_child(bg_row, pin_btn);
+  sz_view_add_child(bg_row, open_btn);
+  sz_view_add_child(bg_row, reset_btn);
+  SzView *bg_group = sz_view_focus_group(bg_row);
+  sz_view_add_child(page, bg_tabs_view);
+  sz_view_add_child(page, bg_book_view);
+  sz_view_add_child(page, bg_group);
+  sz_view_add_child(root, page);
+
+  SzView *modal_stack = sz_view_stack();
+  SzView *modal_col = sz_view_column();
+  SzView *mt_sections = sz_view_column();
+  SzView *modal_group_row = sz_view_row();
+  SzView *modal_act = sz_view_button("Modal act", keyboard_count, modal_hits);
+  SzView *open_confirm = sz_view_button("Open confirm", modal_open_tap, nested);
+  SzView *close_modal = sz_view_button("Close modal", modal_close_tap, open);
+  sz_view_add_child(modal_group_row, modal_act);
+  sz_view_add_child(modal_group_row, open_confirm);
+  sz_view_add_child(modal_group_row, close_modal);
+  SzView *modal_group = sz_view_focus_group(modal_group_row);
+  sz_view_add_child(mt_sections, sz_view_section("mt0", "Alpha", sz_view_text("Alpha body")));
+  sz_view_add_child(mt_sections, sz_view_section("mt1", "Beta", modal_group));
+  SzView *modal_tabs_view = sz_view_tabs(modal_tab, mt_sections);
+  SzView *mb_sections = sz_view_column();
+  sz_view_add_child(mb_sections, sz_view_section("mb0", "One", sz_view_text("One body")));
+  sz_view_add_child(mb_sections, sz_view_section("mb1", "Two", sz_view_text("Two body")));
+  SzView *modal_book_view = sz_view_index_book(modal_book, mb_sections);
+  sz_view_add_child(modal_col, modal_tabs_view);
+  sz_view_add_child(modal_col, modal_book_view);
+  sz_view_add_child(modal_stack, sz_view_center(sz_view_sized(360, 320, sz_view_card(modal_col))));
+
+  SzView *confirm_row = sz_view_row();
+  SzView *keep_btn = sz_view_button("Keep", keyboard_count, confirm_hits);
+  SzView *dismiss_confirm = sz_view_button("Dismiss confirm", modal_close_tap, nested);
+  sz_view_add_child(confirm_row, keep_btn);
+  sz_view_add_child(confirm_row, dismiss_confirm);
+  SzView *inner_modal = sz_view_overlay(nested, "Confirm",
+    sz_view_center(sz_view_sized(260, 140, sz_view_card(sz_view_focus_group(confirm_row)))));
+  sz_view_add_child(modal_stack, inner_modal);
+  SzView *outer_modal = sz_view_overlay(open, "Composite", modal_stack);
+  sz_view_add_child(root, outer_modal);
+
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  sz_view_focus(root, pin_btn);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == open_btn);
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_signal_int_get(open) == 1);
+  assert(!sz_view_tab_stop(pin_btn) && !sz_view_tab_stop(open_btn) && !sz_view_tab_stop(reset_btn));
+  assert(sz_view_focused(root) && !strcmp(sz_view_a11y_label(sz_view_focused(root)), "Alpha"));
+
+  /* Exercise View.tabs, View.focusGroup, and View.indexBook inside the active modal. */
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Beta"));
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_signal_int_get(modal_tab) == 1 && sz_signal_int_get(bg_tab) == 0);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == modal_act);
+  sz_view_handle_key(root, "End", "", 0);
+  assert(sz_view_focused(root) == close_modal);
+  sz_view_handle_key(root, "Home", "", 0);
+  assert(sz_view_focused(root) == modal_act);
+  sz_view_handle_key(root, "Space", "", 0);
+  assert(sz_signal_int_get(modal_hits) == 1 && sz_signal_int_get(bg_hits) == 0);
+
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "One"));
+  sz_view_handle_key(root, "ArrowDown", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Two"));
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_signal_int_get(modal_book) == 1 && sz_signal_int_get(bg_book) == 0);
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(!strcmp(sz_view_a11y_label(sz_view_focused(root)), "Beta"));
+
+  /* Open nested modal from "Open confirm" inside outer modal's focusGroup and close via action. */
+  sz_view_handle_key(root, "Tab", "", 0);
+  assert(sz_view_focused(root) == modal_act);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == open_confirm);
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_signal_int_get(nested) == 1);
+  assert(!sz_view_tab_stop(modal_act) && !sz_view_tab_stop(open_confirm) && !sz_view_tab_stop(close_modal));
+  assert(sz_view_focused(root) == keep_btn);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == dismiss_confirm);
+  sz_view_handle_key(root, "Space", "", 0);
+  assert(sz_signal_int_get(nested) == 0);
+  assert(sz_view_focused(root) == open_confirm);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_view_focused(root) == open_confirm);
+
+  /* Close outer modal via Escape: restores "Open modal" in background focusGroup. */
+  sz_view_handle_key(root, "Escape", "", 0);
+  assert(sz_signal_int_get(open) == 0);
+  assert(sz_view_focused(root) == open_btn);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_view_focused(root) == open_btn);
+  sz_view_handle_key(root, "ArrowRight", "", 0);
+  assert(sz_view_focused(root) == reset_btn);
+  sz_view_handle_key(root, "ArrowLeft", "", 0);
+  assert(sz_view_focused(root) == open_btn);
+
+  /* Re-open outer modal and close via "Close modal" action: immediately restores "Open modal". */
+  sz_view_handle_key(root, "Enter", "", 0);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_signal_int_get(open) == 1);
+  sz_view_focus(root, close_modal);
+  sz_view_handle_key(root, "Enter", "", 0);
+  assert(sz_signal_int_get(open) == 0);
+  assert(sz_view_focused(root) == open_btn);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_view_focused(root) == open_btn);
+
+  /* Re-open outer modal and close via backdrop tap: immediately restores "Open modal". */
+  sz_view_handle_key(root, "Space", "", 0);
+  sz_view_layout(root, 640, 520, sz_theme_default());
+  assert(sz_signal_int_get(open) == 1);
+  assert(sz_view_handle_tap(root, 40, 40));
+  assert(sz_signal_int_get(open) == 0);
+  assert(sz_view_focused(root) == open_btn);
+
+  sz_view_free(root);
+  sz_signal_int_free(bg_tab);
+  sz_signal_int_free(bg_book);
+  sz_signal_int_free(bg_hits);
+  sz_signal_int_free(open);
+  sz_signal_int_free(nested);
+  sz_signal_int_free(modal_tab);
+  sz_signal_int_free(modal_book);
+  sz_signal_int_free(modal_hits);
+  sz_signal_int_free(confirm_hits);
+  sz_alloc_stats(&after_bytes, &after_count);
+  assert(before_bytes == after_bytes && before_count == after_count);
+}
+
 static void theme_metrics_bad_font(void) {
   (void)sz_theme_metrics(NULL, 0, 6, 12, 8, 40);
 }
@@ -23346,6 +23625,8 @@ int main(int argc, char **argv) {
   test_composite_duplicate_focus();
   test_composite_named_radios();
   test_composite_panel_stop();
+  test_composite_index_book_and_focus_group_keys();
+  test_composite_modal_focus_parity();
   test_composite_radio_tab_stop();
   test_composite_tab_capacity();
   test_modal_pointer_surface();

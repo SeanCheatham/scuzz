@@ -14,7 +14,6 @@ Select work from these application needs:
 1. Expose shared semantics to native screen readers.
    Check Android raw touch exploration and real screen-reader behavior.
    Add iOS and Desktop screen-reader bridges.
-   Complete keyboard behavior for remaining composite controls.
    Add editable option search when an application needs it.
 2. Add wider font coverage, other contextual scripts across font changes, and bidi caret affinity.
 
