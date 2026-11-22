@@ -201,17 +201,31 @@ void sz_web_control(SzView *view, int role, const char *label, const char *route
 void sz_web_copy(SzView *view, const char *text) {
   sz_web_copy_id(sz_view_id(view), text);
 }
-EM_JS(void, sync_editor_tab, (uintptr_t id, const char *value, int start, int end), {
+EM_JS(void, sync_edit_selection, (uintptr_t id, const char *value, int anchor, int caret), {
   const node = Module.nodes.get(Number(id));
   if (!node) return;
   const text = UTF8ToString(Number(value));
   const bytes = new TextEncoder().encode(text);
   const decoder = new TextDecoder();
-  node.value = text;
+  if (node.value !== text) node.value = text;
   node.committed = text;
-  node.setSelectionRange(decoder.decode(bytes.subarray(0, start)).length,
-    decoder.decode(bytes.subarray(0, end)).length);
+  const a = decoder.decode(bytes.subarray(0, anchor)).length;
+  const b = decoder.decode(bytes.subarray(0, caret)).length;
+  node.setSelectionRange(Math.min(a, b), Math.max(a, b), a <= b ? 'forward' : 'backward');
 });
+
+static void sync_focused_edit(void) {
+  if (!active) return;
+  SzView *focused = sz_view_focused(sz_ui_session_root(active));
+  if (!focused) return;
+  SzViewKind kind = sz_view_kind(focused);
+  if (kind == SZ_VIEW_TEXT_FIELD)
+    sync_edit_selection(sz_view_id(focused), sz_view_text_field_value(focused),
+                        sz_view_web_anchor(focused), sz_view_text_field_caret(focused));
+  else if (kind == SZ_VIEW_EDITOR)
+    sync_edit_selection(sz_view_id(focused), sz_view_editor_value(focused),
+                        sz_view_web_anchor(focused), sz_view_editor_caret(focused));
+}
 
 EM_JS(void, web_inline_action, (uintptr_t parent, const SzRect *boxes, int count), {
   const item = Module.webFrame.items.at(-1);
@@ -409,9 +423,9 @@ EMSCRIPTEN_KEEPALIVE int sz_web_key(const char *key, int mods, int repeat) {
   input.key_repeat = repeat;
   int handled = sz_ui_session_live_inject(active, &input);
   SzView *focused = sz_view_focused(sz_ui_session_root(active));
-  if (!strcmp(key, "Tab") && focused && sz_view_kind(focused) == SZ_VIEW_EDITOR)
-    sync_editor_tab(sz_view_id(focused), sz_view_editor_value(focused),
-                    sz_view_editor_sel_start(focused), sz_view_editor_sel_end(focused));
+  if (focused && (sz_view_kind(focused) == SZ_VIEW_TEXT_FIELD ||
+                  (!strcmp(key, "Tab") && sz_view_kind(focused) == SZ_VIEW_EDITOR)))
+    sync_focused_edit();
   return handled;
 }
 
@@ -450,14 +464,46 @@ EMSCRIPTEN_KEEPALIVE void sz_web_copy_done(double id, int success) {
 EMSCRIPTEN_KEEPALIVE void sz_web_edit(double id, const char *value, int start, int end, int mode) {
   SzView *view = active ? sz_view_web_find(sz_ui_session_root(active), (uintptr_t)id) : NULL;
   if (!view || (sz_view_kind(view) != SZ_VIEW_TEXT_FIELD && sz_view_kind(view) != SZ_VIEW_EDITOR)) return;
+  int is_field = sz_view_kind(view) == SZ_VIEW_TEXT_FIELD;
+  int cur_anchor = sz_view_web_anchor(view);
+  int cur_caret = is_field ? sz_view_text_field_caret(view) : sz_view_editor_caret(view);
   sz_ui_session_focus_view(active, view);
+  if (mode == 2) {
+    if (start != cur_anchor || end != cur_caret)
+      sz_ui_session_set_sel(active, -1, start, end);
+    return;
+  }
   SzInputEvent input = {0};
-  if (mode != 2) {
-    input.kind = mode == 1 ? SZ_INPUT_COMPOSE : SZ_INPUT_TEXT;
+  if (mode == 1) {
+    input.kind = SZ_INPUT_COMPOSE;
     input.text = value;
     sz_ui_session_live_inject(active, &input);
+    return;
   }
-  if (mode != 1) sz_ui_session_set_sel(active, -1, start, end);
+  int old_s = cur_anchor < cur_caret ? cur_anchor : cur_caret;
+  int old_e = cur_anchor < cur_caret ? cur_caret : cur_anchor;
+  const char *prev = is_field ? sz_view_text_field_value(view) : sz_view_editor_value(view);
+  int old_len = prev ? (int)strlen(prev) : 0;
+  char *old_copy = is_field ? strdup(prev ? prev : "") : NULL;
+  input.kind = SZ_INPUT_TEXT;
+  input.text = value;
+  sz_ui_session_live_inject(active, &input);
+  sz_ui_session_set_sel(active, -1, start, end);
+  if (is_field && old_copy && value && start == end) {
+    int new_len = (int)strlen(value);
+    int tail = old_len - old_e;
+    if (end > old_s && new_len - end == tail &&
+        memcmp(old_copy, value, (size_t)old_s) == 0 &&
+        memcmp(old_copy + old_e, value + end, (size_t)tail) == 0) {
+      if (!(old_s == 0 && old_e == old_len && old_len > 0 && end == new_len && end > 4))
+        sz_view_web_set_affinity(view, 1);
+    } else if (new_len < old_len && end <= new_len &&
+               memcmp(old_copy, value, (size_t)end) == 0 &&
+               memcmp(old_copy + end + (old_len - new_len), value + end, (size_t)(new_len - end)) == 0) {
+      sz_view_web_after_delete(view, old_copy, old_len, end);
+    }
+  }
+  free(old_copy);
 }
 
 EMSCRIPTEN_KEEPALIVE void sz_web_fonts_changed(void) {
@@ -475,4 +521,7 @@ EMSCRIPTEN_KEEPALIVE void sz_web_pointer(double x, double y, int phase) {
   input.pointer_button = 1;
   input.pointer_phase = phase;
   sz_ui_session_live_inject(active, &input);
+  SzView *focused = sz_view_focused(sz_ui_session_root(active));
+  if (focused && sz_view_kind(focused) == SZ_VIEW_TEXT_FIELD)
+    sync_focused_edit();
 }

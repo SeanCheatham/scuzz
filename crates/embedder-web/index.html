@@ -98,10 +98,11 @@ var Module = {
     document.getElementById('feedback').textContent = success ? 'Copied' : 'Copy failed. Select the text and use Copy.';
   },
   syncEdit(node, mode = 0, preview = '') {
-    const start = encoder.encode(node.value.slice(0, node.selectionStart)).length;
-    const end = encoder.encode(node.value.slice(0, node.selectionEnd)).length;
+    const a = encoder.encode(node.value.slice(0, node.selectionStart)).length;
+    const b = encoder.encode(node.value.slice(0, node.selectionEnd)).length;
+    const backward = node.selectionDirection === 'backward';
     Module.ccall('sz_web_edit', null, ['number', 'string', 'number', 'number', 'number'],
-      [node.item.id, mode === 1 ? preview : node.value, start, end, mode]);
+      [node.item.id, mode === 1 ? preview : node.value, backward ? b : a, backward ? a : b, mode]);
     if (mode === 0) node.committed = node.value;
   },
   makeControl(item) {
@@ -148,7 +149,7 @@ var Module = {
         return;
       }
       Module.ccall('sz_web_focus', null, ['number'], [node.item.id]);
-      if (editing) Module.syncEdit(node, 2);
+      if (editing && !node.suppressFocusSync) Module.syncEdit(node, 2);
     });
     if (item.role === 55) {
       node.addEventListener('keydown', event => {
@@ -166,6 +167,14 @@ var Module = {
       node.spellcheck = false;
       if (item.role === 41) node.wrap = 'off';
       node.addEventListener('keydown', event => {
+        if (node.item.role === 3 && !node.composing && !event.isComposing &&
+            !event.ctrlKey && !event.metaKey && !event.altKey &&
+            ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+          event.preventDefault();
+          Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'],
+            [event.key, event.shiftKey ? 1 : 0, Number(event.repeat)]);
+          return;
+        }
         if (node.item.role !== 41 || event.key !== 'Tab' || event.metaKey || event.altKey) return;
         event.preventDefault();
         Module.syncEdit(node, 2);
@@ -188,7 +197,53 @@ var Module = {
       });
       node.addEventListener('select', () => { if (!node.composing) Module.syncEdit(node, 2); });
       node.addEventListener('keyup', () => { if (!node.composing) Module.syncEdit(node, 2); });
-      node.addEventListener('click', () => Module.syncEdit(node, 2));
+      if (item.role === 3) {
+        const pointer = (x, y, phase) => Module.ccall('sz_web_pointer', null,
+          ['number', 'number', 'number'], [x, y, phase]);
+        node.addEventListener('pointerdown', event => {
+          if (event.button !== 0 || event.pointerType === 'touch' || node.composing || node.dragging != null) return;
+          event.preventDefault();
+          node.dragging = event.pointerId;
+          node.suppressClick = true;
+          node.point = [event.clientX, event.clientY];
+          if (document.activeElement !== node) {
+            node.suppressFocusSync = true;
+            node.focus({preventScroll: true});
+            node.suppressFocusSync = false;
+          }
+          pointer(...node.point, 1);
+          try { node.setPointerCapture(event.pointerId); } catch (_) {}
+        });
+        node.addEventListener('pointermove', event => {
+          if (node.dragging !== event.pointerId) return;
+          event.preventDefault();
+          node.point = [event.clientX, event.clientY];
+          pointer(...node.point, 2);
+        });
+        const finish = event => {
+          if (node.dragging !== event.pointerId) return;
+          event.preventDefault();
+          node.dragging = null;
+          if (event.type === 'pointerup') node.point = [event.clientX, event.clientY];
+          pointer(...node.point, 3);
+          if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+        };
+        for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) node.addEventListener(name, finish);
+      }
+      node.addEventListener('click', event => {
+        if (node.suppressClick) { node.suppressClick = false; return; }
+        if (node.item.role === 3 && !node.composing && event.detail > 0) {
+          if (document.activeElement !== node) {
+            node.suppressFocusSync = true;
+            node.focus({preventScroll: true});
+            node.suppressFocusSync = false;
+          }
+          Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [event.clientX, event.clientY, 1]);
+          Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [event.clientX, event.clientY, 3]);
+          return;
+        }
+        Module.syncEdit(node, 2);
+      });
     } else if (item.role === 8 || item.role === 42) {
       node.setAttribute('role', item.role === 42 ? 'separator' : 'slider');
       if (item.role === 42) { node.setAttribute('aria-orientation', 'vertical'); node.style.cursor = 'col-resize'; }
@@ -461,6 +516,7 @@ var Module = {
           node.setAttribute('aria-setsize', item.optionCount);
           node.textContent = item.label;
         } else if (item.role === 3 || item.role === 41) {
+          if (item.role === 3) node.style.fontFamily = Module.scuzzFontStack;
           node.style.fontSize = item.font / scale + 'px';
           node.style.lineHeight = item.line_h / scale + 'px';
           node.style.paddingLeft = (item.inset + item.gutter) / scale + 'px';

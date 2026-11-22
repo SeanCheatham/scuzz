@@ -674,7 +674,8 @@ Its font shaper and DOM text ranges supply glyphs and source positions.
 Pinned Noto fonts supply fallback for Arabic, Devanagari, Thai, and Simplified Chinese.
 Font selection keeps source clusters together. Text line boxes contain fallback marks.
 Web packages include the same fonts. Font loading updates layout and keeps input state.
-Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
+Text fields track leading and trailing caret affinity at bidirectional run boundaries for paint, pointer input, and visual arrow movement.
+Other contextual scripts and mark placement across font changes remain open.
 Software and OpenGL use the same font selection, script runs, clusters, and carets.
 They rasterize HarfBuzz glyph outlines inside the visible clip.
 See the [HarfBuzz shaping model](https://harfbuzz.github.io/getting-started.html).

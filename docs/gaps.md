@@ -142,7 +142,8 @@ Finite checks cover source clusters, mark bounds, CJK field positions, and compo
 Browser checks cover delayed font loading, retained focus, source copying, and font advances.
 The CJK font download uses 17.8 MB before compression. Smaller font delivery remains open.
 Color emoji, author-supplied fonts, and locale-specific CJK forms remain open.
-Other contextual scripts, mark placement across font changes, and full bidi caret affinity remain open.
+Native and browser field checks cover leading and trailing bidi caret affinity for paint, pointer input, and visual arrow movement.
+Other contextual scripts and mark placement across font changes remain open.
 Native software and OpenGL use the shared native shaper and clipped glyph coverage rows.
 Their monospace paint uses pinned DejaVu Sans Mono glyph outlines.
 Monospace metrics scale without pixel rounding.

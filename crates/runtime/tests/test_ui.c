@@ -21368,6 +21368,140 @@ static void test_shaped_field_geometry(void) {
   sz_signal_str_free(value);
 }
 
+static void test_shaped_field_bidi_affinity(void) {
+  const SzTheme *theme = sz_theme_default();
+  int fg_r = (theme->foreground >> 16) & 255, fg_g = (theme->foreground >> 8) & 255, fg_b = theme->foreground & 255;
+  int bg_r = (theme->surface >> 16) & 255, bg_g = (theme->surface >> 8) & 255, bg_b = theme->surface & 255;
+  SzSignalStr *value = sz_signal_str("ab אב");
+  SzView *field = sz_view_text_field(value, "Name");
+  sz_view_layout(field, 320, 100, theme);
+  sz_view_focus(field, field);
+  SzRect frame = sz_view_frame(field);
+  float mid_y = frame.y + frame.h * .5f;
+
+  sz_view_handle_key(field, "Home", "", 0);
+  int ltr_offs[6] = {sz_view_text_field_caret(field)};
+  float ltr_xs[6] = {sz_view_caret_rect(field, theme).x};
+  for (int i = 1; i < 6; i++) {
+    sz_view_handle_key(field, "ArrowRight", "", 0);
+    ltr_offs[i] = sz_view_text_field_caret(field);
+    ltr_xs[i] = sz_view_caret_rect(field, theme).x;
+    assert(ltr_xs[i] > ltr_xs[i - 1] + 2.f);
+  }
+  const int expected_ltr[6] = {0, 1, 2, 3, 5, 7};
+  for (int i = 0; i < 6; i++) assert(ltr_offs[i] == expected_ltr[i]);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 7);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[5]) < .01f);
+
+  sz_view_handle_key(field, "End", "", 0);
+  assert(sz_view_text_field_caret(field) == 7);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[5]) < .01f);
+  sz_view_handle_key(field, "ArrowLeft", "", 0);
+  assert(sz_view_text_field_caret(field) == 5);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[4]) < .01f);
+  sz_view_handle_key(field, "ArrowLeft", "", 0);
+  assert(sz_view_text_field_caret(field) == 7);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[3]) < .01f);
+
+  SkSurface *surface = sk_surface_make_raster_n32_premul(320, 100);
+  assert(surface);
+  assert(sz_view_paint(field, sk_surface_get_canvas(surface), 320, 100, theme));
+  const uint8_t *pixels = sk_surface_peek_pixels(surface, NULL);
+  int top_row = (int)ceilf(sz_view_caret_rect(field, theme).y);
+  assert(px_rgb(pixels, 320, (int)floorf(ltr_xs[3]), top_row, fg_r, fg_g, fg_b));
+  assert(px_rgb(pixels, 320, (int)floorf(ltr_xs[5]), top_row, bg_r, bg_g, bg_b));
+
+  sz_view_activate(field, field, ltr_xs[2] + (ltr_xs[3] - ltr_xs[2]) * .75f, mid_y);
+  assert(sz_view_text_field_caret(field) == 3);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[3]) < .01f);
+
+  sz_view_activate(field, field, ltr_xs[5] - (ltr_xs[5] - ltr_xs[4]) * .25f, mid_y);
+  assert(sz_view_text_field_caret(field) == 3);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[5]) < .01f);
+  assert(sz_view_paint(field, sk_surface_get_canvas(surface), 320, 100, theme));
+  pixels = sk_surface_peek_pixels(surface, NULL);
+  assert(px_rgb(pixels, 320, (int)floorf(ltr_xs[5]), top_row, fg_r, fg_g, fg_b));
+  assert(px_rgb(pixels, 320, (int)floorf(ltr_xs[3]), top_row, bg_r, bg_g, bg_b));
+  sz_view_handle_text_edit(field, "X", 0);
+  assert(!strcmp(sz_signal_str_get(value), "ab Xאב"));
+
+  sz_signal_str_set(value, "ab אב");
+  sz_view_activate(field, field, ltr_xs[3] + (ltr_xs[4] - ltr_xs[3]) * .25f, mid_y);
+  assert(sz_view_text_field_caret(field) == 7);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[3]) < .01f);
+  sz_view_handle_text_edit(field, "!", 0);
+  assert(!strcmp(sz_signal_str_get(value), "ab אב!"));
+
+  sz_signal_str_set(value, "ab אב");
+  sz_view_set_text_field_sel(field, 3, 7);
+  sz_view_handle_key(field, "ArrowLeft", "", 0);
+  assert(sz_view_text_field_caret(field) == 7);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[3]) < .01f);
+  sz_view_set_text_field_sel(field, 3, 7);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 3);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[5]) < .01f);
+  sz_view_set_text_field_sel(field, 0, 7);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 7);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - ltr_xs[5]) < .01f);
+
+  sz_signal_str_set(value, "abאב");
+  sz_view_set_text_field_caret(field, 4);
+  sz_view_handle_text_edit(field, "", 1);
+  assert(!strcmp(sz_signal_str_get(value), "abב"));
+  assert(sz_view_text_field_caret(field) == 2);
+  float right_b = frame.x + 6.f + sk_font_measure_string("abב", 14);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - right_b) < .5f);
+  sz_signal_str_set(value, "abאב");
+  sz_view_set_text_field_caret(field, 2);
+  sz_view_handle_text_edit(field, "", 1);
+  assert(!strcmp(sz_signal_str_get(value), "aאב"));
+  assert(sz_view_text_field_caret(field) == 1);
+  float after_a = frame.x + 6.f + sk_font_measure_string("a", 14);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - after_a) < .5f);
+
+  sz_signal_str_set(value, "אב ab");
+  sz_view_handle_key(field, "Home", "", 0);
+  int rtl_offs[6] = {sz_view_text_field_caret(field)};
+  float rtl_xs[6] = {sz_view_caret_rect(field, theme).x};
+  for (int i = 1; i < 6; i++) {
+    sz_view_handle_key(field, "ArrowLeft", "", 0);
+    rtl_offs[i] = sz_view_text_field_caret(field);
+    rtl_xs[i] = sz_view_caret_rect(field, theme).x;
+    assert(rtl_xs[i] < rtl_xs[i - 1] - 2.f);
+  }
+  const int expected_rtl[6] = {0, 2, 4, 5, 6, 7};
+  for (int i = 0; i < 6; i++) assert(rtl_offs[i] == expected_rtl[i]);
+  sz_view_handle_key(field, "End", "", 0);
+  assert(sz_view_text_field_caret(field) == 7);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - rtl_xs[5]) < .01f);
+  sz_view_activate(field, field, rtl_xs[5] + (rtl_xs[4] - rtl_xs[5]) * .25f, mid_y);
+  assert(sz_view_text_field_caret(field) == 5);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - rtl_xs[5]) < .01f);
+  sz_view_activate(field, field, rtl_xs[3] + (rtl_xs[2] - rtl_xs[3]) * .25f, mid_y);
+  assert(sz_view_text_field_caret(field) == 5);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - rtl_xs[3]) < .01f);
+
+  sz_signal_str_set(value, "e\xcc\x81\xd7\x90");
+  sz_view_handle_key(field, "Home", "", 0);
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 3);
+  float accent_x = sz_view_caret_rect(field, theme).x;
+  sz_view_handle_key(field, "ArrowRight", "", 0);
+  assert(sz_view_text_field_caret(field) == 5);
+  float accent_end_x = sz_view_caret_rect(field, theme).x;
+  assert(accent_end_x > accent_x + 3.f);
+  sz_view_activate(field, field, accent_end_x - 1.f, mid_y);
+  assert(sz_view_text_field_caret(field) == 3);
+  assert(fabsf(sz_view_caret_rect(field, theme).x - accent_end_x) < .01f);
+
+  sk_surface_unref(surface);
+  sz_view_free(field);
+  sz_signal_str_free(value);
+}
+
 static void test_shaped_text_wrapping(void) {
   assert(sk_font_measure_string("i", 14) < sk_font_measure_string("W", 14));
   const char *source = "ééé";
@@ -22766,6 +22900,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--shaping")) {
     test_shaped_field_marks();
     test_shaped_field_geometry();
+    test_shaped_field_bidi_affinity();
     test_shaped_text_wrapping();
     test_font_change_joining();
     test_font_change_direction();
@@ -23604,6 +23739,7 @@ int main(int argc, char **argv) {
   test_select_scope_and_journal();
   test_shaped_field_marks();
   test_shaped_field_geometry();
+  test_shaped_field_bidi_affinity();
   test_shaped_text_wrapping();
   test_font_change_joining();
   test_font_change_direction();
