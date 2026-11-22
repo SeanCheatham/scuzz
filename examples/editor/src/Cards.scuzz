@@ -378,6 +378,7 @@ def finish(root: String, op: Json): IO[Unit] =
     _ <- IO.foreachDiscard(ws, w => writeOne(root, w))
     _ <- Fs.write(recordPath(root, id), text(op))
     _ <- Fs.write(Fs.join(storage(root), "last.json"), if (str(op, "decision") == "accept" || str(op, "decision") == "install-rule") text(op) else "")
+    _ <- if (str(op, "decision") == "install-rule") Fs.write(Fs.join(storage(root), "active-rule.txt"), "") else IO.pure(())
     _ <- Fs.write(Fs.join(storage(root), "journal.json"), "")
   } yield ()
 
@@ -501,7 +502,13 @@ def summarizeRecords(disk: List[(String, String)], records: List[Json]): Json =
     diskSorted = List.map(diskPaths, p => (p, List.at(disk, List.indexOf(rawPaths, p))._2))
     workspaceFiles = Json.Arr(List.map(diskSorted, f => Json.Obj([("path", Json.Str(f._1)), ("sha256", Json.Str(Hash.sha256(f._2)))])))
     workspaceSha = setHash(diskSorted)
-    human = List.filter(ordered, r => str(r, "kind") != "automatic")
+    human = List.filter(ordered, r => str(r, "kind") != "automatic" && str(r, "kind") != "rule")
+    rules = List.filter(ordered, r => str(r, "kind") == "rule")
+    rulesInstalled = List.filter(rules, r => str(r, "decision") == "install-rule")
+    rulesRejected = List.filter(rules, r => str(r, "decision") == "reject-rule")
+    ruleUndos = List.filter(rules, r => str(r, "decision") == "undo")
+    ruleUndoneIds = List.distinct(List.map(ruleUndos, r => str(r, "card")))
+    rulesActive = List.len(List.filter(rulesInstalled, r => !List.contains(ruleUndoneIds, str(r, "card"))))
     accepts = List.filter(human, r => str(r, "decision") == "accept")
     baselines = List.filter(human, r => str(r, "decision") == "baseline" || str(r, "decision") == "reject")
     abstains = List.filter(human, r => str(r, "decision") == "abstain" || str(r, "decision") == "skip")
@@ -539,7 +546,7 @@ def summarizeRecords(disk: List[(String, String)], records: List[Json]): Json =
     rateText = formatHundredths(rateX100)
     byReason = Json.Obj([("no-visible-difference", Json.Int(noDiff)), ("need-another-scenario", Json.Int(needScen)), ("outside-my-goal", Json.Int(outsideGoal)), ("unspecified", Json.Int(unspecified))])
     note = "Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior."
-  } yield Json.Obj([("accepted", Json.Int(List.len(accepts))), ("retained_acceptances", Json.Int(retainedCount)), ("baseline_choices", Json.Int(List.len(baselines))), ("abstentions", Json.Int(List.len(abstains))), ("abstentions_by_reason", byReason), ("automatic_exclusions", Json.Int(List.len(autos))), ("duplicates", Json.Int(List.len(dups))), ("undo", Json.Int(List.len(undos))), ("readiness_ms", Json.Int(readinessMs)), ("review_ms", Json.Int(reviewMs)), ("retained_per_review_minute_x100", Json.Int(rateX100)), ("retained_per_review_minute", Json.Str(rateText)), ("measure_note", Json.Str(note)), ("workspace_sha256", Json.Str(workspaceSha)), ("workspace_files", workspaceFiles), ("acceptances", Json.Arr(audits))])
+  } yield Json.Obj([("accepted", Json.Int(List.len(accepts))), ("retained_acceptances", Json.Int(retainedCount)), ("baseline_choices", Json.Int(List.len(baselines))), ("abstentions", Json.Int(List.len(abstains))), ("abstentions_by_reason", byReason), ("automatic_exclusions", Json.Int(List.len(autos))), ("duplicates", Json.Int(List.len(dups))), ("undo", Json.Int(List.len(undos))), ("rules_installed", Json.Int(List.len(rulesInstalled))), ("rules_active", Json.Int(rulesActive)), ("rules_undone", Json.Int(List.len(ruleUndos))), ("rules_rejected", Json.Int(List.len(rulesRejected))), ("readiness_ms", Json.Int(readinessMs)), ("review_ms", Json.Int(reviewMs)), ("retained_per_review_minute_x100", Json.Int(rateX100)), ("retained_per_review_minute", Json.Str(rateText)), ("measure_note", Json.Str(note)), ("workspace_sha256", Json.Str(workspaceSha)), ("workspace_files", workspaceFiles), ("acceptances", Json.Arr(audits))])
 
 def loadRecords(root: String): IO[List[Json]] =
   Proposal.loadLocalRecords(root)
@@ -551,7 +558,7 @@ def sessionSummary(root: String): IO[Json] =
   } yield summarizeRecords(disk, records)
 
 def emptySummaryLines(workspaceSha: String): List[String] =
-  ["Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior.", "Accepted: 0; retained: 0; retained / active review min: 0.00", "Baseline choices: 0; Undo: 0", "Abstentions: 0 (no-visible-difference: 0, need-another-scenario: 0, outside-my-goal: 0, unspecified: 0)", "Automatic exclusions: 0; duplicates: 0", "Readiness wait: 0 ms; active review time: 0 ms", Str.concat("Workspace SHA-256: ", workspaceSha)]
+  ["Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior.", "Accepted: 0; retained: 0; retained / active review min: 0.00", "Baseline choices: 0; Undo: 0", "Abstentions: 0 (no-visible-difference: 0, need-another-scenario: 0, outside-my-goal: 0, unspecified: 0)", "Rule reviews: installed 0 (active 0, undone 0); rejected 0", "Automatic exclusions: 0; duplicates: 0", "Readiness wait: 0 ms; active review time: 0 ms", Str.concat("Workspace SHA-256: ", workspaceSha)]
 
 def summaryLines(summary: Json): List[String] =
   for {
@@ -561,7 +568,8 @@ def summaryLines(summary: Json): List[String] =
   fs = Json.arr(Diags.jsonField(a, "files"))
   fileText = List.join(List.map(fs, f => Str.concat(str(f, "path"), Str.concat(":", Str.concat(Str.take(str(f, "accepted_sha256"), 8), Str.concat("->", if (str(f, "current_sha256") == "") "missing" else Str.take(str(f, "current_sha256"), 8)))))), ", ")
 } yield Str.concat("Audit ", Str.concat(str(a, "proposal"), Str.concat(" (", Str.concat(Str.take(str(a, "card"), 8), Str.concat("): ", Str.concat(str(a, "status"), Str.concat(" [", Str.concat(fileText, "]")))))))))
-    header = [str(summary, "measure_note"), Str.concat("Accepted: ", Str.concat(Str.fromInt(Json.getInt(summary, "accepted", 0)), Str.concat("; retained: ", Str.concat(Str.fromInt(Json.getInt(summary, "retained_acceptances", 0)), Str.concat("; retained / active review min: ", str(summary, "retained_per_review_minute")))))), Str.concat("Baseline choices: ", Str.concat(Str.fromInt(Json.getInt(summary, "baseline_choices", 0)), Str.concat("; Undo: ", Str.fromInt(Json.getInt(summary, "undo", 0))))), Str.concat("Abstentions: ", Str.concat(Str.fromInt(Json.getInt(summary, "abstentions", 0)), Str.concat(" (no-visible-difference: ", Str.concat(Str.fromInt(Json.getInt(byReason, "no-visible-difference", 0)), Str.concat(", need-another-scenario: ", Str.concat(Str.fromInt(Json.getInt(byReason, "need-another-scenario", 0)), Str.concat(", outside-my-goal: ", Str.concat(Str.fromInt(Json.getInt(byReason, "outside-my-goal", 0)), Str.concat(", unspecified: ", Str.concat(Str.fromInt(Json.getInt(byReason, "unspecified", 0)), ")")))))))))), Str.concat("Automatic exclusions: ", Str.concat(Str.fromInt(Json.getInt(summary, "automatic_exclusions", 0)), Str.concat("; duplicates: ", Str.fromInt(Json.getInt(summary, "duplicates", 0))))), Str.concat("Readiness wait: ", Str.concat(Str.fromInt(Json.getInt(summary, "readiness_ms", 0)), Str.concat(" ms; active review time: ", Str.concat(Str.fromInt(Json.getInt(summary, "review_ms", 0)), " ms")))), Str.concat("Workspace SHA-256: ", str(summary, "workspace_sha256"))]
+    ruleLine = Str.concat("Rule reviews: installed ", Str.concat(Str.fromInt(Json.getInt(summary, "rules_installed", 0)), Str.concat(" (active ", Str.concat(Str.fromInt(Json.getInt(summary, "rules_active", 0)), Str.concat(", undone ", Str.concat(Str.fromInt(Json.getInt(summary, "rules_undone", 0)), Str.concat("); rejected ", Str.fromInt(Json.getInt(summary, "rules_rejected", 0)))))))))
+    header = [str(summary, "measure_note"), Str.concat("Accepted: ", Str.concat(Str.fromInt(Json.getInt(summary, "accepted", 0)), Str.concat("; retained: ", Str.concat(Str.fromInt(Json.getInt(summary, "retained_acceptances", 0)), Str.concat("; retained / active review min: ", str(summary, "retained_per_review_minute")))))), Str.concat("Baseline choices: ", Str.concat(Str.fromInt(Json.getInt(summary, "baseline_choices", 0)), Str.concat("; Undo: ", Str.fromInt(Json.getInt(summary, "undo", 0))))), Str.concat("Abstentions: ", Str.concat(Str.fromInt(Json.getInt(summary, "abstentions", 0)), Str.concat(" (no-visible-difference: ", Str.concat(Str.fromInt(Json.getInt(byReason, "no-visible-difference", 0)), Str.concat(", need-another-scenario: ", Str.concat(Str.fromInt(Json.getInt(byReason, "need-another-scenario", 0)), Str.concat(", outside-my-goal: ", Str.concat(Str.fromInt(Json.getInt(byReason, "outside-my-goal", 0)), Str.concat(", unspecified: ", Str.concat(Str.fromInt(Json.getInt(byReason, "unspecified", 0)), ")")))))))))), ruleLine, Str.concat("Automatic exclusions: ", Str.concat(Str.fromInt(Json.getInt(summary, "automatic_exclusions", 0)), Str.concat("; duplicates: ", Str.fromInt(Json.getInt(summary, "duplicates", 0))))), Str.concat("Readiness wait: ", Str.concat(Str.fromInt(Json.getInt(summary, "readiness_ms", 0)), Str.concat(" ms; active review time: ", Str.concat(Str.fromInt(Json.getInt(summary, "review_ms", 0)), " ms")))), Str.concat("Workspace SHA-256: ", str(summary, "workspace_sha256"))]
   } yield List.concat(header, auditLines)
 
 private def setupRuleStorage(root: String): IO[Unit] =
@@ -845,7 +853,6 @@ def installRule(root: String, ruleCard: Json, dirties: List[String]): IO[Unit] =
     now <- Clock.monotonic()
     op = Json.Obj([("operation", Json.Str(Str.concat("install-rule-", id))), ("card", Json.Str(id)), ("kind", Json.Str("rule")), ("proposal", Proposal.field(ruleCard, "proposal")), ("decision", Json.Str("install-rule")), ("witness", Json.Str(str(Diags.jsonField(ruleCard, "witness"), "id"))), ("objective", Proposal.field(ruleCard, "objective")), ("region", Json.Arr(List.map(props, f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(ws))])
     _ <- Fs.write(Fs.join(storage(root), "journal.json"), text(op)).flatMap(_ => finish(root, op))
-    _ <- Fs.write(Fs.join(storage(root), "active-rule.txt"), "")
   } yield ()
 
 def rejectRule(root: String, ruleCard: Json): IO[Unit] =

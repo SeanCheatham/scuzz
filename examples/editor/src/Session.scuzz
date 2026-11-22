@@ -5,6 +5,14 @@ record SessionS(objective: Signal[String], paths: Signal[String], mode: Signal[I
 def refreshSummary(root: String, s: SessionS): IO[Unit] =
   if (Str.isEmpty(root)) IO.pure(()) else Cards.sessionSummary(root).map(j => Signal.set(s.summary, Cards.summaryLines(j))).handleErrorWith(_ => IO.pure(()))
 
+def restoredInit(saved: Json, files: List[(String, String)]): (String, String, String) =
+  for {
+    objective = Json.getStr(saved, "objective", "")
+    savedAllowed = List.filter(List.map(Json.arr(Proposal.field(saved, "allowed")), j => Str.trim(Json.strOr(j, ""))), p => !Str.isEmpty(p))
+    paths = if (List.isEmpty(savedAllowed)) List.join(List.map(files, f => f._1), ",") else List.join(savedAllowed, ",")
+    status = if (Str.isEmpty(Str.trim(objective))) "Set an objective, then select Start." else "Session restored in paused state. Select Start to resume."
+  } yield (objective, paths, status)
+
 def create(root: String): IO[SessionS] =
   for {
     files <- Cards.own(root)
@@ -12,16 +20,15 @@ def create(root: String): IO[SessionS] =
     jobs <- Ref.of(OwnedJob("", []: List[Fiber[Unit]], false))
     reviews <- Ref.of(OwnedJob("", []: List[Fiber[Unit]], false))
     savedRaw <- Fs.read(Fs.join(Cards.storage(root), "session.json")).handleErrorWith(_ => IO.pure("{}"))
-    saved <- Proposal.parse(savedRaw, 8192)
+    saved <- Proposal.parse(if (Str.isEmpty(Str.trim(savedRaw))) "{}" else savedRaw, 8192)
     id = Json.getStr(saved, "model", "qwen3.5-4b")
     selected <- Models.select(id)
     resolved = Proposal.field(saved, "resolved_model")
     _ <- Models.need(Json.getStr(saved, "mode", "external") != "local" || Proposal.str(resolved, "revision") == selected.revision && Proposal.str(resolved, "sha256") == selected.sha256 && Proposal.str(saved, "backend") == Models.backendBuild(), "saved local model identity does not match the pinned catalog")
     count = Json.getInt(saved, "requests", 0)
     _ <- Models.need(count >= 0 && count <= 8 && (List.isEmpty(Json.keys(saved)) || Proposal.version(saved)), "local session metadata is invalid")
-    objective = Json.getStr(saved, "objective", "")
-    paths = if (List.isEmpty(Json.keys(saved))) List.join(List.map(files, f => f._1), ",") else List.join(List.map(Json.arr(Proposal.field(saved, "allowed")), j => Json.strOr(j, "")), ",")
-    created = SessionS(Signal.make(objective), Signal.make(paths), Signal.make(if (Json.getStr(saved, "mode", "external") == "local") 1 else 0), Signal.make(id), Signal.make(0), Signal.make(count), Signal.make("Set an objective, then select Start."), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), cache, Signal.make(""), Signal.make(List.map(Models.catalog(), m => Models.modelJson(cache, m, false))), Signal.make(0), Signal.make(0), Signal.make(Cards.emptySummaryLines(Cards.setHash(files))))
+    restored = restoredInit(saved, files)
+    created = SessionS(Signal.make(restored._1), Signal.make(restored._2), Signal.make(if (Json.getStr(saved, "mode", "external") == "local") 1 else 0), Signal.make(id), Signal.make(0), Signal.make(count), Signal.make(restored._3), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), cache, Signal.make(""), Signal.make(List.map(Models.catalog(), m => Models.modelJson(cache, m, false))), Signal.make(0), Signal.make(0), Signal.make(Cards.emptySummaryLines(Cards.setHash(files))))
     _ = if (List.isEmpty(Json.keys(saved))) () else Signal.set(created.config, settings(created))
     hasRecords <- Fs.exists(Fs.join(Cards.storage(root), "records")).handleErrorWith(_ => IO.pure(0))
     _ <- if (hasRecords == 0) IO.pure(()) else refreshSummary(root, created)

@@ -13,3 +13,16 @@ oracle snippetsFmt(): Bool =
 oracle cmdsOk(): Bool =
   List.forall(Manual.allCmd(), s => Str.startsWith(s, "scuzz ")) && List.forall(Manual.allCmd(), s => Manual.hasVerb(Manual.cmdVerb(s)))
 
+private def flatTopic(name: String): String =
+  Str.replace(Manual.renderTopic(name), """
+""", " ")
+
+oracle topicsReconciled(): Bool =
+  for {
+    lang = flatTopic("language")
+    gui = flatTopic("gui")
+    ver = flatTopic("verify")
+    cmds = flatTopic("commands")
+    ide = flatTopic("ide")
+  } yield Str.contains(lang, "user-defined record, or enum") && Str.contains(lang, "Map and Ref bindings remain outside this check.") && Str.contains(lang, "guarded only by erased checks") && !Str.contains(lang, "Other whole container bindings remain outside this check.") && Str.contains(gui, "View.rotate(degrees, child)") && Str.contains(gui, "View.animatedRotation(value, pumps, child)") && Str.contains(gui, "View.focusGroup") && Str.contains(ver, "mutate.survivors") && Str.contains(ver, "diverged_workloads") && Str.contains(ver, "passed_claims") && Str.contains(cmds, "declaration boundaries at delimiter depth zero") && Str.contains(ide, "Need another scenario") && Str.contains(ide, "Rule review") && Str.contains(ide, "Refresh summary") && Str.contains(ide, "Retain region") && Str.contains(ide, "sixteen chronological feedback records") && !Str.contains(ide, "Local IDE requests use the latest three.")
+

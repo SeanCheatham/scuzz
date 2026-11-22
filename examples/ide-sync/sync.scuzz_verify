@@ -81,7 +81,7 @@ oracle recordEncoding(): Bool =
   } yield Json.getInt(opAcc0, "v", 0) == 1 && Json.getInt(opAcc0, "lane", -9) == 1 && Json.getInt(opRej0, "lane", -9) == 0 && Json.getInt(opAcc1, "lane", -9) == 0 && Json.getInt(opRej1, "lane", -9) == 1 && Json.getInt(opSkip, "lane", -9) == -1 && IdeSync.str(opAcc0, "generator") == "g1" && IdeSync.str(opAcc1, "generator") == "" && IdeSync.str(opSkip, "decision") == "abstain" && IdeSync.str(opSkip, "reason") == "outside-my-goal" && List.len(Json.arr(IdeSync.field(opAcc0, "writes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(opRej0, "writes"))) && List.len(Json.arr(IdeSync.field(sum0, "before"))) == 1 && List.len(Json.arr(IdeSync.field(sum0, "changes"))) == 1 && List.isEmpty(Json.arr(IdeSync.field(sum1, "changes"))) && Json.getInt(sum0, "flip", -1) == 0 && Json.getInt(sum1, "flip", -1) == 1
 
 oracle hashOrderCanonical(): Bool =
-  IdeSync.setHash([("src/B.scuzz", "2"), ("src/A.scuzz", "1")]) == IdeSync.setHash([("src/A.scuzz", "1"), ("src/B.scuzz", "2")]) && IdeSync.applyPaths([("src/Main.scuzz", "v0")], [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]) == [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]
+  Str.contains(Main.usageLine(), "scuzz ide serve") && Str.contains(Main.usageLine(), "scuzz ide crank") && IdeSync.setHash([("src/B.scuzz", "2"), ("src/A.scuzz", "1")]) == IdeSync.setHash([("src/A.scuzz", "1"), ("src/B.scuzz", "2")]) && IdeSync.applyPaths([("src/Main.scuzz", "v0")], [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]) == [("src/Main.scuzz", "v1"), ("src/Extra.scuzz", "e")]
 
 private def faulted(t: Timeline, i: Int): Bool =
   Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs")

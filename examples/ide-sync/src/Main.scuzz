@@ -1,2 +1,5 @@
+def usageLine(): String =
+  "Use scuzz ide serve [OPTIONS] [PATH] or scuzz ide crank [OPTIONS] [PATH] for /v1/ide/sync and verified generation."
+
 @main def main: IO[Unit] =
-  IO.println("Use scuzz ide serve [OPTIONS] [PATH] to serve /v1/ide/sync.")
+  IO.println(usageLine())
