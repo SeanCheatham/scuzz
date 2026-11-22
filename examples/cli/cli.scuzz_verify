@@ -229,3 +229,44 @@ oracle numericFlags(): Bool =
 oracle numericFlagRoundTrip(n: Int): Bool =
   Cli.showFlagInt(Str.fromInt(n)) == Str.fromInt(n) && Cli.showFlagNat(Str.fromInt(n)) == (if (n >= 0) Str.fromInt(n) else "fail")
 
+private def spanEq(s: Mutate.SiteSpan, file: String, kind: String, line: Int, col: Int, eline: Int, ecol: Int): Bool =
+  s.file == file && s.kind == kind && s.line == line && s.column == col && s.endLine == eline && s.endColumn == ecol
+
+oracle mutationSurvivorAttribution(): Bool =
+  for {
+    sharedSrc = """def helper(n: Int where n >= 0): Bool =
+  (n + 1 == 2) && true
+"""
+    mainSrc = "def choose(flag: Bool): Int =\n  (if (flag) 0 else 1).require(v => !flag || v >= 0)\n\ndef viewPair(s: Signal[Int]): View =\n  View.column([View.bindText(Signal.map(s, x => Str.fromInt(x))), View.button(\"A\", _ => IO.pure(())), View.button(\"B\", _ => IO.pure(()))])\n"
+    live = [("Shared", sharedSrc), ("Main", mainSrc)]
+    built = Verify.rewriteReqFiles(live)
+    s0 = Mutate.siteSpanFiles(live, built, 0, false)
+    s1 = Mutate.siteSpanFiles(live, built, 1, false)
+    s2 = Mutate.siteSpanFiles(live, built, 2, false)
+    s3 = Mutate.siteSpanFiles(live, built, 3, false)
+    s4 = Mutate.siteSpanFiles(live, built, 4, false)
+    s5 = Mutate.siteSpanFiles(live, built, 5, false)
+    s6 = Mutate.siteSpanFiles(live, built, 6, false)
+    s7 = Mutate.siteSpanFiles(live, built, 7, false)
+    s8 = Mutate.siteSpanFiles(live, built, 8, false)
+    s9 = Mutate.siteSpanFiles(live, built, 9, false)
+    s10 = Mutate.siteSpanFiles(live, built, 10, false)
+    s11 = Mutate.siteSpanFiles(live, built, 11, false)
+    o0 = Mutate.siteSpanFiles(live, built, 0, true)
+    o1 = Mutate.siteSpanFiles(live, built, 1, true)
+    o2 = Mutate.siteSpanFiles(live, built, 2, true)
+    o3 = Mutate.siteSpanFiles(live, built, 3, true)
+    enc = Mutate.encodeSurvived(["idle", "corpus/a.toml"], ["claimOne", "claimTwo"])
+    dec = Mutate.decodeSurvived(enc)
+    kept = Mutate.parseLive(built)
+    ds = Mutate.defSites(kept, false)
+    rawStore = Mutate.storeFormat("inp1", Mutate.storeMerge(ds, Mutate.MutStore("inp1", []), [(3, enc), (4, "excluded"), (5, "incomplete")]))
+    parsedStore = Mutate.storeParse(rawStore)
+    reused3 = Mutate.storeReusable(parsedStore, ds, 3)
+    reused5 = Mutate.storeReusable(parsedStore, ds, 5)
+    survivors = Mutate.survivorsOf(live, built, [(3, reused3), (4, "excluded"), (5, "incomplete")], false)
+    scope = Verify.InputScope(2, [Verify.Workload("idle", true, "", "", "", [], "evaluator", "passed", "")], [4], [], ["claimOne", "claimTwo"], ["claimOne", "claimTwo"])
+    rawJson = Verify.summaryJsonMut(false, 42, 16, 10, 0, 1, 0, "0", "", 0, 1, 0, 3, 13, false, "", 1, 1, [5], [4], survivors, [], [], [], [], [], [], [], [], Verify.noBreadth(), scope, [])
+    human = Mutate.survivorHuman(s3, ["idle", "corpus/a.toml"], ["claimOne", "claimTwo"])
+  } yield Mutate.countFiles(built, false) == 13 && spanEq(s0, "Shared.scuzz", "logic-flip", 2, 16, 2, 18) && spanEq(s1, "Shared.scuzz", "and-left", 2, 16, 2, 18) && spanEq(s2, "Shared.scuzz", "and-right", 2, 16, 2, 18) && spanEq(s3, "Shared.scuzz", "rel-flip", 2, 10, 2, 12) && spanEq(s4, "Shared.scuzz", "arith-flip", 2, 6, 2, 7) && spanEq(s5, "Shared.scuzz", "int-flip", 2, 8, 2, 9) && spanEq(s6, "Shared.scuzz", "bool-flip", 2, 19, 2, 23) && spanEq(s7, "Main.scuzz", "if-swap", 2, 4, 2, 6) && spanEq(s8, "Main.scuzz", "int-flip", 2, 14, 2, 15) && spanEq(s9, "Main.scuzz", "int-flip", 2, 21, 2, 22) && spanEq(s10, "Main.scuzz", "signal-map", 5, 30, 5, 40) && spanEq(s11, "Main.scuzz", "handler-swap", 5, 67, 5, 78) && spanEq(o0, "Main.scuzz", "logic-flip", 2, 43, 2, 45) && spanEq(o1, "Main.scuzz", "not-drop", 2, 37, 2, 38) && spanEq(o2, "Main.scuzz", "rel-flip", 2, 48, 2, 50) && spanEq(o3, "Main.scuzz", "int-flip", 2, 51, 2, 52) && dec._1 == ["idle", "corpus/a.toml"] && dec._2 == ["claimOne", "claimTwo"] && reused3 == enc && reused5 == "" && List.len(survivors) == 1 && human == "  mutant 3: survived at Shared.scuzz:2:10 (Shared.helper, rel-flip; diverged: idle, corpus/a.toml; claims: claimOne, claimTwo)" && Str.contains(rawJson, "\"incomplete_sites\":[5],\"excluded_sites\":[4],\"survivors\":[{\"site\":3,\"kind\":\"rel-flip\",\"file\":\"Shared.scuzz\",\"line\":2,\"column\":10,\"end_line\":2,\"end_column\":12,\"diverged_workloads\":[\"idle\",\"corpus/a.toml\"],\"passed_claims\":[\"claimOne\",\"claimTwo\"]}]")
+
