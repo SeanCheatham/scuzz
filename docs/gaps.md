@@ -95,7 +95,9 @@ Raw touchscreen conversion and real screen-reader checks remain open.
 Android records accessibility actions, viewport changes, and lifecycle input.
 A finite emulator proof replays that record in Headless.
 Named Signals, field text, byte selection offsets, and the semantic tree agree.
-iOS and Desktop screen-reader bridges remain open.
+Linux Desktop exposes semantic controls over AT-SPI2 D-Bus.
+Private D-Bus checks replay recorded Linux Desktop accessibility actions in Headless.
+macOS, iOS, and real screen-reader checks remain open.
 Keyboard checks cover a form, named radio groups, manual tabs, nested dialogs, named range sliders, and editors.
 Range checks cover signed 64-bit bounds, stepped values, pointer input, and browser accessibility data.
 Physical-device and real screen-reader checks for sliders remain open.

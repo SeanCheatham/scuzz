@@ -50,6 +50,16 @@ __attribute__((weak)) int sz_embedder_available(void) { return 0; }
 __attribute__((weak)) double sz_embedder_display_scale(void) { return 1.0; }
 __attribute__((weak)) int sz_embedder_alive(void) { return 0; }
 __attribute__((weak)) int sz_embedder_reduced_motion(void) { return 0; }
+__attribute__((weak)) int sz_embedder_accessibility_available(void) {
+  return 0;
+}
+__attribute__((weak)) void
+sz_embedder_publish_accessibility(SzA11ySnapshot *snapshot, int width,
+                                  int height) {
+  (void)width;
+  (void)height;
+  sz_a11y_snapshot_free(snapshot);
+}
 __attribute__((weak)) int sz_embedder_present(const char *title, int point_w,
                                               int point_h, int pixel_w,
                                               int pixel_h, const uint8_t *rgba,
@@ -1652,7 +1662,7 @@ static void drain_desktop_events(SzUiSession *session) {
   SzInputEvent ev;
   if (!session || session->cfg.kind != SZ_UI_RUNTIME_DESKTOP)
     return;
-  if (!sz_embedder_available())
+  if (!sz_embedder_available() && !sz_embedder_accessibility_available())
     return;
   while (sz_embedder_poll_event(&ev))
     inject_native_event(session, &ev);
@@ -1806,6 +1816,12 @@ int sz_ui_pump_sync(SzUiSession *session) {
       session->lifecycle != SZ_LIFECYCLE_STOP && !defer_debug_dump(session))
     sz_ui_session_write_dump(session, session->debug_dump_path);
   /* Desktop peer: present to OS surface when embedder is available. */
+  if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP &&
+      session->lifecycle == SZ_LIFECYCLE_RESUME &&
+      sz_embedder_accessibility_available()) {
+    sz_embedder_publish_accessibility(sz_ui_session_a11y_snapshot(session),
+                                      session->cfg.width, session->cfg.height);
+  }
   if (session->lifecycle != SZ_LIFECYCLE_STOP &&
       session->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
     rgba = sk_surface_peek_pixels(session->surface, &nbytes);
