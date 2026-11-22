@@ -2041,8 +2041,10 @@ async function checkShaping(browserType, url, mobile) {
     const fontsReleased = new Promise(resolve => { releaseFonts = resolve; });
     const fontRequests = new Set();
     await context.route(/\/fonts\/[^/]+\.ttf$/, async route => {
-      fontRequests.add(new URL(route.request().url()).pathname);
+      const pathname = new URL(route.request().url()).pathname;
+      fontRequests.add(pathname);
       await fontsReleased;
+      if (pathname.includes('/arabic-')) await new Promise(resolve => setTimeout(resolve, 25));
       await route.continue();
     });
     const page = await context.newPage();
@@ -2053,15 +2055,22 @@ async function checkShaping(browserType, url, mobile) {
     const initialField = page.getByRole('textbox', {name: 'Name', exact: true});
     await initialField.focus();
     await initialField.evaluate(node => { node.setSelectionRange(1, 1); node.dispatchEvent(new Event('select')); });
+    await page.waitForFunction(() => !Module.ccall('sz_web_needs_paint', 'number', [], []));
     const identity = await initialField.getAttribute('id');
     const paintsBeforeFonts = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
     releaseFonts();
     await page.evaluate(async () => {
-      await Promise.all([document.fonts.load('24px "Scuzz devanagari"', 'नमस्ते'),
-        document.fonts.load('24px "Scuzz arabic"', 'مر'), document.fonts.load('24px "Scuzz thai"', 'สวัสดี'), document.fonts.load('24px "Scuzz sc"', '中文')]);
+      await Promise.all([
+        ...(Module.fontLoads ? Module.fontLoads.values() : []),
+        document.fonts.load('24px "Scuzz devanagari"', 'नमस्ते'),
+        document.fonts.load('24px "Scuzz arabic"', 'مر'),
+        document.fonts.load('24px "Arabic context"', 'مر'),
+        document.fonts.load('24px "Scuzz thai"', 'สวัสดี'),
+        document.fonts.load('24px "Scuzz sc"', '中文'),
+      ]);
       await document.fonts.ready;
     });
-    await page.waitForFunction(paints => [...document.fonts].filter(face => face.family.includes('Scuzz ')).every(face => face.status === 'loaded') && Module.ccall('sz_web_paints', 'number', [], []) > paints, paintsBeforeFonts);
+    await page.waitForFunction(paints => [...document.fonts].filter(face => face.family.includes('Scuzz ') || face.family.includes('Arabic context')).every(face => face.status === 'loaded') && !Module.ccall('sz_web_needs_paint', 'number', [], []) && Module.ccall('sz_web_paints', 'number', [], []) > paints, paintsBeforeFonts);
     assert.equal(fontRequests.size, 4, 'load the four pinned fonts');
     assert.equal(await initialField.getAttribute('id'), identity, 'font loading keeps field identity');
     assert(await initialField.evaluate(node => node === document.activeElement && node.selectionStart === 1 && node.selectionEnd === 1), 'font loading keeps focus and selection');
