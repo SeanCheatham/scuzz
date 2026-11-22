@@ -1652,7 +1652,138 @@ try:
  assert partial.read_bytes() == b"incomplete" and unrelated.poll() is None
 finally:
  unrelated.terminate();unrelated.wait(timeout=5)
-print("Generation: offline catalog, finite command refusals, both controlled profiles, strict schema, context, timeout, signals, private HTTP, and owned cleanup")
+import urllib.request
+crank_ws = root / "crank-hardening"
+helper = crank_ws / "pkg/helper"
+pkg = crank_ws / "pkg"
+(helper / "src").mkdir(parents=True)
+(pkg / "src").mkdir(parents=True)
+(pkg / "corpus").mkdir(parents=True)
+(pkg / ".scuzz/ide").mkdir(parents=True)
+(helper / "scuzz.toml").write_text('[package]\nname = "helper"\nversion = "0.1.0"\n')
+(helper / "src/HelperMod.scuzz").write_text('def v1(): String =\n  "v1"\n\ndef v2(): String =\n  "v2"\n\ndef v3(): String =\n  "v3"\n\ndef writeV2(): IO[Unit] =\n  Fs.write("out.txt", "v2")\n\ndef writeExtra(s: String): IO[Unit] =\n  Fs.write("unused.txt", s)\n')
+(pkg / "scuzz.toml").write_text('[package]\nname = "helper"\nversion = "0.1.0"\ndescription = "helper"\n\n[dependencies]\nhelper = { path = "helper" }\n\n[fuzz]\nscore_floor = 0.0\n')
+(pkg / "src/Main.scuzz").write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", HelperMod.v1())\n\n@main def main: IO[Unit] =\n  step()\n')
+(pkg / "smoke.scuzz_scenario").write_text('def setup(): IO[Unit] =\n  Fs.write("out.txt", "init")\n\ndef runStep(): IO[Unit] =\n  Main.step()\n')
+(pkg / "smoke.scuzz_verify").write_text('def writesExpected(t: Timeline): Verdict =\n  Verdict.every(t, i => !Timeline.driveHas(t, i, "runStep") || Timeline.fileTextIs(t, i, "out.txt", "v1") || Timeline.fileTextIs(t, i, "out.txt", "v2") || Timeline.fileTextIs(t, i, "out.txt", "v3"))\n')
+(pkg / "corpus/run.toml").write_text('[fuzz]\nevents = ["drive runStep"]\n')
+subprocess.run([str(cli), "fmt", str(helper)], env=env, check=True, timeout=30, stdout=subprocess.DEVNULL)
+subprocess.run([str(cli), "fmt", str(pkg)], env=env, check=True, timeout=30, stdout=subprocess.DEVNULL)
+def run_crank(rounds=1):
+ proc = subprocess.run([str(cli), "ide", "crank", "--rounds", str(rounds), "--message-format=json", str(pkg)], env=env, capture_output=True, text=True, timeout=180)
+ assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+ return json.loads(proc.stdout)
+idle0 = run_crank(1)
+assert idle0["results"][0]["status"] == "idle", idle0
+base_hash = idle0["baseline"]
+(pkg / ".scuzz/ide/session.json").write_text(json.dumps({"objective": "switch output to v2", "allowed": ["src/Main.scuzz", "src/HelperMod.scuzz"]}))
+outside = crank_ws / "outside.scuzz"
+outside.write_text('def step(): IO[Unit] =\n  Fs.write("out.txt", "outside")\n\n@main def main: IO[Unit] =\n  step()\n')
+sym_file = pkg / "build/proposals/01-sym-file/src"
+sym_file.mkdir(parents=True)
+(sym_file / "Main.scuzz").symlink_to(outside)
+c1 = run_crank(1)
+assert c1["published"] == 0 and c1["rejected"] == 1 and "unsafe resolved path" in c1["results"][0]["diagnostic"], c1
+outside_dir = crank_ws / "outside-dir"
+(outside_dir / "src").mkdir(parents=True)
+(outside_dir / "src/Main.scuzz").write_text(outside.read_text())
+(pkg / "build/proposals/02-sym-dir").symlink_to(outside_dir)
+c2 = run_crank(1)
+assert c2["published"] == 0 and c2["rejected"] == 1 and "unsafe resolved path" in c2["results"][0]["diagnostic"], c2
+v2_src = 'def step(): IO[Unit] =\n  Fs.write("out.txt", HelperMod.v2())\n\n@main def main: IO[Unit] =\n  step()\n'
+v2_sha = hashlib.sha256(v2_src.encode()).hexdigest()
+def pub_meta(req_id, base, files, kind="behavior", v=1):
+ return json.dumps({"v": v, "request": req_id, "baseline": base, "kind": kind, "generator": "external", "files": [{"path": p, "sha256": h} for p, h in files]})
+corrupt_dir = pkg / "build/proposals/03-corrupt"
+corrupt_dir.mkdir(parents=True)
+(corrupt_dir / "proposal.json").write_text('{"v": 1, "kind":')
+mismatch_dir = pkg / "build/proposals/04-hash-mismatch"
+(mismatch_dir / "src").mkdir(parents=True)
+(mismatch_dir / "src/Main.scuzz").write_text("partial write")
+(mismatch_dir / "proposal.json").write_text(pub_meta("req-04", base_hash, [("src/Main.scuzz", v2_sha)]))
+rule_dir = pkg / "build/proposals/05-rule-draft"
+rule_dir.mkdir(parents=True)
+rule_src = (pkg / "smoke.scuzz_verify").read_text()
+(rule_dir / "smoke.scuzz_verify").write_text(rule_src)
+(rule_dir / "proposal.json").write_text(json.dumps({"v": 1, "request": "req-rule", "baseline": base_hash, "kind": "rule", "witness": "a" * 64, "generator": "external", "files": [{"path": "smoke.scuzz_verify", "sha256": hashlib.sha256(rule_src.encode()).hexdigest()}]}))
+bad_meta = pkg / "build/proposals/06-bad-meta"
+(bad_meta / "src").mkdir(parents=True)
+(bad_meta / "src/Main.scuzz").write_text(v2_src)
+(bad_meta / "proposal.json").write_text(pub_meta("req-06", base_hash, [("src/Main.scuzz", v2_sha)], v=2))
+undeclared = pkg / "build/proposals/07-undeclared"
+(undeclared / "src").mkdir(parents=True)
+(undeclared / "src/Main.scuzz").write_text(v2_src)
+(undeclared / "src/Extra.scuzz").write_text('def extra(): Int =\n  1\n')
+(undeclared / "proposal.json").write_text(pub_meta("req-07", base_hash, [("src/Main.scuzz", v2_sha)]))
+c3 = run_crank(2)
+assert c3["published"] == 0 and c3["rejected"] == 2, c3
+assert [r["diagnostic"] for r in c3["results"]] == ["invalid publication fields", "undeclared publication file"], c3
+for skipped in ("03-corrupt", "04-hash-mismatch", "05-rule-draft"):
+ assert not (pkg / ".scuzz/ide/sync/claimed" / (skipped + ".json")).exists(), skipped
+shutil.rmtree(corrupt_dir)
+dup_dir = pkg / "build/proposals/03b-dup-stem"
+(dup_dir / "src").mkdir(parents=True)
+dup_src = 'def shadow(): Int =\n  1\n'
+(dup_dir / "src/HelperMod.scuzz").write_text(dup_src)
+(dup_dir / "proposal.json").write_text(pub_meta("req-dup", base_hash, [("src/HelperMod.scuzz", hashlib.sha256(dup_src.encode()).hexdigest())]))
+c_dup = run_crank(1)
+assert c_dup["published"] == 0 and c_dup["rejected"] == 1 and c_dup["results"][0]["diagnostic"] == "duplicate module stem", c_dup
+inc_dir = pkg / "build/proposals/03c-mut-incomplete"
+(inc_dir / "src").mkdir(parents=True)
+inc_src = 'def guard(): Int =\n  10 / (if (true) 1 else 0)\n\ndef step(): IO[Unit] =\n  if (guard() == 10) Fs.write("out.txt", HelperMod.v2()) else IO.pure(())\n\n@main def main: IO[Unit] =\n  step()\n'
+(inc_dir / "src/Main.scuzz").write_text(inc_src)
+subprocess.run([str(cli), "fmt", str(inc_dir)], env=env, check=True, timeout=30, stdout=subprocess.DEVNULL)
+inc_fmt = (inc_dir / "src/Main.scuzz").read_text()
+(inc_dir / "proposal.json").write_text(pub_meta("req-inc", base_hash, [("src/Main.scuzz", hashlib.sha256(inc_fmt.encode()).hexdigest())]))
+c_inc = run_crank(1)
+assert c_inc["published"] == 0 and c_inc["rejected"] == 1 and c_inc["results"][0]["diagnostic"] == "mutation-incomplete", c_inc
+surv_dir = pkg / "build/proposals/03d-mut-survived"
+(surv_dir / "src").mkdir(parents=True)
+surv_src = 'def step(): IO[Unit] =\n  HelperMod.writeExtra(Str.fromInt(if (true) 1 else 2)).flatMap(_ => HelperMod.writeV2())\n\n@main def main: IO[Unit] =\n  step()\n'
+(surv_dir / "src/Main.scuzz").write_text(surv_src)
+subprocess.run([str(cli), "fmt", str(surv_dir)], env=env, check=True, timeout=30, stdout=subprocess.DEVNULL)
+surv_fmt = (surv_dir / "src/Main.scuzz").read_text()
+(surv_dir / "proposal.json").write_text(pub_meta("req-surv", base_hash, [("src/Main.scuzz", hashlib.sha256(surv_fmt.encode()).hexdigest())]))
+c_surv = run_crank(1)
+assert c_surv["published"] == 0 and c_surv["rejected"] == 1 and c_surv["results"][0]["diagnostic"] == "mutation-survived", c_surv
+assert not list((pkg / ".scuzz/ide/cards").glob("*/card.json"))
+(mismatch_dir / "src/Main.scuzz").write_text(v2_src)
+serve_port = free_port()
+srv = subprocess.Popen([str(cli), "ide", "serve", "--port", serve_port, "--once", "--generate", "--rounds", "1", "--message-format=json", str(pkg)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+try:
+ ready_line = srv.stdout.readline()
+ assert ready_line, srv.stderr.read()
+ ready_doc = json.loads(ready_line)
+ assert ready_doc["ok"] is True and ready_doc["generate"] is True, ready_doc
+ deadline = time.monotonic() + 180
+ snap = None
+ while time.monotonic() < deadline:
+  try:
+   req_http = urllib.request.Request("http://127.0.0.1:" + serve_port + "/v1/ide/sync", headers={"Authorization": "Bearer " + ready_doc["token"]})
+   with urllib.request.urlopen(req_http, timeout=10) as resp:
+    snap = json.loads(resp.read().decode())
+   break
+  except OSError:
+   assert srv.poll() is None, srv.stderr.read()
+   time.sleep(0.05)
+ assert snap is not None and len(snap["cards"]) == 1 and snap["cards"][0]["proposal"] == "04-hash-mismatch", snap
+ out_rest, err_rest = srv.communicate(timeout=15)
+ assert srv.returncode == 0 and out_rest == "", (srv.returncode, out_rest, err_rest)
+finally:
+ if srv.poll() is None:
+  srv.kill();srv.wait(timeout=5)
+assert not (pkg / ".scuzz/ide/sync/claimed/05-rule-draft.json").exists() and (rule_dir / "proposal.json").exists()
+assert 'name = "helper"' in (pkg / "scuzz.toml").read_text() and 'description = "helper"' in (pkg / "scuzz.toml").read_text()
+(pkg / "src/Main.scuzz").write_text(v2_src)
+v3_src = 'def step(): IO[Unit] =\n  Fs.write("out.txt", HelperMod.v3())\n\n@main def main: IO[Unit] =\n  step()\n'
+stale_dir = pkg / "build/proposals/08-stale-base"
+(stale_dir / "src").mkdir(parents=True)
+(stale_dir / "src/Main.scuzz").write_text(v3_src)
+(stale_dir / "proposal.json").write_text(pub_meta("req-08", base_hash, [("src/Main.scuzz", hashlib.sha256(v3_src.encode()).hexdigest())]))
+c_stale = run_crank(1)
+assert c_stale["published"] == 0 and c_stale["rejected"] == 1 and c_stale["results"][0]["diagnostic"] == "stale-proposal-baseline", c_stale
+assert (pkg / "src/Main.scuzz").read_text() == v2_src
+print("Generation: offline catalog, finite command refusals, both controlled profiles, strict schema, context, timeout, signals, private HTTP, inbox hardening, and owned cleanup")
 PYGENERATION
   # Controlled artifacts exercise the shared finite command without weights.
   python3 - <<'PYGENCOMMAND'
