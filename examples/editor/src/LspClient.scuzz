@@ -28,49 +28,10 @@ def parseJson(s: String): Json =
   }
 
 def infoCall(root: String, path: String, body: String, method: String, line: Int, col: Int, nu: String): IO[Json] =
-  IO.pure(parseJson(Lsp.resultMsg("2", infoResult(root, path, body, method, line, col, nu))))
-
-def infoResult(root: String, path: String, body: String, method: String, line: Int, col: Int, nu: String): String =
-  if (method == "textDocument/hover") Lsp.hoverJson(Lsp.hoverAt(body, line, col)) else if (method == "textDocument/definition") Lsp.defJson(Str.concat("file://", path), body, line, col) else if (method == "textDocument/rename") Lsp.renameJson(Str.concat("file://", path), body, line, col, nu) else "null"
-
-def encodeJson(j: Json): String =
-  Json.stringify(j) match {
-    case Result.Ok(s) => s
-    case Result.Err(_) => ""
-  }
+  Lsp.query(root, path, body, method, line, col, nu).map(s => parseJson(s))
 
 def takeIfMatch(j: Json, want: Int): Json =
   if (Diags.jsonInt(Diags.jsonField(j, "id")) == want) j else Json.Null()
-
-def emptyObj(): Json =
-  Json.Obj([])
-
-def jField(k: String, v: Json): (String, Json) =
-  (k, v)
-
-def posObj(line: Int, col: Int): Json =
-  Json.Obj(jField("line", Json.Int(line)) :: jField("character", Json.Int(col)) :: [])
-
-def docObj(uri: String): Json =
-  Json.Obj(jField("uri", Json.Str(uri)) :: [])
-
-def initBody(rootUri: String): String =
-  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("x"))) :: jField("method", Json.Str("initialize")) :: jField("params", Json.Obj(jField("rootUri", Json.Str(rootUri)) :: jField("capabilities", emptyObj()) :: [])) :: []))
-
-def didOpenBody(uri: String, text: String): String =
-  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("textDocument/didOpen")) :: jField("params", Json.Obj(jField("textDocument", Json.Obj(jField("uri", Json.Str(uri)) :: jField("languageId", Json.Str("scuzz")) :: jField("version", Json.Int(Str.len("x"))) :: jField("text", Json.Str(text)) :: [])) :: [])) :: []))
-
-def initializedBody(): String =
-  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("initialized")) :: jField("params", emptyObj()) :: []))
-
-def requestBody(method: String, uri: String, line: Int, col: Int): String =
-  encodeJson(method match {
-  case "textDocument/rename" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: jField("newName", Json.Str("x")) :: [])) :: [])
-  case "textDocument/formatting" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: [])) :: [])
-  case "textDocument/semanticTokens/full" | "textDocument/inlayHint" | "textDocument/foldingRange" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: [])) :: [])
-  case "textDocument/codeAction" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("range", Json.Obj(jField("start", posObj(line, col)) :: jField("end", posObj(line, col)) :: [])) :: [])) :: [])
-  case _ => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: [])) :: [])
-})
 
 def hoverText(j: Json): String =
   Diags.jsonStr(Diags.jsonField(Diags.jsonField(Diags.jsonField(j, "result"), "contents"), "value")) match {
@@ -221,21 +182,5 @@ def readResult(pid: Int, buffer: Ref[String], want: Int): IO[Json] =
   } yield out
 
 def lspCall(root: String, path: String, body: String, method: String): IO[Json] =
-  for {
-    cli <- Main.scuzzCli()
-    pid <- Sys.spawn(Str.concat("exec ", Str.concat(Lanes.shQuote(cli), " lsp")))
-    buffer <- Ref.of("")
-    j <- IO.ensure(IO.timeout(30000, for {
-  abs <- Fs.canonicalize(path).handleErrorWith(_ => IO.pure(path))
-  rootAbs <- Fs.canonicalize(root).handleErrorWith(_ => IO.pure(root))
-  uri = Str.concat("file://", abs)
-  rootUri = Str.concat("file://", rootAbs)
-  _ <- Sys.childWrite(pid, frame(initBody(rootUri)))
-  _ <- readResult(pid, buffer, Str.len("x"))
-  _ <- Sys.childWrite(pid, frame(initializedBody()))
-  _ <- Sys.childWrite(pid, frame(didOpenBody(uri, body)))
-  _ <- Sys.childWrite(pid, frame(requestBody(method, uri, Str.len(""), Str.len(""))))
-  result <- readResult(pid, buffer, Str.len("xy"))
-} yield result), Sys.kill(pid).handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(pid).handleErrorWith(_ => IO.pure(()))))
-  } yield j
+  Lsp.query(root, path, body, method, Str.len(""), Str.len(""), "x").map(s => parseJson(s))
 

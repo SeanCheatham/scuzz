@@ -356,7 +356,7 @@ One host sample does not establish a general cost bound or method advantage.
 ### Supporting compiler and editor work
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
-- **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.
+- **IDE subprocesses.** Editor capabilities run in-process through `Lsp`. Run, Fuzz, and Diff use the CLI. Removing these calls is not a gate for the stream.
 - **Standard kits.** OS threads remain missing. Add kit work only when it blocks an ordinary program or a required review proof.
 
 ### Local model evidence

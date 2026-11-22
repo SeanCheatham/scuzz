@@ -648,7 +648,90 @@ def lspWireOver(): Bool =
   Lsp.overlayHas(Lsp.overlayPut([], "/x", ""), "/x") && Lsp.overlayGet(Lsp.overlayPut([], "/x", ""), "/x") == "" && !Lsp.overlayHas([], "/x")
 
 def lspWireCaps(): Bool =
-  Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "\"file://x\"") && Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "bar") && !Str.contains(Lsp.caps(), "prepareProvider") && !Str.contains(Lsp.caps(), "documentSymbol") && !Str.contains(Lsp.caps(), "inlayHint") && !Str.contains(Lsp.caps(), "foldingRange") && !Str.contains(Lsp.caps(), "codeAction") && !Str.contains(Lsp.caps(), "declarationProvider") && !Str.contains(Lsp.caps(), "triggerCharacters") && Str.contains(Lsp.caps(), "utf-8")
+  Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "\"file://x\"") && Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "bar") && !Str.contains(Lsp.caps(), "prepareProvider") && !Str.contains(Lsp.caps(), "documentSymbol") && Str.contains(Lsp.caps(), "\"inlayHintProvider\":true") && Str.contains(Lsp.caps(), "\"foldingRangeProvider\":true") && Str.contains(Lsp.caps(), "\"codeActionProvider\":true") && !Str.contains(Lsp.caps(), "declarationProvider") && !Str.contains(Lsp.caps(), "triggerCharacters") && Str.contains(Lsp.caps(), "utf-8") && lspEditorSliceOk()
+
+private def lspEditorSliceOk(): Bool =
+  for {
+    inlaySrc = "def demo(n: Int): IO[Int] =\n  for {\n    a = n + 1\n    b <- IO.pure(\"hi\")\n    c = 3: Int\n    d = (4: Int)\n    _ <- IO.println(b)\n    if a > 0\n  } yield a + c + d\n"
+    inlays = Lsp.inlayHintsJson(inlaySrc)
+    foldSrc = """enum Choice:
+  case One
+  case Two
+
+record Pair(
+  left: Int,
+  right: Int
+)
+
+trait Show[A]:
+  def render(x: A): String
+
+impl Show[Int] for Pair:
+  def render(x: Int): String =
+    Str.fromInt(x)
+
+oracle law(n: Int): Bool =
+  n == n
+
+def check(c: Choice): Int =
+  for {
+    base = 1
+    out = c match {
+      case Choice.One => base
+      case Choice.Two => 2
+    }
+  } yield out
+"""
+    folds = Lsp.foldingRangesJson(foldSrc)
+    unfmt = """def f():Int=1
+"""
+    fmtClean = Parse.pretty(Parse.parse(Lexer.lex(unfmt)))
+    actDirty = Lsp.codeActionsJson("file:///ws/src/Main.scuzz", unfmt)
+    actClean = Lsp.codeActionsJson("file:///ws/src/Main.scuzz", fmtClean)
+    actBroken = Lsp.codeActionsJson("file:///ws/src/Main.scuzz", """def broken(: Int = 1
+""")
+    scopeSrc = """def first(x: Int): Int =
+  x + 1
+
+def second(x: Int): Int =
+  for {
+    x = x + 10
+    y = x * 2
+  } yield y match {
+    case 0 => x
+    case y => y + 1
+  }
+"""
+    renParam = Lsp.renameJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 10, "n")
+    renFor = Lsp.renameJson("file:///ws/src/Main.scuzz", scopeSrc, 5, 4, "inner")
+    renMatch = Lsp.renameJson("file:///ws/src/Main.scuzz", scopeSrc, 9, 9, "armVal")
+    renCapture = Lsp.renameJson("file:///ws/src/Main.scuzz", scopeSrc, 5, 4, "y")
+    renKw = Lsp.renameJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 10, "def")
+    renBad = Lsp.renameJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 10, "9bad")
+    renAtKw = Lsp.renameJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 1, "bar")
+    mods = [Lsp.ModFile("Main", "/ws/src/Main.scuzz", """def run(): String =
+  Help.word()
+"""), Lsp.ModFile("Help", "/ws/dep/src/Help.scuzz", "def word(): String =\n  \"ok\"\n")]
+    wsHover = Lsp.hoverWorkspace(mods, "Main", """def run(): String =
+  Help.word()
+""", 1, 8)
+    wsComp = Lsp.completeWorkspaceJson(mods, "Main", """def run(): String =
+  Help.wo
+""", Lsp.qualPrefixAt("""def run(): String =
+  Help.wo
+""", Lsp.offsetOf("""def run(): String =
+  Help.wo
+""", 1, 9)))
+    wsDef = Lsp.defWorkspaceJson(mods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", """def run(): String =
+  Help.word()
+""", 1, 8)
+    wsRen = Lsp.renameWorkspaceJson(mods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", """def run(): String =
+  Help.word()
+""", 1, 8, "phrase")
+    rootDiag = Drive.sourceError("Main.scuzz", "needs formatting")
+    depPub = Lsp.publishDiagsFull("file:///ws/dep/src/Main.scuzz", "/ws/dep/src/Main.scuzz", "/ws", mods, rootDiag)
+    rootPub = Lsp.publishDiagsFull("file:///ws/src/Main.scuzz", "/ws/src/Main.scuzz", "/ws", mods, rootDiag)
+  } yield inlays == "[{\"position\":{\"line\":2,\"character\":5},\"label\":\": Int\",\"kind\":1},{\"position\":{\"line\":3,\"character\":5},\"label\":\": String\",\"kind\":1}]" && Str.contains(folds, "{\"startLine\":0,\"endLine\":2}") && Str.contains(folds, "{\"startLine\":4,\"endLine\":7}") && Str.contains(folds, "{\"startLine\":9,\"endLine\":10}") && Str.contains(folds, "{\"startLine\":12,\"endLine\":14}") && Str.contains(folds, "{\"startLine\":16,\"endLine\":17}") && Str.contains(folds, "{\"startLine\":19,\"endLine\":26}") && Str.contains(folds, "{\"startLine\":20,\"endLine\":26}") && Str.contains(folds, "{\"startLine\":22,\"endLine\":25}") && Str.contains(actDirty, "\"title\":\"Format file\"") && Str.contains(actDirty, Check.jsonStr(fmtClean)) && actClean == "[]" && actBroken == "[]" && Str.contains(renParam, "def first(n: Int): Int =\\n  n + 1\\n\\ndef second(x: Int):") && Str.contains(renFor, "inner = x + 10\\n    y = inner * 2") && Str.contains(renMatch, "case armVal => armVal + 1") && Str.contains(renMatch, "y = x * 2") && renCapture == "null" && renKw == "null" && renBad == "null" && renAtKw == "null" && wsHover == "def Help.word(): String" && Str.contains(wsComp, "Help.word") && Str.contains(wsDef, "file:///ws/dep/src/Help.scuzz") && Str.contains(wsRen, "file:///ws/src/Main.scuzz") && Str.contains(wsRen, "file:///ws/dep/src/Help.scuzz") && Str.contains(wsRen, "Help.phrase()") && Str.contains(wsRen, "def phrase(): String") && !Str.contains(depPub, "needs formatting") && Str.contains(rootPub, "needs formatting")
 
 def lspWirePath(): Bool =
   Lsp.pathOfUri("file:///tmp/a%20b.scuzz") == "/tmp/a b.scuzz" && Str.contains(Lsp.errorMsg("1", 0 - 32601, "MethodNotFound"), "-32601") && Str.contains(Check.jsonStr("a\tb"), "\\t") && overlaySrcOf(Drive.substOverlay(("Main", "disk") :: Manifest.noPairs(), ("/pkg/src/Main.scuzz", "") :: Manifest.noPairs())) == "" && overlaySrcOf(Drive.substOverlay(("Main", "disk") :: Manifest.noPairs(), ("/pkg/src/Main.scuzz", "open") :: Manifest.noPairs())) == "open"
