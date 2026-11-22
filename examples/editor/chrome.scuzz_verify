@@ -441,3 +441,20 @@ oracle restoredSessionInitFallsBackCleanly(hasObjective: Bool, hasAllowed: Bool)
     expectedStatus = if (hasObjective) "Session restored in paused state. Select Start to resume." else "Set an objective, then select Start."
   } yield init._2 == expectedPaths && init._3 == expectedStatus && emptyInit._1 == "" && emptyInit._2 == "src/Main.scuzz,src/Other.scuzz" && emptyInit._3 == "Set an objective, then select Start."
 
+oracle diagRowsAndFilesRoundTrip(line: Int where line >= 0 && line <= 5000, col: Int where col >= 0 && col <= 500, hasFile: Bool): Bool =
+  for {
+    file = if (hasFile) "src/Main.scuzz" else ""
+    item = Json.Obj([("line", Json.Int(line)), ("column", Json.Int(col)), ("file", Json.Str(file)), ("message", Json.Str("type error"))])
+    row = Diags.diagRow(item)
+    emptyRow = Diags.diagRow(Json.Obj([]))
+    expectedRow = Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat("|", Str.concat(file, "|type error")))))
+  } yield row == expectedRow && Diags.diagFile(row) == file && Diags.diagFile("plain") == "" && emptyRow == "0:0||" && Diags.diagRows(Json.Arr([item, Json.Obj([])])) == [expectedRow, "0:0||"] && List.isEmpty(Diags.diagRows(Json.Null())) && List.isEmpty(Diags.diagRows(Json.Obj([])))
+
+oracle diagMarksClassifySeverity(line: Int where line >= 0 && line <= 5000, warn: Bool): Bool =
+  for {
+    sev = if (warn) "warning" else "error"
+    item = Json.Obj([("line", Json.Int(line)), ("severity", Json.Str(sev))])
+    plain = Json.Obj([("line", Json.Int(line))])
+    expectedSev = if (warn) 2 else 1
+  } yield Diags.diagMark(item) == (line, expectedSev) && Diags.diagMark(plain) == (line, 1) && Diags.diagMark(Json.Null()) == (0, 1) && Diags.diagMarks(Json.Arr([item, plain])) == [(line, expectedSev), (line, 1)] && List.isEmpty(Diags.diagMarks(Json.Null())) && List.isEmpty(Diags.diagMarks(Json.Str("x")))
+
