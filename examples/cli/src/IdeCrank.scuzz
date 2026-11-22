@@ -1,36 +1,68 @@
+record DepStep private(inDeps: Bool, line: String)
+
+record FuzzOutcome private(ok: Bool, survived: Int, diagnostic: String)
+
 import IdeLoop.GenContext
 import IdeLoop.Candidate
 import IdeLoop.VerifyInput
 import IdeLoop.VerifyEvidence
 import IdeLoop.RoundResult
 
+private def claimedRelPath(name: String): String =
+  Fs.join(".scuzz/ide/sync/claimed", Str.concat(name, ".json"))
+
 private def claimedPath(root: String, name: String): String =
-  Fs.join(Fs.join(Fs.join(IdeSync.storage(root), "sync"), "claimed"), Str.concat(name, ".json"))
+  Fs.join(root, claimedRelPath(name))
 
-private def readProposalFiles(dir: String): IO[List[(String, String)]] =
+private def markClaimed(root: String, name: String): IO[Unit] =
   for {
-    ents <- Fs.list(Fs.join(dir, "src")).handleErrorWith(_ => IO.pure([]: List[(String, Bool)]))
-    names = List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".scuzz")), e => e._1))
-    loaded <- IO.foreach(names, n => Fs.read(Fs.join(Fs.join(dir, "src"), n)).map(body => (Fs.join("src", n), body)))
-  } yield loaded
+    _ <- Proposal.checkTargetInside(root, claimedRelPath(name))
+    _ <- Fs.mkdirs(Fs.dirname(claimedPath(root, name)))
+    _ <- Proposal.checkExistingInside(root, ".scuzz/ide/sync/claimed")
+    _ <- Fs.write(claimedPath(root, name), IdeSync.text(Json.Obj([("v", Json.Int(1)), ("proposal", Json.Str(name))])))
+  } yield ()
 
-private def findUnclaimedInbox(root: String, names: List[String]): IO[Option[Candidate]] =
-  if (List.isEmpty(names)) IO.pure(Option.None) else for {
-  name = List.at(names, 0)
-  claimed <- Fs.exists(claimedPath(root, name))
-  found <- if (claimed != 0) findUnclaimedInbox(root, List.tail(names)) else for {
-  files <- readProposalFiles(Fs.join(Fs.join(root, "build/proposals"), name))
-  _ <- Fs.mkdirs(Fs.dirname(claimedPath(root, name)))
-  _ <- Fs.write(claimedPath(root, name), IdeSync.text(Json.Obj([("v", Json.Int(1)), ("proposal", Json.Str(name))])))
-} yield Option.Some(IdeLoop.Candidate(name, "inbox", files))
+private def findUnclaimedInbox(root: String, baseline: String, ents: List[(String, Bool)]): IO[Option[Result[String, Candidate]]] =
+  ents match {
+    case [] => IO.pure(Option.None)
+    case head :: rest => for {
+  name = head._1
+  isDir = head._2
+  claimCheck <- IO.attempt(Proposal.checkTargetInside(root, claimedRelPath(name)))
+  found <- claimCheck match {
+  case Result.Err(err) => IO.pure(Option.Some(Result.Err(err)))
+  case Result.Ok(_) => Fs.exists(claimedPath(root, name)).flatMap(claimed => if (claimed != 0) findUnclaimedInbox(root, baseline, rest) else if (!isDir) IO.attempt(Proposal.checkExistingInside(root, Fs.join("build/proposals", name))).flatMap(entryCheck => entryCheck match {
+  case Result.Err(err) => markClaimed(root, name).map(_ => Option.Some(Result.Err(err)))
+  case Result.Ok(_) => findUnclaimedInbox(root, baseline, rest)
+}) else Proposal.importInbox(root, name, baseline).flatMap(imported => imported match {
+  case Option.None => findUnclaimedInbox(root, baseline, rest)
+  case Option.Some(res) => res match {
+  case Result.Err(err) => markClaimed(root, name).map(_ => Option.Some(Result.Err(err)))
+  case Result.Ok(pair) => markClaimed(root, name).map(_ => Option.Some(Result.Ok(IdeLoop.Candidate(name, pair._1, pair._2))))
+}
+}))
+}
 } yield found
+  }
 
-private def claimInbox(root: String): IO[Option[Candidate]] =
-  for {
-    ents <- Fs.list(Fs.join(root, "build/proposals")).handleErrorWith(_ => IO.pure([]: List[(String, Bool)]))
-    names = List.sort(List.map(List.filter(ents, e => e._2 && IdeSync.validActionId(e._1)), e => e._1))
-    picked <- findUnclaimedInbox(root, names)
-  } yield picked
+private def claimInbox(root: String, baseline: String): IO[Option[Result[String, Candidate]]] =
+  Fs.list(root).handleErrorWith(_ => IO.pure([]: List[(String, Bool)])).flatMap(rootEnts => if (!List.exists(rootEnts, e => e._1 == "build")) IO.pure(Option.None) else IO.attempt(Proposal.checkExistingInside(root, "build")).flatMap(buildCheck => buildCheck match {
+  case Result.Err(err) => IO.pure(Option.Some(Result.Err(err)))
+  case Result.Ok(_) => Fs.list(Fs.join(root, "build")).handleErrorWith(_ => IO.pure([]: List[(String, Bool)])).flatMap(buildEnts => if (!List.exists(buildEnts, e => e._1 == "proposals")) IO.pure(Option.None) else for {
+  propIsDir = List.exists(buildEnts, e => e._1 == "proposals" && e._2)
+  propCheck <- IO.attempt(Proposal.checkExistingInside(root, "build/proposals"))
+  picked <- propCheck match {
+  case Result.Err(err) => IO.pure(Option.Some(Result.Err(err)))
+  case Result.Ok(_) => if (!propIsDir) IO.pure(Option.None) else for {
+  ents <- Fs.list(Fs.join(root, "build/proposals")).handleErrorWith(_ => IO.pure([]: List[(String, Bool)]))
+  kept = List.filter(ents, e => IdeSync.validActionId(e._1))
+  names = List.sort(List.map(kept, x => x._1))
+  ordered = List.sortBy(kept, e => List.indexOf(names, e._1))
+  res <- findUnclaimedInbox(root, baseline, ordered)
+} yield res
+}
+} yield picked)
+}))
 
 private def proposeModel(ctx: GenContext, modelId: String, allowDownload: Bool): IO[Result[String, Candidate]] =
   (for {
@@ -47,8 +79,8 @@ private def proposeModel(ctx: GenContext, modelId: String, allowDownload: Bool):
 } yield Result.Ok(IdeLoop.Candidate(name, modelId, files))).handleErrorWith(err => IO.pure(Result.Err(err)))
 
 def proposeStep(ctx: GenContext, modelId: String, allowDownload: Bool): IO[Result[String, Candidate]] =
-  claimInbox(ctx.root).flatMap(inbox => inbox match {
-  case Option.Some(cand) => IO.pure(Result.Ok(cand))
+  claimInbox(ctx.root, ctx.baseline).flatMap(inbox => inbox match {
+  case Option.Some(res) => IO.pure(res)
   case Option.None => proposeModel(ctx, modelId, allowDownload)
 })
 
@@ -60,17 +92,60 @@ private def formattedAll(files: List[(String, String)]): Bool =
 private def rmTree(path: String): IO[Unit] =
   Fs.list(path).flatMap(ents => IO.foreachDiscard(ents, e => if (e._2) rmTree(Fs.join(path, e._1)) else Fs.delete(Fs.join(path, e._1))).flatMap(_ => Fs.delete(path))).handleErrorWith(_ => Fs.delete(path).handleErrorWith(_ => IO.pure(())))
 
-private def resolveManifestDeps(root: String, toml: String): IO[String] =
+private def rewriteDepLine(line: String, inDeps: Bool, resolved: List[(String, String)]): DepStep =
   for {
+    clean = Manifest.trim(Manifest.cutHash(line))
+  } yield if (clean == "" || Str.startsWith(clean, "#")) DepStep(inDeps, line) else if (Str.startsWith(clean, "[")) DepStep(Manifest.tableOf(clean) == "dependencies", line) else if (!inDeps || Manifest.findEq(clean, 0) < 0) DepStep(inDeps, line) else for {
+  depName = Manifest.splitEq(clean)._1
+  idx = List.indexOf(List.map(resolved, p => p._1), depName)
+  rebuilt = if (idx < 0) line else Str.concat(depName, Str.concat(" = { path = \"", Str.concat(List.at(resolved, idx)._2, "\" }")))
+} yield DepStep(true, rebuilt)
+
+private def rewriteManifestStep(step: DepStep, rest: List[String], resolved: List[(String, String)], acc: List[String]): List[String] =
+  rewriteManifestLines(rest, step.inDeps, resolved, step.line :: acc)
+
+private def rewriteManifestLines(xs: List[String], inDeps: Bool, resolved: List[(String, String)], acc: List[String]): List[String] =
+  xs match {
+    case [] => List.reverse(acc)
+    case line :: rest => rewriteManifestStep(rewriteDepLine(line, inDeps, resolved), rest, resolved, acc)
+  }
+
+private def rewriteManifestDeps(toml: String, resolved: List[(String, String)]): String =
+  List.join(rewriteManifestLines(Manifest.linesOf(toml), false, resolved, []), """
+""")
+
+private def dropCommonPrefix(a: List[String], b: List[String]): (List[String], List[String]) =
+  a match {
+    case [] => ([], b)
+    case ah :: at => b match {
+  case [] => (a, [])
+  case bh :: bt => if (ah == bh) dropCommonPrefix(at, bt) else (a, b)
+}
+  }
+
+private def relPathFrom(fromDir: String, toDir: String): String =
+  dropCommonPrefix(List.filter(Str.split(fromDir, "/"), s => s != ""), List.filter(Str.split(toDir, "/"), s => s != "")) match {
+    case (remFrom, remTo) => for {
+  joined = List.join(List.concat(List.map(remFrom, _ => ".."), remTo), "/")
+} yield if (joined == "") "." else joined
+  }
+
+private def resolveManifestDeps(root: String, stage: String, toml: String): IO[String] =
+  for {
+    absRoot <- Fs.canonicalize(root)
+    absStage <- Fs.canonicalize(stage)
     deps = Manifest.parse(toml).deps
-    pairs <- IO.foreach(deps, d => Fs.canonicalize(Fs.join(root, d._2)).handleErrorWith(_ => IO.pure(Fs.join(root, d._2))).map(abs => (d._2, abs)))
-  } yield List.foldLeft(pairs, toml, p => Str.replace(p._1, Str.concat("\"", Str.concat(p._2._1, "\"")), Str.concat("\"", Str.concat(p._2._2, "\""))))
+    pairs <- IO.foreach(deps, d => for {
+  rawTarget = if (Str.startsWith(d._2, "/")) d._2 else Fs.join(absRoot, d._2)
+  absDep <- Fs.canonicalize(rawTarget).handleErrorWith(_ => Proposal.resolvedOutput(rawTarget))
+} yield (d._1, relPathFrom(absStage, absDep)))
+  } yield rewriteManifestDeps(toml, pairs)
 
 private def copyTopFiles(root: String, stage: String): IO[Unit] =
   for {
     ents <- Fs.list(root)
     toml <- Fs.read(Fs.join(root, "scuzz.toml"))
-    resolvedToml <- resolveManifestDeps(root, toml)
+    resolvedToml <- resolveManifestDeps(root, stage, toml)
     _ <- Fs.write(Fs.join(stage, "scuzz.toml"), resolvedToml)
     keep = List.map(List.filter(ents, e => !e._2 && (Drive.isVerify(e._1) || Drive.isScenario(e._1))), e => e._1)
     _ <- IO.foreachDiscard(keep, name => Fs.read(Fs.join(root, name)).flatMap(body => Fs.write(Fs.join(stage, name), body)))
@@ -79,7 +154,20 @@ private def copyTopFiles(root: String, stage: String): IO[Unit] =
     _ <- if (List.isEmpty(tomlNames)) IO.pure(()) else Fs.mkdirs(Fs.join(stage, "corpus")).flatMap(_ => IO.foreachDiscard(tomlNames, n => Fs.read(Fs.join(Fs.join(root, "corpus"), n)).flatMap(body => Fs.write(Fs.join(Fs.join(stage, "corpus"), n), body))))
   } yield ()
 
-private def stageAndFuzz(root: String, after: List[(String, String)]): IO[(Bool, Int, String)] =
+private def fuzzSummaryResult(doc: Json): FuzzOutcome =
+  for {
+    fuzzObj = IdeSync.field(doc, "fuzz")
+    mutObj = IdeSync.field(doc, "mutate")
+    status = IdeSync.str(doc, "status")
+    fuzzOk = Json.getBool(fuzzObj, "ok", false)
+    survived = Json.getInt(mutObj, "survived", -1)
+    incomplete = Json.getInt(mutObj, "incomplete", -1)
+  } yield if (!Json.isObj(fuzzObj) || !Json.isObj(mutObj) || survived < 0 || incomplete < 0) FuzzOutcome(false, 0, "invalid-fuzz-summary") else if (incomplete != 0 || status == "incomplete") FuzzOutcome(false, survived, "mutation-incomplete") else if (!fuzzOk) FuzzOutcome(false, survived, "fuzz-campaign-failed") else if (survived != 0) FuzzOutcome(false, survived, "mutation-survived") else FuzzOutcome(true, 0, "")
+
+private def mergeRunErr(parsed: FuzzOutcome, err: String): FuzzOutcome =
+  if (!parsed.ok && parsed.diagnostic != "fuzz-campaign-failed" && parsed.diagnostic != "invalid-fuzz-summary") parsed else FuzzOutcome(false, 0, err)
+
+private def stageAndFuzz(root: String, after: List[(String, String)]): IO[FuzzOutcome] =
   for {
     nonce <- Uuid.v4()
     stage = Fs.join(Fs.join(root, "build/ide"), Str.concat("verify-", Str.take(nonce, 12)))
@@ -91,13 +179,13 @@ private def stageAndFuzz(root: String, after: List[(String, String)]): IO[(Bool,
   ran <- IO.attempt(Drive.fuzzDirAt(stage, Fs.join(stage, "build"), 8, 1, "", false, false, false, false, false, false, true))
   summaryRaw <- IdeSync.readOptional(Fs.join(stage, "build/fuzz/summary.json"))
 } yield ran match {
-  case Result.Err(err) => (false, 0, err)
+  case Result.Err(err) => Json.parse(summaryRaw) match {
+  case Result.Ok(doc) => mergeRunErr(fuzzSummaryResult(doc), err)
+  case Result.Err(_) => FuzzOutcome(false, 0, err)
+}
   case Result.Ok(_) => Json.parse(summaryRaw) match {
-  case Result.Err(_) => (false, 0, "missing-fuzz-summary")
-  case Result.Ok(doc) => for {
-  ok = Json.getBool(IdeSync.field(doc, "fuzz"), "ok", false)
-  survived = Json.getInt(IdeSync.field(doc, "mutate"), "survived", 0)
-} yield (ok, survived, if (ok) "" else "fuzz-campaign-failed")
+  case Result.Err(_) => FuzzOutcome(false, 0, "missing-fuzz-summary")
+  case Result.Ok(doc) => fuzzSummaryResult(doc)
 }
 }, rmTree(stage))
   } yield out
@@ -113,7 +201,9 @@ private def reportValid(doc: Json): Bool =
   } yield IdeSync.str(doc, "kind") == "diff" && Json.getBool(review, "complete", false) && Json.getInt(search, "ran", -1) == 32 && List.nonEmpty(rows) && List.forall(rows, w => Json.isNull(IdeSync.field(w, "why_b")))
 
 def verifyLive(root: String, disk: List[(String, String)], after: List[(String, String)]): IO[VerifyEvidence] =
-  if (!formattedAll(after)) IO.pure(IdeLoop.VerifyEvidence(false, "candidate-syntax-or-format-error", "", 0, "", "", [], 0, 0, 0)) else for {
+  if (!formattedAll(after)) IO.pure(IdeLoop.VerifyEvidence(false, "candidate-syntax-or-format-error", "", 0, "", "", [], 0, 0, 0)) else IO.attempt(Proposal.checkNoDuplicateStems(root, after)).flatMap(stemCheck => stemCheck match {
+  case Result.Err(err) => IO.pure(IdeLoop.VerifyEvidence(false, err, "", 0, "", "", [], 0, 0, 0))
+  case Result.Ok(_) => for {
   toml <- Fs.read(Fs.join(root, "scuzz.toml"))
   deps = Manifest.parse(toml).deps
   ownDisk = List.map(disk, f => (Str.dropRight(Fs.basename(f._1), 6), f._2))
@@ -148,12 +238,13 @@ def verifyLive(root: String, disk: List[(String, String)], after: List[(String, 
   step = if (rawStep < 0) 0 else rawStep
   changes = Json.arr(IdeSync.field(delta, "changes"))
   fuzzRes <- stageAndFuzz(root, after)
-} yield IdeLoop.VerifyEvidence(fuzzRes._1, fuzzRes._3, IdeSync.str(chosen, "label"), step, tlA, tlB, changes, diverged, regressed, fuzzRes._2)
+} yield IdeLoop.VerifyEvidence(fuzzRes.ok, fuzzRes.diagnostic, IdeSync.str(chosen, "label"), step, tlA, tlB, changes, diverged, regressed, fuzzRes.survived)
 } yield done
 }
 } yield out
 }
 } yield ev
+})
 
 private def isPublished(r: RoundResult): Bool =
   r.status == "published"

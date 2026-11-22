@@ -372,3 +372,106 @@ def loadLocalRecords(root: String): IO[List[Json]] =
 def recentFeedback(root: String, automatic: List[Json]): IO[List[Json]] =
   loadLocalRecords(root).map(records => boundedFeedback(records, automatic))
 
+def checkExistingInside(root: String, path: String): IO[Unit] =
+  relativePath(path) match {
+    case Result.Err(error) => IO.fail(error)
+    case Result.Ok(value) => for {
+  base <- Fs.canonicalize(root)
+  resolved <- Fs.canonicalize(Fs.join(root, value.value)).handleErrorWith(_ => IO.fail(Str.concat("unsafe resolved path: ", value.value)))
+  _ <- Models.need(resolved == Fs.join(base, value.value), Str.concat("unsafe resolved path: ", value.value))
+} yield ()
+  }
+
+def checkTargetInside(root: String, path: String): IO[Unit] =
+  relativePath(path) match {
+    case Result.Err(error) => IO.fail(error)
+    case Result.Ok(value) => for {
+  base <- Fs.canonicalize(root)
+  resolved <- resolvedOutput(Fs.join(root, value.value))
+  _ <- Models.need(resolved == Fs.join(base, value.value), Str.concat("unsafe resolved path: ", value.value))
+} yield ()
+  }
+
+def checkNoDuplicateStems(root: String, files: List[(String, String)]): IO[Unit] =
+  for {
+    _ <- Models.need(List.len(List.distinct(List.map(files, f => Str.toLower(f._1)))) == List.len(files), "duplicate module stem")
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    m = Manifest.parse(toml)
+    _ <- Drive.manNeed(m)
+    sources <- own(root)
+    all <- Drive.collectDeps(root, m.deps, List.map(sources, f => (Str.dropRight(Fs.basename(f._1), 6), f._2)))
+    additions = List.filter(files, f => !List.contains(List.map(sources, d => d._1), f._1))
+    knownStems = List.map(all, d => Str.toLower(d._1))
+    _ <- Models.need(!List.exists(additions, f => List.contains(knownStems, Str.toLower(Str.dropRight(Fs.basename(f._1), 6)))), "duplicate module stem")
+  } yield ()
+
+private def checkTargetSourcePaths(root: String, paths: List[String]): IO[Unit] =
+  for {
+    _ <- checkExistingInside(root, "src")
+    srcEnts <- Fs.list(Fs.join(root, "src"))
+    existing = List.map(srcEnts, e => Fs.join("src", e._1))
+    _ <- IO.foreachDiscard(paths, p => if (List.contains(existing, p)) checkExistingInside(root, p) else checkTargetInside(root, p))
+  } yield ()
+
+private def finalizeInboxCandidate(root: String, generator: String, files: List[(String, String)]): IO[Option[Result[String, (String, List[(String, String)])]]] =
+  if (!sourceSetOk(files)) IO.pure(Option.Some(Result.Err("proposal exceeds source scope or limit"))) else IO.attempt(checkNoDuplicateStems(root, files)).map(res => res match {
+  case Result.Err(err) => Option.Some(Result.Err(err))
+  case Result.Ok(_) => Option.Some(Result.Ok((generator, files)))
+})
+
+private def importInboxPublished(root: String, candDir: String, baseline: String, actualFiles: List[String], actualDirs: List[String]): IO[Option[Result[String, (String, List[(String, String)])]]] =
+  IO.attempt(Fs.read(Fs.join(candDir, "proposal.json"))).flatMap(rawRes => rawRes match {
+  case Result.Err(_) => IO.pure(Option.None)
+  case Result.Ok(raw) => if (Str.byteLen(raw) > 131072) IO.pure(Option.Some(Result.Err("serialized input exceeds its byte limit"))) else Json.parse(raw) match {
+  case Result.Err(_) => IO.pure(Option.None)
+  case Result.Ok(j) => if (!Json.isObj(j) || keys(j, ["v", "request", "baseline", "kind", "witness", "generator", "files"]) && version(j) && str(j, "kind") == "rule") IO.pure(Option.None) else for {
+  metaOk = keys(j, ["v", "request", "baseline", "kind", "generator", "files"]) && version(j) && str(j, "kind") == "behavior" && Str.matches(str(j, "request"), "^[A-Za-z0-9_-]{1,128}$") && Str.matches(str(j, "baseline"), "^[a-f0-9]{64}$") && stringValue(field(j, "generator")) && Str.byteLen(str(j, "generator")) > 0 && Str.byteLen(str(j, "generator")) <= 1024 && arrayValue(field(j, "files"))
+  out <- if (!metaOk) IO.pure(Option.Some(Result.Err("invalid publication fields"))) else for {
+  fs = Json.arr(field(j, "files"))
+  declPaths = List.map(fs, f => str(f, "path"))
+  setOk = List.nonEmpty(fs) && List.len(fs) <= 3 && List.forall(fs, f => keys(f, ["path", "sha256"]) && stringValue(field(f, "path")) && stringValue(field(f, "sha256")) && safePath(str(f, "path")) && Str.matches(str(f, "sha256"), "^[a-f0-9]{64}$")) && List.len(List.distinct(declPaths)) == List.len(declPaths)
+  step <- if (!setOk) IO.pure(Option.Some(Result.Err("invalid publication source set"))) else IO.attempt(checkTargetSourcePaths(root, declPaths)).flatMap(targetRes => targetRes match {
+  case Result.Err(err) => IO.pure(Option.Some(Result.Err(err)))
+  case Result.Ok(_) => if (!List.forall(declPaths, p => List.contains(actualFiles, p))) IO.pure(Option.None) else IO.attempt(IO.foreach(fs, f => Fs.read(Fs.join(candDir, str(f, "path"))).map(src => (str(f, "path"), src)))).flatMap(readRes => readRes match {
+  case Result.Err(_) => IO.pure(Option.None)
+  case Result.Ok(files) => if (!List.forall(fs, f => List.exists(files, p => p._1 == str(f, "path") && Hash.sha256(p._2) == str(f, "sha256")))) IO.pure(Option.None) else for {
+  expectedFiles = List.sort("proposal.json" :: declPaths)
+  checked <- if (actualFiles != expectedFiles || actualDirs != ["src"]) IO.pure(Option.Some(Result.Err("undeclared publication file"))) else if (str(j, "baseline") != baseline) IO.pure(Option.Some(Result.Err("stale-proposal-baseline"))) else finalizeInboxCandidate(root, str(j, "generator"), files)
+} yield checked
+})
+})
+} yield step
+} yield out
+}
+})
+
+private def importInboxRaw(root: String, candDir: String, actualFiles: List[String], actualDirs: List[String]): IO[Option[Result[String, (String, List[(String, String)])]]] =
+  if (!List.forall(actualFiles, p => safePath(p)) || actualDirs != ["src"]) IO.pure(Option.Some(Result.Err("undeclared publication file"))) else if (List.len(actualFiles) > 3) IO.pure(Option.Some(Result.Err("proposal exceeds source scope or limit"))) else IO.attempt(checkTargetSourcePaths(root, actualFiles)).flatMap(targetRes => targetRes match {
+  case Result.Err(err) => IO.pure(Option.Some(Result.Err(err)))
+  case Result.Ok(_) => IO.attempt(IO.foreach(actualFiles, p => Fs.read(Fs.join(candDir, p)).map(src => (p, src)))).flatMap(readRes => readRes match {
+  case Result.Err(_) => IO.pure(Option.None)
+  case Result.Ok(files) => finalizeInboxCandidate(root, "inbox", files)
+})
+})
+
+def importInbox(root: String, name: String, baseline: String): IO[Option[Result[String, (String, List[(String, String)])]]] =
+  if (!Str.matches(name, "^[A-Za-z0-9_-]{1,128}$")) IO.pure(Option.None) else for {
+  relDir = Fs.join("build/proposals", name)
+  candDir = Fs.join(root, relDir)
+  dirRes <- IO.attempt(checkExistingInside(root, "build/proposals").flatMap(_ => checkExistingInside(root, relDir)))
+  out <- dirRes match {
+  case Result.Err(err) => IO.pure(Option.Some(Result.Err(err)))
+  case Result.Ok(_) => IO.attempt(Fs.walk(candDir)).flatMap(walkRes => walkRes match {
+  case Result.Err(_) => IO.pure(Option.None)
+  case Result.Ok(walked) => IO.attempt(IO.foreachDiscard(walked, e => checkExistingInside(candDir, e._1))).flatMap(walkCheck => walkCheck match {
+  case Result.Err(err) => Fs.walk(candDir).handleErrorWith(_ => IO.pure([]: List[(String, Bool)])).map(reWalk => if (reWalk != walked) Option.None else Option.Some(Result.Err(err)))
+  case Result.Ok(_) => for {
+  actualFiles = List.sort(List.map(List.filter(walked, e => !e._2), e => e._1))
+  actualDirs = List.sort(List.map(List.filter(walked, e => e._2), e => e._1))
+  res <- if (List.isEmpty(actualFiles) || List.exists(actualFiles, p => Str.endsWith(p, ".tmp") || Str.endsWith(p, ".part"))) IO.pure(Option.None) else if (List.contains(actualFiles, "proposal.json")) importInboxPublished(root, candDir, baseline, actualFiles, actualDirs) else importInboxRaw(root, candDir, actualFiles, actualDirs)
+} yield res
+})
+})
+}
+} yield out
+
