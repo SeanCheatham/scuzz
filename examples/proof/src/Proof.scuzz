@@ -1,73 +1,145 @@
-record Term(code: String, ty: String)
-
 record Queries(domain: String, violation: String, reach: String)
 
+record Term private(code: String, ty: String, ok: String)
+
+import Parse.Arm
+import Parse.Bind
 import Parse.Expr
 import Parse.Fun
 import Parse.Param
-import Parse.Bind
 
-def fail(reason: String): Result[String, Term] =
+private def fail(reason: String): Result[String, Term] =
   Result.Err(Str.concat("unsupported: ", reason))
 
-def atom(code: String, ty: String): Result[String, Term] =
-  Result.Ok(Term(code, ty))
+private def atom(code: String, ty: String): Result[String, Term] =
+  Result.Ok(Term(code, ty, ""))
 
-def sort(ty: String): String =
+private def clean(term: Term): Term =
+  Term(term.code, term.ty, "")
+
+private def andOk(a: String, b: String): String =
+  if (a == "") b else if (b == "") a else s"(and $a $b)"
+
+private def impOk(cond: String, req: String): String =
+  if (req == "") "" else if (cond == "") req else s"(=> $cond $req)"
+
+private def iteOk(cond: String, leftOk: String, rightOk: String): String =
+  if (leftOk == "" && rightOk == "") "" else s"(ite $cond ${if (leftOk == "") "true" else leftOk} ${if (rightOk == "") "true" else rightOk})"
+
+private def foldOk(values: List[Term]): String =
+  if (List.isEmpty(values)) "" else andOk(List.at(values, 0).ok, foldOk(List.tail(values)))
+
+private def sort(ty: String): String =
   if (ty == "Int") "(_ BitVec 64)" else "Bool"
 
-def signature(f: Fun): Bool =
-  List.isEmpty(f.tparams) && (f.ret == "Int" || f.ret == "Bool") && List.len(f.params) <= 4 && List.forall(f.params, p => (p.ty == "Int" || p.ty == "Bool") && p.w == "" && p.d == "")
+private def signature(f: Fun): Bool =
+  List.isEmpty(f.tparams) && (f.ret == "Int" || f.ret == "Bool") && List.len(f.params) <= 4 && List.forall(f.params, p => (p.ty == "Int" || p.ty == "Bool") && p.d == "")
 
-def lookup(name: String, env: List[(String, Term)]): Result[String, Term] =
+private def lookup(name: String, env: List[(String, Term)]): Result[String, Term] =
   if (List.isEmpty(env)) fail(Str.concat("variable ", name)) else if (List.at(env, 0)._1 == name) Result.Ok(List.at(env, 0)._2) else lookup(name, List.tail(env))
 
-def integer(n: Int): String =
+private def integer(n: Int): String =
   if (n == -9223372036854775808) "#x8000000000000000" else if (n < 0) s"(bvneg (_ bv${0 - n} 64))" else s"(_ bv$n 64)"
 
-def binary(op: String, a: Term, b: Term): Result[String, Term] =
-  if (a.ty != b.ty) fail("operand types") else if (op == "==") atom(s"(= ${a.code} ${b.code})", "Bool") else if (op == "!=") atom(s"(not (= ${a.code} ${b.code}))", "Bool") else if (a.ty == "Bool") boolBinary(op, a, b) else intBinary(op, a, b)
+private def binary(op: String, a: Term, b: Term): Result[String, Term] =
+  if (op == "==") Result.Ok(Term(s"(= ${a.code} ${b.code})", "Bool", andOk(a.ok, b.ok))) else if (op == "!=") Result.Ok(Term(s"(not (= ${a.code} ${b.code}))", "Bool", andOk(a.ok, b.ok))) else if (a.ty == "Bool") boolBinary(op, a, b) else intBinary(op, a, b)
 
-def boolBinary(op: String, a: Term, b: Term): Result[String, Term] =
-  if (op == "&&") atom(s"(and ${a.code} ${b.code})", "Bool") else if (op == "||") atom(s"(or ${a.code} ${b.code})", "Bool") else fail(Str.concat("Boolean operator ", op))
+private def boolBinary(op: String, a: Term, b: Term): Result[String, Term] =
+  if (op == "&&") Result.Ok(Term(s"(and ${a.code} ${b.code})", "Bool", andOk(a.ok, impOk(a.code, b.ok)))) else if (op == "||") Result.Ok(Term(s"(or ${a.code} ${b.code})", "Bool", andOk(a.ok, impOk(s"(not ${a.code})", b.ok)))) else fail(Str.concat("Boolean operator ", op))
 
-def intBinary(op: String, a: Term, b: Term): Result[String, Term] =
+private def intBinary(op: String, a: Term, b: Term): Result[String, Term] =
   for {
-    smt = if (op == "+") "bvadd" else if (op == "-") "bvsub" else if (op == "*") "bvmul" else if (op == "<") "bvslt" else if (op == "<=") "bvsle" else if (op == ">") "bvsgt" else if (op == ">=") "bvsge" else ""
-  } yield if (smt == "") fail(Str.concat("integer operator ", op)) else atom(s"($smt ${a.code} ${b.code})", if (op == "+" || op == "-" || op == "*") "Int" else "Bool")
+    smt = if (op == "+") "bvadd" else if (op == "-") "bvsub" else if (op == "*") "bvmul" else if (op == "&") "bvand" else if (op == "|") "bvor" else if (op == "^") "bvxor" else if (op == "<") "bvslt" else if (op == "<=") "bvsle" else if (op == ">") "bvsgt" else if (op == ">=") "bvsge" else ""
+    outTy = if (op == "+" || op == "-" || op == "*" || op == "&" || op == "|" || op == "^") "Int" else "Bool"
+  } yield if (smt == "") fail(Str.concat("integer operator ", op)) else Result.Ok(Term(s"($smt ${a.code} ${b.code})", outTy, andOk(a.ok, b.ok)))
 
-def unary(op: String, a: Term): Result[String, Term] =
-  if (op == "!" && a.ty == "Bool") atom(s"(not ${a.code})", "Bool") else if (op == "-" && a.ty == "Int") atom(s"(bvneg ${a.code})", "Int") else fail(Str.concat("unary operator ", op))
+private def unary(op: String, a: Term): Result[String, Term] =
+  if (op == "!" && a.ty == "Bool") Result.Ok(Term(s"(not ${a.code})", "Bool", a.ok)) else if (op == "-" && a.ty == "Int") Result.Ok(Term(s"(bvneg ${a.code})", "Int", a.ok)) else if (op == "~" && a.ty == "Int") Result.Ok(Term(s"(bvnot ${a.code})", "Int", a.ok)) else fail(Str.concat("unary operator ", op))
 
-def conditional(c: Term, a: Term, b: Term): Result[String, Term] =
-  if (c.ty != "Bool" || a.ty != b.ty) fail("conditional types") else atom(s"(ite ${c.code} ${a.code} ${b.code})", a.ty)
+private def conditional(c: Term, a: Term, b: Term): Result[String, Term] =
+  Result.Ok(Term(s"(ite ${c.code} ${a.code} ${b.code})", a.ty, andOk(c.ok, iteOk(c.code, a.ok, b.ok))))
 
-def nextTerm(value: Result[String, Term], next: Term => Result[String, Term]): Result[String, Term] =
+private def nextTerm(value: Result[String, Term], next: Term => Result[String, Term]): Result[String, Term] =
   value match {
     case Result.Ok(term) => next(term)
     case Result.Err(reason) => Result.Err(reason)
   }
 
-def expression(e: Expr, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+private def expression(e: Expr, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
   if (depth > 32) fail("expression depth exceeds 32") else e match {
   case Expr.EInt(n, _) => atom(integer(n), "Int")
   case Expr.EBool(b) => atom(if (b) "true" else "false", "Bool")
   case Expr.EVar(name, _) => lookup(name, env)
+  case Expr.EAscribe(inner, _, _) => expression(inner, env, defs, stack, depth + 1)
   case Expr.EBin(op, a, b, _) => nextTerm(expression(a, env, defs, stack, depth + 1), left => nextTerm(expression(b, env, defs, stack, depth + 1), right => binary(op, left, right)))
   case Expr.EUn(op, a, _) => nextTerm(expression(a, env, defs, stack, depth + 1), value => unary(op, value))
   case Expr.EIf(c, a, b, _) => nextTerm(expression(c, env, defs, stack, depth + 1), test => nextTerm(expression(a, env, defs, stack, depth + 1), left => nextTerm(expression(b, env, defs, stack, depth + 1), right => conditional(test, left, right))))
   case Expr.ECall(name, args, _) => callArgs(arguments(args, env, defs, stack, depth + 1), name, defs, stack, depth + 1)
   case Expr.EFor(bs, body, _) => bindings(bs, body, env, defs, stack, depth + 1)
+  case Expr.EMatch(scrut, arms, _) => matchExpr(scrut, arms, env, defs, stack, depth + 1)
   case _ => fail("expression or effect")
 }
 
-def callArgs(values: Result[String, List[Term]], name: String, defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+private def digitsFrom(text: String, i: Int): Bool =
+  if (i == Str.len(text)) true else for {
+  c = Str.charAt(text, i)
+} yield c >= 48 && c <= 57 && digitsFrom(text, i + 1)
+
+private def intPattern(pat: String): Bool =
+  if (Str.len(pat) == 0) false else for {
+  start = if (Str.charAt(pat, 0) == 45) 1 else 0
+} yield start < Str.len(pat) && digitsFrom(pat, start)
+
+private def armPattern(pat: String, scrut: Term, env: List[(String, Term)]): Result[String, (String, Bool, List[(String, Term)])] =
+  if (pat == "_") Result.Ok(("", true, env)) else if (pat == "true" || pat == "false") Result.Ok((s"(= ${scrut.code} $pat)", false, env)) else if (intPattern(pat)) Str.parseInt(pat) match {
+  case Result.Ok(n) => Result.Ok((s"(= ${scrut.code} ${integer(n)})", false, env))
+  case Result.Err(_) => Result.Err(Str.concat("unsupported: match pattern ", pat))
+} else if (simpleName(pat)) Result.Ok(("", true, (pat, scrut) :: env)) else Result.Err(Str.concat("unsupported: match pattern ", pat))
+
+private def guardTerm(g: String, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  if (g == "") atom("", "Bool") else expression(Parse.parseExprList(Lexer.lex(g), 0)._1, env, defs, stack, depth)
+
+private def checkDeadArms(arms: List[Arm], scrut: Term, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Bool] =
+  if (List.isEmpty(arms)) Result.Ok(true) else for {
+  arm = List.at(arms, 0)
+} yield armPattern(arm.pat, scrut, env) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(info) => guardTerm(arm.g, info._3, defs, stack, depth + 1) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(_) => expression(arm.body, info._3, defs, stack, depth + 1) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(_) => checkDeadArms(List.tail(arms), scrut, env, defs, stack, depth)
+}
+}
+}
+
+private def terminalArm(arm: Arm, catchAll: Bool, scrutTy: String, seenTrue: Bool, seenFalse: Bool): Bool =
+  arm.g == "" && (catchAll || scrutTy == "Bool" && (arm.pat == "true" && seenFalse || arm.pat == "false" && seenTrue))
+
+private def matchArms(arms: List[Arm], scrut: Term, seenTrue: Bool, seenFalse: Bool, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  if (List.isEmpty(arms)) fail("partial match") else for {
+  arm = List.at(arms, 0)
+  rest = List.tail(arms)
+} yield armPattern(arm.pat, scrut, env) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(info) => nextTerm(guardTerm(arm.g, info._3, defs, stack, depth + 1), g => nextTerm(expression(arm.body, info._3, defs, stack, depth + 1), body => if (terminalArm(arm, info._2, scrut.ty, seenTrue, seenFalse)) checkDeadArms(rest, scrut, env, defs, stack, depth) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(_) => Result.Ok(body)
+} else nextTerm(matchArms(rest, scrut, seenTrue || arm.g == "" && arm.pat == "true", seenFalse || arm.g == "" && arm.pat == "false", env, defs, stack, depth), tailTerm => for {
+  cond = andOk(info._1, g.code)
+} yield Result.Ok(Term(s"(ite $cond ${body.code} ${tailTerm.code})", body.ty, andOk(impOk(info._1, g.ok), iteOk(cond, body.ok, tailTerm.ok)))))))
+}
+
+private def matchExpr(scrut: Expr, arms: List[Arm], env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+  nextTerm(expression(scrut, env, defs, stack, depth), value => nextTerm(matchArms(arms, clean(value), false, false, env, defs, stack, depth), body => Result.Ok(Term(body.code, body.ty, andOk(value.ok, body.ok)))))
+
+private def callArgs(values: Result[String, List[Term]], name: String, defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
   values match {
     case Result.Ok(args) => call(name, args, defs, stack, depth)
     case Result.Err(reason) => Result.Err(reason)
   }
 
-def arguments(args: List[Expr], env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, List[Term]] =
+private def arguments(args: List[Expr], env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, List[Term]] =
   if (List.isEmpty(args)) Result.Ok([]) else expression(List.at(args, 0), env, defs, stack, depth) match {
   case Result.Err(reason) => Result.Err(reason)
   case Result.Ok(value) => arguments(List.tail(args), env, defs, stack, depth) match {
@@ -76,55 +148,79 @@ def arguments(args: List[Expr], env: List[(String, Term)], defs: List[Fun], stac
 }
 }
 
-def bindings(bs: List[Bind], body: Expr, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+private def bindings(bs: List[Bind], body: Expr, env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
   if (List.isEmpty(bs)) expression(body, env, defs, stack, depth) else for {
   b = List.at(bs, 0)
-} yield if (b.draw || !simpleName(b.name)) fail("effect or pattern binding") else nextTerm(expression(b.value, env, defs, stack, depth), value => bindings(List.tail(bs), body, (b.name, value) :: env, defs, stack, depth + 1))
+} yield if (b.draw || !simpleName(b.name)) fail("effect or pattern binding") else nextTerm(expression(b.value, env, defs, stack, depth), value => nextTerm(bindings(List.tail(bs), body, (b.name, clean(value)) :: env, defs, stack, depth + 1), out => Result.Ok(Term(out.code, out.ty, andOk(value.ok, out.ok)))))
 
-def simpleName(name: String): Bool =
+private def simpleName(name: String): Bool =
   Str.len(name) > 0 && nameChars(name, 0)
 
-def nameChars(name: String, i: Int): Bool =
+private def nameChars(name: String, i: Int): Bool =
   if (i == Str.len(name)) true else for {
   c = Str.charAt(name, i)
 } yield (c == 95 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || i > 0 && c >= 48 && c <= 57) && nameChars(name, i + 1)
 
-def call(name: String, values: List[Term], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+private def paramsWhere(ps: List[Param], env: List[(String, Term)], defs: List[Fun], stack: List[String], depth: Int): Result[String, String] =
+  if (List.isEmpty(ps)) Result.Ok("") else for {
+  p = List.at(ps, 0)
+  rest = List.tail(ps)
+} yield if (p.w == "") paramsWhere(rest, env, defs, stack, depth) else expression(Parse.parseExprList(Lexer.lex(p.w), 0)._1, env, defs, stack, depth + 1) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(term) => paramsWhere(rest, env, defs, stack, depth) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(tailPred) => Result.Ok(andOk(andOk(term.ok, term.code), tailPred))
+}
+}
+
+private def call(name: String, values: List[Term], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
   if (List.contains(stack, name)) fail("recursive call") else if (List.len(stack) >= 8) fail("call depth exceeds 8") else callFound(List.filter(defs, f => f.name == name), name, values, defs, stack, depth)
 
-def callFound(hit: List[Fun], name: String, values: List[Term], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
+private def callFound(hit: List[Fun], name: String, values: List[Term], defs: List[Fun], stack: List[String], depth: Int): Result[String, Term] =
   if (List.len(hit) != 1) fail(Str.concat("call ", name)) else for {
   f = List.at(hit, 0)
-} yield if (!signature(f) || List.len(f.params) != List.len(values)) fail("function signature or implicit assumption") else if (!List.forall(List.zip(f.params, values), pair => pair._1.ty == pair._2.ty)) fail("argument types") else expression(f.body, List.map(List.zip(f.params, values), pair => (pair._1.name, pair._2)), defs, name :: stack, depth)
+  argsOk = foldOk(values)
+  paramEnv = List.map(List.zip(f.params, List.map(values, v => clean(v))), pair => (pair._1.name, pair._2))
+} yield if (!signature(f) || List.len(f.params) != List.len(values)) fail("function signature or implicit assumption") else if (!List.forall(List.zip(f.params, values), pair => pair._1.ty == pair._2.ty)) fail("argument types") else paramsWhere(f.params, paramEnv, defs, name :: stack, depth) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(wherePred) => nextTerm(expression(f.body, paramEnv, defs, name :: stack, depth), body => Result.Ok(Term(body.code, body.ty, andOk(argsOk, andOk(wherePred, body.ok)))))
+}
 
-def symbols(ps: List[Param], i: Int): List[Term] =
-  if (List.isEmpty(ps)) [] else Term(s"p$i", List.at(ps, 0).ty) :: symbols(List.tail(ps), i + 1)
+private def symbols(ps: List[Param], i: Int): List[Term] =
+  if (List.isEmpty(ps)) [] else Term(s"p$i", List.at(ps, 0).ty, "") :: symbols(List.tail(ps), i + 1)
 
-def declarations(values: List[Term]): String =
+private def declarations(values: List[Term]): String =
   List.join(List.map(values, value => s"(declare-fun ${value.code} () ${sort(value.ty)})"), """
 """)
 
-def query(decls: String, condition: String): String =
+private def query(decls: String, condition: String): String =
   s"(set-logic QF_BV)\n$decls\n(assert $condition)\n"
 
 def queries(source: String, claimName: String, assumption: String, trigger: String): Result[String, Queries] =
   if (Check.check(source) != "[]") Result.Err("invalid: source check fails") else queriesChecked(Parse.parse(Lexer.lex(source)).defs, claimName, assumption, trigger)
 
-def queriesChecked(defs: List[Fun], claimName: String, assumption: String, trigger: String): Result[String, Queries] =
+private def queriesChecked(defs: List[Fun], claimName: String, assumption: String, trigger: String): Result[String, Queries] =
   queriesRoot(List.filter(defs, f => f.name == claimName && f.ora), defs, assumption, trigger)
 
-def queriesRoot(hit: List[Fun], defs: List[Fun], assumption: String, trigger: String): Result[String, Queries] =
+private def queriesRoot(hit: List[Fun], defs: List[Fun], assumption: String, trigger: String): Result[String, Queries] =
   if (List.len(hit) != 1) Result.Err("unsupported: one named author oracle is required") else for {
   f = List.at(hit, 0)
   values = symbols(f.params, 0)
-} yield if (!signature(f) || f.ret != "Bool") Result.Err("unsupported: oracle signature or implicit assumption") else nextQueries(call(f.name, values, defs, [], 0), claim => nextQueries(call(assumption, values, defs, [], 0), domain => nextQueries(call(trigger, values, defs, [], 0), reach => assemble(values, claim, domain, reach))))
+  paramEnv = List.map(List.zip(f.params, values), pair => (pair._1.name, pair._2))
+} yield if (!signature(f) || f.ret != "Bool") Result.Err("unsupported: oracle signature or implicit assumption") else paramsWhere(f.params, paramEnv, defs, [f.name], 0) match {
+  case Result.Err(reason) => Result.Err(reason)
+  case Result.Ok(oraWhere) => nextQueries(expression(f.body, paramEnv, defs, [f.name], 0), claim => nextQueries(call(assumption, values, defs, [], 0), domain => nextQueries(call(trigger, values, defs, [], 0), reach => assemble(values, oraWhere, claim, domain, reach))))
+}
 
-def assemble(values: List[Term], claim: Term, domain: Term, reach: Term): Result[String, Queries] =
+private def assemble(values: List[Term], oraWhere: String, claim: Term, domain: Term, reach: Term): Result[String, Queries] =
   if (claim.ty != "Bool" || domain.ty != "Bool" || reach.ty != "Bool") Result.Err("unsupported: claim, assumption, and trigger must return Bool") else for {
   decls = declarations(values)
-} yield Result.Ok(Queries(query(decls, domain.code), query(decls, s"(and ${domain.code} (not ${claim.code}))"), query(decls, s"(and ${domain.code} ${reach.code})")))
+  domainPred = andOk(oraWhere, andOk(domain.ok, domain.code))
+  claimPred = andOk(claim.ok, claim.code)
+  reachPred = andOk(reach.ok, reach.code)
+} yield Result.Ok(Queries(query(decls, domainPred), query(decls, s"(and $domainPred (not $claimPred))"), query(decls, s"(and $domainPred $reachPred)")))
 
-def nextQueries(value: Result[String, Term], next: Term => Result[String, Queries]): Result[String, Queries] =
+private def nextQueries(value: Result[String, Term], next: Term => Result[String, Queries]): Result[String, Queries] =
   value match {
     case Result.Ok(term) => next(term)
     case Result.Err(reason) => Result.Err(reason)

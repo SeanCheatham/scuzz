@@ -423,7 +423,14 @@ def translation_checks(cli, solver, cases, package, logs):
                   order=lambda n: (n < 0 or n > 100) and not (n >= 0 and n <= 100),
                   binding=lambda n: (signed(-n) if n < 0 else n) != n,
                   negative=lambda n: signed(-n) > 0,
-                  bool=lambda n: n == 0)
+                  bool=lambda n: n == 0,
+                  bitand=lambda n: signed(n & 255) > 0,
+                  bitor=lambda n: signed(n | 1) == n,
+                  bitxor=lambda n: signed(n ^ -1) >= 0,
+                  bitnot=lambda n: signed(~n) > n,
+                  match_int=lambda n: False if n == 0 else True if n == -1 else (n > 100) if n >= 100 else (n < 0),
+                  match_bool=lambda n: (False if n == 0 else n <= 100) if n >= 0 else (n == -1),
+                  where_call=lambda n: signed(n + 1) <= 100 if 0 <= n <= 100 else n < 0)
     (package / 'src').mkdir(parents=True, exist_ok=True)
     (package / 'scuzz.toml').write_text('[package]\nname="translation"\n')
     expected = []
@@ -863,20 +870,24 @@ def main():
                                  check=True, timeout=5).stdout.strip()
         report['identities'].update(solver_sha256=digest(Path(solver).read_bytes()), solver=version)
         report['scope'] = dict(input='all signed 64-bit Int values', arithmetic='modulo 2^64',
-                               operations=['integer literals', 'Boolean literals', 'variables',
-                                           '+', '-', '*', '<', '<=', '>', '>=', '==', '!=',
-                                           '&&', '||', '!', 'if', 'pure bindings', 'nonrecursive calls'],
+                               operations=['integer literals', 'Boolean literals', 'variables', 'type ascriptions',
+                                           '+', '-', '*', '&', '|', '^', '~', '<', '<=', '>', '>=', '==', '!=',
+                                           '&&', '||', '!', 'if', 'total Int and Bool match', 'pure bindings',
+                                           'nonrecursive calls', 'pure where refinements'],
                                effects=[], expression_depth=32, call_depth=8, parameters=4,
                                platform='host evaluator and native replay',
                                solver_deadline_seconds=5, checking_budget_seconds=60)
         report['trusted'] = ['Scuzz parser and type checker', 'bit-vector translation',
                              version, 'evaluator', 'LLVM emission', 'clang', 'C runtime and scheduler choice trace', 'host OS']
         report['checks'] = {key: check(solver, data[key])
-                            for key in ('correct', 'defect', 'contradiction', 'impossible')}
+                            for key in ('correct', 'defect', 'contradiction', 'impossible', 'where_domain', 'where_violation')}
         assert report['checks']['correct']['status'] == 'passed', report['checks']
         assert report['checks']['defect']['status'] == 'failed', report['checks']
         assert report['checks']['contradiction']['status'] == 'invalid', report['checks']
         assert report['checks']['impossible']['status'] == 'invalid', report['checks']
+        assert report['checks']['where_domain']['status'] == 'passed', report['checks']
+        assert report['checks']['where_violation']['status'] == 'failed', report['checks']
+        assert report['checks']['where_violation']['queries']['counterexample']['input'] < 0, report['checks']
         assert all(row['result']['status'] == 'unsupported' for row in data['unsupported']), data['unsupported']
         report['unsupported'] = data['unsupported']
         report['translation'] = translation_checks(cli, solver, data['translation'], output / 'translation', output)
@@ -1016,7 +1027,8 @@ def recovery_package(cli, sources, output, variant):
     (package / 'src').mkdir(parents=True, exist_ok=True)
     (package / 'scuzz.toml').write_text('[package]\nname="recovery"\n')
     for name, source in sources.items():
-        (package / 'src' / (name + '.scuzz')).write_text(source)
+        if name != 'Recovery':
+            (package / 'src' / (name + '.scuzz')).write_text(source)
     setup = ['def setup(): IO[Unit] =', '  for {']
     before, after, addition, accepted, undone = recovery_documents()
     for mode in (0, 1, 2, 3, 6, 7, 10, 11, 12, 14):
@@ -1053,19 +1065,28 @@ def recovery_package(cli, sources, output, variant):
             setup.append(f'    _ <- Fs.write({json.dumps(path)}, {json.dumps(content)})')
     setup.append('    _ <- Fs.write("unrelated.txt", "unrelated bytes")')
     setup.append('  } yield ()')
+    driver_signatures = {
+        'repeat': 'def repeat(mode: Int where mode == 0 || mode == 2): IO[Unit] =',
+        'preserve': 'def preserve(n: Int where n == 1 || n == 3 || n == 5 || n == 7): IO[Unit] =',
+        'duplicate': 'def duplicate(): IO[Unit] =',
+        'undo': 'def undo(n: Int where n == 2 || n == 3 || n == 6 || n == 7): IO[Unit] =',
+        'request': 'def request(n: Int where n >= 0 && n <= 3): IO[Unit] =',
+        'invalidRecord': 'def invalidRecord(n: Int where n >= 0 && n < 19): IO[Unit] =',
+        'invalidJournal': 'def invalidJournal(n: Int where n >= 0 && n < 21): IO[Unit] =',
+        'external': 'def external(n: Int where n >= 0 && n <= 7): IO[Unit] =',
+        'externalUndo': 'def externalUndo(n: Int where n >= 0 && n <= 3): IO[Unit] =',
+        'relateExternal': 'def relateExternal(n: Int where n >= 0 && n <= 3): IO[Unit] =',
+    }
+    recovery_scenario = re.sub(
+        r'^def ([A-Za-z_][A-Za-z0-9_]*)\([^)]*\):\s*[^\n=]+=',
+        lambda m: driver_signatures.get(m[1], 'private ' + m[0]),
+        sources['Recovery'],
+        flags=re.M,
+    )
     (package / 'recovery.scuzz_scenario').write_text('\n'.join(setup) + '\n\n'
         'def faults(): List[String] = ["fs:fail"]\n\n'
-        'def recover(n: Int where n >= 0 && n <= 7): IO[Unit] = Recovery.run(n)\n\n'
-        'def repeat(n: Int where n == 0 || n == 2): IO[Unit] = Recovery.repeat(n)\n\n'
-        'def preserve(n: Int where n == 1 || n == 3 || n == 5 || n == 7): IO[Unit] = Recovery.preserve(n)\n\n'
-        'def duplicate(): IO[Unit] = Recovery.duplicate()\n\n'
-        'def undo(n: Int where n == 2 || n == 3 || n == 6 || n == 7): IO[Unit] = Recovery.undo(n)\n\n'
-        'def request(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.request(n)\n\n'
-        'def invalidRecord(n: Int where n >= 0 && n < 19): IO[Unit] = Recovery.invalidRecord(n)\n\n'
-        'def invalidJournal(n: Int where n >= 0 && n < 21): IO[Unit] = Recovery.invalidJournal(n)\n\n'
-        'def external(n: Int where n >= 0 && n <= 7): IO[Unit] = Recovery.external(n)\n\n'
-        'def externalUndo(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.externalUndo(n)\n\n'
-        'def relateExternal(n: Int where n >= 0 && n <= 3): IO[Unit] = Recovery.relateExternal(n)\n')
+        + recovery_scenario + '\n\n'
+        'def recover(n: Int where n >= 0 && n <= 7): IO[Unit] = run(n)\n')
     (package / 'recovery.scuzz_verify').write_text(
         'def externalBytes(t: Timeline): Verdict =\n'
         '  Verdict.every(t, i => !(Timeline.driveHas(t, i, "recover") || Timeline.driveHas(t, i, "undo") || Timeline.driveHas(t, i, "request")) || '
@@ -1096,7 +1117,7 @@ def recovery_package(cli, sources, output, variant):
         '  Timeline.fileTextIs(a, lastA, path, expected) == Timeline.fileTextIs(b, lastB, path, expected)\n\n'
         'private def atomicConflict(t: Timeline, last: Int): Bool =\n'
         '  Timeline.fileTextIs(t, last, "recovery-23/.scuzz/ide/journal.json", "") || '
-        'Timeline.fileTextIs(t, last, "recovery-23/src/Main.scuzz", Recovery.before())\n\n'
+        f'Timeline.fileTextIs(t, last, "recovery-23/src/Main.scuzz", {json.dumps(before)})\n\n'
         'def externalOwnershipRelation(a: Timeline, b: Timeline): Verdict =\n'
         '  for {\n'
         '    lastA = Timeline.len(a) - 1\n'
@@ -1484,8 +1505,15 @@ def live_recovery_checks(cli, sources, output):
     (package / 'src').mkdir(parents=True, exist_ok=True)
     (package / 'scuzz.toml').write_text('[package]\nname="live-recovery"\n')
     root = package / 'workspace'
+    starts = list(re.finditer(r'^def ([A-Za-z_][A-Za-z0-9_]*)\(', sources['Recovery'], re.M))
+    recovery_bodies = {match[1]: sources['Recovery'][match.start():starts[i + 1].start() if i + 1 < len(starts) else len(sources['Recovery'])]
+                       for i, match in enumerate(starts)}
+    live_recovery_source = ''.join(recovery_bodies[name] for name in (
+        'before', 'after', 'addition', 'acceptMode', 'writes', 'prepared', 'text', 'invalidRecords', 'invalidJournals'))
     for name, source in sources.items():
-        if name != 'Main':
+        if name == 'Recovery':
+            (package / 'src/Recovery.scuzz').write_text(live_recovery_source)
+        elif name != 'Main':
             (package / 'src' / (name + '.scuzz')).write_text(source)
     (package / 'src/Main.scuzz').write_text(
         '@main def main: IO[Unit] =\n'
