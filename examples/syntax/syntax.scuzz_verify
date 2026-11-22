@@ -1,0 +1,146 @@
+private def lineColAt(src: String, i: Int, off: Int, line: Int, col: Int): (Int, Int) =
+  if (i >= off || i >= Str.len(src)) (line, col) else if (Str.charAt(src, i) == 10) lineColAt(src, i + 1, off, line + 1, 1) else lineColAt(src, i + 1, off, line, col + 1)
+
+private def errCoords(src: String): List[(Int, Int)] =
+  List.map(Parse.parseErrorOffs(src), off => lineColAt(src, 0, off, 1, 1))
+
+private def strictlyIncreasing(offs: List[Int]): Bool =
+  if (List.len(offs) <= 1) true else List.at(offs, 0) < List.at(offs, 1) && strictlyIncreasing(List.tail(offs))
+
+private def expectErrs(src: String, want: List[(Int, Int)]): Bool =
+  for {
+    offs = Parse.parseErrorOffs(src)
+    prog = Parse.parse(Lexer.lex(src))
+  } yield Parse.hasParseError(prog) && !List.isEmpty(offs) && strictlyIncreasing(offs) && Parse.parseErrorOff(src) == List.at(offs, 0) && errCoords(src) == want
+
+private def expectValid(src: String): Bool =
+  for {
+    offs = Parse.parseErrorOffs(src)
+    prog = Parse.parse(Lexer.lex(src))
+  } yield !Parse.hasParseError(prog) && List.isEmpty(offs) && Parse.parseErrorOff(src) == 0 - 1
+
+private def srcForTrunc(): String =
+  """def compute(): Int =
+  for {
+    a = 1 +
+    b = 2 +
+    ok = 3
+  } yield ok +"""
+
+private def srcForKinds(): String =
+  "@main def main: IO[Unit] =\n  for {\n    record = 1\n    IO.println(\"bare\")\n    if 1 + )\n    x = 1 $ 2\n    y = 3; z = 4 + ]\n  } yield ()"
+
+private def srcForNoCascade(): String =
+  """def broken(): Int = for {
+  x = 1 +
+record = 2
+} yield x"""
+
+private def srcForValidMultiLine(): String =
+  """def validFor(): Int =
+  for {
+    a =
+      1 +
+        2
+    (x, y) =
+      (a, a + 1)
+    if x > 0
+  } yield x + y"""
+
+oracle recoverForBindings(): Bool =
+  expectErrs(srcForTrunc(), [(4, 5), (5, 5), (6, 15)]) && expectErrs(srcForKinds(), [(3, 5), (4, 5), (5, 12), (6, 11), (7, 10), (7, 20)]) && expectErrs(srcForNoCascade(), [(3, 1)]) && expectValid(srcForValidMultiLine())
+
+private def srcMatchArms(): String =
+  "def classify(n: Int): String =\n  n match {\n    case 0 if => \"zero\"\n    case 1 => \"one\" +\n    case record => \"two\"\n    case 2 => \"three\" $ \"four\"\n    case _ => \"other\"\n  }"
+
+private def srcBraceMatchNested(): String =
+  """oracle nestedMatch(xs: List[Int]): Bool =
+  List.map(xs, {
+    case 0 =>
+      xs match {
+        case [] => 1 +
+        case _ => 2 +
+      }
+    case _ => 3 +
+  }) == []"""
+
+private def srcMatchValid(): String =
+  "def describe(n: Int): String =\n  n match {\n    case 0 => \"zero\"\n    case x if x > 0 => \"pos\"\n    case _ => \"neg\"\n  }"
+
+oracle recoverMatchArms(): Bool =
+  expectErrs(srcMatchArms(), [(3, 15), (5, 5), (5, 10), (6, 23)]) && expectErrs(srcBraceMatchNested(), [(6, 9), (7, 7), (9, 3)]) && expectErrs("def f(x: Int): Int = x match { case case => 1 }", [(1, 37)]) && expectValid(srcMatchValid())
+
+private def srcBraceBlock(): String =
+  """def blockFn(x: Int): Int = {
+  a = x + )
+  b = a * ]
+  a + b
+}"""
+
+private def srcBodyStmts(): String =
+  "@main def main: IO[Unit] =\n  IO.println(\"ok\")\n  IO.println(\"second\")\n  IO.println(1 + )"
+
+private def srcAssignStmts(): String =
+  """def assignBody(x: Int): Int =
+  a = x + 1
+  b = a + 2"""
+
+private def srcDelimsAndInterp(): String =
+  "def compound(c: Bool): String =\n  if (1 + ) s\"${2 3} ${4 + }\" else List.join([\"a\", 5 + ], \",\")"
+
+oracle recoverBlockStatements(): Bool =
+  expectErrs(srcBraceBlock(), [(1, 28), (2, 11), (3, 11)]) && expectErrs("def singleBrace(): Int = { 1 + }", [(1, 26)]) && expectErrs(srcBodyStmts(), [(3, 3), (4, 18)]) && expectErrs(srcAssignStmts(), [(2, 5), (3, 5)]) && expectErrs("def semis(): Int = 1 + ); 2 + ]", [(1, 24), (1, 25), (1, 31)]) && expectErrs(srcDelimsAndInterp(), [(2, 11), (2, 19), (2, 28), (2, 56)])
+
+private def srcTraitAndImpl(): String =
+  """trait Store[A]:
+  def get(key: ): A
+  def put(key: String, val0: A where ): Unit
+  def bad(x: Int)
+  def ok(z: ): A
+impl Store[Int] for Box:
+  def get(key: ): Int =
+    for {
+      a = 1 +
+      b = 2 +
+    } yield a
+  def put(key: , val0: ): Unit = ()"""
+
+private def srcBrokenHeadersWithBodies(): String =
+  """trait record:
+  def first(x: ): Int
+  def second(y: ): String
+def record(a: , b: Int where ): Int =
+  for {
+    u = 1 + )
+    v = 2 + ]
+  } yield u"""
+
+oracle recoverTraitAndImplMembers(): Bool =
+  expectErrs(srcTraitAndImpl(), [(2, 16), (3, 38), (5, 3), (5, 13), (7, 16), (10, 7), (11, 5), (12, 16), (12, 24)]) && expectErrs(srcBrokenHeadersWithBodies(), [(1, 7), (2, 16), (3, 17), (4, 5), (4, 15), (4, 30), (6, 13), (7, 13)]) && expectErrs("""trait record:
+  def ok(): Int""", [(1, 7)])
+
+private def genForLine(name: String, broken: Bool): String =
+  if (broken) Str.concat("    ", Str.concat(name, " = 1 + )")) else Str.concat("    ", Str.concat(name, " = 1"))
+
+private def genArmLine(tag: Int, broken: Bool): String =
+  if (broken) s"    case $tag => 10 + )" else s"    case $tag => 10"
+
+private def genTraitLine(name: String, broken: Bool): String =
+  if (broken) Str.concat("  def ", Str.concat(name, "(x: ): Int")) else Str.concat("  def ", Str.concat(name, "(x: Int): Int"))
+
+private def bCount(b: Bool): Int =
+  if (b) 1 else 0
+
+oracle generatedRecoveryAgreement(seed: Int where seed >= 0): Bool =
+  for {
+    b0 = seed % 2 == 1
+    b1 = seed / 2 % 2 == 1
+    b2 = seed / 4 % 2 == 1
+    b3 = seed / 8 % 2 == 1
+    want = bCount(b0) + bCount(b1) + bCount(b2) + bCount(b3)
+    src = List.join(["trait Sample:", genTraitLine("m0", b0), "def run(n: Int): Int =", "  for {", genForLine("a", b1), genForLine("b", b2), "    r = n match {", genArmLine(0, b3), "      case _ => 0", "    }", "  } yield a + b + r"], """
+""")
+    offs = Parse.parseErrorOffs(src)
+    hasErr = Parse.hasParseError(Parse.parse(Lexer.lex(src)))
+  } yield hasErr == (want > 0) && List.len(offs) == want && strictlyIncreasing(offs)
+

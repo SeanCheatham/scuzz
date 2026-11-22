@@ -1576,322 +1576,625 @@ def vPatListNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
     case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vPatList(toks, j + 1) else vExpect(toks, j, Tok.RBracket)
   }
 
-def vExpr(toks: Toks, i: Int): (Bool, Int) =
-  vAscribe(toks, vBin(toks, i, 0))
+def hasNl(src: String, a: Int, b: Int): Bool =
+  if (a < 0) hasNl(src, 0, b) else if (a >= b || a >= Str.len(src)) false else if (Str.charAt(src, a) == 10) true else hasNl(src, a + 1, b)
 
-def vAscribe(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def onNewLine(src: String, toks: Toks, k: Int): Bool =
+  k > 0 && hasNl(src, _off(toks, k - 1), _off(toks, k))
+
+def isColZeroLine(src: String, toks: Toks, k: Int): Bool =
+  Lexer.columnAt(src, _off(toks, k) - 1, 0) == 0
+
+def isIndentedDefLine(src: String, toks: Toks, k: Int): Bool =
+  _is(toks, k, Tok.Def) && _sp(toks, k).column > 0 && (k == 0 || hasNl(src, _off(toks, k - 1), _off(toks, k)))
+
+def _isSemi(src: String, toks: Toks, k: Int): Bool =
+  _is(toks, k, Tok.Bad) && _off(toks, k) < Str.len(src) && Str.charAt(src, _off(toks, k)) == 59
+
+def skipSemis(src: String, toks: Toks, k: Int): Int =
+  if (_isSemi(src, toks, k)) skipSemis(src, toks, k + 1) else k
+
+def addErrOff(off: Int, acc: List[Int]): List[Int] =
+  if (off < 0) acc else if (!List.isEmpty(acc) && off <= List.at(acc, 0)) acc else off :: acc
+
+def vLift(step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Colon)) vType(toks, j + 1) else (true, j)
+    case (ok, j) => (ok, j, acc)
+  }
+
+def vFail3(toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  (false, _off(toks, i), acc)
+
+def vExpect3(toks: Toks, i: Int, t: Tok, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, t)) (true, i + 1, acc) else vFail3(toks, i, acc)
+
+def isForBindStart(src: String, toks: Toks, k: Int): Bool =
+  isForBindPat(src, toks, k, vPat(toks, k))
+
+def isForBindPat(src: String, toks: Toks, k: Int, step: (Bool, Int)): Bool =
+  step match {
+    case (ok, m) => ok && (_is(toks, m, Tok.LeftArrow) || _is(toks, m, Tok.Eq)) && !hasNl(src, _off(toks, k), _off(toks, m))
+  }
+
+def vTypeCtx(src: String, toks: Toks, i: Int, inFor: Bool): (Bool, Int) =
+  if (inFor && onNewLine(src, toks, i) && isForBindStart(src, toks, i)) vFail(toks, i) else vType(toks, i)
+
+def vIdentCtx(src: String, toks: Toks, i: Int, inFor: Bool): (Bool, Int) =
+  if (inFor && onNewLine(src, toks, i) && isForBindStart(src, toks, i)) vFail(toks, i) else vIdent(toks, i)
+
+def isLeadContTok(t: Tok): Bool =
+  if (_opTok(t) != "") true else t match {
+  case Tok.Dot => true
+  case Tok.Comma => true
+  case Tok.Colon => true
+  case Tok.RParen => true
+  case Tok.RBracket => true
+  case Tok.Arrow => true
+  case Tok.Else => true
+  case Tok.Match => true
+  case Tok.Where => true
+  case Tok.Yield => true
+  case _ => false
+}
+
+def isTrailContTok(t: Tok): Bool =
+  if (_opTok(t) != "") true else t match {
+  case Tok.Bang => true
+  case Tok.Tilde => true
+  case Tok.Dot => true
+  case Tok.Comma => true
+  case Tok.Colon => true
+  case Tok.LParen => true
+  case Tok.LBracket => true
+  case Tok.Arrow => true
+  case Tok.LeftArrow => true
+  case Tok.Eq => true
+  case Tok.Else => true
+  case Tok.If => true
+  case Tok.Where => true
+  case Tok.Yield => true
+  case _ => false
+}
+
+def isContLine(src: String, toks: Toks, k: Int): Bool =
+  isLeadContTok(_at(toks, k)) || k > 0 && isTrailContTok(_at(toks, k - 1)) && !isForBindStart(src, toks, k) && !_is(toks, k, Tok.Case)
+
+def findCloseBrace(toks: Toks, k: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) 0 - 1 else _at(toks, k) match {
+  case Tok.LBrace => findCloseBrace(toks, k + 1, c + 1)
+  case Tok.RBrace => if (c == 1) k + 1 else findCloseBrace(toks, k + 1, c - 1)
+  case _ => findCloseBrace(toks, k + 1, c)
+}
+
+def findCloseParen(toks: Toks, k: Int, p: Int, b: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) 0 - 1 else _at(toks, k) match {
+  case Tok.LParen => findCloseParen(toks, k + 1, p + 1, b, c)
+  case Tok.RParen => if (p == 1) if (b == 0 && c == 0) k + 1 else 0 - 1 else findCloseParen(toks, k + 1, p - 1, b, c)
+  case Tok.LBracket => findCloseParen(toks, k + 1, p, b + 1, c)
+  case Tok.RBracket => findCloseParen(toks, k + 1, p, if (b > 0) b - 1 else 0, c)
+  case Tok.LBrace => findCloseParen(toks, k + 1, p, b, c + 1)
+  case Tok.RBrace => if (c > 0) findCloseParen(toks, k + 1, p, b, c - 1) else 0 - 1
+  case _ => findCloseParen(toks, k + 1, p, b, c)
+}
+
+def findCloseBracket(toks: Toks, k: Int, p: Int, b: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) 0 - 1 else _at(toks, k) match {
+  case Tok.LBracket => findCloseBracket(toks, k + 1, p, b + 1, c)
+  case Tok.RBracket => if (b == 1) if (p == 0 && c == 0) k + 1 else 0 - 1 else findCloseBracket(toks, k + 1, p, b - 1, c)
+  case Tok.LParen => findCloseBracket(toks, k + 1, p + 1, b, c)
+  case Tok.RParen => findCloseBracket(toks, k + 1, if (p > 0) p - 1 else 0, b, c)
+  case Tok.LBrace => findCloseBracket(toks, k + 1, p, b, c + 1)
+  case Tok.RBrace => if (c > 0) findCloseBracket(toks, k + 1, p, b, c - 1) else 0 - 1
+  case _ => findCloseBracket(toks, k + 1, p, b, c)
+}
+
+def findNextComma(toks: Toks, k: Int, stopIdx: Int, errOff: Int, p: Int, b: Int, c: Int): Int =
+  if (k >= stopIdx || k >= toks.n || _is(toks, k, Tok.Eof)) 0 - 1 else if (p == 0 && b == 0 && c == 0 && _is(toks, k, Tok.Comma) && _off(toks, k) >= errOff) k else _at(toks, k) match {
+  case Tok.LParen => findNextComma(toks, k + 1, stopIdx, errOff, p + 1, b, c)
+  case Tok.RParen => findNextComma(toks, k + 1, stopIdx, errOff, if (p > 0) p - 1 else 0, b, c)
+  case Tok.LBracket => findNextComma(toks, k + 1, stopIdx, errOff, p, b + 1, c)
+  case Tok.RBracket => findNextComma(toks, k + 1, stopIdx, errOff, p, if (b > 0) b - 1 else 0, c)
+  case Tok.LBrace => findNextComma(toks, k + 1, stopIdx, errOff, p, b, c + 1)
+  case Tok.RBrace => findNextComma(toks, k + 1, stopIdx, errOff, p, b, if (c > 0) c - 1 else 0)
+  case _ => findNextComma(toks, k + 1, stopIdx, errOff, p, b, c)
+}
+
+def vExpr(src: String, toks: Toks, i: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  vAscribe(src, toks, vBin(src, toks, i, 0, inFor, acc), inFor)
+
+def vAscribe(src: String, toks: Toks, step: (Bool, Int, List[Int]), inFor: Bool): (Bool, Int, List[Int]) =
+  step match {
+    case (ok, j, acc) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.Colon)) vLift(vTypeCtx(src, toks, j + 1, inFor), acc) else (true, j, acc)
   }
 
 def vPrecWant(lvl: Int): String =
   if (lvl == 0) "||" else if (lvl == 1) "&&" else if (lvl == 2) "|" else if (lvl == 3) "^" else if (lvl == 4) "&" else if (lvl == 5) "==" else if (lvl == 7) "<<" else if (lvl == 8) "+" else "*"
 
-def vBin(toks: Toks, i: Int, lvl: Int): (Bool, Int) =
-  if (lvl == 6) vCons(toks, i) else if (lvl >= 9) vBinRest(toks, vUnary(toks, i), 9) else vBinRest(toks, vBin(toks, i, lvl + 1), lvl)
+def vBin(src: String, toks: Toks, i: Int, lvl: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (lvl == 6) vCons(src, toks, i, inFor, acc) else if (lvl >= 9) vBinRest(src, toks, vUnary(src, toks, i, inFor, acc), 9, inFor) else vBinRest(src, toks, vBin(src, toks, i, lvl + 1, inFor, acc), lvl, inFor)
 
-def vBinRest(toks: Toks, step: (Bool, Int), lvl: Int): (Bool, Int) =
+def vBinRest(src: String, toks: Toks, step: (Bool, Int, List[Int]), lvl: Int, inFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_opLevel(_opTok(_at(toks, j)), vPrecWant(lvl))) vBinRest(toks, if (lvl >= 9) vUnary(toks, j + 1) else vBin(toks, j + 1, lvl + 1), lvl) else (true, j)
+    case (ok, j, acc) => if (!ok) (false, j, acc) else if (_opLevel(_opTok(_at(toks, j)), vPrecWant(lvl))) vBinRest(src, toks, if (lvl >= 9) vUnary(src, toks, j + 1, inFor, acc) else vBin(src, toks, j + 1, lvl + 1, inFor, acc), lvl, inFor) else (true, j, acc)
   }
 
-def vCons(toks: Toks, i: Int): (Bool, Int) =
-  vConsRest(toks, vBin(toks, i, 7))
+def vCons(src: String, toks: Toks, i: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  vConsRest(src, toks, vBin(src, toks, i, 7, inFor, acc), inFor)
 
-def vConsRest(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vConsRest(src: String, toks: Toks, step: (Bool, Int, List[Int]), inFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.ColonColon)) vCons(toks, j + 1) else (true, j)
+    case (ok, j, acc) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.ColonColon)) vCons(src, toks, j + 1, inFor, acc) else (true, j, acc)
   }
 
-def vUnary(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.Minus) || _is(toks, i, Tok.Bang) || _is(toks, i, Tok.Tilde)) vUnary(toks, i + 1) else vPost(toks, vAtom(toks, i))
+def vUnary(src: String, toks: Toks, i: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.Minus) || _is(toks, i, Tok.Bang) || _is(toks, i, Tok.Tilde)) vUnary(src, toks, i + 1, inFor, acc) else vPost(src, toks, vAtom(src, toks, i, inFor, acc), inFor)
 
-def vAtom(toks: Toks, i: Int): (Bool, Int) =
-  _at(toks, i) match {
-    case Tok.Int(_) => (true, i + 1)
-    case Tok.True => (true, i + 1)
-    case Tok.False => (true, i + 1)
-    case Tok.Str(_) => (true, i + 1)
-    case Tok.Float(_) => (true, i + 1)
-    case Tok.Interp(s) => vInterpAtom(vInterp(s, 0, _off(toks, i) + 2), i + 1)
-    case Tok.Underscore => if (_is(toks, i + 1, Tok.Arrow)) vExpr(toks, i + 2) else (true, i + 1)
-    case Tok.LParen => if (_is(toks, i + 1, Tok.RParen)) (true, i + 2) else vParen(toks, vExpr(toks, i + 1))
-    case Tok.LBracket => if (_is(toks, i + 1, Tok.RBracket)) (true, i + 2) else vListElems(toks, i + 1)
-    case Tok.Ident(s) => vIdentAtom(toks, i, s)
-    case Tok.If => vIf(toks, i)
-    case Tok.For => vFor(toks, i)
-    case Tok.LBrace => if (_is(toks, i + 1, Tok.Case)) vMatch(toks, i) else vFail(toks, i)
-    case _ => vFail(toks, i)
+def vAtom(src: String, toks: Toks, i: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (inFor && onNewLine(src, toks, i) && isForBindStart(src, toks, i)) vFail3(toks, i, acc) else _at(toks, i) match {
+  case Tok.Int(_) => (true, i + 1, acc)
+  case Tok.True => (true, i + 1, acc)
+  case Tok.False => (true, i + 1, acc)
+  case Tok.Str(_) => (true, i + 1, acc)
+  case Tok.Float(_) => (true, i + 1, acc)
+  case Tok.Interp(s) => (true, i + 1, vInterp(src, s, 0, _off(toks, i) + 2, acc))
+  case Tok.Underscore => if (_is(toks, i + 1, Tok.Arrow)) vExpr(src, toks, i + 2, inFor, acc) else (true, i + 1, acc)
+  case Tok.LParen => if (_is(toks, i + 1, Tok.RParen)) (true, i + 2, acc) else vParenOpen(src, toks, i, inFor, acc)
+  case Tok.LBracket => if (_is(toks, i + 1, Tok.RBracket)) (true, i + 2, acc) else vListOpen(src, toks, i, acc)
+  case Tok.Ident(s) => vIdentAtom(src, toks, i, s, inFor, acc)
+  case Tok.If => vIf(src, toks, i, inFor, acc)
+  case Tok.For => vFor(src, toks, i, inFor, acc)
+  case Tok.LBrace => if (_is(toks, i + 1, Tok.Case)) vMatch(src, toks, i, acc) else vBraceBlock(src, toks, i, acc)
+  case _ => vFail3(toks, i, acc)
+}
+
+def vInterp(src: String, s: String, i: Int, base: Int, acc: List[Int]): List[Int] =
+  if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 92 && i + 1 < Str.len(s)) vInterp(src, s, i + 2, base, acc) else if (Str.charAt(s, i) == 36 && i + 1 < Str.len(s) && Str.charAt(s, i + 1) == 123) vInterpBrace(src, s, i, interpCloseBrace(s, i + 2, 1), base, acc) else vInterp(src, s, i + 1, base, acc)
+
+def vInterpBrace(src: String, s: String, i: Int, j: Int, base: Int, acc: List[Int]): List[Int] =
+  vInterp(src, s, j, base, vHoleToks(src, indexToks(interpHoleToks(Str.slice(s, i + 2, j - 1), base + i + 2)), acc))
+
+def vHoleToks(src: String, toks: Toks, acc: List[Int]): List[Int] =
+  vHoleToksEnd(toks, vExpr(src, toks, 0, false, acc))
+
+def vHoleToksEnd(toks: Toks, step: (Bool, Int, List[Int])): List[Int] =
+  step match {
+    case (ok, j, acc) => if (!ok) addErrOff(j, acc) else if (!_is(toks, j, Tok.Eof)) addErrOff(_off(toks, j), acc) else if (toks.bad >= 0) addErrOff(_off(toks, toks.bad), acc) else acc
   }
 
-def vInterpAtom(step: (Bool, Int), next: Int): (Bool, Int) =
+def vIdentAtom(src: String, toks: Toks, i: Int, s: String, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i + 1, Tok.Arrow)) vExpr(src, toks, i + 2, inFor, acc) else if ((s == "IO" || _kit(s)) && _is(toks, i + 1, Tok.Dot)) vKitCall(src, toks, vIdentCtx(src, toks, i + 2, inFor), acc) else (true, i + 1, acc)
+
+def vKitCall(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, off) => if (ok) (true, next) else (false, off)
+    case (ok, j) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j)) vArgOpen(src, toks, j + 1, acc) else (true, j, acc)
   }
 
-def vInterp(s: String, i: Int, base: Int): (Bool, Int) =
-  if (i >= Str.len(s)) (true, 0) else if (Str.charAt(s, i) == 92 && i + 1 < Str.len(s)) vInterp(s, i + 2, base) else if (Str.charAt(s, i) == 36 && i + 1 < Str.len(s) && Str.charAt(s, i + 1) == 123) vInterpBrace(s, i, interpCloseBrace(s, i + 2, 1), base) else vInterp(s, i + 1, base)
+def vParenOpen(src: String, toks: Toks, openIdx: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  vParen(src, toks, openIdx + 1, findCloseParen(toks, openIdx + 1, 1, 0, 0), vExpr(src, toks, openIdx + 1, false, acc), inFor)
 
-def vInterpBrace(s: String, i: Int, j: Int, base: Int): (Bool, Int) =
-  vInterpBraceNext(vHoleToks(indexToks(interpHoleToks(Str.slice(s, i + 2, j - 1), base + i + 2))), s, j, base)
-
-def vInterpBraceNext(step: (Bool, Int), s: String, j: Int, base: Int): (Bool, Int) =
+def vParen(src: String, toks: Toks, elemStart: Int, closeIdx: Int, step: (Bool, Int, List[Int]), inFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, off) => if (!ok) (false, off) else vInterp(s, j, base)
+    case (ok, j, acc) => if (!ok) vParenRecover(src, toks, elemStart, closeIdx, j, inFor, acc) else if (_is(toks, j, Tok.Comma)) vTupleLam(src, toks, closeIdx, vTupleRest(src, toks, j + 1, closeIdx, acc), inFor) else vOneLam(src, toks, elemStart, closeIdx, j, inFor, acc)
   }
 
-def vHoleToks(toks: Toks): (Bool, Int) =
-  vHoleToksEnd(toks, vExpr(toks, 0))
+def vParenRecover(src: String, toks: Toks, elemStart: Int, closeIdx: Int, errOff: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (closeIdx < 0) (false, errOff, acc) else vParenRecoverComma(src, toks, findNextComma(toks, elemStart, closeIdx - 1, errOff, 0, 0, 0), closeIdx, inFor, addErrOff(errOff, acc))
 
-def vHoleToksEnd(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vParenRecoverComma(src: String, toks: Toks, commaIdx: Int, closeIdx: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (commaIdx >= 0 && commaIdx + 1 < closeIdx - 1) vTupleLam(src, toks, closeIdx, vTupleRest(src, toks, commaIdx + 1, closeIdx, acc), inFor) else vParenAfterClose(src, toks, closeIdx, inFor, acc)
+
+def vParenAfterClose(src: String, toks: Toks, closeIdx: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, closeIdx, Tok.Arrow)) vExpr(src, toks, closeIdx + 1, inFor, acc) else (true, closeIdx, acc)
+
+def vOneLam(src: String, toks: Toks, elemStart: Int, closeIdx: Int, j: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, j, Tok.Colon)) vOneLamTy(src, toks, elemStart, closeIdx, vType(toks, j + 1), inFor, acc) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) vExpr(src, toks, j + 2, inFor, acc) else if (_is(toks, j, Tok.RParen)) (true, j + 1, acc) else vParenRecover(src, toks, j, closeIdx, _off(toks, j), inFor, acc)
+
+def vOneLamTy(src: String, toks: Toks, elemStart: Int, closeIdx: Int, step: (Bool, Int), inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.Eof)) vFail(toks, j) else if (toks.bad >= 0) (false, _off(toks, toks.bad)) else (true, 0)
+    case (ok, k) => if (!ok) vParenRecover(src, toks, elemStart, closeIdx, k, inFor, acc) else vOneLam(src, toks, elemStart, closeIdx, k, inFor, acc)
   }
 
-def vIdentAtom(toks: Toks, i: Int, s: String): (Bool, Int) =
-  if (_is(toks, i + 1, Tok.Arrow)) vExpr(toks, i + 2) else if ((s == "IO" || _kit(s)) && _is(toks, i + 1, Tok.Dot)) vKitCall(toks, vIdent(toks, i + 2)) else (true, i + 1)
+def vTupleRest(src: String, toks: Toks, i: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vTupleRestNext(src, toks, i, closeIdx, vExpr(src, toks, i, false, acc))
 
-def vKitCall(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vTupleRestNext(src: String, toks: Toks, elemStart: Int, closeIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j)) vArgOpen(toks, j + 1) else (true, j)
+    case (ok, j, acc) => if (!ok) vTupleRecover(src, toks, elemStart, closeIdx, j, acc) else if (_is(toks, j, Tok.Comma)) vTupleRest(src, toks, j + 1, closeIdx, acc) else if (_is(toks, j, Tok.RParen)) (true, j + 1, acc) else vTupleRecover(src, toks, j, closeIdx, _off(toks, j), acc)
   }
 
-def vParen(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vTupleRecover(src: String, toks: Toks, elemStart: Int, closeIdx: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (closeIdx < 0) (false, errOff, acc) else vTupleRecoverComma(src, toks, findNextComma(toks, elemStart, closeIdx - 1, errOff, 0, 0, 0), closeIdx, addErrOff(errOff, acc))
+
+def vTupleRecoverComma(src: String, toks: Toks, commaIdx: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (commaIdx >= 0 && commaIdx + 1 < closeIdx - 1) vTupleRest(src, toks, commaIdx + 1, closeIdx, acc) else (true, closeIdx, acc)
+
+def vTupleLam(src: String, toks: Toks, closeIdx: Int, step: (Bool, Int, List[Int]), inFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vTupleLam(toks, vTupleRest(toks, j + 1)) else vOneLam(toks, j)
+    case (ok, j, acc) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.Arrow)) vExpr(src, toks, j + 1, inFor, acc) else (true, j, acc)
   }
 
-def vOneLam(toks: Toks, j: Int): (Bool, Int) =
-  if (_is(toks, j, Tok.Colon)) vOneLamTy(toks, vType(toks, j + 1)) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) vExpr(toks, j + 2) else vExpect(toks, j, Tok.RParen)
+def vListOpen(src: String, toks: Toks, openIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vListElems(src, toks, openIdx + 1, findCloseBracket(toks, openIdx + 1, 0, 1, 0), acc)
 
-def vOneLamTy(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vListElems(src: String, toks: Toks, i: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vListNext(src, toks, i, closeIdx, vExpr(src, toks, i, false, acc))
+
+def vListNext(src: String, toks: Toks, elemStart: Int, closeIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else vOneLam(toks, k)
+    case (ok, j, acc) => if (!ok) vListRecover(src, toks, elemStart, closeIdx, j, acc) else if (_is(toks, j, Tok.Comma)) vListElems(src, toks, j + 1, closeIdx, acc) else if (_is(toks, j, Tok.RBracket)) (true, j + 1, acc) else vListRecover(src, toks, j, closeIdx, _off(toks, j), acc)
   }
 
-def vTupleRest(toks: Toks, i: Int): (Bool, Int) =
-  vTupleRestNext(toks, vExpr(toks, i))
+def vListRecover(src: String, toks: Toks, elemStart: Int, closeIdx: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (closeIdx < 0) (false, errOff, acc) else vListRecoverComma(src, toks, findNextComma(toks, elemStart, closeIdx - 1, errOff, 0, 0, 0), closeIdx, addErrOff(errOff, acc))
 
-def vTupleRestNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vListRecoverComma(src: String, toks: Toks, commaIdx: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (commaIdx >= 0 && commaIdx + 1 < closeIdx - 1) vListElems(src, toks, commaIdx + 1, closeIdx, acc) else (true, closeIdx, acc)
+
+def vIf(src: String, toks: Toks, i: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (!_is(toks, i + 1, Tok.LParen)) vFail3(toks, i + 1, acc) else vIfCond(src, toks, findCloseParen(toks, i + 2, 1, 0, 0), vExpr(src, toks, i + 2, false, acc), inFor)
+
+def vIfCond(src: String, toks: Toks, closeIdx: Int, step: (Bool, Int, List[Int]), inFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vTupleRest(toks, j + 1) else vExpect(toks, j, Tok.RParen)
+    case (ok, j, acc) => if (!ok) vIfCondRecover(src, toks, closeIdx, j, inFor, acc) else if (!_is(toks, j, Tok.RParen)) vIfCondRecover(src, toks, closeIdx, _off(toks, j), inFor, acc) else vIfThen(src, toks, j + 1, vExpr(src, toks, j + 1, inFor, acc), inFor)
   }
 
-def vTupleLam(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vIfCondRecover(src: String, toks: Toks, closeIdx: Int, errOff: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (closeIdx < 0) (false, errOff, acc) else vIfThen(src, toks, closeIdx, vExpr(src, toks, closeIdx, inFor, addErrOff(errOff, acc)), inFor)
+
+def findSyncElse(src: String, toks: Toks, k: Int, errOff: Int, p: Int, b: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) 0 - 1 else if (p == 0 && b == 0 && c == 0 && _is(toks, k, Tok.Else) && _off(toks, k) >= errOff) k else if (p == 0 && b == 0 && c == 0 && (_is(toks, k, Tok.RBrace) || _is(toks, k, Tok.Case) || _isSemi(src, toks, k) || isTopStart(src, toks, k) || isIndentedDefLine(src, toks, k))) 0 - 1 else _at(toks, k) match {
+  case Tok.LParen => findSyncElse(src, toks, k + 1, errOff, p + 1, b, c)
+  case Tok.RParen => if (p > 0) findSyncElse(src, toks, k + 1, errOff, p - 1, b, c) else 0 - 1
+  case Tok.LBracket => findSyncElse(src, toks, k + 1, errOff, p, b + 1, c)
+  case Tok.RBracket => if (b > 0) findSyncElse(src, toks, k + 1, errOff, p, b - 1, c) else 0 - 1
+  case Tok.LBrace => findSyncElse(src, toks, k + 1, errOff, p, b, c + 1)
+  case _ => findSyncElse(src, toks, k + 1, errOff, p, b, c)
+}
+
+def vIfThen(src: String, toks: Toks, thenStart: Int, step: (Bool, Int, List[Int]), inFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Arrow)) vExpr(toks, j + 1) else (true, j)
+    case (ok, k, acc) => if (!ok) vIfThenRecover(src, toks, findSyncElse(src, toks, thenStart, k, 0, 0, 0), k, inFor, acc) else if (_is(toks, k, Tok.Else)) vExpr(src, toks, k + 1, inFor, acc) else (true, k, acc)
   }
 
-def vListElems(toks: Toks, i: Int): (Bool, Int) =
-  vListNext(toks, vExpr(toks, i))
+def vIfThenRecover(src: String, toks: Toks, elseIdx: Int, errOff: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (elseIdx < 0) (false, errOff, acc) else vExpr(src, toks, elseIdx + 1, inFor, addErrOff(errOff, acc))
 
-def vListNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vFor(src: String, toks: Toks, i: Int, inFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (!_is(toks, i + 1, Tok.LBrace)) vFail3(toks, i + 1, acc) else vForBinds(src, toks, findCloseBrace(toks, i + 2, 1) >= 0, i + 2, inFor, acc)
+
+def vForBinds(src: String, toks: Toks, hasClose: Bool, i: Int, outFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.RBrace)) vForYield(src, toks, i + 1, outFor, acc) else if (i >= toks.n || _is(toks, i, Tok.Eof) || !hasClose && isTopStart(src, toks, i)) vFail3(toks, i, acc) else if (_isSemi(src, toks, i)) vForBinds(src, toks, hasClose, skipSemis(src, toks, i + 1), outFor, addErrOff(_off(toks, i), acc)) else vForBindsNext(src, toks, hasClose, i, vForOne(src, toks, i, acc), outFor)
+
+def vForBindsNext(src: String, toks: Toks, hasClose: Bool, bindStart: Int, step: (Bool, Int, List[Int]), outFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vListElems(toks, j + 1) else vExpect(toks, j, Tok.RBracket)
+    case (ok, j, acc) => if (ok) vForBinds(src, toks, hasClose, j, outFor, acc) else vForBinds(src, toks, hasClose, syncForBind(src, toks, hasClose, bindStart, bindStart, j, 0), outFor, addErrOff(j, acc))
   }
 
-def vIf(toks: Toks, i: Int): (Bool, Int) =
-  if (!_is(toks, i + 1, Tok.LParen)) vFail(toks, i + 1) else vIfCond(toks, vExpr(toks, i + 2))
+def syncForBind(src: String, toks: Toks, hasClose: Bool, bindStart: Int, k: Int, errOff: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) k else if (c == 0 && _is(toks, k, Tok.RBrace)) k else if (!hasClose && c == 0 && k > bindStart && _off(toks, k) >= errOff && isTopStart(src, toks, k)) k else if (c == 0 && k > bindStart && _isSemi(src, toks, k) && _off(toks, k) >= errOff) skipSemis(src, toks, k + 1) else if (c == 0 && k > bindStart && onNewLine(src, toks, k) && (_off(toks, k) == errOff && isForBindStart(src, toks, k) || hasNl(src, errOff, _off(toks, k)) && !isContLine(src, toks, k))) k else _at(toks, k) match {
+  case Tok.LBrace => syncForBind(src, toks, hasClose, bindStart, k + 1, errOff, c + 1)
+  case Tok.RBrace => syncForBind(src, toks, hasClose, bindStart, k + 1, errOff, if (c > 0) c - 1 else 0)
+  case _ => syncForBind(src, toks, hasClose, bindStart, k + 1, errOff, c)
+}
 
-def vIfCond(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vForOne(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.If)) vExpr(src, toks, i + 1, true, acc) else vForPat(src, toks, i, vPat(toks, i), acc)
+
+def vForPat(src: String, toks: Toks, bindStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.RParen)) vFail(toks, j) else vIfThen(toks, vExpr(toks, j + 1))
+    case (ok, j) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.LeftArrow) || _is(toks, j, Tok.Eq)) vForRhs(src, toks, vExpr(src, toks, j + 1, true, acc)) else if (hasNl(src, _off(toks, bindStart), _off(toks, j))) (true, j, addErrOff(_off(toks, bindStart), acc)) else vFail3(toks, j, acc)
   }
 
-def vIfThen(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vForRhs(src: String, toks: Toks, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else if (_is(toks, k, Tok.Else)) vExpr(toks, k + 1) else (true, k)
+    case (ok, j, acc) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.Colon)) vLift(vTypeCtx(src, toks, j + 1, true), acc) else (true, j, acc)
   }
 
-def vFor(toks: Toks, i: Int): (Bool, Int) =
-  if (!_is(toks, i + 1, Tok.LBrace)) vFail(toks, i + 1) else vForBinds(toks, i + 2)
+def vForYield(src: String, toks: Toks, i: Int, outFor: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.Yield)) vExpr(src, toks, i + 1, outFor, acc) else vFail3(toks, i, acc)
 
-def vForBinds(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.RBrace)) vForYield(toks, i + 1) else vForBindsNext(toks, vForOne(toks, i))
+def skipToNextLine(src: String, toks: Toks, k: Int, stopIdx: Int, lineOff: Int, c: Int): Int =
+  if (k >= stopIdx || k >= toks.n || _is(toks, k, Tok.Eof)) k else if (c == 0 && hasNl(src, lineOff, _off(toks, k))) k else _at(toks, k) match {
+  case Tok.LBrace => skipToNextLine(src, toks, k + 1, stopIdx, lineOff, c + 1)
+  case Tok.RBrace => skipToNextLine(src, toks, k + 1, stopIdx, lineOff, if (c > 0) c - 1 else 0)
+  case _ => skipToNextLine(src, toks, k + 1, stopIdx, lineOff, c)
+}
 
-def vForBindsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vBraceBlock(src: String, toks: Toks, openIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vBraceBlockOpen(src, toks, openIdx, findCloseBrace(toks, openIdx + 1, 1), acc)
+
+def vBraceBlockOpen(src: String, toks: Toks, openIdx: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (closeIdx < 0) vFail3(toks, openIdx, acc) else vBraceItems(src, toks, closeIdx - 1, skipToNextLine(src, toks, openIdx + 1, closeIdx - 1, _off(toks, openIdx), 0), addErrOff(_off(toks, openIdx), acc))
+
+def vBraceItems(src: String, toks: Toks, rbraceIdx: Int, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (i >= rbraceIdx) (true, rbraceIdx + 1, acc) else if (_isSemi(src, toks, i)) vBraceItems(src, toks, rbraceIdx, skipSemis(src, toks, i + 1), acc) else vBraceItemNext(src, toks, rbraceIdx, i, vBlockItem(src, toks, i, acc))
+
+def vBraceItemNext(src: String, toks: Toks, rbraceIdx: Int, itemStart: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vForBinds(toks, j)
+    case (ok, j, acc) => if (!ok) vBraceItems(src, toks, rbraceIdx, syncBlockItem(src, toks, rbraceIdx, itemStart, itemStart, j, 0), addErrOff(j, acc)) else if (j >= rbraceIdx) (true, rbraceIdx + 1, acc) else if (_isSemi(src, toks, j)) vBraceItems(src, toks, rbraceIdx, skipSemis(src, toks, j + 1), acc) else if (onNewLine(src, toks, j)) vBraceItems(src, toks, rbraceIdx, j, acc) else vBraceItems(src, toks, rbraceIdx, syncBlockItem(src, toks, rbraceIdx, j, j, _off(toks, j), 0), addErrOff(_off(toks, j), acc))
   }
 
-def vForOne(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.If)) vExpr(toks, i + 1) else vForPat(toks, vPat(toks, i))
+def vBlockItem(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.If) && !_is(toks, i + 1, Tok.LParen)) vExpr(src, toks, i + 1, true, acc) else if (isForBindStart(src, toks, i)) vBlockBind(src, toks, vPat(toks, i), acc) else vExpr(src, toks, i, true, acc)
 
-def vForPat(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vBlockBind(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.LeftArrow) || _is(toks, j, Tok.Eq)) vForRhs(toks, vExpr(toks, j + 1)) else vFail(toks, j)
+    case (ok, j) => if (!ok) (false, j, acc) else vForRhs(src, toks, vExpr(src, toks, j + 1, true, acc))
   }
 
-def vForRhs(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def syncBlockItem(src: String, toks: Toks, rbraceIdx: Int, itemStart: Int, k: Int, errOff: Int, c: Int): Int =
+  if (k >= rbraceIdx || k >= toks.n || _is(toks, k, Tok.Eof)) rbraceIdx else if (c == 0 && k > itemStart && _isSemi(src, toks, k) && _off(toks, k) >= errOff) skipSemis(src, toks, k + 1) else if (c == 0 && k > itemStart && onNewLine(src, toks, k) && (_off(toks, k) == errOff && isForBindStart(src, toks, k) || hasNl(src, errOff, _off(toks, k)) && !isContLine(src, toks, k))) k else _at(toks, k) match {
+  case Tok.LBrace => syncBlockItem(src, toks, rbraceIdx, itemStart, k + 1, errOff, c + 1)
+  case Tok.RBrace => syncBlockItem(src, toks, rbraceIdx, itemStart, k + 1, errOff, if (c > 0) c - 1 else 0)
+  case _ => syncBlockItem(src, toks, rbraceIdx, itemStart, k + 1, errOff, c)
+}
+
+def vPost(src: String, toks: Toks, step: (Bool, Int, List[Int]), inFor: Bool): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Colon)) vType(toks, j + 1) else (true, j)
+    case (ok, i, acc) => if (!ok) (false, i, acc) else if (_is(toks, i, Tok.LParen) && !forBindAfter(toks, i)) vPost(src, toks, vArgOpen(src, toks, i + 1, acc), inFor) else if (_is(toks, i, Tok.Dot)) vPost(src, toks, vPostDot(src, toks, vIdentCtx(src, toks, i + 1, inFor), acc), inFor) else if (_is(toks, i, Tok.Match)) vPost(src, toks, vMatch(src, toks, i + 1, acc), inFor) else (true, i, acc)
   }
 
-def vForYield(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.Yield)) vExpr(toks, i + 1) else vFail(toks, i)
-
-def vPost(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vPostDot(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, i) => if (!ok) (false, i) else if (_is(toks, i, Tok.LParen) && !forBindAfter(toks, i)) vPost(toks, vArgOpen(toks, i + 1)) else if (_is(toks, i, Tok.Dot)) vPost(toks, vPostDot(toks, vIdent(toks, i + 1))) else if (_is(toks, i, Tok.Match)) vPost(toks, vMatch(toks, i + 1)) else (true, i)
+    case (ok, j) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j)) vArgOpen(src, toks, j + 1, acc) else if (_is(toks, j, Tok.LBrace) && _is(toks, j + 1, Tok.Case)) vMatch(src, toks, j, acc) else (true, j, acc)
   }
 
-def vPostDot(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vArgOpen(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.RParen)) (true, i + 1, acc) else vArgList(src, toks, i, findCloseParen(toks, i, 1, 0, 0), acc)
+
+def vArgList(src: String, toks: Toks, i: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vArgListSep(src, toks, i, closeIdx, vArgTail(src, toks, vArgOne(src, toks, i, acc)))
+
+def vArgOne(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_identOf(_at(toks, i)) != "" && _is(toks, i + 1, Tok.Eq)) vExpr(src, toks, i + 2, false, acc) else vExpr(src, toks, i, false, acc)
+
+def vArgTail(src: String, toks: Toks, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j)) vArgOpen(toks, j + 1) else if (_is(toks, j, Tok.LBrace) && _is(toks, j + 1, Tok.Case)) vMatch(toks, j) else (true, j)
+    case (ok, j, acc) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.Colon)) vArgTail(src, toks, vLift(vType(toks, j + 1), acc)) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) vArgTail(src, toks, vPost(src, toks, (true, j, acc), false)) else (true, j, acc)
   }
 
-def vArgOpen(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.RParen)) (true, i + 1) else vArgList(toks, i)
-
-def vArgList(toks: Toks, i: Int): (Bool, Int) =
-  vArgListSep(toks, vArgTail(toks, vArgOne(toks, i)))
-
-def vArgOne(toks: Toks, i: Int): (Bool, Int) =
-  if (_identOf(_at(toks, i)) != "" && _is(toks, i + 1, Tok.Eq)) vExpr(toks, i + 2) else vExpr(toks, i)
-
-def vArgTail(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vArgListSep(src: String, toks: Toks, elemStart: Int, closeIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Colon)) vArgTail(toks, vType(toks, j + 1)) else if (_is(toks, j, Tok.LParen) && !forBindAfter(toks, j) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) vArgTail(toks, vPost(toks, (true, j))) else (true, j)
+    case (ok, k, acc) => if (!ok) vArgRecover(src, toks, elemStart, closeIdx, k, acc) else if (_is(toks, k, Tok.Comma)) vArgList(src, toks, k + 1, closeIdx, acc) else if (_is(toks, k, Tok.RParen)) (true, k + 1, acc) else vArgRecover(src, toks, k, closeIdx, _off(toks, k), acc)
   }
 
-def vArgListSep(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vArgRecover(src: String, toks: Toks, elemStart: Int, closeIdx: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (closeIdx < 0) (false, errOff, acc) else vArgRecoverComma(src, toks, findNextComma(toks, elemStart, closeIdx - 1, errOff, 0, 0, 0), closeIdx, addErrOff(errOff, acc))
+
+def vArgRecoverComma(src: String, toks: Toks, commaIdx: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (commaIdx >= 0 && commaIdx + 1 < closeIdx - 1) vArgList(src, toks, commaIdx + 1, closeIdx, acc) else (true, closeIdx, acc)
+
+def vMatch(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (!_is(toks, i, Tok.LBrace)) vFail3(toks, i, acc) else vMatchArms(src, toks, findCloseBrace(toks, i + 1, 1) >= 0, i + 1, acc)
+
+def vMatchArms(src: String, toks: Toks, hasClose: Bool, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.RBrace)) (true, i + 1, acc) else if (i >= toks.n || _is(toks, i, Tok.Eof) || !hasClose && isTopStart(src, toks, i)) vFail3(toks, i, acc) else if (_is(toks, i, Tok.Case)) vMatchArmsNext(src, toks, hasClose, i, vMatchArm(src, toks, i + 1, acc)) else vMatchArms(src, toks, hasClose, syncMatchTrail(src, toks, hasClose, i, i + 1, _off(toks, i), 0), addErrOff(_off(toks, i), acc))
+
+def vMatchArmsNext(src: String, toks: Toks, hasClose: Bool, armIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else if (_is(toks, k, Tok.Comma)) vArgList(toks, k + 1) else vExpect(toks, k, Tok.RParen)
+    case (ok, j, acc) => if (!ok) vMatchArms(src, toks, hasClose, syncMatchArm(src, toks, hasClose, armIdx, armIdx + 1, j, 0), addErrOff(j, acc)) else if (_is(toks, j, Tok.RBrace) || _is(toks, j, Tok.Case)) vMatchArms(src, toks, hasClose, j, acc) else if (j >= toks.n || _is(toks, j, Tok.Eof) || !hasClose && isTopStart(src, toks, j)) vFail3(toks, j, acc) else vMatchArms(src, toks, hasClose, syncMatchTrail(src, toks, hasClose, j, j + 1, _off(toks, j), 0), addErrOff(_off(toks, j), acc))
   }
 
-def vMatch(toks: Toks, i: Int): (Bool, Int) =
-  if (!_is(toks, i, Tok.LBrace)) vFail(toks, i) else vMatchArms(toks, i + 1)
+def syncMatchArm(src: String, toks: Toks, hasClose: Bool, armIdx: Int, k: Int, errOff: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) k else if (c == 0 && _is(toks, k, Tok.RBrace)) k else if (!hasClose && c == 0 && _off(toks, k) >= errOff && isTopStart(src, toks, k)) k else if (c == 0 && _is(toks, k, Tok.Case) && (_off(toks, k) > errOff || hasNl(src, _off(toks, armIdx), _off(toks, k)))) k else _at(toks, k) match {
+  case Tok.LBrace => syncMatchArm(src, toks, hasClose, armIdx, k + 1, errOff, c + 1)
+  case Tok.RBrace => syncMatchArm(src, toks, hasClose, armIdx, k + 1, errOff, if (c > 0) c - 1 else 0)
+  case _ => syncMatchArm(src, toks, hasClose, armIdx, k + 1, errOff, c)
+}
 
-def vMatchArms(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.RBrace)) (true, i + 1) else if (_is(toks, i, Tok.Case)) vMatchArmsNext(toks, vMatchArm(toks, i + 1)) else vFail(toks, i)
+def syncMatchTrail(src: String, toks: Toks, hasClose: Bool, startIdx: Int, k: Int, errOff: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) k else if (c == 0 && _is(toks, k, Tok.RBrace)) k else if (!hasClose && c == 0 && _off(toks, k) >= errOff && isTopStart(src, toks, k)) k else if (c == 0 && _is(toks, k, Tok.Case) && (hasNl(src, _off(toks, startIdx), _off(toks, k)) || _off(toks, k) > errOff)) k else _at(toks, k) match {
+  case Tok.LBrace => syncMatchTrail(src, toks, hasClose, startIdx, k + 1, errOff, c + 1)
+  case Tok.RBrace => syncMatchTrail(src, toks, hasClose, startIdx, k + 1, errOff, if (c > 0) c - 1 else 0)
+  case _ => syncMatchTrail(src, toks, hasClose, startIdx, k + 1, errOff, c)
+}
 
-def vMatchArmsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vMatchArm(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vMatchArmPat(src, toks, vPat(toks, i), acc)
+
+def vMatchArmPat(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vMatchArms(toks, j)
+    case (ok, j) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.If)) vMatchGuard(src, toks, vExpr(src, toks, j + 1, false, acc)) else vMatchBody(src, toks, j, acc)
   }
 
-def vMatchArm(toks: Toks, i: Int): (Bool, Int) =
-  vMatchArmPat(toks, vPat(toks, i))
-
-def vMatchArmPat(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vMatchGuard(src: String, toks: Toks, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.If)) vMatchGuard(toks, vExpr(toks, j + 1)) else vMatchBody(toks, j)
+    case (ok, j, acc) => if (!ok) (false, j, acc) else vMatchBody(src, toks, j, acc)
   }
 
-def vMatchGuard(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vMatchBody(src: String, toks: Toks, j: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, j, Tok.Arrow)) vExpr(src, toks, j + 1, false, acc) else vFail3(toks, j, acc)
+
+def vParams(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.LParen)) vParamOpen(src, toks, i + 1, acc) else (true, i, acc)
+
+def vReqParams(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.LParen)) vParamOpen(src, toks, i + 1, acc) else vFail3(toks, i, acc)
+
+def vParamOpen(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.RParen)) (true, i + 1, acc) else vParamList(src, toks, i, findCloseParen(toks, i, 1, 0, 0), acc)
+
+def vParamList(src: String, toks: Toks, i: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vParamListNext(src, toks, i, closeIdx, vOneParam(src, toks, i, acc))
+
+def vParamListNext(src: String, toks: Toks, paramStart: Int, closeIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vMatchBody(toks, j)
+    case (ok, j, acc) => if (!ok) vParamRecover(src, toks, paramStart, closeIdx, j, acc) else if (_is(toks, j, Tok.Comma)) vParamList(src, toks, j + 1, closeIdx, acc) else if (_is(toks, j, Tok.RParen)) (true, j + 1, acc) else vParamRecover(src, toks, j, closeIdx, _off(toks, j), acc)
   }
 
-def vMatchBody(toks: Toks, j: Int): (Bool, Int) =
-  if (_is(toks, j, Tok.Arrow)) vExpr(toks, j + 1) else vFail(toks, j)
+def vParamRecover(src: String, toks: Toks, paramStart: Int, closeIdx: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (closeIdx < 0) (false, errOff, acc) else vParamRecoverComma(src, toks, findNextComma(toks, paramStart, closeIdx - 1, errOff, 0, 0, 0), closeIdx, addErrOff(errOff, acc))
 
-def vParams(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.LParen)) vParamOpen(toks, i + 1) else (true, i)
+def vParamRecoverComma(src: String, toks: Toks, commaIdx: Int, closeIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (commaIdx >= 0 && commaIdx + 1 < closeIdx - 1) vParamList(src, toks, commaIdx + 1, closeIdx, acc) else (true, closeIdx, acc)
 
-def vReqParams(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.LParen)) vParamOpen(toks, i + 1) else vFail(toks, i)
+def vOneParam(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vOneParamName(src, toks, vIdent(toks, i), acc)
 
-def vParamOpen(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.RParen)) (true, i + 1) else vParamList(toks, i)
-
-def vParamList(toks: Toks, i: Int): (Bool, Int) =
-  vParamListNext(toks, vOneParam(toks, i))
-
-def vParamListNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vOneParamName(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Comma)) vParamList(toks, j + 1) else vExpect(toks, j, Tok.RParen)
+    case (ok, j) => if (!ok) (false, j, acc) else if (!_is(toks, j, Tok.Colon)) vFail3(toks, j, acc) else vParamAfterTy(src, toks, vType(toks, j + 1), acc)
   }
 
-def vOneParam(toks: Toks, i: Int): (Bool, Int) =
-  vOneParamName(toks, vIdent(toks, i))
-
-def vOneParamName(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vParamAfterTy(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.Colon)) vFail(toks, j) else vParamAfterTy(toks, vType(toks, j + 1))
+    case (ok, j) => if (!ok) (false, j, acc) else if (_is(toks, j, Tok.Where)) vParamAfterW(src, toks, vExpr(src, toks, j + 1, false, acc)) else vParamDefault(src, toks, j, acc)
   }
 
-def vParamAfterTy(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vParamAfterW(src: String, toks: Toks, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (_is(toks, j, Tok.Where)) vParamAfterW(toks, vExpr(toks, j + 1)) else vParamDefault(toks, j)
+    case (ok, j, acc) => if (!ok) (false, j, acc) else vParamDefault(src, toks, j, acc)
   }
 
-def vParamAfterW(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vParamDefault(src: String, toks: Toks, j: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, j, Tok.Eq)) vExpr(src, toks, j + 1, false, acc) else (true, j, acc)
+
+def findHeaderEq(src: String, toks: Toks, headStart: Int, k: Int, p: Int, b: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) 0 - 1 else if (k > headStart && p == 0 && b == 0 && c == 0 && _is(toks, k, Tok.Eq)) k + 1 else if (k > headStart && p == 0 && b == 0 && c == 0 && (isTopStart(src, toks, k) || isIndentedDefLine(src, toks, k) || onNewLine(src, toks, k))) 0 - 1 else _at(toks, k) match {
+  case Tok.LParen => findHeaderEq(src, toks, headStart, k + 1, p + 1, b, c)
+  case Tok.RParen => findHeaderEq(src, toks, headStart, k + 1, if (p > 0) p - 1 else 0, b, c)
+  case Tok.LBracket => findHeaderEq(src, toks, headStart, k + 1, p, b + 1, c)
+  case Tok.RBracket => findHeaderEq(src, toks, headStart, k + 1, p, if (b > 0) b - 1 else 0, c)
+  case Tok.LBrace => findHeaderEq(src, toks, headStart, k + 1, p, b, c + 1)
+  case Tok.RBrace => findHeaderEq(src, toks, headStart, k + 1, p, b, if (c > 0) c - 1 else 0)
+  case _ => findHeaderEq(src, toks, headStart, k + 1, p, b, c)
+}
+
+def findHeaderColon(src: String, toks: Toks, headStart: Int, k: Int, p: Int, b: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) 0 - 1 else if (k > headStart && p == 0 && b == 0 && c == 0 && _is(toks, k, Tok.Colon)) k + 1 else if (k > headStart && p == 0 && b == 0 && c == 0 && (isTopStart(src, toks, k) || onNewLine(src, toks, k))) 0 - 1 else _at(toks, k) match {
+  case Tok.LParen => findHeaderColon(src, toks, headStart, k + 1, p + 1, b, c)
+  case Tok.RParen => findHeaderColon(src, toks, headStart, k + 1, if (p > 0) p - 1 else 0, b, c)
+  case Tok.LBracket => findHeaderColon(src, toks, headStart, k + 1, p, b + 1, c)
+  case Tok.RBracket => findHeaderColon(src, toks, headStart, k + 1, p, if (b > 0) b - 1 else 0, c)
+  case Tok.LBrace => findHeaderColon(src, toks, headStart, k + 1, p, b, c + 1)
+  case Tok.RBrace => findHeaderColon(src, toks, headStart, k + 1, p, b, if (c > 0) c - 1 else 0)
+  case _ => findHeaderColon(src, toks, headStart, k + 1, p, b, c)
+}
+
+def isDeclEnd(inImpl: Bool, src: String, toks: Toks, j: Int): Bool =
+  if (j >= toks.n || _is(toks, j, Tok.Eof)) true else if (isColZeroLine(src, toks, j)) true else if (inImpl) isIndentedDefLine(src, toks, j) else isTopTok(_at(toks, j))
+
+def syncBodyStmt(inImpl: Bool, src: String, toks: Toks, stmtStart: Int, k: Int, errOff: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof)) k else if (c == 0 && k > stmtStart && isDeclEnd(inImpl, src, toks, k)) k else if (c == 0 && k > stmtStart && _isSemi(src, toks, k) && _off(toks, k) >= errOff) skipSemis(src, toks, k + 1) else if (c == 0 && k > stmtStart && onNewLine(src, toks, k) && hasNl(src, errOff, _off(toks, k)) && !isContLine(src, toks, k)) k else _at(toks, k) match {
+  case Tok.LBrace => syncBodyStmt(inImpl, src, toks, stmtStart, k + 1, errOff, c + 1)
+  case Tok.RBrace => syncBodyStmt(inImpl, src, toks, stmtStart, k + 1, errOff, if (c > 0) c - 1 else 0)
+  case _ => syncBodyStmt(inImpl, src, toks, stmtStart, k + 1, errOff, c)
+}
+
+def vDefBody(inImpl: Bool, src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vDefBodyStep(inImpl, src, toks, i, vExpr(src, toks, i, false, acc))
+
+def vDefBodyStep(inImpl: Bool, src: String, toks: Toks, stmtStart: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vParamDefault(toks, j)
+    case (ok, j, acc) => if (!ok) vDefBodyAfterFail(inImpl, src, toks, syncBodyStmt(inImpl, src, toks, stmtStart, stmtStart, j, 0), addErrOff(j, acc)) else if (isDeclEnd(inImpl, src, toks, j)) (true, j, acc) else if (_isSemi(src, toks, j)) vDefBodySemi(inImpl, src, toks, skipSemis(src, toks, j + 1), addErrOff(_off(toks, j), acc)) else if (onNewLine(src, toks, j)) vDefBodyExtra(inImpl, src, toks, j, acc) else vDefBodyAfterFail(inImpl, src, toks, syncBodyStmt(inImpl, src, toks, j, j, _off(toks, j), 0), addErrOff(_off(toks, j), acc))
   }
 
-def vParamDefault(toks: Toks, j: Int): (Bool, Int) =
-  if (_is(toks, j, Tok.Eq)) vExpr(toks, j + 1) else (true, j)
+def vDefBodySemi(inImpl: Bool, src: String, toks: Toks, nextIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (isDeclEnd(inImpl, src, toks, nextIdx)) (true, nextIdx, acc) else vDefBody(inImpl, src, toks, nextIdx, acc)
 
-def vDef(toks: Toks, i: Int): (Bool, Int) =
-  vDefTp(toks, vQualIdent(toks, i))
+def vDefBodyAfterFail(inImpl: Bool, src: String, toks: Toks, nextIdx: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (isDeclEnd(inImpl, src, toks, nextIdx)) (true, nextIdx, acc) else vDefBody(inImpl, src, toks, nextIdx, acc)
 
-def vDefTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
-  step match {
-    case (ok, j) => if (!ok) (false, j) else vDefParams(toks, vTParams(toks, j))
+def vDefBodyExtra(inImpl: Bool, src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (isDeclEnd(inImpl, src, toks, i)) (true, i, acc) else vDefExtraStep(inImpl, src, toks, i, vExpr(src, toks, i, false, []), acc)
+
+def vDefExtraStep(inImpl: Bool, src: String, toks: Toks, stmtStart: Int, probe: (Bool, Int, List[Int]), acc: List[Int]): (Bool, Int, List[Int]) =
+  probe match {
+    case (ok, j, innerAcc) => if (!ok) vDefBodyAfterFail(inImpl, src, toks, syncBodyStmt(inImpl, src, toks, stmtStart, stmtStart, j, 0), addErrOff(j, mergeRevAcc(innerAcc, acc))) else if (!List.isEmpty(innerAcc)) vDefExtraTail(inImpl, src, toks, j, mergeRevAcc(innerAcc, acc)) else if (isDeclEnd(inImpl, src, toks, j) || onNewLine(src, toks, j)) vDefBodyExtra(inImpl, src, toks, j, addErrOff(_off(toks, stmtStart), acc)) else vDefBodyAfterFail(inImpl, src, toks, syncBodyStmt(inImpl, src, toks, j, j, _off(toks, j), 0), addErrOff(_off(toks, j), acc))
   }
 
-def vDefParams(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vDefExtraTail(inImpl: Bool, src: String, toks: Toks, j: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (isDeclEnd(inImpl, src, toks, j)) (true, j, acc) else if (_isSemi(src, toks, j)) vDefBodySemi(inImpl, src, toks, skipSemis(src, toks, j + 1), addErrOff(_off(toks, j), acc)) else if (onNewLine(src, toks, j)) vDefBodyExtra(inImpl, src, toks, j, acc) else vDefBodyAfterFail(inImpl, src, toks, syncBodyStmt(inImpl, src, toks, j, j, _off(toks, j), 0), addErrOff(_off(toks, j), acc))
+
+def mergeRevAcc(innerAcc: List[Int], acc: List[Int]): List[Int] =
+  mergeInOrder(List.reverse(innerAcc), acc)
+
+def mergeInOrder(offs: List[Int], acc: List[Int]): List[Int] =
+  if (List.isEmpty(offs)) acc else mergeInOrder(List.tail(offs), addErrOff(List.at(offs, 0), acc))
+
+def vDefHeaderRecover(inImpl: Bool, src: String, toks: Toks, headStart: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vDefHeaderEq(inImpl, src, toks, findHeaderEq(src, toks, headStart, headStart, 0, 0, 0), errOff, acc)
+
+def vDefHeaderEq(inImpl: Bool, src: String, toks: Toks, bodyIdx: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (bodyIdx < 0) (false, errOff, acc) else vDefBody(inImpl, src, toks, bodyIdx, addErrOff(errOff, acc))
+
+def vDef(inImpl: Bool, src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vDefTp(inImpl, src, toks, i, vQualIdent(toks, i), acc)
+
+def vDefTp(inImpl: Bool, src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else vDefColon(toks, vParams(toks, k))
+    case (ok, j) => if (!ok) vDefHeaderRecover(inImpl, src, toks, headStart, j, acc) else vDefParams(inImpl, src, toks, headStart, vTParams(toks, j), acc)
   }
 
-def vDefColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vDefParams(inImpl: Bool, src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, m) => if (!ok) (false, m) else if (!_is(toks, m, Tok.Colon)) vFail(toks, m) else vDefEq(toks, vType(toks, m + 1))
+    case (ok, k) => if (!ok) vDefHeaderRecover(inImpl, src, toks, headStart, k, acc) else vDefColon(inImpl, src, toks, headStart, vParams(src, toks, k, acc))
   }
 
-def vDefEq(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vDefColon(inImpl: Bool, src: String, toks: Toks, headStart: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, r) => if (!ok) (false, r) else if (!_is(toks, r, Tok.Eq)) vFail(toks, r) else vExpr(toks, r + 1)
+    case (ok, m, acc) => if (!ok) vDefHeaderRecover(inImpl, src, toks, headStart, m, acc) else if (!_is(toks, m, Tok.Colon)) vDefHeaderRecover(inImpl, src, toks, headStart, _off(toks, m), acc) else vDefEq(inImpl, src, toks, headStart, vType(toks, m + 1), acc)
   }
 
-def vMain(toks: Toks, i: Int): (Bool, Int) =
-  if (!_is(toks, i, Tok.Def)) vFail(toks, i) else vMainColon(toks, vIdent(toks, i + 1))
-
-def vMainColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vDefEq(inImpl: Bool, src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else if (!_is(toks, j, Tok.Colon)) vFail(toks, j) else vDefEq(toks, vType(toks, j + 1))
+    case (ok, r) => if (!ok) vDefHeaderRecover(inImpl, src, toks, headStart, r, acc) else if (!_is(toks, r, Tok.Eq)) vFail3(toks, r, acc) else vDefBody(inImpl, src, toks, r + 1, acc)
   }
 
-def vEnum(toks: Toks, i: Int): (Bool, Int) =
-  vEnumTp(toks, vIdent(toks, i))
+def vMain(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (!_is(toks, i, Tok.Def)) vDefHeaderRecover(false, src, toks, i, _off(toks, i), acc) else vMainColon(src, toks, i, vIdent(toks, i + 1), acc)
 
-def vEnumTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vMainColon(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vEnumColon(toks, vTParams(toks, j))
+    case (ok, j) => if (!ok) vDefHeaderRecover(false, src, toks, headStart, j, acc) else if (!_is(toks, j, Tok.Colon)) vDefHeaderRecover(false, src, toks, headStart, _off(toks, j), acc) else vDefEq(false, src, toks, headStart, vType(toks, j + 1), acc)
   }
 
-def vEnumColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vEnum(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vEnumTp(src, toks, i, vIdent(toks, i), acc)
+
+def vEnumTp(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.Colon)) vFail(toks, k) else if (!_is(toks, k + 1, Tok.Case)) vFail(toks, k + 1) else vEnumCases(toks, k + 1)
+    case (ok, j) => if (!ok) vEnumHeaderRecover(src, toks, headStart, j, acc) else vEnumColon(src, toks, headStart, vTParams(toks, j), acc)
   }
 
-def vEnumCases(toks: Toks, i: Int): (Bool, Int) =
-  if (!_is(toks, i, Tok.Case)) (true, i) else vEnumCaseName(toks, vIdent(toks, i + 1))
-
-def vEnumCaseName(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vEnumColon(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vEnumCaseNext(toks, vParams(toks, j))
+    case (ok, k) => if (!ok) vEnumHeaderRecover(src, toks, headStart, k, acc) else if (!_is(toks, k, Tok.Colon)) vFail3(toks, k, acc) else if (!_is(toks, k + 1, Tok.Case)) vFail3(toks, k + 1, acc) else vEnumCases(src, toks, k + 1, acc)
   }
 
-def vEnumCaseNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vEnumHeaderRecover(src: String, toks: Toks, headStart: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vEnumHeaderColon(src, toks, findHeaderColon(src, toks, headStart, headStart, 0, 0, 0), errOff, acc)
+
+def vEnumHeaderColon(src: String, toks: Toks, afterColon: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (afterColon < 0 || !_is(toks, afterColon, Tok.Case)) (false, errOff, acc) else vEnumCases(src, toks, afterColon, addErrOff(errOff, acc))
+
+def vEnumCases(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (!_is(toks, i, Tok.Case) || isColZeroLine(src, toks, i)) (true, i, acc) else vEnumCaseName(src, toks, i, vIdent(toks, i + 1), acc)
+
+def vEnumCaseName(src: String, toks: Toks, caseIdx: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else vEnumCases(toks, k)
+    case (ok, j) => if (!ok) vEnumCases(src, toks, syncEnumCase(src, toks, caseIdx + 1, j), addErrOff(j, acc)) else vEnumCaseNext(src, toks, caseIdx, vParams(src, toks, j, acc))
   }
 
-def vRec(toks: Toks, i: Int): (Bool, Int) =
-  vRecTp(toks, vIdent(toks, i))
-
-def vRecTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vEnumCaseNext(src: String, toks: Toks, caseIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vRecOpen(toks, vTParams(toks, j))
+    case (ok, k, acc) => if (!ok) vEnumCases(src, toks, syncEnumCase(src, toks, caseIdx + 1, k), addErrOff(k, acc)) else vEnumCases(src, toks, k, acc)
   }
 
-def vRecOpen(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def syncEnumCase(src: String, toks: Toks, k: Int, errOff: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof) || isColZeroLine(src, toks, k)) k else if (_is(toks, k, Tok.Case) && hasNl(src, errOff, _off(toks, k))) k else syncEnumCase(src, toks, k + 1, errOff)
+
+def vRec(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vRecTp(src, toks, vIdent(toks, i), acc)
+
+def vRecTp(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else vReqParams(toks, if (_is(toks, k, Tok.Private)) k + 1 else k)
+    case (ok, j) => if (!ok) (false, j, acc) else vRecOpen(src, toks, vTParams(toks, j), acc)
+  }
+
+def vRecOpen(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
+  step match {
+    case (ok, k) => if (!ok) (false, k, acc) else vReqParams(src, toks, if (_is(toks, k, Tok.Private)) k + 1 else k, acc)
   }
 
 def vAlias(toks: Toks, i: Int): (Bool, Int) =
@@ -1920,77 +2223,102 @@ def vImportAs(toks: Toks, step: (Bool, Int)): (Bool, Int) =
     case (ok, k) => if (!ok) (false, k) else if (_identOf(_at(toks, k)) == "as") vIdent(toks, k + 1) else (true, k)
   }
 
-def vTrait(toks: Toks, i: Int): (Bool, Int) =
-  vTraitTp(toks, vIdent(toks, i))
+def vTrait(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vTraitTp(src, toks, i, vIdent(toks, i), acc)
 
-def vTraitTp(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vTraitTp(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vTraitColon(toks, vTParams(toks, j))
+    case (ok, j) => if (!ok) vTraitHeaderRecover(src, toks, headStart, j, acc) else vTraitColon(src, toks, headStart, vTParams(toks, j), acc)
   }
 
-def vTraitColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vTraitColon(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.Colon)) vFail(toks, k) else vTraitMeths(toks, k + 1)
+    case (ok, k) => if (!ok) vTraitHeaderRecover(src, toks, headStart, k, acc) else if (!_is(toks, k, Tok.Colon)) vFail3(toks, k, acc) else vTraitMeths(src, toks, k + 1, acc)
   }
 
-def vTraitMeths(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.Def) && _sp(toks, i).column > 0) vTraitMethsNext(toks, vTraitMeth(toks, i + 1)) else (true, i)
+def vTraitHeaderRecover(src: String, toks: Toks, headStart: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vTraitHeaderColon(src, toks, findHeaderColon(src, toks, headStart, headStart, 0, 0, 0), errOff, acc)
 
-def vTraitMethsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vTraitHeaderColon(src: String, toks: Toks, afterColon: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (afterColon < 0) (false, errOff, acc) else vTraitMeths(src, toks, afterColon, addErrOff(errOff, acc))
+
+def isTraitMemEnd(src: String, toks: Toks, j: Int): Bool =
+  j >= toks.n || _is(toks, j, Tok.Eof) || isColZeroLine(src, toks, j) || isIndentedDefLine(src, toks, j) || onNewLine(src, toks, j)
+
+def syncTraitMember(src: String, toks: Toks, k: Int, errOff: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof) || isColZeroLine(src, toks, k)) k else if (isIndentedDefLine(src, toks, k) && _off(toks, k) >= errOff) k else if (onNewLine(src, toks, k) && hasNl(src, errOff, _off(toks, k)) && !isLeadContTok(_at(toks, k))) k else syncTraitMember(src, toks, k + 1, errOff)
+
+def vTraitMeths(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (i >= toks.n || _is(toks, i, Tok.Eof) || isColZeroLine(src, toks, i)) (true, i, acc) else if (_is(toks, i, Tok.Def) && _sp(toks, i).column > 0) vTraitMethsNext(src, toks, i, vTraitMeth(src, toks, i + 1, acc)) else vTraitMeths(src, toks, syncTraitMember(src, toks, i + 1, _off(toks, i)), addErrOff(_off(toks, i), acc))
+
+def vTraitMethsNext(src: String, toks: Toks, memIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vTraitMeths(toks, j)
+    case (ok, j, acc) => if (!ok) vTraitMeths(src, toks, syncTraitMember(src, toks, memIdx + 1, j), addErrOff(j, acc)) else if (isTraitMemEnd(src, toks, j)) vTraitMeths(src, toks, j, acc) else vTraitMeths(src, toks, syncTraitMember(src, toks, j + 1, _off(toks, j)), addErrOff(_off(toks, j), acc))
   }
 
-def vTraitMeth(toks: Toks, i: Int): (Bool, Int) =
-  vTraitMethParams(toks, vIdent(toks, i))
+def vTraitMeth(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vTraitMethParams(src, toks, vIdent(toks, i), acc)
 
-def vTraitMethParams(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vTraitMethParams(src: String, toks: Toks, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vTraitMethColon(toks, vParams(toks, j))
+    case (ok, j) => if (!ok) (false, j, acc) else vTraitMethColon(toks, vParams(src, toks, j, acc))
   }
 
-def vTraitMethColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vTraitMethColon(toks: Toks, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.Colon)) vFail(toks, k) else vType(toks, k + 1)
+    case (ok, k, acc) => if (!ok) (false, k, acc) else if (!_is(toks, k, Tok.Colon)) vFail3(toks, k, acc) else vLift(vType(toks, k + 1), acc)
   }
 
-def vImpl(toks: Toks, i: Int): (Bool, Int) =
-  vImplArgsStep(toks, vQualIdent(toks, i))
+def vImpl(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vImplArgsStep(src, toks, i, vQualIdent(toks, i), acc)
 
-def vImplArgsStep(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vImplArgsStep(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vImplFor(toks, vImplArgs(toks, j))
+    case (ok, j) => if (!ok) vImplHeaderRecover(src, toks, headStart, j, acc) else vImplFor(src, toks, headStart, vImplArgs(toks, j), acc)
   }
 
 def vImplArgs(toks: Toks, i: Int): (Bool, Int) =
   if (_is(toks, i, Tok.LBracket)) vTypeBrack(toks, vTypeList(toks, i + 1)) else (true, i)
 
-def vImplFor(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vImplFor(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, k) => if (!ok) (false, k) else if (!_is(toks, k, Tok.For)) vFail(toks, k) else vImplColon(toks, vType(toks, k + 1))
+    case (ok, k) => if (!ok) vImplHeaderRecover(src, toks, headStart, k, acc) else if (!_is(toks, k, Tok.For)) vImplHeaderRecover(src, toks, headStart, _off(toks, k), acc) else vImplColon(src, toks, headStart, vType(toks, k + 1), acc)
   }
 
-def vImplColon(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vImplColon(src: String, toks: Toks, headStart: Int, step: (Bool, Int), acc: List[Int]): (Bool, Int, List[Int]) =
   step match {
-    case (ok, r) => if (!ok) (false, r) else if (!_is(toks, r, Tok.Colon)) vFail(toks, r) else vImplMeths(toks, r + 1)
+    case (ok, r) => if (!ok) vImplHeaderRecover(src, toks, headStart, r, acc) else if (!_is(toks, r, Tok.Colon)) vFail3(toks, r, acc) else vImplMeths(src, toks, r + 1, acc)
   }
 
-def vImplMeths(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i, Tok.Def) && _sp(toks, i).column > 0) vImplMethsNext(toks, vDef(toks, i + 1)) else (true, i)
+def vImplHeaderRecover(src: String, toks: Toks, headStart: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  vImplHeaderColon(src, toks, findHeaderColon(src, toks, headStart, headStart, 0, 0, 0), errOff, acc)
 
-def vImplMethsNext(toks: Toks, step: (Bool, Int)): (Bool, Int) =
+def vImplHeaderColon(src: String, toks: Toks, afterColon: Int, errOff: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (afterColon < 0) (false, errOff, acc) else vImplMeths(src, toks, afterColon, addErrOff(errOff, acc))
+
+def syncImplMember(src: String, toks: Toks, k: Int, errOff: Int, c: Int): Int =
+  if (k >= toks.n || _is(toks, k, Tok.Eof) || c == 0 && isColZeroLine(src, toks, k)) k else if (c == 0 && isIndentedDefLine(src, toks, k) && _off(toks, k) >= errOff) k else _at(toks, k) match {
+  case Tok.LBrace => syncImplMember(src, toks, k + 1, errOff, c + 1)
+  case Tok.RBrace => syncImplMember(src, toks, k + 1, errOff, if (c > 0) c - 1 else 0)
+  case _ => syncImplMember(src, toks, k + 1, errOff, c)
+}
+
+def vImplMeths(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (i >= toks.n || _is(toks, i, Tok.Eof) || isColZeroLine(src, toks, i)) (true, i, acc) else if (_is(toks, i, Tok.Def) && _sp(toks, i).column > 0) vImplMethsNext(src, toks, i, vDef(true, src, toks, i + 1, acc)) else if (_is(toks, i, Tok.Private) && _is(toks, i + 1, Tok.Def)) vImplMethsNext(src, toks, i, vDef(true, src, toks, i + 2, addErrOff(_off(toks, i), acc))) else vImplMeths(src, toks, syncImplMember(src, toks, i + 1, _off(toks, i), 0), addErrOff(_off(toks, i), acc))
+
+def vImplMethsNext(src: String, toks: Toks, memIdx: Int, step: (Bool, Int, List[Int])): (Bool, Int, List[Int]) =
   step match {
-    case (ok, j) => if (!ok) (false, j) else vImplMeths(toks, j)
+    case (ok, j, acc) => if (!ok) vImplMeths(src, toks, syncImplMember(src, toks, memIdx + 1, j, 0), addErrOff(j, acc)) else vImplMeths(src, toks, j, acc)
   }
 
-def vItemOne(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
-  if (_is(toks, i, Tok.Private)) vItemPriv(toks, i) else if (_is(toks, i, Tok.Oracle)) vDef(toks, i + 1) else if (_is(toks, i, Tok.Enum)) vEnum(toks, i + 1) else if (_is(toks, i, Tok.Record)) vRec(toks, i + 1) else if (_is(toks, i, Tok.TypeKw)) vAlias(toks, i + 1) else if (_is(toks, i, Tok.Trait)) vTrait(toks, i + 1) else if (_is(toks, i, Tok.Impl)) vImpl(toks, i + 1) else if (_is(toks, i, Tok.Import)) vImport(toks, i + 1) else if (_is(toks, i, Tok.Def)) vDef(toks, i + 1) else if (_is(toks, i, Tok.AtMain)) vItemMain(toks, i, hasMain) else vFail(toks, i)
+def vItemOne(src: String, toks: Toks, i: Int, hasMain: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i, Tok.Private)) vItemPriv(src, toks, i, acc) else if (_is(toks, i, Tok.Oracle)) vDef(false, src, toks, i + 1, acc) else if (_is(toks, i, Tok.Enum)) vEnum(src, toks, i + 1, acc) else if (_is(toks, i, Tok.Record)) vRec(src, toks, i + 1, acc) else if (_is(toks, i, Tok.TypeKw)) vLift(vAlias(toks, i + 1), acc) else if (_is(toks, i, Tok.Trait)) vTrait(src, toks, i + 1, acc) else if (_is(toks, i, Tok.Impl)) vImpl(src, toks, i + 1, acc) else if (_is(toks, i, Tok.Import)) vLift(vImport(toks, i + 1), acc) else if (_is(toks, i, Tok.Def)) vDef(false, src, toks, i + 1, acc) else if (_is(toks, i, Tok.AtMain)) vItemMain(src, toks, i, hasMain, acc) else vFail3(toks, i, acc)
 
-def vItemPriv(toks: Toks, i: Int): (Bool, Int) =
-  if (_is(toks, i + 1, Tok.Def)) vDef(toks, i + 2) else vFail(toks, i + 1)
+def vItemPriv(src: String, toks: Toks, i: Int, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (_is(toks, i + 1, Tok.Def)) vDef(false, src, toks, i + 2, acc) else if (_is(toks, i + 1, Tok.Oracle)) vDef(false, src, toks, i + 2, addErrOff(_off(toks, i + 1), acc)) else vFail3(toks, i + 1, acc)
 
-def vItemMain(toks: Toks, i: Int, hasMain: Bool): (Bool, Int) =
-  if (hasMain) vFail(toks, i) else vMain(toks, i + 1)
+def vItemMain(src: String, toks: Toks, i: Int, hasMain: Bool, acc: List[Int]): (Bool, Int, List[Int]) =
+  if (hasMain) vMain(src, toks, i + 1, addErrOff(_off(toks, i), acc)) else vMain(src, toks, i + 1, acc)
 
 def stepDepth(t: Tok, d: Int): Int =
   t match {
@@ -2024,16 +2352,13 @@ def isTopStart(src: String, toks: Toks, k: Int): Bool =
 def syncTop(src: String, toks: Toks, itemStart: Int, k: Int, errByteOff: Int, d: Int): Int =
   if (k >= toks.n || _is(toks, k, Tok.Eof)) k else if (k > itemStart && _off(toks, k) >= errByteOff && d == 0 && isTopStart(src, toks, k)) k else syncTop(src, toks, itemStart, k + 1, errByteOff, stepDepth(_at(toks, k), d))
 
-def addErrOff(off: Int, acc: List[Int]): List[Int] =
-  if (!List.isEmpty(acc) && List.at(acc, 0) == off) acc else off :: acc
-
-def vItemsStep(src: String, toks: Toks, i: Int, nextMain: Bool, step: (Bool, Int), acc: List[Int]): List[Int] =
+def vItemsStep(src: String, toks: Toks, i: Int, nextMain: Bool, step: (Bool, Int, List[Int])): List[Int] =
   step match {
-    case (ok, j) => if (ok) vItemsCollect(src, toks, j, nextMain, acc) else vItemsCollect(src, toks, syncTop(src, toks, i, i, j, 0), nextMain, addErrOff(j, acc))
+    case (ok, j, acc) => if (ok) vItemsCollect(src, toks, if (j <= i) i + 1 else j, nextMain, acc) else vItemsCollect(src, toks, syncTop(src, toks, i, i, j, 0), nextMain, addErrOff(j, acc))
   }
 
 def vItemsCollect(src: String, toks: Toks, i: Int, hasMain: Bool, acc: List[Int]): List[Int] =
-  if (i >= toks.n || _is(toks, i, Tok.Eof)) parseErrorFinishList(toks, acc) else vItemsStep(src, toks, i, hasMain || _is(toks, i, Tok.AtMain), vItemOne(toks, i, hasMain), acc)
+  if (i >= toks.n || _is(toks, i, Tok.Eof)) parseErrorFinishList(toks, acc) else vItemsStep(src, toks, i, hasMain || _is(toks, i, Tok.AtMain), vItemOne(src, toks, i, hasMain, acc))
 
 def vPkgCollect(src: String, toks: Toks, step: (Bool, Int)): List[Int] =
   step match {
