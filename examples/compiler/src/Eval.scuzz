@@ -414,25 +414,43 @@ def step(s: EvStep, p: EvProg): Value =
   }
 
 def floatLit(str: String): Float =
-  floatLitExp(str, expAt(str, 0))
+  floatLitSign(Str.replace(str, "_", ""))
+
+def floatLitSign(s: String): Float =
+  if (Str.startsWith(s, "-")) 0.0 - floatLitUnsigned(Str.drop(s, 1)) else if (Str.startsWith(s, "+")) floatLitUnsigned(Str.drop(s, 1)) else floatLitUnsigned(s)
+
+def floatLitUnsigned(s: String): Float =
+  floatLitParts(s, expAt(s, 0))
 
 def expAt(str: String, i: Int): Int =
   if (i >= Str.len(str)) 0 - 1 else if (Str.charAt(str, i) == 101 || Str.charAt(str, i) == 69) i else expAt(str, i + 1)
 
-def floatLitExp(str: String, e: Int): Float =
-  if (e < 0) floatMant(str, 0) else floatMant(Str.slice(str, 0, e), Str.toInt(Str.stripPrefix(Str.slice(str, e + 1, Str.len(str)), "+"), 0))
+def isDecDigit(c: Int): Bool =
+  c >= 48 && c <= 57
 
-def floatMant(m: String, e: Int): Float =
-  floatMantDot(m, Str.indexOf(m, "."), e)
+def parseExpBounded(s: String, i: Int, neg: Bool, acc: Int): Int =
+  if (i == 0 && Str.startsWith(s, "-")) parseExpBounded(s, 1, true, 0) else if (i == 0 && Str.startsWith(s, "+")) parseExpBounded(s, 1, false, 0) else if (i >= Str.len(s) || !isDecDigit(Str.charAt(s, i))) if (neg) 0 - acc else acc else parseExpBounded(s, i + 1, neg, if (acc > 1000000) 1000000 else acc * 10 + (Str.charAt(s, i) - 48))
 
-def floatMantDot(m: String, d: Int, e: Int): Float =
-  if (d < 0) floatScale(Float.fromInt(Str.toInt(m, 0)), e) else floatScale(Float.fromInt(Str.toInt(Str.concat(Str.slice(m, 0, d), Str.slice(m, d + 1, Str.len(m))), 0)), e - (Str.len(m) - d - 1))
+def floatLitParts(s: String, e: Int): Float =
+  if (e < 0) floatCanonScan(s, 0, false, Builder.empty(), 0, false, 0, 0) else floatCanonScan(Str.slice(s, 0, e), 0, false, Builder.empty(), 0, false, 0, parseExpBounded(Str.slice(s, e + 1, Str.len(s)), 0, false, 0))
 
-def floatScale(x: Float, e: Int): Float =
-  if (e == 0) x else if (e > 0) x * Float.fromInt(pow10(e)) else x / Float.fromInt(pow10(0 - e))
+def floatCanonScan(m: String, i: Int, dot: Bool, b: Builder, sig: Int, sticky: Bool, adj: Int, exp: Int): Float =
+  if (i >= Str.len(m)) floatCanonDone(Builder.result(b), sig, sticky, exp + adj + sig - 1) else if (Str.charAt(m, i) == 46) floatCanonScan(m, i + 1, true, b, sig, sticky, adj, exp) else if (!isDecDigit(Str.charAt(m, i))) floatCanonDone(Builder.result(b), sig, sticky, exp + adj + sig - 1) else floatCanonDigit(m, i, dot, b, sig, sticky, adj, exp, Str.charAt(m, i) - 48)
 
-def pow10(k: Int): Int =
-  if (k <= 0) 1 else 10 * pow10(k - 1)
+def floatCanonDigit(m: String, i: Int, dot: Bool, b: Builder, sig: Int, sticky: Bool, adj: Int, exp: Int, d: Int): Float =
+  if (sig == 0 && d == 0) floatCanonScan(m, i + 1, dot, b, 0, sticky, if (dot) adj - 1 else adj, exp) else if (sig < 80) floatCanonScan(m, i + 1, dot, Builder.append(b, Str.slice(m, i, i + 1)), sig + 1, sticky, if (dot) adj - 1 else adj, exp) else floatCanonScan(m, i + 1, dot, b, sig, sticky || d != 0, if (dot) adj else adj + 1, exp)
+
+def floatCanonDone(digits: String, sig: Int, sticky: Bool, sciExp: Int): Float =
+  if (sig == 0 || sciExp < 0 - 350) 0.0 else if (sciExp > 310) 1.0 / 0.0 else floatCanonJson(Str.concat(Str.slice(digits, 0, 1), Str.concat(".", Str.concat(floatCanonFrac(Str.drop(digits, 1), sticky), Str.concat("e", Str.fromInt(sciExp))))))
+
+def floatCanonFrac(rest: String, sticky: Bool): String =
+  if (sticky) Str.concat(rest, "1") else if (rest == "") "0" else rest
+
+def floatCanonJson(canon: String): Float =
+  Json.parse(canon) match {
+    case Result.Ok(j) => Json.floatOr(j, 0.0)
+    case Result.Err(_) => 1.0 / 0.0
+  }
 
 def stepAll(xs: List[Expr], env: EvEnv, p: EvProg): List[Value] =
   if (List.isEmpty(xs)) noVals() else step(EvStep.Next(List.at(xs, 0), env), p) :: stepAll(List.tail(xs), env, p)
@@ -1045,7 +1063,7 @@ def binInts(op: String, a: Int, b: Int, env: EvEnv, p: EvProg, off: Int): Value 
   if (op == "+") Value.VInt(a + b) else if (op == "-") Value.VInt(a - b) else if (op == "*") Value.VInt(a * b) else if (op == "/") divInts(a, b, false, env, p, off) else if (op == "%") divInts(a, b, true, env, p, off) else if (op == "<") distVal(distHit(a, b, env, off), Value.VBool(a < b)) else if (op == "<=") distVal(distHit(a, b, env, off), Value.VBool(a <= b)) else if (op == ">") distVal(distHit(a, b, env, off), Value.VBool(a > b)) else if (op == ">=") distVal(distHit(a, b, env, off), Value.VBool(a >= b)) else bitInts(op, a, b, env, p, off)
 
 def bitInts(op: String, a: Int, b: Int, env: EvEnv, p: EvProg, off: Int): Value =
-  if (op == "&") Value.VInt(a & b) else if (op == "|") Value.VInt(a | b) else if (op == "^") Value.VInt(a ^ b) else if (op == "<<") Value.VInt(a << b) else if (op == ">>") Value.VInt(a >> b) else unsupported(Str.concat("operator ", op), env, p, off)
+  if (op == "&") Value.VInt(a & b) else if (op == "|") Value.VInt(a | b) else if (op == "^") Value.VInt(a ^ b) else if (op == "<<") Value.VInt(a << (b & 63)) else if (op == ">>") Value.VInt(a >> (b & 63)) else unsupported(Str.concat("operator ", op), env, p, off)
 
 def divInts(a: Int, b: Int, rem: Bool, env: EvEnv, p: EvProg, off: Int): Value =
   if (b == 0) errAt("division by zero", env, p, off) else if (a == -9223372036854775808 && b == -1) Value.VInt(if (rem) 0 else a) else if (rem) Value.VInt(a % b) else Value.VInt(a / b)
