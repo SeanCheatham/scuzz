@@ -1,19 +1,19 @@
-def bounded(seed: Int): Int =
+private def bounded(seed: Int): Int =
   seed % 4096
 
-def family(seed: Int): Int =
+private def family(seed: Int): Int =
   bounded(seed) % 6
 
-def input(seed: Int): Int =
+private def input(seed: Int): Int =
   bounded(seed) / 6 % 17 - 8
 
-def depth(seed: Int): Int =
+private def depth(seed: Int): Int =
   bounded(seed) / 102 % 3 + 1
 
-def number(n: Int): String =
+private def number(n: Int): String =
   if (n < 0) s"(0 - ${0 - n})" else Str.fromInt(n)
 
-def model(seed: Int, levels: Int, x: Int): Int =
+private def model(seed: Int, levels: Int, x: Int): Int =
   if (levels == 0) x else for {
   value = model(seed / 4, levels - 1, x)
   amount = seed % 5 + 1
@@ -24,7 +24,7 @@ def model(seed: Int, levels: Int, x: Int): Int =
   case _ => value * 2
 }
 
-def expression(seed: Int, levels: Int): String =
+private def expression(seed: Int, levels: Int): String =
   if (levels == 0) "x" else for {
   inner = expression(seed / 4, levels - 1)
   amount = Str.fromInt(seed % 5 + 1)
@@ -35,10 +35,10 @@ def expression(seed: Int, levels: Int): String =
   case _ => s"((value: Int) => value * 2)($inner)"
 }
 
-def value(seed: Int): Int =
+private def value(seed: Int): Int =
   model(bounded(seed) / 6, depth(seed), input(seed))
 
-def result(seed: Int): String =
+private def result(seed: Int): String =
   family(seed) match {
     case 0 => s"match:${value(seed)}"
     case 1 => s"closure:${value(seed) + 3}"
@@ -48,10 +48,10 @@ def result(seed: Int): String =
     case _ => s"io:${value(seed)}"
   }
 
-def output(seed: Int): String =
+private def output(seed: Int): String =
   if (family(seed) == 5) Str.concat(result(seed), ":2") else result(seed)
 
-def body(seed: Int): String =
+private def body(seed: Int): String =
   for {
     expr = expression(bounded(seed) / 6, depth(seed))
     prefix = """def calculate(x: Int): Int =
@@ -76,7 +76,7 @@ def emit(x: Int): IO[Unit] =
 def source(seed: Int): String =
   Str.concat(body(seed), s"\n@main def main: IO[Unit] =\n  emit(${number(input(seed))})\n")
 
-def invalid(seed: Int): String =
+private def invalid(seed: Int): String =
   Str.concat(source(seed), (seed % 12) match {
   case 0 => """
 def invalid(): String =
@@ -150,17 +150,17 @@ def evaluated(seed: Int): Bool =
     got = Eval.show(Eval.callPure(program, "Main", "f", [Value.VInt(input(seed))]))
   } yield checked(seed) && got == Eval.show(Value.VStr(result(seed)))
 
-def coveragePair(i: Int): String =
+private def coveragePair(i: Int): String =
   Str.concat(if (i / 2 == 0) "false" else "true", Str.concat(", ", if (i % 2 == 0) "false" else "true"))
 
-def coveragePattern(kind: Int, i: Int): String =
+private def coveragePattern(kind: Int, i: Int): String =
   if (kind == 0) Str.concat("(", Str.concat(coveragePair(i), ")")) else if (kind == 1) Str.concat("Some((", Str.concat(coveragePair(i), "))")) else if (kind == 2) Str.concat("Flags.Bits(", Str.concat(coveragePair(i), ")")) else Str.concat("Result.Ok((", Str.concat(coveragePair(i), "))"))
 
-def coverageArms(mask: Int, kind: Int, guarded: Bool, i: Int): String =
+private def coverageArms(mask: Int, kind: Int, guarded: Bool, i: Int): String =
   if (i == 4) "" else Str.concat(if (mask % 2 == 0) "" else Str.concat("    case ", Str.concat(coveragePattern(kind, i), Str.concat(if (guarded) " if true" else "", Str.concat(" => ", Str.concat(Str.fromInt(i), """
 """))))), coverageArms(mask / 2, kind, guarded, i + 1))
 
-def coverageSource(seed: Int): String =
+private def coverageSource(seed: Int): String =
   for {
     kind = seed / 16 % 4
     ty = if (kind == 0) "(Bool, Bool)" else if (kind == 1) "Option[(Bool, Bool)]" else if (kind == 2) "Flags" else "Result[String, (Bool, Bool)]"
@@ -193,10 +193,10 @@ def caseSeeds(): List[Int] =
 def exported(seed: Int): Json =
   Json.Obj([("seed", Json.Int(seed)), ("modules", moduleExport(seed)), ("family", Json.Int(family(seed))), ("input", Json.Int(input(seed))), ("body", Json.Str(body(seed))), ("source", Json.Str(source(seed))), ("invalid", Json.Str(invalid(seed))), ("result", Json.Str(result(seed))), ("output", Json.Str(output(seed)))])
 
-def moduleA(): String =
+private def moduleA(): String =
   "record Positive private(value: Int)\nrecord PrivateBox[A] private(value: A)\ndef amount(n: Int): Result[String, Positive] = if (n >= 0) Result.Ok(Positive(n)) else Result.Err(\"negative\")\ndef privateBox[A](value: A): PrivateBox[A] = PrivateBox(value)\nrecord Box[T](value: T)\nrecord Marker()\nenum Choice[T]:\n  case Wrap(box: Box[T])\n  case End\ntype Payload = Choice[String]\ndef make(): Payload = Choice.Wrap(Box(\"alpha\"))\ndef read(c: Payload): Int =\n  c match {\n    case Choice.Wrap(Box(text)) => Str.len(text)\n    case Choice.End => 0\n  }\ndef shadow(Box: String): Int = Str.len(Box)\ndef call(x: String, y: String, z: String): String = Str.concat(x, Str.concat(y, z))\ndef score(m: Marker): Int = m.score(1)\ntrait Score:\n  def score(n: Int): Int\nimpl Score for Marker:\n  def score(n: Int): Int = n + 1\n"
 
-def moduleB(seed: Int): String =
+private def moduleB(seed: Int): String =
   Str.concat("""record Box[T](marker: String, value: T)
 record Marker()
 enum Choice[T]:
@@ -216,7 +216,7 @@ impl Score for Marker:
   def score(n: Int): Int = n + 2
 """))))
 
-def moduleMain(): String =
+private def moduleMain(): String =
   "import A.Box as First\nrecord Holder(value: Int)\nrecord Callbacks(run: List[String => String])\ndef forward(value: String): String = value\ndef callback(): String = List.at(Callbacks([call => forward(call)]).run, (0).require(n => n == 0))(\"kept\")\ndef qualified(c: A.Choice[String]): Int =\n  c match {\n    case A.Choice.Wrap(A.Box(text)) => Str.len(text)\n    case A.Choice.End => 0\n  }\ndef imported(x: First[String]): String = x.value\ndef shadow(A: Holder): Int = A.value\ndef folded(): String = List.foldLeft([A.Box(\"a\"), A.Box(\"b\")], \"\", entry => Str.concat(entry._1, entry._2.value))\ndef privateValues(): Int = A.amount(7) match { case Result.Ok(value) => value.value + Str.len(A.privateBox(\"kept\").value) - 11 case Result.Err(_) => 1 }\ndef result(): Int = privateValues() + Str.len(callback()) - 4 + Str.len(folded()) + A.read(A.make()) + B.read(B.make()) + qualified(A.make()) + Str.len(imported(First(\"abc\"))) + A.score(A.Marker()) + B.score(B.Marker())\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(result()))\n"
 
 def moduleFiles(seed: Int, reverse: Bool): List[(String, String)] =
@@ -227,6 +227,150 @@ def moduleChecked(seed: Int): Bool =
 
 def moduleExport(seed: Int): Json =
   Json.Arr(List.map(moduleFiles(seed % 6, false), pair => Json.Arr([Json.Str(pair._1), Json.Str(pair._2)])))
+
+private def jsonText(value: Json): String =
+  Json.stringify(value) match {
+    case Result.Ok(text) => text
+    case Result.Err(_) => ""
+  }
+
+def exportChecked(seed: Int): Bool =
+  for {
+    seeds = caseSeeds()
+    picked = List.at(seeds, seed % 54)
+    text = jsonText(exported(picked))
+    modules = jsonText(moduleExport(picked))
+  } yield if (List.len(seeds) == 54) if (Str.contains(text, "\"source\"")) if (Str.contains(text, "@main")) if (Str.contains(source(picked), "def calculate")) if (Str.contains(modules, "Main")) if (List.len(moduleFiles(picked, false)) == 3) List.len(moduleFiles(picked, true)) == 3 else false else false else false else false else false else false
+
+private def modernCoverageMiss(kind: Int): String =
+  if (kind == 0) "non-exhaustive match on Main.Row" else if (kind == 1) "non-exhaustive match on Option[Result[Bool, Bool]]" else "non-exhaustive match on Main.Bit"
+
+private def modernRow(full: Bool): String =
+  Str.concat("""record Row(label: String, ok: Bool, hot: Bool)
+
+def select(value: Row): Int =
+  value match {
+    case Row(_, false, false) => 0
+    case Row(_, false, true) => 1
+    case Row(_, true, false) => 2
+""", if (full) """    case Row(_, true, true) => 3
+  }
+""" else """  }
+""")
+
+private def modernNested(full: Bool): String =
+  Str.concat("""def select(value: Option[Result[Bool, Bool]]): Int =
+  value match {
+    case None => 0
+    case Some(Result.Err(_)) => 1
+    case Some(Result.Ok(false)) => 2
+""", if (full) """    case Some(Result.Ok(true)) => 3
+  }
+""" else """  }
+""")
+
+private def modernOr(full: Bool): String =
+  Str.concat("""enum Bit:
+  case Off
+  case On
+
+def selectBit(value: Bit): Int =
+  value match {
+""", Str.concat(if (full) """    case Bit.Off | Bit.On => 1
+""" else """    case Bit.Off => 1
+""", """  }
+
+def selectBool(value: Bool): Int =
+  value match {
+    case false | true => 1
+  }
+"""))
+
+private def modernCoverageFull(kind: Int): String =
+  if (kind == 0) modernRow(true) else if (kind == 1) modernNested(true) else modernOr(true)
+
+private def modernCoverageGap(kind: Int): String =
+  if (kind == 0) modernRow(false) else if (kind == 1) modernNested(false) else modernOr(false)
+
+private def modernCoverageSource(seed: Int): String =
+  if (seed / 3 % 2 == 0) modernCoverageFull(seed % 3) else modernCoverageGap(seed % 3)
+
+def modernCoverageChecked(seed: Int): Bool =
+  for {
+    result = Check.check(modernCoverageSource(seed))
+    complete = seed / 3 % 2 == 0
+    kind = seed % 3
+  } yield if (complete) result == "[]" else Str.contains(result, modernCoverageMiss(kind))
+
+private def modernModel(seed: Int): String =
+  for {
+    value = seed / 4 % 4
+    extra = seed / 16 % 4
+    shift = seed / 64 % 4
+    shown = shift + value + extra
+    nested = Str.concat(Str.fromInt(value), Str.fromInt(extra))
+    closed = shift + value + shift + extra
+  } yield Str.concat("t:", Str.concat(Str.fromInt(shift), Str.concat(":s:", Str.concat(Str.fromInt(shown), Str.concat(":n:", Str.concat(nested, Str.concat(":c:", Str.fromInt(closed))))))))
+
+private def modernPrelude(): String =
+  """record Box[T](tag: Int, value: T)
+trait Show[T]:
+  def render(extra: Int): Int
+impl Show[Int] for Box:
+  def render(extra: Int): Int =
+    self.tag + self.value + extra
+
+def run(): String =
+  for {
+    tag = """
+
+private def modernSource(seed: Int): String =
+  for {
+    tag = Str.fromInt(seed % 4)
+    value = Str.fromInt(seed / 4 % 4)
+    extra = Str.fromInt(seed / 16 % 4)
+    shift = Str.fromInt(seed / 64 % 4)
+  } yield Str.concat(modernPrelude(), Str.concat(tag, Str.concat("""
+    value = """, Str.concat(value, Str.concat("""
+    extra = """, Str.concat(extra, Str.concat("""
+    shift = """, Str.concat(shift, "\n    made = Box(tag, value)\n    box = made.copy(tag = shift)\n    shown = box.render(extra)\n    nested = s\"${s\"$value\"}$extra\"\n    step = (n: Int) => box.tag + value + n\n    closed = step(shift + extra)\n  } yield s\"t:${box.tag}:s:$shown:n:$nested:c:$closed\"\n"))))))))
+
+def modernEvaluated(seed: Int): Bool =
+  for {
+    src = modernSource(seed)
+    program = Eval.load([("Main", src)])
+    got = Eval.show(Eval.callPure(program, "Main", "run", []))
+  } yield if (Check.check(src) == "[]") got == Eval.show(Value.VStr(modernModel(seed))) else false
+
+private def modulePretty(src: String): String =
+  Parse.pretty(Parse.parse(Lexer.lex(src)))
+
+private def modulePrettyStable(files: List[(String, String)]): Bool =
+  if (List.isEmpty(files)) true else if (modulePretty(List.at(files, 0)._2) == modulePretty(modulePretty(List.at(files, 0)._2))) modulePrettyStable(List.tail(files)) else false
+
+private def moduleOrder(files: List[(String, String)], reverse: Bool): Bool =
+  if (reverse) if (List.at(files, 0)._1 == "B") List.at(files, 1)._1 == "A" else false else if (List.at(files, 0)._1 == "A") List.at(files, 1)._1 == "B" else false
+
+private def moduleRejects(files: List[(String, String)], bad: String, rule: String): Bool =
+  Str.contains(Check.checkFiles(List.map(files, pair => if (pair._1 == "Main") (pair._1, Str.concat(pair._2, Str.concat("""
+""", bad))) else pair)), rule)
+
+private def modulePrivateRejected(files: List[(String, String)]): Bool =
+  if (moduleRejects(files, """def bad(): A.Positive = A.Positive(-1)
+""", "private record constructor")) moduleRejects(files, """def bad(p: A.Positive): A.Positive = p.copy(value = -1)
+""", "private record copy") else false
+
+private def moduleSide(seed: Int, reverse: Bool): Bool =
+  for {
+    files = moduleFiles(seed, reverse)
+    pretty = List.map(files, pair => (pair._1, modulePretty(pair._2)))
+    program = Eval.load(pretty)
+    got = Eval.show(Eval.callPure(program, "Main", "result", []))
+    expect = Str.fromInt(20 + seed + (seed + 1))
+  } yield if (moduleOrder(files, reverse)) if (modulePrettyStable(files)) if (Check.checkFiles(pretty) == "[]") if (got == expect) modulePrivateRejected(files) else false else false else false else false
+
+def moduleEvaluatedAndFormatted(seed: Int): Bool =
+  if (moduleSide(seed % 6, false)) moduleSide(seed % 6, true) else false
 
 @main def main: IO[Unit] =
   Json.stringify(Json.Arr(List.map(Cases.caseSeeds(), seed => Cases.exported(seed)))) match {
