@@ -1961,7 +1961,7 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  enumCaseNames() && privateRecords() && recordCopyTypes() && resultBindings() && resultFieldBindings() && resultListBindings() && resultLiveUse() && erasedInputGuards() && totalBindingPatterns() && effectBindingTypes() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
+  enumCaseNames() && privateRecords() && recordCopyTypes() && resultBindings() && resultFieldBindings() && resultListBindings() && resultLiveUse() && erasedInputGuards() && totalBindingPatterns() && effectBindingTypes() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity() && unclaimedSpans()
 
 def closedMatchCoverage(): Bool =
   List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()
@@ -1994,7 +1994,7 @@ def orderedListTypes(): Bool =
   Check.check("def right(): List[Int] = List.sort([2, 1])") == "[]" && Check.check("def right(): List[String] = List.sort([\"b\", \"a\"])") == "[]" && Check.check("def right(): Int = List.max([1, 2])") == "[]" && Check.check("def right(): String = List.min([\"b\", \"a\"])") == "[]" && Check.check("def right(): List[Float] = List.sort([2.0, 1.0])") == "[]" && Check.check("def right(): Float = List.max([1.0, 2.0])") == "[]" && Check.check("def right(): Float = List.min([1.0, 2.0])") == "[]" && rejects("def wrong(): Bool = List.min([true, false])", "List.min needs List[Int], List[Float], or List[String]")
 
 def dumpFail(): String =
-  if (!enumCaseNames()) "enumCaseNames" else if (!privateRecords()) "privateRecords" else if (!recordCopyTypes()) "recordCopyTypes" else if (!resultBindings()) "resultBindings" else if (!resultFieldBindings()) "resultFieldBindings" else if (!resultListBindings()) "resultListBindings" else if (!resultLiveUse()) "resultLiveUse" else if (!totalBindingPatterns()) "totalBindingPatterns" else if (!effectBindingTypes()) "effectBindingTypes" else if (!orderedListTypes()) "orderedListTypes" else if (!erasedInputGuards()) "erasedInputGuards" else if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else if (!moduleIdentity()) Str.concat("moduleIdentity:", Check.checkFiles(Cases.moduleFiles(0, false))) else "other"
+  if (!enumCaseNames()) "enumCaseNames" else if (!privateRecords()) "privateRecords" else if (!recordCopyTypes()) "recordCopyTypes" else if (!resultBindings()) "resultBindings" else if (!resultFieldBindings()) "resultFieldBindings" else if (!resultListBindings()) "resultListBindings" else if (!resultLiveUse()) "resultLiveUse" else if (!totalBindingPatterns()) "totalBindingPatterns" else if (!effectBindingTypes()) "effectBindingTypes" else if (!orderedListTypes()) "orderedListTypes" else if (!erasedInputGuards()) "erasedInputGuards" else if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else if (!moduleIdentity()) Str.concat("moduleIdentity:", Check.checkFiles(Cases.moduleFiles(0, false))) else if (!unclaimedSpans()) "unclaimedSpans" else "other"
 
 def dumpTyckRes(): String =
   if (!tyckDiff(srcResArity(), wantResArity())) Str.concat("Resource arity: ", Check.check(srcResArity())) else if (!tyckDiff(srcResDraw(), wantResDraw())) Str.concat("Resource binding: ", Check.check(srcResDraw())) else if (!tyckDiff(srcResLam(), wantResLam())) Str.concat("Resource cleanup: ", Check.check(srcResLam())) else if (!tyckDiff(srcResUnk(), wantResUnk())) Str.concat("Resource lookup: ", Check.check(srcResUnk())) else if (!tyckDiff(srcJsonUnk(), wantJsonUnk())) Str.concat("JSON lookup: ", Check.check(srcJsonUnk())) else if (!tyckDiff(srcDefUnk(), wantDefUnk())) Str.concat("Deferred lookup: ", Check.check(srcDefUnk())) else if (!tyckDiff(srcDefMis(), wantDefMis())) Str.concat("Deferred payload: ", Check.check(srcDefMis())) else if (!tyckDiff(srcQueUnk(), wantQueUnk())) Str.concat("Queue lookup: ", Check.check(srcQueUnk())) else if (!tyckDiff(srcQueMis(), wantQueMis())) Str.concat("Queue offer: ", Check.check(srcQueMis())) else if (!tyckDiff(srcQueTake(), wantQueTake())) Str.concat("Queue take: ", Check.check(srcQueTake())) else if (!tyckDiff(srcQuePay(), wantQuePay())) Str.concat("Queue payload: ", Check.check(srcQuePay())) else if (!tyckDiff(srcNetStr(), wantNetStr())) Str.concat("Net handler: ", Check.check(srcNetStr())) else if (!emptyCtorTypes()) "empty constructor types" else if (!queueRefineTypes()) "queue refinement" else if (!queueLambdaPinTypes()) "queue lambda types" else if (!nestedPatTypes()) dumpNestedPat() else if (!lambdaApplyTypes()) "lambda application" else if (!expectedLamTypes()) "expected lambda types" else "tyckRes"
@@ -2056,7 +2056,7 @@ def dumpTyckCore(): String =
   if (!sourceOffsets()) dumpSourceOffsets() else if (!funLookup()) "funLookup" else "tyckCore"
 
 def dumpSourceOffsets(): String =
-  if (!numericTokenRanges()) "numericTokenRanges" else "sourceOffsets"
+  if (!numericTokenRanges()) "numericTokenRanges" else if (!scanMarkers()) "scanMarkers" else "sourceOffsets"
 
 def dumpTyckFail(): String =
   if (!collectionTypes()) dumpListFilter() else if (!userTypeArgs()) dumpUserTypeArgs() else if (!streamTypes()) dumpStream() else if (!flattenTypes()) dumpFlatten() else if (!foldTypes()) dumpFold() else if (!mapSetTypes()) dumpMapSet() else if (!zipTypes()) dumpZip() else if (!unfoldTypes()) dumpUnfold() else if (!listBuildTypes()) dumpListBuild() else if (!mapProjectTypes()) dumpMapProject() else if (!listRestTypes()) dumpListRest() else if (!streamRestTypes()) dumpStreamRest() else if (!listStructTypes()) dumpListStruct() else if (!listToMapTypes()) dumpListToMap() else if (!listSpanTypes()) dumpListSpan() else if (!listSliceTypes()) dumpListSlice() else if (!setUnionTypes()) dumpSetUnion() else if (!streamChangesTypes()) dumpStreamChanges() else if (!listFindTypes()) dumpListFind() else if (!mapExistsTypes()) dumpMapExists() else if (!listSumTypes()) dumpListSum() else if (!jsonListTypes()) dumpJsonList() else if (!editorListTypes()) dumpEditorList() else if (!propertyForceTypes()) dumpPropertyForce() else if (!namedIoTypes()) dumpNamedIo() else if (!kitLookup()) "kitLookup" else if (!ioCombinators()) dumpIoComb() else "tyckFail"
@@ -2494,7 +2494,38 @@ def sourceOffsets(): Bool =
   List.map(List.range(0, 8), off => Check.lineCol(sourceOffSrc(), off)) == [(1, 1), (1, 2), (1, 3), (2, 1), (3, 1), (3, 2), (3, 3), (4, 1)] && Check.lineCol("", 0) == (1, 1) && Check.lineCol("a", 5) == (1, 2) && Check.lineIndex(sourceOffSrc()) == [0, 3, 4, 7] && Check.lineIndex("") == [0] && Check.lineIndex("a") == [0] && Check.lineColIdx(Check.startsOf(Check.fileIndex(("Main", sourceOffSrc()) :: []), "Main"), sourceOffSrc(), 4) == (3, 1) && Check.lineColIdx(Check.startsOf(Check.fileIndex(("Main", "a") :: []), ""), "a", 0) == (1, 1) && sourceIndexEdges() && sourceTokenRanges() && scanMarkers()
 
 def scanMarkers(): Bool =
-  Check.scanNeedle("x = Signal.make", " = Signal.make", "", "signal ", 0, []) == ["signal x"] && Check.scanQuoted("View.button(\"go\")", "View.button(\"", "", "control ", 0, []) == ["control go"]
+  Check.scanSignals("App", "x = Signal.make(0)\nstep = Signal.makeN(\"step\", 0)\n_ = Signal.makeN(\"countReady\", 0)\n_ = Signal.makeN(\"$mirror\", 0)\n_ = Signal.make(0)\nlabel = Signal.map(x, n => n)", "") == [("signal x", ("App", 0)), ("signal step", ("App", 19)), ("signal countReady", ("App", 67))] && List.isEmpty(Check.scanSignals("Main", "def s(): String = \"fake = Signal.make(0) _ = Signal.makeN(\\\"ghost\\\", 0)\"\ndef i(n: Int): String = s\"$n fake2 = Signal.make(0)\"\ndef t(): String = \"\"\"fake3 = Signal.make(0)\"\"\"", "")) && Check.scanControls("Panel", "View.button(\"Go\", _ => ())\nView.outlinedButton(\"Back\", _ => ())\nView.textButton(\"Help\", _ => ())\ndef q(): String = \"View.button(\\\"Fake\\\", _ => ())\"", "") == [("control Go", ("Panel", 12)), ("control Back", ("Panel", 47)), ("control Help", ("Panel", 80))]
+
+def unclaimedHelperSrc(): String =
+  """private def hidden(): Int = 0
+def _skip(): Int = 0
+def helperFn(n: Int): Int =
+  n + 1
+oracle helperRule(n: Int): Bool =
+  helperFn(n) > n
+"""
+
+def unclaimedAppSrc(): String =
+  "def banner(): String =\n  \"é雪 fake = Signal.make(0) View.button(\\\"Ghost\\\", _ => ())\"\n\n@main def launch: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    _ = Signal.makeN(\"ready\", 0)\n    _ <- Ui.run(_ => View.column([View.button(\"Run\", _ => ()), View.outlinedButton(\"Back\", _ => ()), View.textButton(\"More\", _ => ())]))\n  } yield ()\n"
+
+def unclaimedExpectedJson(): String =
+  "[{\"severity\":\"info\",\"message\":\"unclaimed def launch\",\"file\":\"App.scuzz\",\"line\":4,\"column\":11,\"end_line\":4,\"end_column\":17},{\"severity\":\"info\",\"message\":\"unclaimed def helperFn\",\"file\":\"Helper.scuzz\",\"line\":3,\"column\":5,\"end_line\":3,\"end_column\":13},{\"severity\":\"info\",\"message\":\"unclaimed oracle helperRule\",\"file\":\"Helper.scuzz\",\"line\":5,\"column\":8,\"end_line\":5,\"end_column\":18},{\"severity\":\"info\",\"message\":\"unclaimed def banner\",\"file\":\"App.scuzz\",\"line\":1,\"column\":5,\"end_line\":1,\"end_column\":11},{\"severity\":\"info\",\"message\":\"unclaimed signal clicks\",\"file\":\"App.scuzz\",\"line\":6,\"column\":5,\"end_line\":6,\"end_column\":11},{\"severity\":\"info\",\"message\":\"unclaimed signal ready\",\"file\":\"App.scuzz\",\"line\":7,\"column\":22,\"end_line\":7,\"end_column\":29},{\"severity\":\"info\",\"message\":\"unclaimed control Run\",\"file\":\"App.scuzz\",\"line\":8,\"column\":47,\"end_line\":8,\"end_column\":52},{\"severity\":\"info\",\"message\":\"unclaimed control Back\",\"file\":\"App.scuzz\",\"line\":8,\"column\":84,\"end_line\":8,\"end_column\":90},{\"severity\":\"info\",\"message\":\"unclaimed control More\",\"file\":\"App.scuzz\",\"line\":8,\"column\":118,\"end_line\":8,\"end_column\":124}]"
+
+def unclaimedEscSrc(): String =
+  "private def v(): View =\n  View.column([View.button(\"Say \\\"hi\\\"\", _ => ()), View.textButton(\"\"\"Line1\nLine2\"\"\", _ => ())])\n"
+
+def unclaimedEscJson(): String =
+  "[{\"severity\":\"info\",\"message\":\"unclaimed control Say \\\"hi\\\"\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":28,\"end_line\":2,\"end_column\":40},{\"severity\":\"info\",\"message\":\"unclaimed control Line1\\nLine2\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":68,\"end_line\":3,\"end_column\":9}]"
+
+def unclaimedSpans(): Bool =
+  for {
+    files = [("Helper", unclaimedHelperSrc()), ("App", unclaimedAppSrc())]
+    prog = Parse.parseFiles(files)
+    stems = ["Helper", "App"]
+    depAll = Parse.parseFiles([("Dep", """@main def depMain: IO[Unit] = IO.pure(())
+def depFn(): Int = 1"""), ("Lib", "def libFn(): Int = 2")])
+    escFiles = [("Main", unclaimedEscSrc())]
+  } yield Check.unclaimedJsonVer(prog, files, stems, []) == unclaimedExpectedJson() && Check.unclaimedJsonVer(prog, files, stems, ["helperFn helperRule banner launch clicks ready Run Back More"]) == "[]" && Check.unclaimedJsonVer(depAll, [("Lib", "def libFn(): Int = 2")], ["Lib"], ["libFn"]) == "[]" && Check.unclaimedJsonVer(Parse.parseFiles(escFiles), escFiles, ["Main"], []) == unclaimedEscJson()
 
 def sourceTokenRanges(): Bool =
   Check.locOf("abc", 0) == (1, 1, 1, 4) && Check.locOf("\"a\"", 0) == (1, 1, 1, 4) && Check.locOf("\"a\nb\"", 0) == (1, 1, 2, 3) && Check.tokenEnd("\"\"\"a\nb\"\"\"", 0) == 9 && Check.locOf("\"\"\"a\nb\"\"\"", 0) == (1, 1, 2, 5) && Str.contains(Check.check("def wrong(): Int = \"\"\"a\nb\"\"\""), "\"line\":1,\"column\":20,\"end_line\":2,\"end_column\":5") && compoundTokenRanges() && numericTokenRanges()

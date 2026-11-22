@@ -1602,7 +1602,7 @@ def evProbeCmd(job: FuzzJob, dir: String): String =
   if (job.hasUi) uiProbeCmd(job.scuzz, dir) else ioProbeCmd(job.scuzz, dir)
 
 def ioProbeCmd(scuzz: String, dir: String): String =
-  Str.concat("SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec ", Str.concat(shQuote(scuzz), Str.concat(" eval --probe ", shQuote(dir))))))
+  Str.concat("SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec env -u SCUZZ_UI_RUNTIME -u SCUZZ_UI_WIDTH -u SCUZZ_UI_HEIGHT -u SCUZZ_UI_SCALE -u SCUZZ_UI_SCRIPT -u SCUZZ_UI_INJECT -u SCUZZ_UI_TAP -u SCUZZ_UI_TEXT -u SCUZZ_UI_SERVE -u SCUZZ_UI_RECORD -u SCUZZ_UI_DEBUG_DUMP -u SCUZZ_UI_RELOAD_STAMP -u SCUZZ_LIVE_FRAMES ", Str.concat(shQuote(scuzz), Str.concat(" eval --probe ", shQuote(dir))))))
 
 def uiProbeCmd(host: String, dir: String): String =
   Str.concat("SCUZZ_EVAL_MIRROR=1 SCUZZ_EVAL_TAGS=", Str.concat(shQuote(joinSlash(dir, "tags.txt")), Str.concat(" SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec env -u SCUZZ_UI_SCRIPT -u SCUZZ_UI_INJECT -u SCUZZ_UI_TAP -u SCUZZ_UI_TEXT -u SCUZZ_UI_SERVE -u SCUZZ_UI_RECORD -u SCUZZ_UI_DEBUG_DUMP -u SCUZZ_UI_RELOAD_STAMP -u SCUZZ_LIVE_FRAMES ", Str.concat(shQuote(host), Str.concat(" ", shQuote(dir))))))))
@@ -1749,7 +1749,7 @@ def fuzzSplitProbe(exe: String, hasUi: Bool, dump: String, tl: String, uiEnv: St
   runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzSplitEnv(hasUi, dump, tl, uiEnv, outDir), shQuote(exe)))).flatMap(r => fuzzProbeCodeIoAt(r, quiet))
 
 def fuzzSplitEnv(hasUi: Bool, dump: String, tl: String, uiEnv: String, outDir: String): String =
-  Str.concat(testEnv(), Str.concat(if (hasUi) uiEnv else "", Str.concat(kv("SCUZZ_", "FUZZ_DUMP", dump), Str.concat(fuzzTlEnv("SCUZZ_", tl), fuzzReachEnv("SCUZZ_", outDir)))))
+  Str.concat(testEnv(), Str.concat(if (hasUi) uiEnv else kv("SCUZZ_", "UI_RUNTIME", ""), Str.concat(kv("SCUZZ_", "FUZZ_DUMP", dump), Str.concat(fuzzTlEnv("SCUZZ_", tl), fuzzReachEnv("SCUZZ_", outDir)))))
 
 def fuzzSplitCmp(job: FuzzJob): IO[Unit] =
   fuzzReadOr(fuzzDumpPath(job.outDir)).flatMap(vd => fuzzReadOr(joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.json")).flatMap(ld => fuzzReadOr(fuzzTlPath(job.outDir)).flatMap(vt => fuzzReadOr(joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "timeline.txt")).flatMap(lt => fuzzSplitEq(job, ld, vd, lt, vt)))))
@@ -2237,7 +2237,7 @@ def shellTokReq(tok: String): String =
 """) else ""
 
 def fuzzProbeEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String, picks: List[String], outDir: String, uiEnv: String, live: Bool, session: Bool): String =
-  Str.concat(if (live || session) kv(pre, "NET_LIVE", "1") else "", Str.concat(if (session) kv(pre, "NET_SESSION", "1") else "", Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnvFor(pre, uiEnv) else "", Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzPicksEnv(pre, picks), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir)))))))))
+  Str.concat(if (live || session) kv(pre, "NET_LIVE", "1") else "", Str.concat(if (session) kv(pre, "NET_SESSION", "1") else "", Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnvFor(pre, uiEnv) else kv(pre, "UI_RUNTIME", ""), Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzPicksEnv(pre, picks), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir)))))))))
 
 def fuzzPicksEnv(pre: String, picks: List[String]): String =
   if (List.isEmpty(picks)) "" else kv(pre, "SCHED_PICKS", List.join(picks, ";"))
@@ -2695,7 +2695,7 @@ def relateEnv(hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool
   Str.concat(relateBaseEnv(hasUi, uiEnv), Str.concat(relateScriptEnv(hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzTlEnv("SCUZZ_", tl), Str.concat(Str.concat("SCUZZ_SOMETIMES_DUMP=", Str.concat(reached, " ")), Str.concat(fuzzSchedEnv("SCUZZ_", sched), fuzzFaultEnv("SCUZZ_", fault))))))
 
 def relateBaseEnv(hasUi: Bool, uiEnv: String): String =
-  Str.concat(testEnv(), if (hasUi) uiEnv else "")
+  Str.concat(testEnv(), if (hasUi) uiEnv else kv("SCUZZ_", "UI_RUNTIME", ""))
 
 def relateScriptEnv(hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool): String =
   if (!hasScript) "" else if (hasUi) Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(scriptPath, Str.concat(" SCUZZ_FUZZ_DUMP=", Str.concat(dumpPath, " ")))) else Str.concat("SCUZZ_DRIVE_SCRIPT=", Str.concat(scriptPath, " "))

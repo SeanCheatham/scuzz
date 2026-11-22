@@ -22,6 +22,8 @@ import Parse.TrMethod
 import Lexer.lex
 import Lexer.interpEnd
 import Lexer.numberEnd
+import Lexer.Tok
+import Lexer.SpTok
 import Type.preferStr
 import Type.eqPinned
 import Type.isTyParam
@@ -4660,84 +4662,127 @@ def check3(files: List[(String, String)], o: Out): String =
   if (!hasErr(o)) "[]" else if (o.err == "unexpected token" && o.span == noSpan()) parseErrorCheckJson(files, o) else Str.concat("[", Str.concat(diagJson(files, o), "]"))
 
 def unclaimedJsonVer(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): String =
-  unclaimedWrap(unclaimedLines(p, files, stems, vers))
+  unclaimedWrap(files, unclaimedOf(p, files, stems, List.join(vers, """
+""")))
 
-def unclaimedWrap(xs: List[String]): String =
-  if (List.isEmpty(xs)) "[]" else Str.concat("[", Str.concat(List.join(List.map(xs, s => unclaimedItem(s)), ","), "]"))
+def fileSrcMap(files: List[(String, String)], acc: Map[String, String]): Map[String, String] =
+  if (List.isEmpty(files)) acc else fileSrcMap(List.tail(files), Map.set(acc, List.at(files, 0)._1, List.at(files, 0)._2))
 
-def unclaimedItem(s: String): String =
-  Str.concat("{\"severity\":\"info\",\"message\":\"unclaimed ", Str.concat(s, "\",\"line\":1,\"column\":1}"))
+def srcFromMap(srcs: Map[String, String], stem: String): String =
+  Map.get(srcs, stem) match {
+    case Some(s) => s
+    case None => if (stem == "") srcFromMap(srcs, "Main") else ""
+  }
 
-def unclaimedLines(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): List[String] =
-  unclaimedOf(p, files, stems, List.join(vers, """
-"""))
+def unclaimedWrap(files: List[(String, String)], xs: List[(String, (String, Int))]): String =
+  if (List.isEmpty(xs)) "[]" else unclaimedJsonAcc(xs, fileSrcMap(files, Map.empty()), fileIndex(files), Builder.append(Builder.empty(), "["), true)
 
-def unclaimedOf(p: Prog, files: List[(String, String)], stems: List[String], ver: String): List[String] =
-  List.concat(unclaimedDefs(p, stems, ver), List.concat(unclaimedSignals(files, ver), unclaimedControls(files, ver)))
+def unclaimedJsonAcc(xs: List[(String, (String, Int))], srcs: Map[String, String], lidx: Map[String, LineIndex], b: Builder, first: Bool): String =
+  if (List.isEmpty(xs)) Builder.result(Builder.append(b, "]")) else unclaimedJsonAcc(List.tail(xs), srcs, lidx, Builder.append(if (first) b else Builder.append(b, ","), unclaimedJsonOne(List.at(xs, 0), srcs, lidx)), false)
 
-def unclaimedDefs(p: Prog, stems: List[String], ver: String): List[String] =
-  unclaimedDefNames(if (p.main == "") ownDefs(p.defs, stems) else Fun(false, false, p.main, [], [], "IO[Unit]", p.body, "Main", 0) :: ownDefs(p.defs, stems), ver)
+def unclaimedJsonOne(entry: (String, (String, Int)), srcs: Map[String, String], lidx: Map[String, LineIndex]): String =
+  unclaimedJsonLoc(entry._1, fileOf(entry._2._1), locOfIdx(startsOf(lidx, entry._2._1), srcFromMap(srcs, entry._2._1), entry._2._2))
+
+def unclaimedJsonLoc(item: String, file: String, loc: (Int, Int, Int, Int)): String =
+  loc match {
+    case (line, col, eline, ecol) => Str.concat("{\"severity\":\"info\",\"message\":", Str.concat(jsonStr(Str.concat("unclaimed ", item)), Str.concat(",\"file\":", Str.concat(jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))))
+  }
+
+def unclaimedOf(p: Prog, files: List[(String, String)], stems: List[String], ver: String): List[(String, (String, Int))] =
+  List.reverse(unclaimedControlsAcc(files, ver, unclaimedSignalsAcc(files, ver, unclaimedDefsAcc(unclaimedOwnDefs(p, files, stems), ver, []))))
+
+def unclaimedOwnDefs(p: Prog, files: List[(String, String)], stems: List[String]): List[Fun] =
+  if (p.main == "") ownDefs(p.defs, stems) else mainFunFor(p, files, stems, ownDefs(p.defs, stems))
+
+def mainFunFor(p: Prog, files: List[(String, String)], stems: List[String], rest: List[Fun]): List[Fun] =
+  if (List.isEmpty(files)) if (hasStem(stems, if (p.mod == "") "Main" else p.mod)) Fun(false, false, p.main, [], [], "IO[Unit]", p.body, if (p.mod == "") "Main" else p.mod, 0) :: rest else rest else mainFunHit(p, findMainSpan(files, stems), rest)
+
+def mainFunHit(p: Prog, sp: (String, Int), rest: List[Fun]): List[Fun] =
+  if (sp._2 < 0) rest else Fun(false, false, p.main, [], [], "IO[Unit]", p.body, sp._1, sp._2) :: rest
+
+def findMainSpan(files: List[(String, String)], stems: List[String]): (String, Int) =
+  if (List.isEmpty(files)) noSpan() else if (!(List.isEmpty(stems) || hasStem(stems, List.at(files, 0)._1)) || !Str.contains(List.at(files, 0)._2, "@main")) findMainSpan(List.tail(files), stems) else findMainSpanGot(List.at(files, 0)._1, findMainToks(lex(List.at(files, 0)._2)), List.tail(files), stems)
+
+def findMainSpanGot(stem: String, off: Int, rest: List[(String, String)], stems: List[String]): (String, Int) =
+  if (off >= 0) (stem, off) else findMainSpan(rest, stems)
+
+def hasToks(ts: List[SpTok], n: Int): Bool =
+  if (n <= 0) true else if (List.isEmpty(ts)) false else hasToks(List.tail(ts), n - 1)
+
+def dropToks(ts: List[SpTok], n: Int): List[SpTok] =
+  if (n <= 0 || List.isEmpty(ts)) ts else dropToks(List.tail(ts), n - 1)
+
+def spTokIdent(t: SpTok): String =
+  t.tok match {
+    case Tok.Ident(s) => s
+    case _ => ""
+  }
+
+def spTokHasStr(t: SpTok): Bool =
+  t.tok match {
+    case Tok.Str(_) => true
+    case _ => false
+  }
+
+def spTokStr(t: SpTok): String =
+  t.tok match {
+    case Tok.Str(s) => s
+    case _ => ""
+  }
+
+def findMainToks(ts: List[SpTok]): Int =
+  if (!hasToks(ts, 3)) 0 - 1 else if (List.at(ts, 0).tok == Tok.AtMain && List.at(ts, 1).tok == Tok.Def && spTokIdent(List.at(ts, 2)) != "") List.at(ts, 2).off else findMainToks(List.tail(ts))
 
 def ownDefs(ds: List[Fun], stems: List[String]): List[Fun] =
   List.filter(ds, d => hasStem(stems, d.mod))
 
-def unclaimedDefNames(ds: List[Fun], ver: String): List[String] =
-  if (List.isEmpty(ds)) [] else unclaimedDefHd(List.at(ds, 0), List.tail(ds), ver)
+def unclaimedDefsAcc(ds: List[Fun], ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (List.isEmpty(ds)) acc else unclaimedDefsAcc(List.tail(ds), ver, unclaimedDefStep(List.at(ds, 0), ver, acc))
 
-def unclaimedDefHd(d: Fun, rest: List[Fun], ver: String): List[String] =
-  d match {
-    case Fun(priv, ora, name, _, _, _, _, _, _) => if (priv || Str.startsWith(name, "_") || mentioned(ver, name)) unclaimedDefNames(rest, ver) else Str.concat(if (ora) "oracle " else "def ", name) :: unclaimedDefNames(rest, ver)
-  }
+def unclaimedDefStep(d: Fun, ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (d.priv || Str.startsWith(d.name, "_") || mentioned(ver, d.name)) acc else (Str.concat(if (d.ora) "oracle " else "def ", d.name), (d.mod, d.off)) :: acc
 
 def mentioned(ver: String, name: String): Bool =
   ver != "" && Str.contains(ver, name)
 
-def unclaimedSignals(files: List[(String, String)], ver: String): List[String] =
-  if (List.isEmpty(files)) [] else List.concat(scanSignals(fileSrcOf(List.at(files, 0)), ver), unclaimedSignals(List.tail(files), ver))
+def skipOpenParensToks(ts: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(ts)) [] else if (List.at(ts, 0).tok == Tok.LParen) skipOpenParensToks(List.tail(ts)) else ts
 
-def unclaimedControls(files: List[(String, String)], ver: String): List[String] =
-  if (List.isEmpty(files)) [] else List.concat(scanControls(fileSrcOf(List.at(files, 0)), ver), unclaimedControls(List.tail(files), ver))
+def signalValidName(name: String): Bool =
+  name != "" && !Str.startsWith(name, "_") && !Str.startsWith(name, "$")
 
-def fileSrcOf(h: (String, String)): String =
-  h match {
-    case (_, src) => src
-  }
+def isSignalCall(ts: List[SpTok], fn: String): Bool =
+  hasToks(ts, 3) && spTokIdent(List.at(ts, 0)) == "Signal" && List.at(ts, 1).tok == Tok.Dot && spTokIdent(List.at(ts, 2)) == fn
 
-def scanSignals(src: String, ver: String): List[String] =
-  scanNeedle(src, " = Signal.make", ver, "signal ", 0, [])
+def pushUnclaimed(kind: String, name: String, stem: String, off: Int, ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (kind == "signal " && !signalValidName(name) || name == "" || mentioned(ver, name)) acc else (Str.concat(kind, name), (stem, off)) :: acc
 
-def scanControls(src: String, ver: String): List[String] =
-  List.concat(scanQuoted(src, "View.button(\"", ver, "control ", 0, []), List.concat(scanQuoted(src, "View.outlinedButton(\"", ver, "control ", 0, []), scanQuoted(src, "View.textButton(\"", ver, "control ", 0, [])))
+def scanSignalsToks(ts: List[SpTok], stem: String, ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (List.isEmpty(ts)) acc else if (spTokIdent(List.at(ts, 0)) != "" && hasToks(ts, 2) && List.at(ts, 1).tok == Tok.Eq && isSignalCall(skipOpenParensToks(dropToks(ts, 2)), "make")) scanSignalsToks(dropToks(skipOpenParensToks(dropToks(ts, 2)), 3), stem, ver, pushUnclaimed("signal ", spTokIdent(List.at(ts, 0)), stem, List.at(ts, 0).off, ver, acc)) else if (spTokIdent(List.at(ts, 0)) != "" && hasToks(ts, 2) && List.at(ts, 1).tok == Tok.Eq && isSignalCall(skipOpenParensToks(dropToks(ts, 2)), "makeN")) scanBoundMakeN(List.at(ts, 0), dropToks(skipOpenParensToks(dropToks(ts, 2)), 3), stem, ver, acc) else if (isSignalCall(ts, "makeN") && hasToks(ts, 5) && List.at(ts, 3).tok == Tok.LParen && spTokHasStr(List.at(ts, 4))) scanSignalsToks(dropToks(ts, 5), stem, ver, pushUnclaimed("signal ", spTokStr(List.at(ts, 4)), stem, List.at(ts, 4).off, ver, acc)) else scanSignalsToks(List.tail(ts), stem, ver, acc)
 
-def scanNeedle(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
-  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.charAt(src, i) == Str.charAt(needle, 0) && Str.slice(src, i, i + Str.len(needle)) == needle) scanNeedleHit(src, needle, ver, kind, i, acc) else scanNeedle(src, needle, ver, kind, i + 1, acc)
+def scanBoundMakeN(t0: SpTok, afterCall: List[SpTok], stem: String, ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (hasToks(afterCall, 2) && List.at(afterCall, 0).tok == Tok.LParen && spTokHasStr(List.at(afterCall, 1))) scanSignalsToks(dropToks(afterCall, 2), stem, ver, pushUnclaimed("signal ", spTokStr(List.at(afterCall, 1)), stem, if (signalValidName(spTokIdent(t0))) t0.off else List.at(afterCall, 1).off, ver, acc)) else scanSignalsToks(afterCall, stem, ver, pushUnclaimed("signal ", spTokIdent(t0), stem, t0.off, ver, acc))
 
-def scanNeedleHit(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
-  scanNeedle(src, needle, ver, kind, i + Str.len(needle), identBefore(src, i, kind, ver, acc))
+def unclaimedSignalsAcc(files: List[(String, String)], ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (List.isEmpty(files)) acc else unclaimedSignalsAcc(List.tail(files), ver, if (!Str.contains(List.at(files, 0)._2, "Signal")) acc else scanSignalsToks(lex(List.at(files, 0)._2), List.at(files, 0)._1, ver, acc))
 
-def identBefore(src: String, i: Int, kind: String, ver: String, acc: List[String]): List[String] =
-  identTake(src, identStartAt(src, i - 1), i, kind, ver, acc)
+def scanSignals(stem: String, src: String, ver: String): List[(String, (String, Int))] =
+  if (!Str.contains(src, "Signal")) [] else List.reverse(scanSignalsToks(lex(src), stem, ver, []))
 
-def identStartAt(src: String, i: Int): Int =
-  if (i < 0) 0 else if (isIdentCh(Str.charAt(src, i))) identStartAt(src, i - 1) else i + 1
+def isButtonKind(kind: String): Bool =
+  kind == "button" || kind == "outlinedButton" || kind == "textButton"
 
-def identTake(src: String, start: Int, end: Int, kind: String, ver: String, acc: List[String]): List[String] =
-  if (start >= end) acc else unclaimedAdd(Str.concat(kind, Str.slice(src, start, end)), ver, acc)
+def isControlAt(ts: List[SpTok]): Bool =
+  hasToks(ts, 5) && spTokIdent(List.at(ts, 0)) == "View" && List.at(ts, 1).tok == Tok.Dot && isButtonKind(spTokIdent(List.at(ts, 2))) && List.at(ts, 3).tok == Tok.LParen && spTokHasStr(List.at(ts, 4))
 
-def scanQuoted(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
-  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.charAt(src, i) == Str.charAt(needle, 0) && Str.slice(src, i, i + Str.len(needle)) == needle) scanQuotedHit(src, needle, ver, kind, i, acc) else scanQuoted(src, needle, ver, kind, i + 1, acc)
+def scanControlsToks(ts: List[SpTok], stem: String, ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (List.isEmpty(ts)) acc else if (!isControlAt(ts)) scanControlsToks(List.tail(ts), stem, ver, acc) else scanControlsToks(dropToks(ts, 5), stem, ver, pushUnclaimed("control ", spTokStr(List.at(ts, 4)), stem, List.at(ts, 4).off, ver, acc))
 
-def scanQuotedHit(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
-  scanQuoted(src, needle, ver, kind, i + Str.len(needle), unclaimedAdd(Str.concat(kind, quoteTo(src, i + Str.len(needle))), ver, acc))
+def unclaimedControlsAcc(files: List[(String, String)], ver: String, acc: List[(String, (String, Int))]): List[(String, (String, Int))] =
+  if (List.isEmpty(files)) acc else unclaimedControlsAcc(List.tail(files), ver, if (!Str.contains(List.at(files, 0)._2, "View")) acc else scanControlsToks(lex(List.at(files, 0)._2), List.at(files, 0)._1, ver, acc))
 
-def quoteTo(src: String, i: Int): String =
-  if (i >= Str.len(src) || Str.charAt(src, i) == 34) "" else Str.concat(Str.slice(src, i, i + 1), quoteTo(src, i + 1))
-
-def unclaimedAdd(item: String, ver: String, acc: List[String]): List[String] =
-  if (mentioned(ver, afterKind(item))) acc else item :: acc
-
-def afterKind(item: String): String =
-  if (Str.startsWith(item, "def ")) Str.slice(item, 4, Str.len(item)) else if (Str.startsWith(item, "signal ")) Str.slice(item, 7, Str.len(item)) else if (Str.startsWith(item, "control ")) Str.slice(item, 8, Str.len(item)) else item
+def scanControls(stem: String, src: String, ver: String): List[(String, (String, Int))] =
+  if (!Str.contains(src, "View")) [] else List.reverse(scanControlsToks(lex(src), stem, ver, []))
 
 def humanLine(files: List[(String, String)], o: Out): String =
   humanLineSp(files, o, parseErrorSourceSpan(files, o))
