@@ -8,12 +8,14 @@ OWNER=""
 
 stop() {
   if [ -n "$OWNER" ]; then
-    kill "$OWNER" 2>/dev/null || true
+    kill -KILL "$OWNER" 2>/dev/null || true
     wait "$OWNER" 2>/dev/null || true
+    OWNER=""
   fi
   if [ -n "$WORKER" ]; then
     kill "$WORKER" 2>/dev/null || true
     wait "$WORKER" 2>/dev/null || true
+    WORKER=""
   fi
 }
 trap stop EXIT

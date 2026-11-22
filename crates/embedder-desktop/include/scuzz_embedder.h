@@ -28,6 +28,12 @@ int sz_embedder_alive(void);
 /* Read the initial system motion preference. Start change delivery. */
 int sz_embedder_reduced_motion(void);
 
+/* Nonzero if the embedder reads shared control semantics. */
+int sz_embedder_accessibility_available(void);
+/* Transfer snapshot ownership to the embedder. Use logical viewport dimensions. */
+void sz_embedder_publish_accessibility(SzA11ySnapshot *snapshot, int width,
+                                       int height);
+
 /* Present an RGBA8888 frame in a window. Blocks briefly to process events.
  * point_w/point_h are the window size in points; pixel_w/pixel_h are the
  * rgba dimensions (point * backing scale). Returns 1 on success. */

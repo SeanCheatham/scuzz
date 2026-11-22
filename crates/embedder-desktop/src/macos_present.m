@@ -240,9 +240,10 @@ static NSImageView *g_view;
 static ScuzzWindowDelegate *g_delegate;
 static int g_w;
 static int g_h;
-static int g_ready;
+static _Atomic int g_ready;
 static int g_app_ready;
-static int g_user_quit;
+static _Atomic int g_user_quit;
+static _Atomic int g_poll_pending;
 static int g_became_visible;
 static id g_motion_observer;
 static _Atomic int g_motion_active, g_motion_current, g_motion_reported;
@@ -260,7 +261,7 @@ int sz_embedder_available(void) {
 }
 
 int sz_embedder_alive(void) {
-  return !g_user_quit && sz_embedder_available();
+  return !atomic_load(&g_user_quit) && sz_embedder_available();
 }
 
 /* AppKit must run on the process main thread. The Scuzz IO runtime often
@@ -453,12 +454,14 @@ static int cocoa_drain_events(void) {
 
 int sz_embedder_poll_event(SzInputEvent *out) {
   if (!out) return 0;
-  if (g_ready && !g_user_quit) {
+  if (atomic_load(&g_ready) && !atomic_load(&g_user_quit) &&
+      !atomic_exchange(&g_poll_pending, 1)) {
     on_main_soon(^{
       @autoreleasepool {
         if (cocoa_drain_events())
           mark_user_quit();
       }
+      atomic_store(&g_poll_pending, 0);
     });
   }
   int reduced = atomic_load(&g_motion_current);
@@ -601,19 +604,19 @@ static void shutdown_on_main(void) {
   g_delegate = nil;
   g_content = nil;
   g_view = nil;
-  g_ready = 0;
+  atomic_store(&g_ready, 0);
   g_became_visible = 0;
   g_w = g_h = 0;
   g_q_head = g_q_tail = 0;
 }
 
 static void mark_user_quit(void) {
-  g_user_quit = 1;
+  atomic_store(&g_user_quit, 1);
   sz_embedder_shutdown();
 }
 
 static int ensure_window_on_main(const char *title, int width, int height) {
-  if (g_ready) {
+  if (atomic_load(&g_ready)) {
     /* App-driven size change (inject `resize`): move the window to the
      * frame. A queued resize event means the user is resizing; the next
      * present catches up. Never fight the user. */
@@ -625,7 +628,7 @@ static int ensure_window_on_main(const char *title, int width, int height) {
     return 1;
   }
 
-  g_user_quit = 0;
+  atomic_store(&g_user_quit, 0);
   ensure_app();
 
   NSRect rect = NSMakeRect(100, 100, (CGFloat)width, (CGFloat)height);
@@ -664,7 +667,7 @@ static int ensure_window_on_main(const char *title, int width, int height) {
 
   g_w = width;
   g_h = height;
-  g_ready = 1;
+  atomic_store(&g_ready, 1);
   fprintf(stderr, "scuzz embedder: Cocoa window %dx%d\n", width, height);
   return 1;
 }
@@ -689,7 +692,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
   int finished;
   int ok;
 
-  if (g_user_quit)
+  if (atomic_load(&g_user_quit))
     return 0;
   if (!rgba || point_w <= 0 || point_h <= 0 || pixel_w <= 0 || pixel_h <= 0)
     return 0;
