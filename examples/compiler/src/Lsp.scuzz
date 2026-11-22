@@ -1,10 +1,27 @@
 record Open(path: String, src: String)
 
+record ModFile(stem: String, path: String, src: String)
+
 import Parse.Fun
 import Parse.Param
+import Parse.Prog
+import Parse.Expr
+import Parse.Bind
+import Parse.Arm
+import Parse.En
+import Parse.EnCase
+import Parse.Alias
+import Parse.Tr
+import Parse.Im
+import Parse.Imp
+import Parse.Toks
 import Lexer.Tok
 import Lexer.SpTok
 import Check.LineIndex
+import Check.Ftab
+import Check.Out
+import Type.Ty
+import Manifest.Man
 
 def lf(): String =
   """
@@ -148,15 +165,152 @@ def identPrefix(src: String, off: Int): String =
 def identPrefix2(src: String, a: Int, off: Int): String =
   if (a >= off) "" else Str.slice(src, a, off)
 
+def qualPrefixAt(src: String, off: Int): String =
+  for {
+    clamped = if (off < 0) 0 else if (off > Str.len(src)) Str.len(src) else off
+    a = identStart(src, clamped)
+    tail = if (a >= clamped) "" else Str.slice(src, a, clamped)
+  } yield if (a >= 2 && Str.charAt(src, a - 1) == 46 && Str.nonEmpty(identAt(src, a - 2))) Str.concat(identAt(src, a - 2), Str.concat(".", tail)) else tail
+
 def qualIdentAt(src: String, off: Int): String =
-  qualIdentAt2(src, identAt(src, off), identStart(src, off))
+  qualIdentAt2(src, identAt(src, off), identStart(src, if (off > Str.len(src)) Str.len(src) else off))
 
 def qualIdentAt2(src: String, name: String, a: Int): String =
   if (name == "") name else if (a >= 2 && Str.charAt(src, a - 1) == 46) Str.concat(identAt(src, a - 2), Str.concat(".", name)) else name
 
+def validIdent(s: String): Bool =
+  Str.nonEmpty(s) && !Str.startsWith(s, "__Scuzz") && (for {
+  lexed = Lexer.lex(s)
+} yield List.len(lexed) == 2 && List.at(lexed, 0) match {
+  case SpTok(t0, off0, _, _) => off0 == 0 && t0 match {
+  case Tok.Ident(got) => got == s && List.at(lexed, 1) match {
+  case SpTok(Tok.Eof, _, _, _) => true
+  case _ => false
+}
+  case _ => false
+}
+})
+
+def stemOfPath(path: String): String =
+  for {
+    base = Fs.basename(path)
+  } yield if (Str.endsWith(base, ".scuzz") && Str.len(base) > 6) Str.dropRight(base, 6) else if (Str.isEmpty(base)) "Main" else base
+
+def normDir(dir: String): IO[String] =
+  if (Str.isEmpty(dir)) IO.pure("") else Fs.canonicalize(dir).handleErrorWith(_ => IO.pure(dir))
+
+def normPath(path: String): IO[String] =
+  if (Str.isEmpty(path)) IO.pure("") else Fs.canonicalize(path).handleErrorWith(_ => normDir(Fs.dirname(path)).map(d => if (Str.isEmpty(d)) path else Fs.join(d, Fs.basename(path))))
+
+def normOpen(open: List[Open]): IO[List[Open]] =
+  open match {
+    case [] => IO.pure([])
+    case h :: rest => h match {
+  case Open(p, src) => for {
+  np <- normPath(p)
+  tail <- normOpen(rest)
+} yield Open(np, src) :: tail
+}
+  }
+
+def pkgRootWalk(dir: String, fallback: String, limit: Int): IO[String] =
+  if (limit <= 0 || Str.isEmpty(dir)) normDir(fallback) else Fs.exists(Fs.join(dir, "scuzz.toml")).handleErrorWith(_ => IO.pure(0)).flatMap(ok => if (ok != 0) normDir(dir) else for {
+  parent = Fs.dirname(dir)
+  out <- if (parent == dir || Str.isEmpty(parent)) normDir(fallback) else pkgRootWalk(parent, fallback, limit - 1)
+} yield out)
+
+def pkgRootOfPath(path: String, fallback: String): IO[String] =
+  if (Str.isEmpty(path)) normDir(fallback) else pkgRootWalk(Fs.dirname(path), fallback, 16)
+
+def hasModStem(mods: List[ModFile], stem: String): Bool =
+  List.exists(mods, m => m.stem == stem)
+
+def readPkgOwnMods(srcDir: String, ents: List[(String, Bool)], openNorm: List[Open]): IO[List[ModFile]] =
+  for {
+    names = List.sort(List.map(List.filter(ents, ent => !ent._2 && Drive.isScuzz(ent._1)), ent => ent._1))
+    mods <- IO.foreach(names, name => for {
+  full <- normPath(Fs.join(srcDir, name))
+  src <- if (overlayHas(openNorm, full)) IO.pure(overlayGet(openNorm, full)) else Fs.read(full).handleErrorWith(_ => IO.pure(""))
+} yield ModFile(Drive.stemOf(name), full, src))
+  } yield mods
+
+def appendNewMods(acc: List[ModFile], more: List[ModFile]): List[ModFile] =
+  more match {
+    case [] => acc
+    case h :: rest => if (hasModStem(acc, h.stem)) appendNewMods(acc, rest) else appendNewMods(List.append(acc, h), rest)
+  }
+
+def loadDepMods(parentDir: String, deps: List[(String, String)], acc: List[ModFile], seen: List[String], openNorm: List[Open]): IO[List[ModFile]] =
+  deps match {
+    case [] => IO.pure(acc)
+    case dep :: rest => for {
+  relPath = dep._2
+  pkgDir <- normDir(Drive.depDir(parentDir, relPath))
+  nextAcc <- if (Str.isEmpty(pkgDir) || List.contains(seen, pkgDir)) IO.pure(acc) else loadSinglePkgMods(pkgDir, acc, pkgDir :: seen, openNorm)
+  done <- loadDepMods(parentDir, rest, nextAcc, seen, openNorm)
+} yield done
+  }
+
+def loadSinglePkgMods(pkgDir: String, acc: List[ModFile], seen: List[String], openNorm: List[Open]): IO[List[ModFile]] =
+  (for {
+  toml <- Fs.read(Fs.join(pkgDir, "scuzz.toml"))
+  m = Manifest.parse(toml)
+  _ <- Drive.manNeed(m)
+  ents <- Fs.list(Fs.join(pkgDir, "src"))
+  own <- readPkgOwnMods(Fs.join(pkgDir, "src"), ents, openNorm)
+  withNested <- loadDepMods(pkgDir, m.deps, acc, seen, openNorm)
+} yield appendNewMods(withNested, own)).handleErrorWith(_ => IO.pure(acc))
+
+def loadPkgMods(rootDir: String, openNorm: List[Open]): IO[List[ModFile]] =
+  if (Str.isEmpty(rootDir)) IO.pure([]) else (for {
+  toml <- Fs.read(Fs.join(rootDir, "scuzz.toml"))
+  m = Manifest.parse(toml)
+  _ <- Drive.manNeed(m)
+  ents <- Fs.list(Fs.join(rootDir, "src"))
+  own <- readPkgOwnMods(Fs.join(rootDir, "src"), ents, openNorm)
+  all <- loadDepMods(rootDir, m.deps, own, [rootDir], openNorm)
+} yield all).handleErrorWith(_ => IO.pure([]))
+
+def upsertActiveMod(mods: List[ModFile], stem: String, path: String, src: String): List[ModFile] =
+  if (List.exists(mods, m => m.path == path)) List.map(mods, m => if (m.path == path) ModFile(m.stem, path, src) else m) else ModFile(stem, path, src) :: List.filter(mods, m => m.stem != stem)
+
+def workspaceMods(root: String, open: List[Open], activePath: String, activeSrc: String): IO[List[ModFile]] =
+  for {
+    rDir <- normDir(root)
+    aPath <- normPath(activePath)
+    openNorm0 <- normOpen(open)
+    openNorm = if (Str.isEmpty(aPath)) openNorm0 else overlayPut(openNorm0, aPath, activeSrc)
+    rMods <- loadPkgMods(rDir, openNorm)
+    out <- if (Str.nonEmpty(aPath) && List.exists(rMods, m => m.path == aPath)) IO.pure(rMods) else for {
+  docPkg <- pkgRootOfPath(aPath, rDir)
+  pMods <- if (Str.nonEmpty(docPkg) && docPkg != rDir) loadPkgMods(docPkg, openNorm) else IO.pure(rMods)
+} yield if (Str.isEmpty(aPath)) pMods else upsertActiveMod(pMods, stemOfPath(aPath), aPath, activeSrc)
+  } yield out
+
+def modPairs(mods: List[ModFile]): List[(String, String)] =
+  List.map(mods, m => (m.stem, m.src))
+
+def cleanModPairs(mods: List[ModFile], activeStem: String, activeSrc: String): List[(String, String)] =
+  List.foldLeft(mods, []: List[(String, String)], __tup => __tup match {
+  case (acc, m) => if (m.stem == activeStem) List.append(acc, (m.stem, activeSrc)) else if (Parse.hasParseError(Parse.parseFile(m.stem, m.src))) acc else List.append(acc, (m.stem, m.src))
+})
+
+def findModByStem(mods: List[ModFile], stem: String): Option[ModFile] =
+  List.head(List.filter(mods, m => m.stem == stem))
+
+def showTParams(ts: List[String]): String =
+  if (List.isEmpty(ts)) "" else Str.concat("[", Str.concat(List.join(ts, ", "), "]"))
+
 def showFun(d: Fun): String =
   d match {
     case Fun(_, ora, name, _, ps, ret, _, _, _) => Str.concat(if (ora) "oracle " else "def ", Str.concat(name, Str.concat("(", Str.concat(showParams(ps), Str.concat("): ", ret)))))
+  }
+
+def showFunQual(d: Fun, activeStem: String): String =
+  d match {
+    case Fun(_, ora, name, ts, ps, ret, _, mod, _) => for {
+  qName = if (Str.isEmpty(mod) || mod == activeStem) name else Str.concat(mod, Str.concat(".", name))
+} yield Str.concat(if (ora) "oracle " else "def ", Str.concat(qName, Str.concat(showTParams(ts), Str.concat("(", Str.concat(showParams(ps), Str.concat("): ", ret))))))
   }
 
 def showParams(ps: List[Param]): String =
@@ -166,6 +320,17 @@ def showParamsHd(p: Param, rest: List[Param]): String =
   p match {
     case Param(name, ty, _, _) => if (List.isEmpty(rest)) Str.concat(name, Str.concat(": ", ty)) else Str.concat(name, Str.concat(": ", Str.concat(ty, Str.concat(", ", showParams(rest)))))
   }
+
+def showEn(en: En, activeStem: String): String =
+  for {
+    qName = if (Str.isEmpty(en.mod) || en.mod == activeStem) en.name else Str.concat(en.mod, Str.concat(".", en.name))
+    tp = showTParams(en.tparams)
+  } yield if (en.isRec) en.cases match {
+  case c0 :: _ => c0 match {
+  case EnCase(_, fs) => Str.concat("record ", Str.concat(qName, Str.concat(tp, Str.concat("(", Str.concat(showParams(fs), ")")))))
+}
+  case [] => Str.concat("record ", Str.concat(qName, tp))
+} else Str.concat("enum ", Str.concat(qName, tp))
 
 def findFun(ds: List[Fun], name: String): String =
   if (List.isEmpty(ds)) "" else findFunHd(List.at(ds, 0), List.tail(ds), name)
@@ -190,6 +355,58 @@ def hoverName2(src: String, name: String, kit: String): String =
 def hoverName3(_src: String, name: String, hit: String): String =
   if (Str.nonEmpty(hit)) hit else if (name == "") "" else name
 
+def resolveImpMod(imps: List[Imp], activeStem: String, aliasName: String): (String, String) =
+  List.find(imps, imp => imp.owner == activeStem && (imp.alias == aliasName || imp.alias == "" && imp.name == aliasName)) match {
+    case imp :: _ => (imp.mod, imp.name)
+    case [] => List.find(imps, imp => imp.owner == activeStem && imp.name == "*") match {
+  case imp :: _ => (imp.mod, aliasName)
+  case [] => ("", "")
+}
+  }
+
+def findFunInMod(ds: List[Fun], mod: String, name: String, allowPriv: Bool): Option[Fun] =
+  List.head(List.filter(ds, d => d.mod == mod && d.name == name && (allowPriv || !d.priv)))
+
+def findEnInMod(ens: List[En], mod: String, name: String): Option[En] =
+  List.head(List.filter(ens, en => en.mod == mod && en.name == name))
+
+def hoverWorkspace(mods: List[ModFile], activeStem: String, src: String, line: Int, col: Int): String =
+  for {
+    off = offsetOf(src, line, col)
+    qual = qualIdentAt(src, off)
+    bare = identAt(src, off)
+  } yield if (qual == "") "" else if (Str.nonEmpty(kitHover(qual))) kitHover(qual) else hoverWorkspaceProg(Parse.parseFiles(modPairs(mods)), mods, activeStem, qual, bare)
+
+def hoverWorkspaceProg(p: Prog, mods: List[ModFile], activeStem: String, qual: String, bare: String): String =
+  for {
+    dot = Str.indexOf(qual, ".")
+  } yield if (dot >= 0) for {
+  lhs = Str.take(qual, dot)
+  rhs = Str.drop(qual, dot + 1)
+  hitFun = findFunInMod(p.defs, lhs, rhs, lhs == activeStem)
+  hitEn = findEnInMod(p.enums, lhs, rhs)
+} yield hitFun match {
+  case Some(d) => showFunQual(d, activeStem)
+  case None => hitEn match {
+  case Some(en) => showEn(en, activeStem)
+  case None => qual
+}
+} else findFunInMod(p.defs, activeStem, bare, true) match {
+  case Some(d) => showFun(d)
+  case None => findEnInMod(p.enums, activeStem, bare) match {
+  case Some(en) => showEn(en, activeStem)
+  case None => for {
+  impTarget = resolveImpMod(p.imps, activeStem, bare)
+} yield if (Str.nonEmpty(impTarget._1)) findFunInMod(p.defs, impTarget._1, impTarget._2, false) match {
+  case Some(d) => showFunQual(d, activeStem)
+  case None => findEnInMod(p.enums, impTarget._1, impTarget._2) match {
+  case Some(en) => showEn(en, activeStem)
+  case None => if (hasModStem(mods, bare)) Str.concat("module ", bare) else qual
+}
+} else if (hasModStem(mods, bare)) Str.concat("module ", bare) else qual
+}
+}
+
 def hoverJson(text: String): String =
   if (text == "") "null" else Str.concat("{\"contents\":{\"kind\":\"plaintext\",\"value\":", Str.concat(Check.jsonStr(text), "}}"))
 
@@ -204,6 +421,20 @@ def completeNamesHd(d: Fun, rest: List[Fun], acc: List[String]): List[String] =
     case Fun(_, _, name, _, _, _, _, _, _) => completeNames2(rest, name :: acc)
   }
 
+def completeWorkspaceNames(mods: List[ModFile], activeStem: String, src: String): List[String] =
+  for {
+    p = Parse.parseFiles(modPairs(mods))
+    localDefs = List.map(List.filter(p.defs, d => d.mod == activeStem && d.name != "#parse" && Str.nonEmpty(d.name)), d => d.name)
+    localTypes = List.map(List.filter(p.enums, en => en.mod == activeStem && Str.nonEmpty(en.name)), en => en.name)
+    impDirect = List.foldLeft(List.filter(p.imps, imp => imp.owner == activeStem), []: List[String], __tup => __tup match {
+  case (acc, imp) => if (imp.name == "*") List.concat(acc, List.map(List.filter(p.defs, d => d.mod == imp.mod && !d.priv && d.name != "#parse"), d => d.name)) else if (Str.nonEmpty(imp.alias)) List.append(acc, imp.alias) else List.append(acc, imp.name)
+})
+    modStems = List.map(List.filter(mods, m => m.stem != activeStem && Str.nonEmpty(m.stem)), m => m.stem)
+    qualDefs = List.map(List.filter(p.defs, d => d.mod != activeStem && Str.nonEmpty(d.mod) && !d.priv && d.name != "#parse" && Str.nonEmpty(d.name)), d => Str.concat(d.mod, Str.concat(".", d.name)))
+    qualTypes = List.map(List.filter(p.enums, en => en.mod != activeStem && Str.nonEmpty(en.mod) && Str.nonEmpty(en.name)), en => Str.concat(en.mod, Str.concat(".", en.name)))
+    fallbackLocal = List.map(List.filter(Parse.parse(Lexer.lex(src)).defs, d => d.name != "#parse" && Str.nonEmpty(d.name)), d => d.name)
+  } yield List.distinct(List.concat(localDefs, List.concat(fallbackLocal, List.concat(localTypes, List.concat(impDirect, List.concat(modStems, List.concat(qualDefs, List.concat(qualTypes, Check.kitNames()))))))))
+
 def completePref(xs: List[String], p: String): List[String] =
   if (p == "") xs else completePrefGo(xs, p)
 
@@ -215,6 +446,9 @@ def completePrefHd(h: String, rest: List[String], p: String): List[String] =
 
 def completeJson(src: String, prefix: String): String =
   Str.concat("{\"isIncomplete\":false,\"items\":[", Str.concat(completeItems(completePref(completeNames(src), prefix)), "]}"))
+
+def completeWorkspaceJson(mods: List[ModFile], activeStem: String, src: String, prefix: String): String =
+  Str.concat("{\"isIncomplete\":false,\"items\":[", Str.concat(completeItems(completePref(completeWorkspaceNames(mods, activeStem, src), prefix)), "]}"))
 
 def completeItems(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else completeItemsHd(List.at(xs, 0), List.tail(xs))
@@ -254,6 +488,74 @@ def findFunOffHd(d: Fun, rest: List[Fun], name: String): Int =
     case Fun(_, _, n, _, _, _, _, _, off) => if (n == name) off else findFunOff(rest, name)
   }
 
+def topDeclOffGo(toks: Toks, i: Int, name: String): Int =
+  if (i + 1 >= toks.n) 0 - 1 else if ((Parse._is(toks, i, Tok.Enum) || Parse._is(toks, i, Tok.Record) || Parse._is(toks, i, Tok.Trait) || Parse._is(toks, i, Tok.TypeKw) || Parse._is(toks, i, Tok.Def) || Parse._is(toks, i, Tok.Oracle)) && Parse._identOf(Parse._at(toks, i + 1)) == name) Parse._off(toks, i + 1) else topDeclOffGo(toks, i + 1, name)
+
+def findSymbolOffInMod(p: Prog, m: ModFile, sym: String, allowPriv: Bool): Int =
+  findFunInMod(p.defs, m.stem, sym, allowPriv) match {
+    case Some(d) => d.off
+    case None => topDeclOffGo(Parse.indexToks(Lexer.lex(m.src)), 0, sym)
+  }
+
+def uriForModPath(modPath: String, activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open]): String =
+  if (Str.nonEmpty(activeNormPath) && modPath == activeNormPath && Str.nonEmpty(activeUri)) activeUri else uriForOpenGo(modPath, open, openNorm)
+
+def uriForOpenGo(modPath: String, open: List[Open], openNorm: List[Open]): String =
+  open match {
+    case o1 :: r1 => openNorm match {
+  case o2 :: r2 => (o1, o2) match {
+  case (Open(origPath, _), Open(nPath, _)) => if (nPath == modPath) uriOfPath(origPath) else uriForOpenGo(modPath, r1, r2)
+}
+  case [] => uriOfPath(modPath)
+}
+    case [] => uriOfPath(modPath)
+  }
+
+def defWorkspaceJson(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, src: String, line: Int, col: Int): String =
+  for {
+    off = offsetOf(src, line, col)
+    qual = qualIdentAt(src, off)
+    bare = identAt(src, off)
+  } yield if (qual == "" || bare == "") "null" else defWorkspaceLookup(Parse.parseFiles(modPairs(mods)), mods, activeNormPath, activeUri, open, openNorm, activeStem, src, off, qual, bare)
+
+def defWorkspaceLookup(p: Prog, mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, src: String, off: Int, qual: String, bare: String): String =
+  for {
+    dot = Str.indexOf(qual, ".")
+  } yield if (dot >= 0) for {
+  lhs = Str.take(qual, dot)
+  rhs = Str.drop(qual, dot + 1)
+} yield findModByStem(mods, lhs) match {
+  case Some(m) => for {
+  symOff = findSymbolOffInMod(p, m, rhs, lhs == activeStem)
+  targetUri = uriForModPath(m.path, activeNormPath, activeUri, open, openNorm)
+} yield defJsonOff(targetUri, m.src, rhs, symOff)
+  case None => defJsonName(activeUri, src, qual)
+} else findModByStem(mods, activeStem) match {
+  case Some(selfMod) => for {
+  localSymOff = findSymbolOffInMod(p, selfMod, bare, true)
+} yield if (localSymOff >= 0) defJsonOff(activeUri, src, bare, localSymOff) else for {
+  impTarget = resolveImpMod(p.imps, activeStem, bare)
+} yield if (Str.nonEmpty(impTarget._1)) findModByStem(mods, impTarget._1) match {
+  case Some(m) => for {
+  symOff = findSymbolOffInMod(p, m, impTarget._2, false)
+  targetUri = uriForModPath(m.path, activeNormPath, activeUri, open, openNorm)
+} yield defJsonOff(targetUri, m.src, impTarget._2, symOff)
+  case None => "null"
+} else findModByStem(mods, bare) match {
+  case Some(m) => defJsonOff(uriForModPath(m.path, activeNormPath, activeUri, open, openNorm), m.src, bare, 0)
+  case None => defLocalVarJson(p, activeUri, src, off, bare)
+}
+  case None => defJsonName(activeUri, src, qual)
+}
+
+def defLocalVarJson(p: Prog, activeUri: String, src: String, off: Int, bare: String): String =
+  for {
+    toks = Parse.indexToks(Lexer.lex(src))
+    idx = identTokAtOff(toks, off, 0)
+    refs = if (idx < 0) []: List[(Int, Int)] else localBindRefs(toks, enumCaseSet(p))
+    declIdx = lookupLocalDecl(refs, idx)
+  } yield if (declIdx < 0) "null" else defJsonOff(activeUri, src, bare, Parse._off(toks, declIdx))
+
 def rangeOf(src: String, off: Int): String =
   rangeOfLoc(Check.locOf(src, off))
 
@@ -271,23 +573,360 @@ def formatJson(src: String): String =
 def formatValidJson(src: String): String =
   Str.concat("[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":", Str.concat(Str.fromInt(lineCount(src)), Str.concat(",\"character\":0}},\"newText\":", Str.concat(Check.jsonStr(Parse.pretty(Parse.parse(Lexer.lex(src)))), "}]"))))
 
+def codeActionsJson(uri: String, src: String): String =
+  for {
+    p = Parse.parse(Lexer.lex(src))
+  } yield if (Parse.hasParseError(p)) "[]" else for {
+  formatted = Parse.pretty(p)
+} yield if (formatted == src) "[]" else Str.concat("[{\"title\":\"Format file\",\"kind\":\"source.fixAll\",\"edit\":{\"changes\":{", Str.concat(Check.jsonStr(uri), Str.concat(":", Str.concat(wholeEdit(src, formatted), "}}}]"))))
+
 def lineCount(src: String): Int =
   lineCountGo(src, 0, 1)
 
 def lineCountGo(src: String, i: Int, n: Int): Int =
   if (i >= Str.len(src)) n else if (Str.charAt(src, i) == 10) lineCountGo(src, i + 1, n + 1) else lineCountGo(src, i + 1, n)
 
-def renameJson(uri: String, src: String, line: Int, col: Int, nu: String): String =
-  renameJson2(uri, src, identAt(src, offsetOf(src, line, col)), nu)
-
-def renameJson2(uri: String, src: String, name: String, nu: String): String =
-  if (name == "" || nu == "") "null" else Str.concat("{\"changes\":{", Str.concat(Check.jsonStr(uri), Str.concat(":", Str.concat(wholeEdit(src, renameIdents(src, name, nu)), "}}"))))
-
 def wholeEdit(src: String, text: String): String =
   Str.concat("[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":", Str.concat(Str.fromInt(lineCount(src)), Str.concat(",\"character\":0}},\"newText\":", Str.concat(Check.jsonStr(text), "}]"))))
 
+def enumCaseSet(p: Prog): List[String] =
+  for {
+    allEns = Parse.builtins(p.enums)
+    fromEns = List.foldLeft(allEns, []: List[String], __tup => __tup match {
+  case (acc, en) => if (en.isRec) acc else List.concat(acc, List.map(en.cases, c => c.name))
+})
+  } yield List.distinct(List.concat(["Null", "Bool", "Int", "Float", "Str", "Arr", "Obj"], fromEns))
+
+def identTokAtOff(toks: Toks, off: Int, i: Int): Int =
+  if (i >= toks.n) 0 - 1 else Parse._at(toks, i) match {
+  case Tok.Ident(s) => for {
+  a = Parse._off(toks, i)
+} yield if (a <= off && off <= a + Str.len(s)) i else if (a > off) 0 - 1 else identTokAtOff(toks, off, i + 1)
+  case Tok.Eof => 0 - 1
+  case _ => if (Parse._off(toks, i) > off) 0 - 1 else identTokAtOff(toks, off, i + 1)
+}
+
+def lookupEnv(env: List[(String, Int)], name: String): Int =
+  List.find(env, p => p._1 == name) match {
+    case h :: _ => h._2
+    case [] => 0 - 1
+  }
+
+def lookupLocalDecl(refs: List[(Int, Int)], tokIdx: Int): Int =
+  List.find(refs, r => r._1 == tokIdx) match {
+    case h :: _ => h._2
+    case [] => 0 - 1
+  }
+
+def prependBindings(bs: List[(String, Int)], env: List[(String, Int)]): List[(String, Int)] =
+  List.foldLeft(bs, env, __tup => __tup match {
+  case (acc, b) => (b._1, b._2) :: acc
+})
+
+def patBindTokens(toks: Toks, i: Int, stop: Int, enumCases: List[String], seen: List[(String, Int)], refs: List[(Int, Int)]): (List[(String, Int)], List[(Int, Int)]) =
+  if (i >= stop) (List.reverse(seen), refs) else Parse._at(toks, i) match {
+  case Tok.Ident(v) => for {
+  afterDot = i > 0 && Parse._is(toks, i - 1, Tok.Dot)
+  beforeDot = i + 1 < stop && Parse._is(toks, i + 1, Tok.Dot)
+  beforeCall = i + 1 < stop && Parse._is(toks, i + 1, Tok.LParen)
+  beforeEq = i + 1 < stop && Parse._is(toks, i + 1, Tok.Eq)
+  beforeAt = i + 1 < stop && Parse._is(toks, i + 1, Tok.At)
+  isCase = !beforeAt && List.contains(enumCases, v)
+} yield if (v == "_" || afterDot || beforeDot || beforeCall || beforeEq || isCase) patBindTokens(toks, i + 1, stop, enumCases, seen, refs) else for {
+  prior = lookupEnv(seen, v)
+  declIdx = if (prior >= 0) prior else i
+  nextSeen = if (prior >= 0) seen else (v, i) :: seen
+} yield patBindTokens(toks, i + 1, stop, enumCases, nextSeen, (i, declIdx) :: refs)
+  case _ => patBindTokens(toks, i + 1, stop, enumCases, seen, refs)
+}
+
+def matchCloseParen(toks: Toks, i: Int, depth: Int, stop: Int): Int =
+  if (i >= stop) 0 - 1 else if (Parse._is(toks, i, Tok.LParen)) matchCloseParen(toks, i + 1, depth + 1, stop) else if (Parse._is(toks, i, Tok.RParen)) if (depth == 1) i else matchCloseParen(toks, i + 1, depth - 1, stop) else matchCloseParen(toks, i + 1, depth, stop)
+
+def paramGroupTokens(toks: Toks, i: Int, stop: Int, envAcc: List[(String, Int)], refs: List[(Int, Int)]): (List[(String, Int)], List[(Int, Int)]) =
+  if (i >= stop) (List.reverse(envAcc), refs) else Parse._at(toks, i) match {
+  case Tok.Ident(name) => if (i + 1 < stop && Parse._is(toks, i + 1, Tok.Colon)) for {
+  (_, afterTy) = Parse.parseType(toks, i + 2)
+  nextI = if (afterTy > i + 2) afterTy else i + 2
+  nextEnv = if (name == "_") envAcc else (name, i) :: envAcc
+  nextRefs = if (name == "_") refs else (i, i) :: refs
+} yield paramGroupTokens(toks, nextI, stop, nextEnv, nextRefs) else paramGroupTokens(toks, i + 1, stop, envAcc, refs)
+  case Tok.Where | Tok.Eq => for {
+  (_, afterE) = Parse.parseExpr(toks, i + 1)
+  nextI = if (afterE > i + 1) afterE else i + 1
+} yield paramGroupTokens(toks, nextI, stop, envAcc, refs)
+  case _ => paramGroupTokens(toks, i + 1, stop, envAcc, refs)
+}
+
+def walkParamDefaults(toks: Toks, i: Int, stop: Int, env: List[(String, Int)], enumCases: List[String], refs: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= stop) refs else if (Parse._is(toks, i, Tok.Colon)) for {
+  (_, afterTy) = Parse.parseType(toks, i + 1)
+  nextI = if (afterTy > i + 1) afterTy else i + 1
+} yield walkParamDefaults(toks, nextI, stop, env, enumCases, refs) else if (Parse._is(toks, i, Tok.Where) || Parse._is(toks, i, Tok.Eq)) for {
+  (_, afterE) = Parse.parseExpr(toks, i + 1)
+  endE = if (afterE > stop) stop else afterE
+  nextRefs = if (endE > i + 1) walkExprRefs(toks, i + 1, endE, env, enumCases, refs) else refs
+} yield walkParamDefaults(toks, if (endE > i + 1) endE else i + 1, stop, env, enumCases, nextRefs) else walkParamDefaults(toks, i + 1, stop, env, enumCases, refs)
+
+def lamParamTokens(toks: Toks, i: Int, stop: Int, envAcc: List[(String, Int)], refs: List[(Int, Int)]): (List[(String, Int)], List[(Int, Int)]) =
+  if (i >= stop) (List.reverse(envAcc), refs) else if (Parse._is(toks, i, Tok.Colon)) for {
+  (_, afterTy) = Parse.parseType(toks, i + 1)
+} yield lamParamTokens(toks, if (afterTy > i + 1) afterTy else i + 1, stop, envAcc, refs) else Parse._at(toks, i) match {
+  case Tok.Ident(p) => if (p == "_") lamParamTokens(toks, i + 1, stop, envAcc, refs) else lamParamTokens(toks, i + 1, stop, (p, i) :: envAcc, (i, i) :: refs)
+  case _ => lamParamTokens(toks, i + 1, stop, envAcc, refs)
+}
+
+def clampIdx(idx: Int, lo: Int, hi: Int): Int =
+  if (idx < lo) lo else if (idx > hi) hi else idx
+
+def walkForRefs(toks: Toks, cur: Int, stop: Int, env: List[(String, Int)], enumCases: List[String], refs: List[(Int, Int)]): (Int, List[(Int, Int)]) =
+  if (cur >= stop) (stop, refs) else if (Parse._is(toks, cur, Tok.RBrace)) if (cur + 1 < stop && Parse._is(toks, cur + 1, Tok.Yield)) for {
+  (_, afterBody0) = Parse.parseExpr(toks, cur + 2)
+  afterBody = clampIdx(afterBody0, cur + 2, stop)
+} yield (afterBody, walkExprRefs(toks, cur + 2, afterBody, env, enumCases, refs)) else (cur + 1, refs) else if (Parse._is(toks, cur, Tok.If)) for {
+  (_, afterG0) = Parse.parseExpr(toks, cur + 1)
+  afterG = clampIdx(afterG0, cur + 1, stop)
+  nextRefs = walkExprRefs(toks, cur + 1, afterG, env, enumCases, refs)
+} yield walkForRefs(toks, if (afterG > cur) afterG else cur + 1, stop, env, enumCases, nextRefs) else for {
+  (_, eqIdx) = Parse.parsePat(toks, cur)
+} yield if (eqIdx <= cur || eqIdx >= stop || !Parse._is(toks, eqIdx, Tok.LeftArrow) && !Parse._is(toks, eqIdx, Tok.Eq)) (cur + 1, refs) else for {
+  (rhsE, afterRhs0) = Parse.parseExpr(toks, eqIdx + 1)
+  (_, nextCur0) = Parse.parseArgAsc(rhsE, toks, afterRhs0)
+  rhsEnd = clampIdx(afterRhs0, eqIdx + 1, stop)
+  nextCur = clampIdx(nextCur0, rhsEnd, stop)
+  refs1 = walkExprRefs(toks, eqIdx + 1, rhsEnd, env, enumCases, refs)
+  (pBinds, refs2) = patBindTokens(toks, cur, eqIdx, enumCases, [], refs1)
+  nextEnv = prependBindings(pBinds, env)
+} yield walkForRefs(toks, if (nextCur > cur) nextCur else cur + 1, stop, nextEnv, enumCases, refs2)
+
+def walkMatchRefs(toks: Toks, cur: Int, stop: Int, env: List[(String, Int)], enumCases: List[String], refs: List[(Int, Int)]): (Int, List[(Int, Int)]) =
+  if (cur >= stop) (stop, refs) else if (Parse._is(toks, cur, Tok.RBrace)) (cur + 1, refs) else if (!Parse._is(toks, cur, Tok.Case)) (cur + 1, refs) else for {
+  (_, afterPat) = Parse.parsePat(toks, cur + 1)
+} yield if (afterPat <= cur + 1 || afterPat >= stop) (cur + 1, refs) else for {
+  (pBinds, refs1) = patBindTokens(toks, cur + 1, afterPat, enumCases, [], refs)
+  armEnv = prependBindings(pBinds, env)
+} yield if (Parse._is(toks, afterPat, Tok.If)) for {
+  (_, afterG0) = Parse.parseExpr(toks, afterPat + 1)
+  afterG = clampIdx(afterG0, afterPat + 1, stop)
+  refs2 = walkExprRefs(toks, afterPat + 1, afterG, armEnv, enumCases, refs1)
+} yield if (afterG < stop && Parse._is(toks, afterG, Tok.Arrow)) for {
+  (_, afterB0) = Parse.parseExpr(toks, afterG + 1)
+  afterB = clampIdx(afterB0, afterG + 1, stop)
+  refs3 = walkExprRefs(toks, afterG + 1, afterB, armEnv, enumCases, refs2)
+} yield walkMatchRefs(toks, if (afterB > cur) afterB else cur + 1, stop, env, enumCases, refs3) else (afterG, refs2) else if (Parse._is(toks, afterPat, Tok.Arrow)) for {
+  (_, afterB0) = Parse.parseExpr(toks, afterPat + 1)
+  afterB = clampIdx(afterB0, afterPat + 1, stop)
+  refs2 = walkExprRefs(toks, afterPat + 1, afterB, armEnv, enumCases, refs1)
+} yield walkMatchRefs(toks, if (afterB > cur) afterB else cur + 1, stop, env, enumCases, refs2) else (afterPat, refs1)
+
+def walkExprRefs(toks: Toks, i: Int, stop: Int, env: List[(String, Int)], enumCases: List[String], refs: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= stop) refs else if (Parse._is(toks, i, Tok.For) && i + 1 < stop && Parse._is(toks, i + 1, Tok.LBrace)) for {
+  (nextI, refs1) = walkForRefs(toks, i + 2, stop, env, enumCases, refs)
+} yield walkExprRefs(toks, if (nextI > i) nextI else i + 2, stop, env, enumCases, refs1) else if (Parse._is(toks, i, Tok.Match) && i + 1 < stop && Parse._is(toks, i + 1, Tok.LBrace)) for {
+  (nextI, refs1) = walkMatchRefs(toks, i + 2, stop, env, enumCases, refs)
+} yield walkExprRefs(toks, if (nextI > i) nextI else i + 2, stop, env, enumCases, refs1) else if (Parse._is(toks, i, Tok.Colon)) for {
+  (_, afterTy) = Parse.parseType(toks, i + 1)
+  nextI = clampIdx(if (afterTy > i + 1) afterTy else i + 1, i + 1, stop)
+} yield walkExprRefs(toks, nextI, stop, env, enumCases, refs) else if (Parse._is(toks, i, Tok.Dot) && i + 1 < stop) walkExprRefs(toks, i + 2, stop, env, enumCases, refs) else if (Parse._is(toks, i, Tok.LParen)) for {
+  closeP = matchCloseParen(toks, i + 1, 1, stop)
+} yield if (closeP > i && closeP + 1 < stop && Parse._is(toks, closeP + 1, Tok.Arrow)) for {
+  (lamBinds, refs1) = lamParamTokens(toks, i + 1, closeP, [], refs)
+  (_, afterLam0) = Parse.parseExpr(toks, closeP + 2)
+  afterLam = clampIdx(afterLam0, closeP + 2, stop)
+  refs2 = walkExprRefs(toks, closeP + 2, afterLam, prependBindings(lamBinds, env), enumCases, refs1)
+} yield walkExprRefs(toks, if (afterLam > closeP + 1) afterLam else closeP + 2, stop, env, enumCases, refs2) else walkExprRefs(toks, i + 1, stop, env, enumCases, refs) else Parse._at(toks, i) match {
+  case Tok.Ident(name) => if (i + 1 < stop && Parse._is(toks, i + 1, Tok.Arrow)) for {
+  (_, afterLam0) = Parse.parseExpr(toks, i + 2)
+  afterLam = clampIdx(afterLam0, i + 2, stop)
+  refs1 = if (name == "_") refs else (i, i) :: refs
+  lamEnv = if (name == "_") env else (name, i) :: env
+  refs2 = walkExprRefs(toks, i + 2, afterLam, lamEnv, enumCases, refs1)
+} yield walkExprRefs(toks, if (afterLam > i + 1) afterLam else i + 2, stop, env, enumCases, refs2) else if (i + 1 < stop && Parse._is(toks, i + 1, Tok.Eq)) walkExprRefs(toks, i + 2, stop, env, enumCases, refs) else for {
+  declIdx = lookupEnv(env, name)
+  refs1 = if (declIdx >= 0) (i, declIdx) :: refs else refs
+} yield walkExprRefs(toks, i + 1, stop, env, enumCases, refs1)
+  case _ => walkExprRefs(toks, i + 1, stop, env, enumCases, refs)
+}
+
+def findDefHeaderOpenParen(toks: Toks, i: Int, stop: Int): Int =
+  if (i >= stop) 0 - 1 else if (Parse._is(toks, i, Tok.LParen)) i else if (Parse._is(toks, i, Tok.Colon) || Parse._is(toks, i, Tok.Eq)) 0 - 1 else findDefHeaderOpenParen(toks, i + 1, stop)
+
+def findTopDefEq(toks: Toks, i: Int, stop: Int): Int =
+  if (i >= stop) 0 - 1 else if (Parse._is(toks, i, Tok.LParen)) for {
+  closeP = matchCloseParen(toks, i + 1, 1, stop)
+} yield if (closeP < 0) 0 - 1 else findTopDefEq(toks, closeP + 1, stop) else if (Parse._is(toks, i, Tok.Eq)) i else findTopDefEq(toks, i + 1, stop)
+
+def walkDefItemRefs(toks: Toks, defBodyStartTok: Int, defEndTok: Int, enumCases: List[String], refs: List[(Int, Int)]): List[(Int, Int)] =
+  for {
+    lp = findDefHeaderOpenParen(toks, defBodyStartTok, defEndTok)
+    closeP = if (lp >= 0) matchCloseParen(toks, lp + 1, 1, defEndTok) else 0 - 1
+    (pEnv, refs1) = if (lp >= 0 && closeP > lp) paramGroupTokens(toks, lp + 1, closeP, [], refs) else ([]: List[(String, Int)], refs)
+    refs2 = if (lp >= 0 && closeP > lp) walkParamDefaults(toks, lp + 1, closeP, pEnv, enumCases, refs1) else refs1
+    eqIdx = findTopDefEq(toks, if (closeP > 0) closeP + 1 else defBodyStartTok, defEndTok)
+  } yield if (eqIdx >= 0 && eqIdx + 1 < defEndTok) walkExprRefs(toks, eqIdx + 1, defEndTok, pEnv, enumCases, refs2) else refs2
+
+def walkImplMemberRefs(toks: Toks, i: Int, stop: Int, enumCases: List[String], refs: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= stop) refs else if (Parse._is(toks, i, Tok.Def) && Parse._sp(toks, i).column > 0) for {
+  (_, j) = Parse.parseDef(toks, i + 1, false, false)
+  endM = clampIdx(if (j > i + 1) j else i + 1, i + 1, stop)
+  refs1 = walkDefItemRefs(toks, i + 1, endM, enumCases, refs)
+} yield walkImplMemberRefs(toks, endM, stop, enumCases, refs1) else walkImplMemberRefs(toks, i + 1, stop, enumCases, refs)
+
+def walkTopItemRefs(toks: Toks, i: Int, enumCases: List[String], refs: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= toks.n || Parse._is(toks, i, Tok.Eof)) List.reverse(refs) else if (Parse._is(toks, i, Tok.Private) && Parse._is(toks, i + 1, Tok.Def)) for {
+  (_, j) = Parse.parseDef(toks, i + 2, true, false)
+  nextI = if (j > i + 2) j else i + 2
+} yield walkTopItemRefs(toks, nextI, enumCases, walkDefItemRefs(toks, i + 2, nextI, enumCases, refs)) else if (Parse._is(toks, i, Tok.Oracle)) for {
+  (_, j) = Parse.parseDef(toks, i + 1, false, true)
+  nextI = if (j > i + 1) j else i + 1
+} yield walkTopItemRefs(toks, nextI, enumCases, walkDefItemRefs(toks, i + 1, nextI, enumCases, refs)) else if (Parse._is(toks, i, Tok.Def)) for {
+  (_, j) = Parse.parseDef(toks, i + 1, false, false)
+  nextI = if (j > i + 1) j else i + 1
+} yield walkTopItemRefs(toks, nextI, enumCases, walkDefItemRefs(toks, i + 1, nextI, enumCases, refs)) else if (Parse._is(toks, i, Tok.AtMain) && Parse._is(toks, i + 1, Tok.Def)) for {
+  (_, _, j) = Parse.parseMain(toks, i + 2)
+  nextI = if (j > i + 2) j else i + 2
+  eqIdx = findTopDefEq(toks, i + 2, nextI)
+  refs1 = if (eqIdx >= 0 && eqIdx + 1 < nextI) walkExprRefs(toks, eqIdx + 1, nextI, [], enumCases, refs) else refs
+} yield walkTopItemRefs(toks, nextI, enumCases, refs1) else if (Parse._is(toks, i, Tok.Impl)) for {
+  (_, j) = Parse.parseImpl(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+} yield walkTopItemRefs(toks, nextI, enumCases, walkImplMemberRefs(toks, i + 1, nextI, enumCases, refs)) else if (Parse._is(toks, i, Tok.Record)) for {
+  (_, j) = Parse.parseRec(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+  lp = findDefHeaderOpenParen(toks, i + 1, nextI)
+  closeP = if (lp >= 0) matchCloseParen(toks, lp + 1, 1, nextI) else 0 - 1
+  (pEnv, refs1) = if (lp >= 0 && closeP > lp) paramGroupTokens(toks, lp + 1, closeP, [], refs) else ([]: List[(String, Int)], refs)
+  refs2 = if (lp >= 0 && closeP > lp) walkParamDefaults(toks, lp + 1, closeP, pEnv, enumCases, refs1) else refs1
+} yield walkTopItemRefs(toks, nextI, enumCases, refs2) else if (Parse._is(toks, i, Tok.Enum)) for {
+  (_, j) = Parse.parseEnum(toks, i + 1)
+} yield walkTopItemRefs(toks, if (j > i + 1) j else i + 1, enumCases, refs) else if (Parse._is(toks, i, Tok.Trait)) for {
+  (_, j) = Parse.parseTrait(toks, i + 1)
+} yield walkTopItemRefs(toks, if (j > i + 1) j else i + 1, enumCases, refs) else if (Parse._is(toks, i, Tok.TypeKw)) for {
+  (_, j) = Parse.parseAlias(toks, i + 1)
+} yield walkTopItemRefs(toks, if (j > i + 1) j else i + 1, enumCases, refs) else if (Parse._is(toks, i, Tok.Import)) for {
+  (_, j) = Parse.parseImport(toks, i + 1)
+} yield walkTopItemRefs(toks, if (j > i + 1) j else i + 1, enumCases, refs) else walkTopItemRefs(toks, i + 1, enumCases, refs)
+
+def localBindRefs(toks: Toks, enumCases: List[String]): List[(Int, Int)] =
+  if (Parse._is(toks, 0, Tok.Package)) for {
+  (_, afterPkg) = Parse.parsePkg(toks, 1)
+} yield walkTopItemRefs(toks, if (afterPkg > 0) afterPkg else 1, enumCases, []) else walkTopItemRefs(toks, 0, enumCases, [])
+
+def noDupParamNames(ps: List[Param], seen: List[String]): Bool =
+  ps match {
+    case [] => true
+    case h :: rest => h match {
+  case Param(n, _, _, _) => if (n == "_" || n == "") noDupParamNames(rest, seen) else !List.contains(seen, n) && noDupParamNames(rest, n :: seen)
+}
+  }
+
+def paramsUniqueInProg(p: Prog): Bool =
+  List.forall(p.defs, d => noDupParamNames(d.params, [])) && List.forall(p.impls, im => List.forall(im.methods, m => noDupParamNames(m.params, [])))
+
+def replaceTokenIndices(src: String, toks: Toks, indices: List[Int], nu: String): String =
+  replaceTokenIndicesGo(src, toks, List.sort(List.distinct(indices)), nu, 0, Builder.empty())
+
+def replaceTokenIndicesGo(src: String, toks: Toks, indices: List[Int], nu: String, prev: Int, b: Builder): String =
+  indices match {
+    case [] => Builder.result(Builder.append(b, Str.slice(src, prev, Str.len(src))))
+    case idx :: rest => for {
+  sp = Parse._sp(toks, idx)
+  len = tokLen(sp.tok, src, sp.off)
+} yield replaceTokenIndicesGo(src, toks, rest, nu, sp.off + len, Builder.append(Builder.append(b, Str.slice(src, prev, sp.off)), nu))
+  }
+
+def isTopDeclKeyword(t: Tok): Bool =
+  t match {
+    case Tok.Def | Tok.Oracle | Tok.Enum | Tok.Record | Tok.Trait | Tok.TypeKw => true
+    case _ => false
+  }
+
+def topSymbolExists(p: Prog, mod: String, sym: String): Bool =
+  List.exists(p.defs, d => d.mod == mod && d.name == sym) || List.exists(p.enums, en => en.mod == mod && en.name == sym) || List.exists(p.traits, tr => tr.mod == mod && tr.name == sym) || List.exists(p.aliases, al => al.mod == mod && al.name == sym)
+
+def collectModuleSymIndices(toks: Toks, i: Int, refs: List[(Int, Int)], selfMod: Bool, importsBare: Bool, targetMod: String, sym: String, acc: List[Int]): List[Int] =
+  if (i >= toks.n) List.reverse(acc) else Parse._at(toks, i) match {
+  case Tok.Ident(s) => if (s != sym || lookupLocalDecl(refs, i) >= 0) collectModuleSymIndices(toks, i + 1, refs, selfMod, importsBare, targetMod, sym, acc) else for {
+  afterDot = i >= 1 && Parse._is(toks, i - 1, Tok.Dot)
+  qualMatch = afterDot && i >= 2 && Parse._identOf(Parse._at(toks, i - 2)) == targetMod && lookupLocalDecl(refs, i - 2) < 0
+  isTopDecl = i >= 1 && isTopDeclKeyword(Parse._at(toks, i - 1)) && (i < 2 || !Parse._is(toks, i - 2, Tok.Impl) && Parse._sp(toks, i - 1).column == 0)
+  isNamedArg = !isTopDecl && i + 1 < toks.n && Parse._is(toks, i + 1, Tok.Eq)
+  beforeDot = i + 1 < toks.n && Parse._is(toks, i + 1, Tok.Dot)
+  hit = if (afterDot) qualMatch else !isNamedArg && !beforeDot && (selfMod || importsBare)
+} yield collectModuleSymIndices(toks, i + 1, refs, selfMod, importsBare, targetMod, sym, if (hit) i :: acc else acc)
+  case _ => collectModuleSymIndices(toks, i + 1, refs, selfMod, importsBare, targetMod, sym, acc)
+}
+
+def renameLocalJson(activeUri: String, src: String, toks: Toks, refs: List[(Int, Int)], declIdx: Int, name: String, nu: String, enumCases: List[String]): String =
+  if (nu == name) Str.concat("{\"changes\":{", Str.concat(Check.jsonStr(activeUri), Str.concat(":", Str.concat(wholeEdit(src, src), "}}")))) else for {
+  targets = List.map(List.filter(refs, r => r._2 == declIdx), r => r._1)
+  newSrc = replaceTokenIndices(src, toks, targets, nu)
+  newToks = Parse.indexToks(Lexer.lex(newSrc))
+  refsAfter = localBindRefs(newToks, enumCases)
+  afterProg = Parse.parse(Lexer.lex(newSrc))
+} yield if (List.isEmpty(targets) || refsAfter != refs || !paramsUniqueInProg(afterProg)) "null" else Str.concat("{\"changes\":{", Str.concat(Check.jsonStr(activeUri), Str.concat(":", Str.concat(wholeEdit(src, newSrc), "}}"))))
+
+def renameEditsGo(mods: List[ModFile], results: List[(Bool, Bool, String)], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], acc: List[String]): List[String] =
+  mods match {
+    case [] => acc
+    case m :: mRest => results match {
+  case [] => acc
+  case r :: rRest => r match {
+  case (_, changed, newSrc) => for {
+  u = uriForModPath(m.path, activeNormPath, activeUri, open, openNorm)
+  nextAcc = if (!changed) acc else List.append(acc, Str.concat(Check.jsonStr(u), Str.concat(":", wholeEdit(m.src, newSrc))))
+} yield renameEditsGo(mRest, rRest, activeNormPath, activeUri, open, openNorm, nextAcc)
+}
+}
+  }
+
+def renameModuleAcross(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], p: Prog, enumCases: List[String], targetMod: String, sym: String, nu: String): String =
+  if (nu != sym && topSymbolExists(p, targetMod, nu)) "null" else for {
+  results = List.map(mods, m => renameOneMod(m, p, enumCases, targetMod, sym, nu))
+  failed = List.exists(results, r => !r._1)
+  edits = renameEditsGo(mods, results, activeNormPath, activeUri, open, openNorm, [])
+} yield if (failed || List.isEmpty(edits)) "null" else Str.concat("{\"changes\":{", Str.concat(List.join(edits, ","), "}}"))
+
+def renameOneMod(m: ModFile, p: Prog, enumCases: List[String], targetMod: String, sym: String, nu: String): (Bool, Bool, String) =
+  for {
+    toks = Parse.indexToks(Lexer.lex(m.src))
+    refs = localBindRefs(toks, enumCases)
+    selfMod = m.stem == targetMod
+    importsBare = !selfMod && !topSymbolExists(p, m.stem, sym) && List.exists(p.imps, imp => imp.owner == m.stem && imp.mod == targetMod && (imp.name == "*" || imp.name == sym && Str.isEmpty(imp.alias)))
+    indices = collectModuleSymIndices(toks, 0, refs, selfMod, importsBare, targetMod, sym, [])
+  } yield if (List.isEmpty(indices)) (true, false, m.src) else if (nu == sym) (true, true, m.src) else for {
+  newSrc = replaceTokenIndices(m.src, toks, indices, nu)
+  newToks = Parse.indexToks(Lexer.lex(newSrc))
+  refsAfter = localBindRefs(newToks, enumCases)
+} yield if (refsAfter != refs) (false, false, m.src) else (true, true, newSrc)
+
+def renameWorkspaceJson(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, src: String, line: Int, col: Int, nu: String): String =
+  if (!validIdent(nu)) "null" else for {
+  toks = Parse.indexToks(Lexer.lex(src))
+  off = offsetOf(src, line, col)
+  idx = identTokAtOff(toks, off, 0)
+} yield if (idx < 0) "null" else for {
+  name = Parse._identOf(Parse._at(toks, idx))
+  p = Parse.parseFiles(modPairs(mods))
+  enumCases = enumCaseSet(p)
+  refs = localBindRefs(toks, enumCases)
+  declIdx = lookupLocalDecl(refs, idx)
+} yield if (declIdx >= 0) renameLocalJson(activeUri, src, toks, refs, declIdx, name, nu, enumCases) else for {
+  afterDot = idx >= 1 && Parse._is(toks, idx - 1, Tok.Dot)
+  dotLhs = if (afterDot && idx >= 2) Parse._identOf(Parse._at(toks, idx - 2)) else ""
+} yield if (afterDot) if (hasModStem(mods, dotLhs) && lookupLocalDecl(refs, idx - 2) < 0) renameModuleAcross(mods, activeNormPath, activeUri, open, openNorm, p, enumCases, dotLhs, name, nu) else "null" else if (topSymbolExists(p, activeStem, name) || List.len(mods) == 1) renameModuleAcross(mods, activeNormPath, activeUri, open, openNorm, p, enumCases, activeStem, name, nu) else for {
+  impTarget = resolveImpMod(p.imps, activeStem, name)
+} yield if (Str.nonEmpty(impTarget._1) && impTarget._2 == name) renameModuleAcross(mods, activeNormPath, activeUri, open, openNorm, p, enumCases, impTarget._1, impTarget._2, nu) else "null"
+
+def renameJson(uri: String, src: String, line: Int, col: Int, nu: String): String =
+  for {
+    path = pathOfUri(uri)
+    stem = stemOfPath(path)
+    mods = [ModFile(stem, path, src)]
+  } yield renameWorkspaceJson(mods, path, uri, [], [], stem, src, line, col, nu)
+
 def renameIdents(src: String, name: String, nu: String): String =
-  Builder.result(renameToks(Lexer.lex(src), src, name, nu, 0, Builder.empty()))
+  if (!validIdent(name) || !validIdent(nu)) src else Builder.result(renameToks(Lexer.lex(src), src, name, nu, 0, Builder.empty()))
 
 def renameToks(toks: List[SpTok], src: String, name: String, nu: String, prev: Int, b: Builder): Builder =
   if (List.isEmpty(toks)) Builder.append(b, Str.slice(src, prev, Str.len(src))) else renameTokHd(List.at(toks, 0), List.tail(toks), src, name, nu, prev, b)
@@ -305,6 +944,308 @@ def renameTokKind(tok: Tok, rest: List[SpTok], src: String, name: String, nu: St
 
 def renameTokIdent(s: String, rest: List[SpTok], src: String, name: String, nu: String, prev: Int, off: Int, b: Builder): Builder =
   if (s == name) renameToks(rest, src, name, nu, off + Str.len(name), Builder.append(Builder.append(b, Str.slice(src, prev, off)), nu)) else renameToks(rest, src, name, nu, prev, b)
+
+def tokIdxAtOffGo(toks: Toks, wantOff: Int, lo: Int, hi: Int): Int =
+  if (lo > hi) 0 - 1 else for {
+  mid = (lo + hi) / 2
+  off = Parse._off(toks, mid)
+} yield if (off == wantOff) mid else if (off < wantOff) tokIdxAtOffGo(toks, wantOff, mid + 1, hi) else tokIdxAtOffGo(toks, wantOff, lo, mid - 1)
+
+def tokIdxAtOff(toks: Toks, wantOff: Int): Int =
+  if (wantOff < 0 || toks.n <= 0) 0 - 1 else tokIdxAtOffGo(toks, wantOff, 0, toks.n - 1)
+
+def isAscribedExpr(e: Expr): Bool =
+  e match {
+    case Expr.EAscribe(_, _, _) => true
+    case _ => false
+  }
+
+def tyVarsAllowed(t: Ty, tparams: List[String]): Bool =
+  t match {
+    case Ty.TVar(v) => List.contains(tparams, v)
+    case Ty.Named(n) => Str.nonEmpty(n) && n != "Any"
+    case Ty.App(n, args) => Str.nonEmpty(n) && n != "Any" && List.forall(args, a => tyVarsAllowed(a, tparams))
+    case Ty.Tuple(ps) => List.forall(ps, p => tyVarsAllowed(p, tparams))
+    case Ty.Arrow(a, r) => tyVarsAllowed(a, tparams) && tyVarsAllowed(r, tparams)
+  }
+
+def stripOwnPrefix(s: String, prefix: String, i: Int, b: Builder): String =
+  if (i >= Str.len(s)) Builder.result(b) else if (i + Str.len(prefix) <= Str.len(s) && Str.slice(s, i, i + Str.len(prefix)) == prefix && (i == 0 || !isIdentCh(Str.charAt(s, i - 1)))) stripOwnPrefix(s, prefix, i + Str.len(prefix), b) else stripOwnPrefix(s, prefix, i + 1, Builder.append(b, Str.slice(s, i, i + 1)))
+
+def cleanInlayTy(rawTy: String, activeStem: String, tparams: List[String]): String =
+  if (Str.isEmpty(rawTy)) "" else for {
+  disp = Resolve.displayText(rawTy)
+  trimmed = if (Str.isEmpty(activeStem)) disp else stripOwnPrefix(disp, Str.concat(activeStem, "."), 0, Builder.empty())
+} yield if (Str.isEmpty(trimmed) || Str.contains(trimmed, "ambiguous name ") || !tyVarsAllowed(Type.parse(trimmed), tparams)) "" else trimmed
+
+def inlayCallArgEnv(f: String, args: List[Expr], idx: Int, arg: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  arg match {
+    case Expr.ELam(p, ann, _) => if (p == "_" || p == "") env else if (Str.nonEmpty(ann)) (p, Type.parse(ann)) :: env else if (idx == 1 && List.len(args) >= 2 && (f == "List.map" || f == "List.filter" || f == "List.flatMap" || f == "List.exists" || f == "List.forall" || f == "List.find" || f == "IO.foreach" || f == "IO.foreachDiscard")) for {
+  xo = Check.infer(List.at(args, 0), env, funs, ens)
+  elemTy = Check.listElemTy(Check.tyStr(xo))
+} yield if (Check.hasErr(xo) || Str.isEmpty(elemTy)) env else (p, Type.parse(elemTy)) :: env else env
+    case _ => env
+  }
+
+def inlayMethodArgEnv(recv: Expr, mName: String, arg: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  arg match {
+    case Expr.ELam(p, ann, _) => if (p == "_" || p == "") env else if (Str.nonEmpty(ann)) (p, Type.parse(ann)) :: env else if (mName == "flatMap" || mName == "map") for {
+  ro = Check.infer(recv, env, funs, ens)
+  rt = Check.tyStr(ro)
+  elem = if (Check.isIo(rt)) Check.ioPayload(rt) else Check.listElemTy(rt)
+} yield if (Check.hasErr(ro) || Str.isEmpty(elem)) env else (p, Type.parse(elem)) :: env else if (mName == "handleErrorWith") for {
+  ro = Check.infer(recv, env, funs, ens)
+  errTy = Check.ioErr(Check.tyStr(ro))
+} yield if (Check.hasErr(ro)) env else (p, Type.parse(if (Str.isEmpty(errTy)) "String" else errTy)) :: env else env
+    case _ => env
+  }
+
+def inlayUnwrapLamBody(e: Expr): Expr =
+  e match {
+    case Expr.ELam(_, _, body) => body
+    case _ => e
+  }
+
+def inlayForBinds(bs: List[Bind], body: Expr, tokCur: Int, env: List[(String, Ty)], tparams: List[String], funs: Ftab, ens: List[En], activeStem: String, toks: Toks, src: String, starts: LineIndex, acc: List[(Int, Int, String)]): (List[(String, Ty)], List[(Int, Int, String)]) =
+  bs match {
+    case [] => (env, acc)
+    case b0 :: rest => b0 match {
+  case Bind(draw, name, v) => for {
+  acc1 = inlayExpr(v, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+} yield if (name == "__guard") for {
+  nextTok = if (tokCur >= 0 && tokCur < toks.n && Parse._is(toks, tokCur, Tok.If)) Parse.parseExpr(toks, tokCur + 1)._2 else 0 - 1
+} yield inlayForBinds(rest, body, nextTok, env, tparams, funs, ens, activeStem, toks, src, starts, acc1) else for {
+  patRes = if (tokCur >= 0 && tokCur < toks.n) Parse.parsePat(toks, tokCur) else ("", 0 - 1)
+  eqIdx = patRes._2
+  rhsRes = if (eqIdx > tokCur && eqIdx < toks.n) Parse.parseExpr(toks, eqIdx + 1) else (Expr.EUnit, 0 - 1)
+  afterRhs0 = rhsRes._2
+  nextTok = if (afterRhs0 > eqIdx) Parse.parseArgAsc(rhsRes._1, toks, afterRhs0)._2 else 0 - 1
+  annotated = isAscribedExpr(v) || isAscribedExpr(rhsRes._1) || afterRhs0 > 0 && Parse._is(toks, afterRhs0, Tok.Colon)
+  vo = Check.inferBindVal(draw, name, v, rest, body, env, funs, ens)
+  voTy = Check.tyStr(vo)
+  rawBound = if (Check.hasErr(vo)) "" else if (draw) if (Check.isIo(voTy)) Check.ioPayload(voTy) else "" else voTy
+  shown = cleanInlayTy(rawBound, activeStem, tparams)
+  acc2 = if (!annotated && name != "_" && Str.nonEmpty(name) && Str.nonEmpty(shown) && eqIdx > tokCur && eqIdx > 0) for {
+  endSp = Parse._sp(toks, eqIdx - 1)
+  endOff = endSp.off + tokLen(endSp.tok, src, endSp.off)
+  loc = Check.lineColIdx(starts, src, endOff)
+} yield List.append(acc1, (loc._1 - 1, loc._2 - 1, Str.concat(": ", shown))) else acc1
+  nextEnv = if (Check.hasErr(vo)) env else Check.bindFor(draw, name, voTy, env, ens)
+} yield inlayForBinds(rest, body, nextTok, nextEnv, tparams, funs, ens, activeStem, toks, src, starts, acc2)
+}
+  }
+
+def inlayArms(arms: List[Arm], scrutTy: String, env: List[(String, Ty)], tparams: List[String], funs: Ftab, ens: List[En], activeStem: String, toks: Toks, src: String, starts: LineIndex, acc: List[(Int, Int, String)]): List[(Int, Int, String)] =
+  arms match {
+    case [] => acc
+    case a0 :: rest => a0 match {
+  case Arm(pat, _, body) => for {
+  armEnv = if (Str.isEmpty(scrutTy)) env else Check.bindPat(pat, scrutTy, env, ens)
+  acc1 = inlayExpr(body, armEnv, tparams, funs, ens, activeStem, toks, src, starts, acc)
+} yield inlayArms(rest, scrutTy, env, tparams, funs, ens, activeStem, toks, src, starts, acc1)
+}
+  }
+
+def inlayExprList(xs: List[Expr], env: List[(String, Ty)], tparams: List[String], funs: Ftab, ens: List[En], activeStem: String, toks: Toks, src: String, starts: LineIndex, acc: List[(Int, Int, String)]): List[(Int, Int, String)] =
+  List.foldLeft(xs, acc, __tup => __tup match {
+  case (cur, e) => inlayExpr(e, env, tparams, funs, ens, activeStem, toks, src, starts, cur)
+})
+
+def inlayCallArgs(f: String, allArgs: List[Expr], restArgs: List[Expr], idx: Int, env: List[(String, Ty)], tparams: List[String], funs: Ftab, ens: List[En], activeStem: String, toks: Toks, src: String, starts: LineIndex, acc: List[(Int, Int, String)]): List[(Int, Int, String)] =
+  restArgs match {
+    case [] => acc
+    case a :: tail => for {
+  argEnv = inlayCallArgEnv(f, allArgs, idx, a, env, funs, ens)
+  acc1 = inlayExpr(inlayUnwrapLamBody(a), argEnv, tparams, funs, ens, activeStem, toks, src, starts, acc)
+} yield inlayCallArgs(f, allArgs, tail, idx + 1, env, tparams, funs, ens, activeStem, toks, src, starts, acc1)
+  }
+
+def inlayExpr(e: Expr, env: List[(String, Ty)], tparams: List[String], funs: Ftab, ens: List[En], activeStem: String, toks: Toks, src: String, starts: LineIndex, acc: List[(Int, Int, String)]): List[(Int, Int, String)] =
+  e match {
+    case Expr.EFor(bs, body, forOff) => for {
+  forIdx = tokIdxAtOff(toks, forOff)
+  startTok = if (forIdx >= 0 && Parse._is(toks, forIdx + 1, Tok.LBrace)) forIdx + 2 else 0 - 1
+  (bodyEnv, acc1) = inlayForBinds(bs, body, startTok, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+} yield inlayExpr(body, bodyEnv, tparams, funs, ens, activeStem, toks, src, starts, acc1)
+    case Expr.EMatch(s, arms, _) => for {
+  acc1 = inlayExpr(s, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+  so = Check.infer(s, env, funs, ens)
+  scrutTy = if (Check.hasErr(so)) "" else Check.tyStr(so)
+} yield inlayArms(arms, scrutTy, env, tparams, funs, ens, activeStem, toks, src, starts, acc1)
+    case Expr.EIf(c, t, el, _) => for {
+  acc1 = inlayExpr(c, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+  acc2 = inlayExpr(t, env, tparams, funs, ens, activeStem, toks, src, starts, acc1)
+} yield inlayExpr(el, env, tparams, funs, ens, activeStem, toks, src, starts, acc2)
+    case Expr.ELam(p, ann, body) => for {
+  lamEnv = if (p != "_" && Str.nonEmpty(p) && Str.nonEmpty(ann)) (p, Type.parse(ann)) :: env else env
+} yield inlayExpr(body, lamEnv, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.ECall(f, args, _) => inlayCallArgs(f, args, args, 0, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.EMethod(recv, mName, args, _) => for {
+  acc1 = inlayExpr(recv, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+} yield List.foldLeft(args, acc1, __tup => __tup match {
+  case (cur, a) => inlayExpr(inlayUnwrapLamBody(a), inlayMethodArgEnv(recv, mName, a, env, funs, ens), tparams, funs, ens, activeStem, toks, src, starts, cur)
+})
+    case Expr.EField(recv, _, _) => inlayExpr(recv, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.EBin(_, l, r, _) => inlayExpr(r, env, tparams, funs, ens, activeStem, toks, src, starts, inlayExpr(l, env, tparams, funs, ens, activeStem, toks, src, starts, acc))
+    case Expr.EUn(_, inner, _) => inlayExpr(inner, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.EPrint(inner, _) => inlayExpr(inner, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.EAscribe(inner, _, _) => inlayExpr(inner, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.ENamed(_, inner) => inlayExpr(inner, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.EInterp(_, parts, _) => inlayExprList(parts, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.EList(xs) => inlayExprList(xs, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case Expr.ETuple(xs) => inlayExprList(xs, env, tparams, funs, ens, activeStem, toks, src, starts, acc)
+    case _ => acc
+  }
+
+def inlayInRange(line: Int, col: Int, rangeJ: Json): Bool =
+  rangeJ match {
+    case Json.Null => true
+    case _ => for {
+  st = jGet(rangeJ, "start")
+  en = jGet(rangeJ, "end")
+  sl = jInt(jGet(st, "line"))
+  sc = jInt(jGet(st, "character"))
+  el = jInt(jGet(en, "line"))
+  ec = jInt(jGet(en, "character"))
+} yield (line > sl || line == sl && col >= sc) && (line < el || line == el && col <= ec)
+  }
+
+def inlayItemJson(h: (Int, Int, String)): String =
+  Str.concat("{\"position\":{\"line\":", Str.concat(Str.fromInt(h._1), Str.concat(",\"character\":", Str.concat(Str.fromInt(h._2), Str.concat("},\"label\":", Str.concat(Check.jsonStr(h._3), ",\"kind\":1}"))))))
+
+def inlayHintsWorkspaceJson(mods: List[ModFile], activeStem: String, src: String, rangeJ: Json): String =
+  if (Str.isEmpty(src)) "[]" else for {
+  rawToks = Lexer.lex(src)
+  toks = Parse.indexToks(rawToks)
+  ownProg = Parse.parseFile(activeStem, src)
+} yield if (toks.bad >= 0 || Parse.hasParseError(ownProg)) "[]" else for {
+  pairs = cleanModPairs(mods, activeStem, src)
+  resolved = Resolve.prog(Parse.parseFiles(pairs))
+  als = resolved.aliases
+  ds = Check.expandDefs(Check.withImportFuns(resolved.imps, Check.implFuns(resolved.impls, resolved.defs)), als)
+  ens = Check.withLetterPins(Parse.builtins(Check.expandEnums(resolved.enums, als)))
+  funs = Check.ftabOfList(ds)
+  starts = Check.fastLineIndex(src)
+  ownDefs = List.filter(resolved.defs, d => d.mod == activeStem)
+  acc1 = List.foldLeft(ownDefs, []: List[(Int, Int, String)], __tup => __tup match {
+  case (cur, d) => for {
+  ps = Check.expandParams(d.params, als)
+  env = Check.bindParams(ps, Check.envSelfMod(activeStem))
+} yield inlayExpr(Check.expandExpr(d.body, als), env, d.tparams, funs, ens, activeStem, toks, src, starts, cur)
+})
+  ownImpls = List.filter(resolved.impls, im => im.mod == activeStem)
+  acc2 = List.foldLeft(ownImpls, acc1, __tup => __tup match {
+  case (cur, im) => List.foldLeft(im.methods, cur, __tup => __tup match {
+  case (curM, m) => for {
+  stamped = Check.stampFun(m, im.forTy)
+  ps = Check.expandParams(stamped.params, als)
+  env = Check.bindParams(ps, Check.envSelfMod(im.forTy))
+} yield inlayExpr(Check.expandExpr(stamped.body, als), env, stamped.tparams, funs, ens, activeStem, toks, src, starts, curM)
+})
+})
+  acc3 = if (Str.nonEmpty(resolved.main) && (resolved.mod == activeStem || Str.isEmpty(resolved.mod) && activeStem == "Main")) inlayExpr(Check.expandExpr(resolved.body, als), Check.envSelfMod(activeStem), [], funs, ens, activeStem, toks, src, starts, acc2) else acc2
+  kept = List.filter(List.distinct(acc3), h => inlayInRange(h._1, h._2, rangeJ))
+} yield Str.concat("[", Str.concat(List.join(List.map(kept, inlayItemJson), ","), "]"))
+
+def inlayHintsJson(src: String): String =
+  inlayHintsWorkspaceJson([ModFile("Main", "Main.scuzz", src)], "Main", src, Json.Null())
+
+def tokLastByte(toks: Toks, idx: Int, src: String): Int =
+  for {
+    sp = Parse._sp(toks, idx)
+    len = tokLen(sp.tok, src, sp.off)
+  } yield if (len > 1) sp.off + len - 1 else sp.off
+
+def addFoldSpan(toks: Toks, startTok: Int, endTok: Int, src: String, starts: LineIndex, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (endTok < startTok || startTok < 0 || endTok >= toks.n) acc else for {
+  sLine = Check.lineColIdx(starts, src, Parse._off(toks, startTok))._1 - 1
+  eLine = Check.lineColIdx(starts, src, tokLastByte(toks, endTok, src))._1 - 1
+} yield if (eLine > sLine) List.append(acc, (sLine, eLine)) else acc
+
+def foldExprTokens(toks: Toks, i: Int, stop: Int, src: String, starts: LineIndex, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= stop) acc else if (Parse._is(toks, i, Tok.For) && i + 1 < stop && Parse._is(toks, i + 1, Tok.LBrace)) for {
+  (fe, endJ) = Parse.parseFor(toks, i)
+  endTok = clampIdx(endJ, i + 1, stop) - 1
+  acc1 = if (endJ > i + 2 && !Parse.parseErrorExpr(fe)) addFoldSpan(toks, i, endTok, src, starts, acc) else acc
+} yield foldExprTokens(toks, i + 1, stop, src, starts, acc1) else if (Parse._is(toks, i, Tok.Match) && i + 1 < stop && Parse._is(toks, i + 1, Tok.LBrace)) for {
+  (_, endJ) = Parse.parseMatch(toks, Expr.EUnit, i + 1, Parse._off(toks, i))
+  endTok = clampIdx(endJ, i + 1, stop) - 1
+  acc1 = if (endJ > i + 2 && Parse._is(toks, endTok, Tok.RBrace)) addFoldSpan(toks, i, endTok, src, starts, acc) else acc
+} yield foldExprTokens(toks, i + 1, stop, src, starts, acc1) else foldExprTokens(toks, i + 1, stop, src, starts, acc)
+
+def foldTraitMembers(toks: Toks, i: Int, stop: Int, src: String, starts: LineIndex, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= stop) acc else if (Parse._is(toks, i, Tok.Def) && Parse._sp(toks, i).column > 0) for {
+  (m, j) = Parse.parseTraitMeth(toks, i + 1)
+  nextI = clampIdx(if (j > i + 1) j else i + 1, i + 1, stop)
+  acc1 = if (j > i + 1 && Str.nonEmpty(m.name)) addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+} yield foldTraitMembers(toks, nextI, stop, src, starts, acc1) else foldTraitMembers(toks, i + 1, stop, src, starts, acc)
+
+def foldImplMembers(toks: Toks, i: Int, stop: Int, src: String, starts: LineIndex, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= stop) acc else if (Parse._is(toks, i, Tok.Def) && Parse._sp(toks, i).column > 0) for {
+  (d, j) = Parse.parseDef(toks, i + 1, false, false)
+  nextI = clampIdx(if (j > i + 1) j else i + 1, i + 1, stop)
+  acc1 = if (j > i + 1 && d.name != "#parse") addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldExprTokens(toks, i + 1, nextI, src, starts, acc1)
+} yield foldImplMembers(toks, nextI, stop, src, starts, acc2) else foldImplMembers(toks, i + 1, stop, src, starts, acc)
+
+def foldTopItems(toks: Toks, i: Int, src: String, starts: LineIndex, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (i >= toks.n || Parse._is(toks, i, Tok.Eof)) acc else if (Parse._is(toks, i, Tok.Private) && Parse._is(toks, i + 1, Tok.Def)) for {
+  (d, j) = Parse.parseDef(toks, i + 2, true, false)
+  nextI = if (j > i + 2) j else i + 2
+  acc1 = if (j > i + 2 && d.name != "#parse") addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldExprTokens(toks, i + 2, nextI, src, starts, acc1)
+} yield foldTopItems(toks, nextI, src, starts, acc2) else if (Parse._is(toks, i, Tok.Oracle)) for {
+  (d, j) = Parse.parseDef(toks, i + 1, false, true)
+  nextI = if (j > i + 1) j else i + 1
+  acc1 = if (j > i + 1 && d.name != "#parse") addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldExprTokens(toks, i + 1, nextI, src, starts, acc1)
+} yield foldTopItems(toks, nextI, src, starts, acc2) else if (Parse._is(toks, i, Tok.Def)) for {
+  (d, j) = Parse.parseDef(toks, i + 1, false, false)
+  nextI = if (j > i + 1) j else i + 1
+  acc1 = if (j > i + 1 && d.name != "#parse") addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldExprTokens(toks, i + 1, nextI, src, starts, acc1)
+} yield foldTopItems(toks, nextI, src, starts, acc2) else if (Parse._is(toks, i, Tok.AtMain) && Parse._is(toks, i + 1, Tok.Def)) for {
+  (mName, _, j) = Parse.parseMain(toks, i + 2)
+  nextI = if (j > i + 2) j else i + 2
+  acc1 = if (j > i + 2 && mName != "#parse") addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldExprTokens(toks, i + 2, nextI, src, starts, acc1)
+} yield foldTopItems(toks, nextI, src, starts, acc2) else if (Parse._is(toks, i, Tok.Enum)) for {
+  (en, j) = Parse.parseEnum(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+  acc1 = if (j > i + 1 && Str.nonEmpty(en.name)) addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+} yield foldTopItems(toks, nextI, src, starts, acc1) else if (Parse._is(toks, i, Tok.Record)) for {
+  (en, j) = Parse.parseRec(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+  acc1 = if (j > i + 1 && Str.nonEmpty(en.name)) addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldExprTokens(toks, i + 1, nextI, src, starts, acc1)
+} yield foldTopItems(toks, nextI, src, starts, acc2) else if (Parse._is(toks, i, Tok.Trait)) for {
+  (tr, j) = Parse.parseTrait(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+  acc1 = if (j > i + 1 && Str.nonEmpty(tr.name)) addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldTraitMembers(toks, i + 1, nextI, src, starts, acc1)
+} yield foldTopItems(toks, nextI, src, starts, acc2) else if (Parse._is(toks, i, Tok.Impl)) for {
+  (im, j) = Parse.parseImpl(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+  acc1 = if (j > i + 1 && Str.nonEmpty(im.tn)) addFoldSpan(toks, i, nextI - 1, src, starts, acc) else acc
+  acc2 = foldImplMembers(toks, i + 1, nextI, src, starts, acc1)
+} yield foldTopItems(toks, nextI, src, starts, acc2) else if (Parse._is(toks, i, Tok.TypeKw)) for {
+  (_, j) = Parse.parseAlias(toks, i + 1)
+} yield foldTopItems(toks, if (j > i + 1) j else i + 1, src, starts, acc) else if (Parse._is(toks, i, Tok.Import)) for {
+  (_, j) = Parse.parseImport(toks, i + 1)
+} yield foldTopItems(toks, if (j > i + 1) j else i + 1, src, starts, acc) else foldTopItems(toks, i + 1, src, starts, acc)
+
+def foldItemJson(r: (Int, Int)): String =
+  Str.concat("{\"startLine\":", Str.concat(Str.fromInt(r._1), Str.concat(",\"endLine\":", Str.concat(Str.fromInt(r._2), "}"))))
+
+def foldingRangesJson(src: String): String =
+  if (Str.isEmpty(src)) "[]" else for {
+  toks = Parse.indexToks(Lexer.lex(src))
+  starts = Check.fastLineIndex(src)
+  startIdx = if (Parse._is(toks, 0, Tok.Package)) for {
+  (_, j) = Parse.parsePkg(toks, 1)
+} yield if (j > 0) j else 1 else 0
+  ranges = if (toks.bad >= 0) []: List[(Int, Int)] else List.distinct(foldTopItems(toks, startIdx, src, starts, []))
+} yield Str.concat("[", Str.concat(List.join(List.map(ranges, foldItemJson), ","), "]"))
 
 def tokensJson(src: String): String =
   Str.concat("{\"data\":[", Str.concat(tokensJoin(tokenInts(Lexer.lex(src), src, Check.fastLineIndex(src), 0, 0, [])), "]}"))
@@ -368,7 +1309,7 @@ def tokensJoinHd(n: Int, rest: List[Int], b: Builder): String =
   if (List.isEmpty(rest)) Builder.result(Builder.append(b, Str.fromInt(n))) else tokensJoinGo(rest, Builder.append(Builder.append(b, Str.fromInt(n)), ","))
 
 def caps(): String =
-  "{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":true,\"definitionProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true}}}"
+  "{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":true,\"definitionProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":true,\"inlayHintProvider\":true,\"foldingRangeProvider\":true,\"codeActionProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true}}}"
 
 def errorMsg(id: String, code: Int, message: String): String =
   Str.concat("{\"jsonrpc\":\"2.0\",\"id\":", Str.concat(id, Str.concat(",\"error\":{\"code\":", Str.concat(Str.fromInt(code), Str.concat(",\"message\":", Str.concat(Check.jsonStr(message), "}}"))))))
@@ -401,13 +1342,35 @@ def publishDiags(uri: String, raw: String): String =
   publishDiags2(uri, parseJson(raw))
 
 def publishDiags2(uri: String, j: Json): String =
-  notifyMsg("textDocument/publishDiagnostics", Str.concat("{\"uri\":", Str.concat(Check.jsonStr(uri), Str.concat(",\"diagnostics\":[", Str.concat(diagsArr(diagsKeep(jArr(j), Fs.basename(pathOfUri(uri)))), "]}")))))
+  notifyMsg("textDocument/publishDiagnostics", Str.concat("{\"uri\":", Str.concat(Check.jsonStr(uri), Str.concat(",\"diagnostics\":[", Str.concat(diagsArr(diagsKeep(jArr(j), pathOfUri(uri))), "]}")))))
 
-def diagsKeep(xs: List[Json], file: String): List[Json] =
-  if (List.isEmpty(xs)) [] else diagsKeepHd(List.at(xs, 0), List.tail(xs), file)
+def diagsKeep(xs: List[Json], docPath: String): List[Json] =
+  if (List.isEmpty(xs)) [] else diagsKeepHd(List.at(xs, 0), List.tail(xs), docPath)
 
-def diagsKeepHd(h: Json, rest: List[Json], file: String): List[Json] =
-  if (jStr(jGet(h, "file")) == file || jStr(jGet(h, "scope")) == "project") h :: diagsKeep(rest, file) else diagsKeep(rest, file)
+def diagPathMatch(diagFile: String, docPath: String): Bool =
+  if (Str.isEmpty(diagFile)) false else if (Str.contains(diagFile, "/")) docPath == diagFile || Str.endsWith(docPath, Str.concat("/", diagFile)) else Fs.basename(docPath) == diagFile
+
+def diagsKeepHd(h: Json, rest: List[Json], docPath: String): List[Json] =
+  if (diagPathMatch(jStr(jGet(h, "file")), docPath) || jStr(jGet(h, "scope")) == "project") h :: diagsKeep(rest, docPath) else diagsKeep(rest, docPath)
+
+def diagFullPath(pkgDir: String, mods: List[ModFile], diagFile: String): String =
+  if (Str.isEmpty(diagFile)) "" else if (Str.startsWith(diagFile, "/")) diagFile else if (Str.endsWith(diagFile, ".scuzz") && !Str.contains(diagFile, "/")) for {
+  stem = Str.dropRight(diagFile, 6)
+} yield findModByStem(mods, stem) match {
+  case Some(m) => m.path
+  case None => Fs.join(Fs.join(pkgDir, "src"), diagFile)
+} else Fs.join(pkgDir, diagFile)
+
+def diagsKeepFull(xs: List[Json], docPath: String, pkgDir: String, mods: List[ModFile]): List[Json] =
+  List.filter(xs, h => jStr(jGet(h, "scope")) == "project" || diagFullPath(pkgDir, mods, jStr(jGet(h, "file"))) == docPath)
+
+def publishDiagsFull(uri: String, docPath: String, pkgDir: String, mods: List[ModFile], raw: String): String =
+  notifyMsg("textDocument/publishDiagnostics", Str.concat("{\"uri\":", Str.concat(Check.jsonStr(uri), Str.concat(",\"diagnostics\":[", Str.concat(diagsArr(diagsKeepFull(jArr(parseJson(raw)), docPath, pkgDir, mods)), "]}")))))
+
+def pkgOverlays(mods: List[ModFile], openNorm: List[Open]): List[(String, String)] =
+  List.foldLeft(openNorm, Manifest.noPairs(), __tup => __tup match {
+  case (acc, o) => if (List.exists(mods, m => m.path == o.path)) List.append(acc, (o.path, o.src)) else acc
+})
 
 def overlayGet(open: List[Open], path: String): String =
   if (List.isEmpty(open)) "" else overlayGetHd(List.at(open, 0), List.tail(open), path)
@@ -445,7 +1408,11 @@ def overlayPairsHd(h: Open, rest: List[Open]): List[(String, String)] =
   }
 
 def srcOf(open: List[Open], path: String): IO[String] =
-  if (overlayHas(open, path)) IO.pure(overlayGet(open, path)) else Fs.read(path).handleErrorWith(_ => IO.pure(""))
+  if (overlayHas(open, path)) IO.pure(overlayGet(open, path)) else for {
+  np <- normPath(path)
+  openNorm <- normOpen(open)
+  out <- if (overlayHas(openNorm, np)) IO.pure(overlayGet(openNorm, np)) else Fs.read(path).handleErrorWith(_ => IO.pure(""))
+} yield out
 
 def handle(root: String, open: List[Open], body: String): IO[List[Open]] =
   handleJ(root, open, parseJson(body), body)
@@ -462,8 +1429,8 @@ def lspReplyKeep(id: String, result: String, open: List[Open]): IO[List[Open]] =
 def handleM2(root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
   if (method == "textDocument/didOpen") didOpen(root, open, j) else if (method == "textDocument/didChange") didChange(root, open, j) else if (method == "textDocument/didClose") didClose(open, j) else handleM3(root, open, j, method, id)
 
-def handleM3(_root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
-  if (method == "textDocument/hover") hover(open, j, id) else if (method == "textDocument/completion") complete(open, j, id) else if (method == "textDocument/definition") definition(open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(open, j, id) else if (method == "textDocument/semanticTokens/full") tokens(open, j, id) else handleM4(open, id)
+def handleM3(root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
+  if (method == "textDocument/hover") hover(root, open, j, id) else if (method == "textDocument/completion") complete(root, open, j, id) else if (method == "textDocument/definition") definition(root, open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(root, open, j, id) else if (method == "textDocument/semanticTokens/full") tokens(open, j, id) else if (method == "textDocument/inlayHint") inlayHint(root, open, j, id) else if (method == "textDocument/foldingRange") foldingRange(open, j, id) else if (method == "textDocument/codeAction") codeAction(open, j, id) else handleM4(open, id)
 
 def handleM4(open: List[Open], id: String): IO[List[Open]] =
   if (id == "null") IO.pure(open) else lspReplyErrKeep(open, id)
@@ -501,8 +1468,34 @@ def didChange(root: String, open: List[Open], j: Json): IO[List[Open]] =
 def didOpen2(root: String, open: List[Open], path: String, src: String): IO[List[Open]] =
   didOpen3(root, overlayPut(open, path, src), path)
 
+def publishOpenDocs(rDir: String, openNorm: List[Open], docs: List[Open], cache: Map[String, (List[ModFile], String)]): IO[Unit] =
+  docs match {
+    case [] => IO.pure(())
+    case document :: rest => for {
+  docPath <- normPath(document.path)
+  pkgDir <- pkgRootOfPath(docPath, rDir)
+  effPkg = if (Str.isEmpty(pkgDir)) rDir else pkgDir
+  (mods, raw, nextCache) <- Map.get(cache, effPkg) match {
+  case Some((cachedMods, cachedRaw)) => IO.pure((cachedMods, cachedRaw, cache))
+  case None => for {
+  m <- loadPkgMods(effPkg, openNorm)
+  ov = if (List.isEmpty(m)) overlayPairs(openNorm) else pkgOverlays(m, openNorm)
+  r <- Drive.checkOverlay(effPkg, ov)
+} yield (m, r, Map.set(cache, effPkg, (m, r)))
+}
+  docUri = uriOfPath(document.path)
+  msg = if (List.isEmpty(mods)) publishDiags(docUri, raw) else publishDiagsFull(docUri, docPath, effPkg, mods, raw)
+  _ <- notify(msg)
+  _ <- publishOpenDocs(rDir, openNorm, rest, nextCache)
+} yield ()
+  }
+
 def didOpen3(root: String, open: List[Open], _path: String): IO[List[Open]] =
-  Drive.checkOverlay(root, overlayPairs(open)).flatMap(raw => IO.foreachDiscard(open, document => notify(publishDiags(uriOfPath(document.path), raw))).map(_ => open))
+  for {
+    rDir <- normDir(root)
+    openNorm <- normOpen(open)
+    _ <- publishOpenDocs(rDir, openNorm, open, Map.empty())
+  } yield open
 
 def didClose(open: List[Open], j: Json): IO[List[Open]] =
   didClose2(open, uriOf(j))
@@ -510,20 +1503,33 @@ def didClose(open: List[Open], j: Json): IO[List[Open]] =
 def didClose2(open: List[Open], uri: String): IO[List[Open]] =
   notify(publishDiags(uri, "[]")).flatMap(_ => IO.pure(overlayDrop(open, pathOfUri(uri))))
 
-def hover(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, hoverJson(hoverAt(src, posLine(j), posCol(j)))).flatMap(_ => IO.pure(open)))
+def hover(root: String, open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    path = pathOfUri(uriOf(j))
+    src <- srcOf(open, path)
+    mods <- workspaceMods(root, open, path, src)
+    _ <- reply(id, hoverJson(hoverWorkspace(mods, stemOfPath(path), src, posLine(j), posCol(j))))
+  } yield open
 
-def complete(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  completeAt(open, pathOfUri(uriOf(j)), posLine(j), posCol(j), id)
+def complete(root: String, open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    path = pathOfUri(uriOf(j))
+    src <- srcOf(open, path)
+    mods <- workspaceMods(root, open, path, src)
+    pref = qualPrefixAt(src, offsetOf(src, posLine(j), posCol(j)))
+    _ <- reply(id, completeWorkspaceJson(mods, stemOfPath(path), src, pref))
+  } yield open
 
-def completeAt(open: List[Open], path: String, line: Int, col: Int, id: String): IO[List[Open]] =
-  srcOf(open, path).flatMap(src => completeReply(src, line, col, id, open))
-
-def completeReply(src: String, line: Int, col: Int, id: String, open: List[Open]): IO[List[Open]] =
-  reply(id, completeJson(src, identPrefix(src, offsetOf(src, line, col)))).flatMap(_ => IO.pure(open))
-
-def definition(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, defJson(uriOf(j), src, posLine(j), posCol(j))).flatMap(_ => IO.pure(open)))
+def definition(root: String, open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    uri = uriOf(j)
+    path = pathOfUri(uri)
+    aPath <- normPath(path)
+    openNorm <- normOpen(open)
+    src <- srcOf(open, path)
+    mods <- workspaceMods(root, open, path, src)
+    _ <- reply(id, defWorkspaceJson(mods, aPath, uri, open, openNorm, stemOfPath(path), src, posLine(j), posCol(j)))
+  } yield open
 
 def tokens(open: List[Open], j: Json, id: String): IO[List[Open]] =
   srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, tokensJson(src)).flatMap(_ => IO.pure(open)))
@@ -531,8 +1537,45 @@ def tokens(open: List[Open], j: Json, id: String): IO[List[Open]] =
 def format(open: List[Open], j: Json, id: String): IO[List[Open]] =
   srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, formatJson(src)).flatMap(_ => IO.pure(open)))
 
-def rename(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, renameJson(uriOf(j), src, posLine(j), posCol(j), newNameOf(j))).flatMap(_ => IO.pure(open)))
+def rename(root: String, open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    uri = uriOf(j)
+    path = pathOfUri(uri)
+    aPath <- normPath(path)
+    openNorm <- normOpen(open)
+    src <- srcOf(open, path)
+    mods <- workspaceMods(root, open, path, src)
+    _ <- reply(id, renameWorkspaceJson(mods, aPath, uri, open, openNorm, stemOfPath(path), src, posLine(j), posCol(j), newNameOf(j)))
+  } yield open
+
+def inlayHint(root: String, open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    path = pathOfUri(uriOf(j))
+    src <- srcOf(open, path)
+    mods <- workspaceMods(root, open, path, src)
+    rangeJ = jGet(paramsOf(j), "range")
+    _ <- reply(id, inlayHintsWorkspaceJson(mods, stemOfPath(path), src, rangeJ))
+  } yield open
+
+def foldingRange(open: List[Open], j: Json, id: String): IO[List[Open]] =
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, foldingRangesJson(src)).flatMap(_ => IO.pure(open)))
+
+def codeAction(open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    uri = uriOf(j)
+    src <- srcOf(open, pathOfUri(uri))
+    _ <- reply(id, codeActionsJson(uri, src))
+  } yield open
+
+def query(root: String, path: String, body: String, method: String, line: Int, col: Int, nu: String): IO[String] =
+  for {
+    aPath <- normPath(path)
+    uri = uriOfPath(if (Str.nonEmpty(aPath)) aPath else path)
+    open = [Open(path, body)]
+    openNorm = [Open(aPath, body)]
+    stem = stemOfPath(path)
+    out <- if (method == "textDocument/semanticTokens/full") IO.pure(resultMsg("2", tokensJson(body))) else if (method == "textDocument/foldingRange") IO.pure(resultMsg("2", foldingRangesJson(body))) else if (method == "textDocument/formatting") IO.pure(resultMsg("2", formatJson(body))) else if (method == "textDocument/codeAction") IO.pure(resultMsg("2", codeActionsJson(uri, body))) else if (method == "textDocument/inlayHint") workspaceMods(root, open, path, body).map(mods => resultMsg("2", inlayHintsWorkspaceJson(mods, stem, body, Json.Null()))) else if (method == "textDocument/hover") workspaceMods(root, open, path, body).map(mods => resultMsg("2", hoverJson(hoverWorkspace(mods, stem, body, line, col)))) else if (method == "textDocument/completion") workspaceMods(root, open, path, body).map(mods => resultMsg("2", completeWorkspaceJson(mods, stem, body, qualPrefixAt(body, offsetOf(body, line, col))))) else if (method == "textDocument/definition") workspaceMods(root, open, path, body).map(mods => resultMsg("2", defWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col))) else if (method == "textDocument/rename") workspaceMods(root, open, path, body).map(mods => resultMsg("2", renameWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu))) else IO.pure(errorMsg("2", 0 - 32601, "MethodNotFound"))
+  } yield out
 
 def headerBody(acc: String): Int =
   headerBodyGo(acc, 0, 0)

@@ -284,6 +284,147 @@ with tempfile.TemporaryDirectory(prefix='scuzz-project-check-') as directory:
     (dep / 'scuzz.toml').write_text('[package]\nname="helper"\n[dependencies]\nagain={path=".."}\n')
     errors = json.loads(command('check', '--message-format=json', root, ok=False).stdout)
     assert errors[0]['scope'] == 'project' and 'cycle' in errors[0]['message'], errors
+
+def lsp_session(root, messages):
+    wire = b''
+    for message in messages:
+        body = json.dumps(message).encode()
+        wire += f'Content-Length: {len(body)}\r\n\r\n'.encode() + body
+    run = subprocess.run([str(cli), 'lsp', str(root)], input=wire, capture_output=True, timeout=180)
+    assert run.returncode == 0, run.stderr.decode()
+    data = run.stdout
+    out = []
+    while data:
+        header, data = re.split(b'\r?\n\r?\n', data, maxsplit=1)
+        size = int(header.split(b':', 1)[1].strip())
+        out.append(json.loads(data[:size]))
+        data = data[size:]
+    return out
+
+with tempfile.TemporaryDirectory(prefix='scuzz-lsp-editor-') as directory:
+    ws = Path(directory)
+    (ws / 'src').mkdir()
+    (ws / 'dep/src').mkdir(parents=True)
+    (ws / 'scuzz.toml').write_text('[package]\nname="lsp-ws"\n[dependencies]\ndep={path="dep"}\n')
+    (ws / 'dep/scuzz.toml').write_text('[package]\nname="dep"\n')
+    help_file = ws / 'dep/src/Help.scuzz'
+    dep_main = ws / 'dep/src/Main.scuzz'
+    main_file = ws / 'src/Main.scuzz'
+    help_file.write_text('record Box(v: Int)\n\ndef word(n: Int): String =\n  Str.fromInt(n)\n')
+    command('fmt', ws / 'dep')
+    valid_main = (
+        'enum Choice:\n'
+        '  case One\n'
+        '  case Two(n: Int)\n\n'
+        'record Pair(a: Int, b: Int)\n\n'
+        'trait Show:\n'
+        '  def show(): String\n\n'
+        'impl Show for Pair:\n'
+        '  def show(): String =\n'
+        '    Help.word(self.a)\n\n'
+        'oracle nonneg(x: Int): Bool =\n'
+        '  x >= 0\n\n'
+        'def calc(x: Int): Int =\n'
+        '  for {\n'
+        '    y = x + 1\n'
+        '    z = (y: Int)\n'
+        '    w = Help.word(x)\n'
+        '  } yield x match {\n'
+        '    case 0 => y\n'
+        '    case _ => z + Str.len(w)\n'
+        '  }\n\n'
+        'def other(x: Int): Int =\n'
+        '  x * 2\n\n'
+        'def shadowCheck(x: Int, y: Int): Int =\n'
+        '  x + y\n\n'
+        '@main def main: IO[Unit] =\n'
+        '  IO.println(Help.word(calc(1)))\n'
+    )
+    main_file.write_text(valid_main)
+    command('fmt', ws)
+    dep_main.write_text('def onlyDep(): Int =\n  "bad"\n\n')
+    formatted_on_disk = main_file.read_text()
+    unformatted_main = formatted_on_disk.replace('def other(x: Int): Int =\n  x * 2', 'def other(x: Int): Int =   x * 2')
+    main_uri = main_file.as_uri()
+    help_uri = help_file.as_uri()
+    dep_main_uri = dep_main.as_uri()
+    calc_line = unformatted_main.splitlines().index('    w = Help.word(x)')
+    word_col = unformatted_main.splitlines()[calc_line].index('word')
+    x_param_line = unformatted_main.splitlines().index('def calc(x: Int): Int =')
+    x_param_col = unformatted_main.splitlines()[x_param_line].index('x: Int')
+    shadow_line = unformatted_main.splitlines().index('def shadowCheck(x: Int, y: Int): Int =')
+    shadow_col = unformatted_main.splitlines()[shadow_line].index('x: Int')
+
+    diag_msgs = lsp_session(ws, [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': ws.as_uri()}},
+        {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': main_uri, 'languageId': 'scuzz', 'version': 1, 'text': formatted_on_disk}}},
+        {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': dep_main_uri, 'languageId': 'scuzz', 'version': 1, 'text': dep_main.read_text()}}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'shutdown', 'params': None},
+        {'jsonrpc': '2.0', 'method': 'exit', 'params': None},
+    ])
+    pub = {}
+    for m in diag_msgs:
+        if m.get('method') == 'textDocument/publishDiagnostics':
+            pub[m['params']['uri']] = m['params']['diagnostics']
+    assert any(d['severity'] == 1 for d in pub.get(dep_main_uri, [])), pub
+    assert not any(d['severity'] == 1 for d in pub.get(main_uri, [])), pub
+
+    msgs = lsp_session(ws, [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': ws.as_uri()}},
+        {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': main_uri, 'languageId': 'scuzz', 'version': 1, 'text': unformatted_main}}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'textDocument/inlayHint', 'params': {'textDocument': {'uri': main_uri}}},
+        {'jsonrpc': '2.0', 'id': 3, 'method': 'textDocument/foldingRange', 'params': {'textDocument': {'uri': main_uri}}},
+        {'jsonrpc': '2.0', 'id': 4, 'method': 'textDocument/codeAction', 'params': {'textDocument': {'uri': main_uri}, 'range': {'start': {'line': 0, 'character': 0}, 'end': {'line': 0, 'character': 0}}}},
+        {'jsonrpc': '2.0', 'id': 5, 'method': 'textDocument/hover', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}}},
+        {'jsonrpc': '2.0', 'id': 6, 'method': 'textDocument/definition', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}}},
+        {'jsonrpc': '2.0', 'id': 7, 'method': 'textDocument/completion', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}}},
+        {'jsonrpc': '2.0', 'id': 8, 'method': 'textDocument/rename', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': x_param_line, 'character': x_param_col}, 'newName': 'n0'}},
+        {'jsonrpc': '2.0', 'id': 9, 'method': 'textDocument/rename', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': shadow_line, 'character': shadow_col}, 'newName': 'y'}},
+        {'jsonrpc': '2.0', 'id': 10, 'method': 'textDocument/rename', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': x_param_line, 'character': x_param_col}, 'newName': 'match'}},
+        {'jsonrpc': '2.0', 'id': 11, 'method': 'textDocument/rename', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}, 'newName': 'greeting'}},
+        {'jsonrpc': '2.0', 'id': 12, 'method': 'shutdown', 'params': None},
+        {'jsonrpc': '2.0', 'method': 'exit', 'params': None},
+    ])
+    by_id = {m['id']: m['result'] for m in msgs if 'id' in m}
+    caps = by_id[1]['capabilities']
+    assert caps.get('inlayHintProvider') is True and caps.get('foldingRangeProvider') is True and caps.get('codeActionProvider') is True, caps
+
+    inlays = [(h['position']['line'], h['label']) for h in by_id[2]]
+    y_line = next(i for i, l in enumerate(unformatted_main.splitlines()) if 'y = x + 1' in l)
+    z_line = next(i for i, l in enumerate(unformatted_main.splitlines()) if 'z =' in l)
+    assert (y_line, ': Int') in inlays and (calc_line, ': String') in inlays, inlays
+    assert all(line != z_line for line, _ in inlays), inlays
+
+    folds = {(r['startLine'], r['endLine']) for r in by_id[3]}
+    assert all(end > start for start, end in folds) and len(folds) >= 6, folds
+
+    actions = by_id[4]
+    assert len(actions) == 1 and actions[0]['title'] == 'Format file' and actions[0]['kind'] == 'source.fixAll', actions
+    formatted_main = actions[0]['edit']['changes'][main_uri][0]['newText']
+    assert formatted_main == formatted_on_disk and formatted_main != unformatted_main
+
+    assert 'def Help.word(n: Int): String' in by_id[5]['contents']['value'], by_id[5]
+    assert by_id[6][0]['uri'] == help_uri, by_id[6]
+    comp_labels = {item['label'] for item in by_id[7]['items']}
+    assert 'Help.word' in comp_labels, comp_labels
+
+    renamed_local = by_id[8]['changes'][main_uri][0]['newText']
+    assert 'def calc(n0: Int): Int =' in renamed_local and 'def other(x: Int): Int =' in renamed_local, renamed_local
+    assert by_id[9] is None and by_id[10] is None, (by_id[9], by_id[10])
+    cross_changes = by_id[11]['changes']
+    assert 'Help.greeting' in cross_changes[main_uri][0]['newText'] and 'def greeting(n: Int): String' in cross_changes[help_uri][0]['newText'], cross_changes
+
+    clean_msgs = lsp_session(ws, [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': ws.as_uri()}},
+        {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': main_uri, 'languageId': 'scuzz', 'version': 2, 'text': formatted_main}}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'textDocument/codeAction', 'params': {'textDocument': {'uri': main_uri}, 'range': {'start': {'line': 0, 'character': 0}, 'end': {'line': 0, 'character': 0}}}},
+        {'jsonrpc': '2.0', 'method': 'textDocument/didChange', 'params': {'textDocument': {'uri': main_uri, 'version': 3}, 'contentChanges': [{'text': 'def broken(\n'}]}},
+        {'jsonrpc': '2.0', 'id': 3, 'method': 'textDocument/codeAction', 'params': {'textDocument': {'uri': main_uri}, 'range': {'start': {'line': 0, 'character': 0}, 'end': {'line': 0, 'character': 0}}}},
+        {'jsonrpc': '2.0', 'id': 4, 'method': 'shutdown', 'params': None},
+        {'jsonrpc': '2.0', 'method': 'exit', 'params': None},
+    ])
+    clean_by_id = {m['id']: m['result'] for m in clean_msgs if 'id' in m}
+    assert clean_by_id[2] == [] and clean_by_id[3] == [], clean_by_id
 print('Project checks: CLI and language server retain load, format, verify, and overlay errors')
 PY_PROJECT
 
