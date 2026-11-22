@@ -1,0 +1,10 @@
+[fuzz]
+schedule_seed = "11"
+fault_seed = "45"
+events = [
+  "drive mobileSteerGenerateAndServe",
+  "drive acceptAdvancesAndRetiresStale",
+  "drive dirtyBlocksAndPreservesSteer",
+  "drive crashActiveSteerRecovery",
+  "drive verifierGateRejections",
+]

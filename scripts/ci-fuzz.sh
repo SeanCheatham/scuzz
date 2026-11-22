@@ -2907,7 +2907,9 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
             {"op": "tap", "id": "button:Start"},
         ])
         ed.wait_for(
-            lambda: bool(read_json(ui_ws / "build/ide/request.json").get("baseline")) and "External proposals: publish a complete directory" in json.dumps(ed.ui()),
+            lambda: bool(read_json(ui_ws / "build/ide/request.json").get("baseline"))
+            and ed.signals().get("deckBusy") == 0
+            and "External proposals: publish a complete directory" in json.dumps(ed.ui()),
             label="initial UI session started",
         )
         ed.goto_section(0, "Review")
@@ -3035,7 +3037,9 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
         lanes_tapped.add(base_lane)
         ed.send([{"op": "tap", "id": f"button:{base_lane}"}])
         ed.wait_for(
-            lambda: ed.signals().get("deckArmed") == "" and ed.signals().get("deckBusy") == 0 and len(read_json(ui_ws / "build/ide/request.json").get("feedback", [])) >= 2,
+            lambda: ed.signals().get("deckArmed") == ""
+            and ed.signals().get("deckBusy") == 0
+            and len(read_json(ui_ws / "build/ide/request.json").get("feedback", [])) >= 2,
             label="request refreshed with abstain + baseline feedback",
         )
         req_after_prefs = json.loads((ui_ws / "build/ide/request.json").read_text())
@@ -3109,7 +3113,8 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
             lambda: "afterPlusKeepsReset" in (ui_ws / "count.scuzz_verify").read_text()
             and "Installed rule in count.scuzz_verify" in ed.signals().get("ruleStatus", "")
             and ed.signals().get("deckBusy") == 0
-            and read_json(ui_ws / "build/ide/request.json").get("inputs", "") not in ("", req_before_rule.get("inputs", "")),
+            and read_json(ui_ws / "build/ide/request.json").get("inputs", "") not in ("", req_before_rule.get("inputs", ""))
+            and read_json(ui_ws / "build/ide/request.json").get("request", "") not in ("", req_before_rule.get("request", "")),
             label="rule installed on disk",
         )
 
@@ -3354,7 +3359,9 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
         ed_io.send([{"op": "tap", "id": "button:Start"}])
         ed_io.wait_for(
-            lambda: bool(read_json(io_ws / "build/ide/request.json").get("baseline")) and "External proposals: publish a complete directory" in json.dumps(ed_io.ui()),
+            lambda: bool(read_json(io_ws / "build/ide/request.json").get("baseline"))
+            and ed_io.signals().get("deckBusy") == 0
+            and "External proposals: publish a complete directory" in json.dumps(ed_io.ui()),
             label="IO session started",
         )
         ed_io.goto_section(0, "Review")
@@ -3431,7 +3438,8 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
             lambda: "deliveryWritesAuditLog" in (io_ws / "delivery.scuzz_verify").read_text()
             and "Installed rule in delivery.scuzz_verify" in ed_io.signals().get("ruleStatus", "")
             and ed_io.signals().get("deckBusy") == 0
-            and read_json(io_ws / "build/ide/request.json").get("inputs", "") not in ("", io_req_before_rule.get("inputs", "")),
+            and read_json(io_ws / "build/ide/request.json").get("inputs", "") not in ("", io_req_before_rule.get("inputs", ""))
+            and read_json(io_ws / "build/ide/request.json").get("request", "") not in ("", io_req_before_rule.get("request", "")),
             label="IO rule installed",
         )
 
@@ -3441,7 +3449,8 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
         ed_io.wait_for(
             lambda: (io_ws / "delivery.scuzz_verify").read_text() == io_ver_orig
             and ed_io.signals().get("deckBusy") == 0
-            and read_json(io_ws / "build/ide/request.json").get("inputs", "") not in ("", io_req_after_rule.get("inputs", "")),
+            and read_json(io_ws / "build/ide/request.json").get("inputs", "") not in ("", io_req_after_rule.get("inputs", ""))
+            and read_json(io_ws / "build/ide/request.json").get("request", "") not in ("", io_req_after_rule.get("request", "")),
             label="IO rule undone",
         )
         ed_io.goto_section(2, "Session")
