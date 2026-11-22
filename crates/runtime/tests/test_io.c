@@ -3600,6 +3600,62 @@ static void test_float_box_equality(void) {
   sz_release(int_box);
 }
 
+typedef struct {
+  const char *root;
+  pthread_mutex_t lock;
+  int stop;
+} WalkChurnCtx;
+
+static void *walk_churn_worker(void *arg) {
+  WalkChurnCtx *ctx = (WalkChurnCtx *)arg;
+  char sub_a[320], sub_b[320];
+  snprintf(sub_a, sizeof sub_a, "%s/stage", ctx->root);
+  snprintf(sub_b, sizeof sub_b, "%s/ready", ctx->root);
+  for (;;) {
+    int done;
+    pthread_mutex_lock(&ctx->lock);
+    done = ctx->stop;
+    pthread_mutex_unlock(&ctx->lock);
+    if (done)
+      break;
+    (void)mkdir(sub_a, 0700);
+    (void)rename(sub_a, sub_b);
+    (void)rmdir(sub_b);
+    (void)rmdir(sub_a);
+  }
+  return NULL;
+}
+
+static void test_concurrent_fs_walk(void) {
+  char directory[] = "/tmp/scuzz_walk_churn.XXXXXX";
+  WalkChurnCtx ctx;
+  pthread_t worker;
+  int i;
+  assert(mkdtemp(directory));
+  ctx.root = directory;
+  pthread_mutex_init(&ctx.lock, NULL);
+  ctx.stop = 0;
+  assert(pthread_create(&worker, NULL, walk_churn_worker, &ctx) == 0);
+  for (i = 0; i < 64; i++) {
+    SzString *path = sz_string_from_cstr(directory);
+    SzIoResult r = sz_io_unsafe_run(sz_fs_walk(path));
+    sz_release(path);
+    assert(r.ok);
+    sz_release(r.value);
+  }
+  pthread_mutex_lock(&ctx.lock);
+  ctx.stop = 1;
+  pthread_mutex_unlock(&ctx.lock);
+  assert(pthread_join(worker, NULL) == 0);
+  pthread_mutex_destroy(&ctx.lock);
+  {
+    SzString *path = sz_string_from_cstr(directory);
+    SzIoResult r = sz_io_unsafe_run(sz_fs_delete(path));
+    sz_release(path);
+    assert(r.ok);
+  }
+}
+
 int main(void) {
   test_float_box_equality();
   test_hmac();
@@ -3607,6 +3663,7 @@ int main(void) {
   test_http_url();
   test_retry_after();
   test_atomic_fs_write();
+  test_concurrent_fs_walk();
   test_request_headers();
   test_live_replay();
   /* List.head_opt: None on empty, Some payload on a cell. C List.head still panics. */

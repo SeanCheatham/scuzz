@@ -951,6 +951,8 @@ static int fs_walk_into(const char *root, const char *rel, int depth, SzList **a
   }
   d = opendir(full);
   if (!d) {
+    if (depth > 0 && (errno == ENOENT || errno == ENOTDIR))
+      return 1;
     char msg[512];
     snprintf(msg, sizeof msg, "Fs.walk: cannot open %s: %s", full,
              strerror(errno));
