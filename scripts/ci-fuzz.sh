@@ -2300,6 +2300,941 @@ with tempfile.TemporaryDirectory(prefix="scuzz-ide-mobile-live-") as tmp:
     assert [s["prompt"] for s in steer_doc["items"]] == ["keep mobile fast"], steer_doc
 PY_IDE_MOBILE_LIVE
 
+if ! fuzz --replay examples/editor/corpus/c_complete_session_ui.toml examples/editor | grep "fuzz replay ok" >/dev/null; then
+  echo "examples/editor: complete session evaluator replay failed" && exit 1
+fi
+if ! SCUZZ_FUZZ_ENGINE=compiled fuzz --replay examples/editor/corpus/c_complete_session_ui.toml examples/editor | grep "fuzz replay ok" >/dev/null; then
+  echo "examples/editor: complete session compiled replay failed" && exit 1
+fi
+
+python3 - "$SCUZZ" <<'PY_IDE_COMPLETE_SESSION'
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shlex
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+cli = str(Path(sys.argv[1]).resolve())
+cli_sha = hashlib.sha256(Path(cli).read_bytes()).hexdigest()
+repo = Path.cwd()
+
+
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def source_hash(files):
+    rows = [{"path": p, "content": c} for p, c in sorted(files)]
+    return hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode()).hexdigest()
+
+
+def fmt_in_pkg(base_dir, rel, body):
+    pkg = base_dir / "fmt-pkg"
+    shutil.rmtree(pkg, ignore_errors=True)
+    (pkg / "src").mkdir(parents=True, exist_ok=True)
+    (pkg / "scuzz.toml").write_text('[package]\nname = "fmtpkg"\n')
+    if not rel.startswith("src/"):
+        (pkg / "src/Dummy.scuzz").write_text("def d(): Int =\n  0\n")
+    target = pkg / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body)
+    subprocess.run([cli, "fmt", str(pkg)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return target.read_text()
+
+
+def publish_behavior(ws, name, request_doc, files, generator="session-proof", override_base=None):
+    stage = ws / "build" / f"{name}.stage"
+    dest = ws / "build/proposals" / name
+    shutil.rmtree(stage, ignore_errors=True)
+    shutil.rmtree(dest, ignore_errors=True)
+    meta_files = []
+    for rel, body in files:
+        formatted = fmt_in_pkg(ws.parent, rel, body)
+        target = stage / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(formatted)
+        meta_files.append({"path": rel, "sha256": hashlib.sha256(formatted.encode()).hexdigest()})
+    (stage / "proposal.json").write_text(json.dumps({
+        "v": 1,
+        "request": request_doc["request"],
+        "baseline": override_base or request_doc["baseline"],
+        "kind": "behavior",
+        "generator": generator,
+        "files": meta_files,
+    }))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    stage.replace(dest)
+
+
+def publish_rule(ws, name, rule_req, rel_verify, verify_body):
+    stage = ws / "build" / f"{name}.stage"
+    dest = ws / "build/proposals" / name
+    shutil.rmtree(stage, ignore_errors=True)
+    shutil.rmtree(dest, ignore_errors=True)
+    stage.mkdir(parents=True, exist_ok=True)
+    formatted = fmt_in_pkg(ws.parent, rel_verify, verify_body)
+    vpath = stage / rel_verify
+    vpath.write_text(formatted)
+    (stage / "proposal.json").write_text(json.dumps({
+        "v": 1,
+        "request": rule_req["request"],
+        "baseline": rule_req["baseline"],
+        "kind": "rule",
+        "witness": rule_req["witness"]["id"],
+        "generator": "session-rule-proof",
+        "files": [{"path": rel_verify, "sha256": hashlib.sha256(formatted.encode()).hexdigest()}],
+    }))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    stage.replace(dest)
+
+
+def write_ops(where, events):
+    path = where / "inject.json"
+    temp = where / "inject.tmp"
+    temp.write_text(json.dumps({"v": 1, "kind": "inject", "stamp": time.monotonic_ns(), "events": events}))
+    temp.replace(path)
+    return path
+
+
+class HeadlessEditor:
+    def __init__(self, editor_exe, ws, initial_events, extra_env=None):
+        self.ws = ws
+        empty = ws / "empty-script.json"
+        empty.write_text(json.dumps({"v": 1, "kind": "inject", "events": []}))
+        inject = write_ops(ws, [])
+        (ws / "debug.json").unlink(missing_ok=True)
+        env = dict(
+            os.environ,
+            SCUZZ=cli,
+            SCUZZ_EXECUTABLE_SHA256=cli_sha,
+            SCUZZ_HOME=str(repo),
+            SCUZZ_UI_RUNTIME="headless",
+            SCUZZ_UI_WIDTH="1280",
+            SCUZZ_UI_HEIGHT="900",
+            SCUZZ_UI_SERVE="1",
+            SCUZZ_LIVE_FRAMES="30000",
+            SCUZZ_UI_SCRIPT=str(empty),
+            SCUZZ_UI_INJECT=str(inject),
+            SCUZZ_UI_DEBUG_DUMP=str(ws / "debug.json"),
+        )
+        if extra_env:
+            env.update(extra_env)
+        self.log_path = ws / "headless-editor.log"
+        self.log = open(self.log_path, "w")
+        self.proc = subprocess.Popen([str(editor_exe)], cwd=str(ws), env=env, stdout=self.log, stderr=self.log)
+        self.wait_for(lambda: (self.ws / "debug.json").is_file(), label="initial debug.json")
+        if initial_events:
+            self.send(initial_events)
+
+    def ui(self):
+        return json.loads((self.ws / "debug.json").read_text())
+
+    def signals(self):
+        return {v["name"]: v.get("value") for v in self.ui().get("signals", []) if "name" in v}
+
+    def send(self, events):
+        write_ops(self.ws, events)
+
+    def wait_for(self, predicate, label="condition", timeout=45.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            assert self.proc.poll() is None, f"editor exited early during {label}:\n" + self.log_path.read_text()[-4000:]
+            try:
+                res = predicate()
+            except (FileNotFoundError, json.JSONDecodeError, KeyError, StopIteration):
+                res = None
+            if res:
+                return res
+            time.sleep(0.05)
+        sig_dump = ""
+        cards_dump = []
+        recs_dump = []
+        try:
+            big = {"buf", "orig", "bodies", "origs", "deckCard", "ruleCard", "deltaRaw", "laneTexts", "laneA", "laneB", "rowsA", "rowsB", "stepViewA", "stepViewB", "srcFiles"}
+            sig_dump = json.dumps({k: v for k, v in self.signals().items() if k not in big})
+            cards_dump = [(c.get("proposal"), c.get("status"), c.get("diagnostic")) for p in sorted((self.ws / ".scuzz/ide/cards").glob("*/card.json")) for c in [json.loads(p.read_text())]]
+            recs_dump = [(r.get("proposal"), r.get("kind"), r.get("decision"), r.get("diagnostic")) for p in sorted((self.ws / ".scuzz/ide/records").glob("*.json")) for r in [json.loads(p.read_text())]]
+        except Exception:
+            pass
+        raise AssertionError(f"timed out waiting for {label} (signals={sig_dump}, cards={cards_dump}, recs={recs_dump}):\n" + self.log_path.read_text()[-4000:])
+
+    def goto_section(self, idx, chip_label):
+        if self.signals().get("developSection") != idx:
+            self.send([{"op": "tap", "id": f"choicechip:{chip_label}"}])
+            self.wait_for(lambda: self.signals().get("developSection") == idx, label=f"section {chip_label}")
+
+    def wait_armed_card(self, expected_proposal=None):
+        def check():
+            sigs = self.signals()
+            if sigs.get("deckBusy") != 0 or not sigs.get("deckArmed"):
+                return None
+            if "Choose left" not in json.dumps(self.ui().get("taps", [])):
+                return None
+            card_path = self.ws / ".scuzz/ide/cards" / sigs["deckArmed"] / "card.json"
+            if not card_path.is_file():
+                return None
+            card = json.loads(card_path.read_text())
+            if card.get("status") != "ready":
+                return None
+            if expected_proposal and card.get("proposal") != expected_proposal:
+                return None
+            return card
+        return self.wait_for(check, label=f"armed card {expected_proposal or '*'}", timeout=180.0)
+
+    def close(self, expect_zero=True):
+        try:
+            if self.proc.poll() is None:
+                self.send([{"op": "quit"}])
+                rc = self.proc.wait(timeout=15)
+                if expect_zero:
+                    assert rc == 0, (rc, self.log_path.read_text()[-3000:])
+        finally:
+            if self.proc.poll() is None:
+                self.proc.kill()
+                self.proc.wait()
+            self.log.close()
+
+
+with tempfile.TemporaryDirectory(prefix="scuzz-ide-e2e-") as tmp:
+    base = Path(tmp)
+    # Copy shared + counter for UI scratch workspace, and webhook for IO scratch workspace.
+    shutil.copytree(repo / "examples/shared", base / "shared", ignore=shutil.ignore_patterns("build", ".scuzz"))
+    ui_ws = base / "ui-counter"
+    shutil.copytree(repo / "examples/counter", ui_ws, ignore=shutil.ignore_patterns("build", ".scuzz"))
+    io_ws = base / "io-webhook"
+    shutil.copytree(repo / "examples/webhook", io_ws, ignore=shutil.ignore_patterns("build", ".scuzz"))
+
+    # Build Headless editor executable once and reuse across UI and IO scratch workspaces.
+    editor_out = base / "editor-out"
+    quit_json = base / "quit.json"
+    quit_json.write_text(json.dumps({"v": 1, "kind": "inject", "events": [{"op": "quit"}]}))
+    subprocess.run(
+        [cli, "run", "--target", "headless", "--out-dir", str(editor_out), "--exec", str(quit_json), str(repo / "examples/editor")],
+        cwd=str(ui_ws),
+        env=dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560"),
+        check=True,
+        timeout=300,
+        stdout=subprocess.DEVNULL,
+    )
+    editor_exe = editor_out / "editor"
+    assert editor_exe.is_file()
+
+    # Build controlled private-loopback HTTP local-inference harness (127.0.0.1) for real process generation + interruption cleanup.
+    gen_pkg = base / "controlled-gen"
+    shutil.copytree(repo / "examples/editor/generation", gen_pkg / "generation", ignore=shutil.ignore_patterns("build", ".scuzz"))
+    gen_toml = gen_pkg / "generation/scuzz.toml"
+    gen_toml.write_text(gen_toml.read_text().replace("../../compiler", os.path.relpath(repo / "examples/compiler", gen_pkg / "generation")))
+    server_py = b'''#!/usr/bin/env python3
+import http.server, json, os, pathlib, sys, time
+if "--version" in sys.argv:
+    print("build 11146, commit 7fe450e19")
+    sys.exit(0)
+if "--list-devices" in sys.argv:
+    print("Available devices:\\n  Vulkan0: Controlled GPU")
+    sys.exit(0)
+args = sys.argv[1:]
+port = int(args[args.index("--port") + 1])
+key = args[args.index("--api-key") + 1]
+pathlib.Path(os.environ["CONTROLLED_PID"]).write_text(str(os.getpid()))
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def reply(self, value):
+        data = json.dumps(value).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+    def do_GET(self):
+        assert self.headers["Authorization"] == "Bearer " + key
+        self.reply({"data": [{"id": key}]})
+    def do_POST(self):
+        assert self.headers["Authorization"] == "Bearer " + key
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/apply-template":
+            self.reply({"prompt": "controlled prompt"})
+            return
+        if self.path == "/tokenize":
+            self.reply({"tokens": [1, 2, 3]})
+            return
+        pathlib.Path(os.environ["CONTROLLED_RECEIVED"]).write_text("1")
+        if os.environ.get("CONTROLLED_MODE") == "hang":
+            time.sleep(120)
+        proposal = json.loads(pathlib.Path(os.environ["CONTROLLED_PROPOSAL"]).read_text())
+        self.reply({"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(proposal)}}]})
+http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+'''
+    archive_buf = io.BytesIO()
+    with tarfile.open(fileobj=archive_buf, mode="w:gz") as tar:
+        entry = tarfile.TarInfo("llama-b11146/llama-server")
+        entry.size = len(server_py)
+        entry.mode = 0o700
+        tar.addfile(entry, io.BytesIO(server_py))
+    artifact = archive_buf.getvalue()
+    weights = b"controlled-e2e-weights"
+    models_scuzz = gen_pkg / "generation/src/Models.scuzz"
+    msrc = models_scuzz.read_text()
+    for cnt, dig in (
+        (2740937888, "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4"),
+        (5680522464, "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"),
+    ):
+        msrc = msrc.replace(str(cnt), str(len(weights))).replace(dig, hashlib.sha256(weights).hexdigest())
+    msrc = re.sub(
+        r'Backend\("([^"]+)", "([^"]+)", [0-9]+, "[a-f0-9]+"\)',
+        lambda m: f'Backend("{m[1]}", "{m[2]}", {len(artifact)}, "{hashlib.sha256(artifact).hexdigest()}")',
+        msrc,
+    )
+    models_scuzz.write_text(msrc)
+    gen_scuzz = gen_pkg / "generation/src/Generate.scuzz"
+    gsrc = gen_scuzz.read_text()
+    gsrc = gsrc.replace('port <- Random.nextInt(30000)', 'port <- Sys.getenv("CONTROLLED_PORT").map(s => Str.toInt(s, 0))').replace("port + 30000", "port").replace('Sys.getenv("SCUZZ_EXECUTABLE_SHA256")', 'Sys.getenv("CONTROLLED_COMPILER")')
+    gen_scuzz.write_text(gsrc)
+    xdg_cache = gen_pkg / "xdg"
+    bplat = platform.system() + "-" + platform.machine()
+    if bplat in ("Linux-x86_64", "Linux-aarch64"):
+        bplat += "-vulkan"
+    bdir = xdg_cache / "scuzz/tools/llama/b11146" / bplat
+    bdir.mkdir(parents=True)
+    (bdir / "release.tar.gz").write_bytes(artifact)
+    mcache = gen_pkg / "mcache/qwen3.5-4b/e87f176479d0855a907a41277aca2f8ee7a09523"
+    mcache.mkdir(parents=True)
+    (mcache / "Qwen3.5-4B-Q4_K_M.gguf").write_bytes(weights)
+    tools_dir = gen_pkg / "tools"
+    tools_dir.mkdir()
+    real_awk = shutil.which("awk")
+    assert real_awk
+    (tools_dir / "awk").write_text(
+        '#!/bin/sh\ncase "$1" in *MemAvailable:*) printf \'34359738368\\n\';; *"Pages free:"*) printf \'34359738368\\n\';; *) exec '
+        + shlex.quote(real_awk)
+        + ' "$@";; esac\n'
+    )
+    (tools_dir / "awk").chmod(0o700)
+    (gen_pkg / "src").mkdir()
+    (gen_pkg / "scuzz.toml").write_text('[package]\nname = "gen-driver"\n[dependencies]\ngeneration = { path = "generation" }\n')
+    (gen_pkg / "src/Main.scuzz").write_text(
+        '@main def main: IO[Unit] =\n'
+        '  for {\n'
+        '    root <- Sys.getenv("CONTROLLED_ROOT")\n'
+        '    req <- Sys.getenv("CONTROLLED_REQ")\n'
+        '    out <- Sys.getenv("CONTROLLED_OUT")\n'
+        '    mode <- Sys.getenv("CONTROLLED_MODE")\n'
+        '    _ <- if (root == "") IO.pure(()) else if (mode == "hang") IO.timeout(2500, Generate.command(root, req, "qwen3.5-4b", out, false)) else Generate.command(root, req, "qwen3.5-4b", out, false)\n'
+        '  } yield ()\n'
+    )
+    gen_base_env = dict(
+        os.environ,
+        SCUZZ=cli,
+        SCUZZ_EXECUTABLE_SHA256=cli_sha,
+        CONTROLLED_COMPILER=cli_sha,
+        SCUZZ_HOME=str(repo),
+        PATH=str(tools_dir) + os.pathsep + os.environ["PATH"],
+        XDG_CACHE_HOME=str(xdg_cache),
+        SCUZZ_MODEL_CACHE=str(gen_pkg / "mcache"),
+        CONTROLLED_ROOT="",
+        CONTROLLED_REQ="",
+        CONTROLLED_OUT="",
+        CONTROLLED_MODE="ok",
+    )
+    subprocess.run([cli, "run", str(gen_pkg)], env=gen_base_env, check=True, timeout=240, stdout=subprocess.DEVNULL)
+    gen_driver = gen_pkg / "build/gen-driver"
+
+    def run_controlled_local_gen(ws, req_path, out_dir, edits, change="Controlled edit", hang=False):
+        pid_file = base / "llama.pid"
+        rec_file = base / "llama.rec"
+        prop_file = base / "llama.proposal.json"
+        pid_file.unlink(missing_ok=True)
+        rec_file.unlink(missing_ok=True)
+        prop_file.write_text(json.dumps({"change": change, "edits": edits}))
+        env = dict(
+            gen_base_env,
+            CONTROLLED_ROOT=str(ws),
+            CONTROLLED_REQ=str(req_path),
+            CONTROLLED_OUT=str(out_dir),
+            CONTROLLED_PID=str(pid_file),
+            CONTROLLED_RECEIVED=str(rec_file),
+            CONTROLLED_PROPOSAL=str(prop_file),
+            CONTROLLED_PORT=str(free_port()),
+            CONTROLLED_MODE="hang" if hang else "ok",
+        )
+        return subprocess.run([str(gen_driver)], env=env, capture_output=True, text=True, timeout=30), pid_file, rec_file
+
+    # =========================================================================
+    # PART A: Complete UI Objective Session (scratch copy of examples/counter)
+    # =========================================================================
+    ui_orig = (ui_ws / "src/Main.scuzz").read_text()
+    ui_verify_orig = (ui_ws / "count.scuzz_verify").read_text()
+    target_snippet = "View.bindText(label),"
+    assert target_snippet in ui_orig
+    ui_anchor_line = next(line for line in ui_orig.splitlines() if target_snippet in line)
+    ui_abstain_line = ui_anchor_line.replace(target_snippet, 'View.text("Tap +1"), View.bindText(label),', 1)
+
+    def fmt_src(body, rel="src/Main.scuzz"):
+        return fmt_in_pkg(base, rel, body)
+
+    ui_abstain_src = fmt_src(ui_orig.replace(target_snippet, 'View.text("Tap +1"), View.bindText(label),', 1))
+    ui_base_src = fmt_src(ui_orig.replace(target_snippet, 'View.text("Ready"), View.bindText(label),', 1))
+    ui_reset_src = fmt_src(ui_orig.replace(
+        target_snippet,
+        'View.bindText(label), View.button("Reset", _ => Signal.set(state, Signal.get(state).copy(value = 0))),',
+        1,
+    ))
+    ui_next_src = fmt_src(ui_reset_src.replace(
+        'View.button("Reset"',
+        'View.text("Reset ready"), View.button("Reset"',
+        1,
+    ))
+    ui_violate_rule_src = fmt_src(ui_orig.replace(target_snippet, 'View.text("Dropped reset"), View.bindText(label),', 1))
+    ui_nodiff_src = fmt_src(ui_orig + "\ndef unusedSessionHelper(): Int =\n  0\n")
+    ui_bad_static_src = ui_orig.replace('CounterState(0, "Counter")', 'CounterState(1 + "bad", "Counter")', 1)
+    ui_bad_claim_src = ui_orig.replace("Signal.get(count) + 1", "Signal.get(count) + 2", 1)
+
+    ed = HeadlessEditor(editor_exe, ui_ws, [])
+    lanes_tapped = set()
+    try:
+        ed.goto_section(2, "Session")
+        ed.send([
+            {"op": "text", "i": 0, "value": "Add a Reset button to Counter"},
+            {"op": "text", "i": 1, "value": "src/Main.scuzz"},
+            {"op": "tap", "id": "button:Start"},
+        ])
+        ed.wait_for(
+            lambda: (ui_ws / "build/ide/request.json").is_file() and "External proposals: publish a complete directory" in json.dumps(ed.ui()),
+            label="initial UI session started",
+        )
+        ed.goto_section(0, "Review")
+        req1 = json.loads((ui_ws / "build/ide/request.json").read_text())
+        assert req1["objective"] == "Add a Reset button to Counter", req1
+
+        # 1a. Interrupted local inference process cleanup over private loopback HTTP.
+        hang_res, hang_pid_file, hang_rec = run_controlled_local_gen(
+            ui_ws,
+            ui_ws / "build/ide/request.json",
+            ui_ws / "build/proposals/00-hang",
+            [{"path": "src/Main.scuzz", "search": ui_anchor_line, "replacement": ui_abstain_line}],
+            hang=True,
+        )
+        assert hang_res.returncode != 0 and hang_rec.is_file(), (hang_res.returncode, hang_res.stdout, hang_res.stderr)
+        spawned_pid = int(hang_pid_file.read_text().strip())
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(spawned_pid, 0)
+                time.sleep(0.05)
+            except ProcessLookupError:
+                break
+        else:
+            raise AssertionError(f"interrupted llama-server pid {spawned_pid} still alive")
+        shutil.rmtree(ui_ws / "build/proposals/00-hang", ignore_errors=True)
+
+        # 1b. Invalid path, stale baseline, and static failure checks via review-suggestion before publishing live queue items.
+        bad_escape = ui_ws / "build/00-unsafe-check"
+        bad_escape.mkdir(parents=True, exist_ok=True)
+        (bad_escape / "proposal.json").write_text(json.dumps({
+            "v": 1,
+            "request": req1["request"],
+            "baseline": req1["baseline"],
+            "kind": "behavior",
+            "generator": "unsafe",
+            "files": [{"path": "../escape.scuzz", "sha256": "a" * 64}],
+        }))
+        bad_rev = subprocess.run(
+            [cli, "ide", "review-suggestion", str(ui_ws), "--request", str(ui_ws / "build/ide/request.json"), "--candidate", str(bad_escape)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert bad_rev.returncode != 0 and not (ui_ws.parent / "escape.scuzz").exists(), (bad_rev.stdout, bad_rev.stderr)
+
+        stale_cand = ui_ws / "build/01-stale-check"
+        (stale_cand / "src").mkdir(parents=True, exist_ok=True)
+        (stale_cand / "src/Main.scuzz").write_text(ui_abstain_src)
+        (stale_cand / "proposal.json").write_text(json.dumps({
+            "v": 1,
+            "request": req1["request"],
+            "baseline": "0" * 64,
+            "kind": "behavior",
+            "generator": "stale",
+            "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(ui_abstain_src.encode()).hexdigest()}],
+        }))
+        stale_rev = subprocess.run(
+            [cli, "ide", "review-suggestion", str(ui_ws), "--request", str(ui_ws / "build/ide/request.json"), "--candidate", str(stale_cand)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert stale_rev.returncode != 0, (stale_rev.stdout, stale_rev.stderr)
+
+        static_cand = ui_ws / "build/02-static-check"
+        (static_cand / "src").mkdir(parents=True, exist_ok=True)
+        (static_cand / "src/Main.scuzz").write_text(ui_bad_static_src)
+        (static_cand / "proposal.json").write_text(json.dumps({
+            "v": 1,
+            "request": req1["request"],
+            "baseline": req1["baseline"],
+            "kind": "behavior",
+            "generator": "static-bad",
+            "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(ui_bad_static_src.encode()).hexdigest()}],
+        }))
+        static_rev = subprocess.run(
+            [cli, "ide", "review-suggestion", str(ui_ws), "--request", str(ui_ws / "build/ide/request.json"), "--candidate", str(static_cand)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert static_rev.returncode != 0, (static_rev.stdout, static_rev.stderr)
+
+        # 1c. Claim-failing candidate pauses external queue with exact claim diagnostic, then Retry preparation continues!
+        publish_behavior(ui_ws, "03-claim-fail", req1, [("src/Main.scuzz", ui_bad_claim_src)])
+        ed.wait_for(
+            lambda: "claim afterPlusShowsOne rejected" in ed.signals().get("readyStatus", ""),
+            label="03-claim-fail rejected by afterPlusShowsOne",
+            timeout=120.0,
+        )
+        shutil.rmtree(ui_ws / "build/proposals/03-claim-fail", ignore_errors=True)
+
+        # 1d. Controlled local model generation over private loopback HTTP publishes 05-abstain, alongside no-diff, duplicate, and 07-base (filling 2-card ready queue).
+        publish_behavior(ui_ws, "04-nodiff", req1, [("src/Main.scuzz", ui_nodiff_src)])
+        gen_res, _, _ = run_controlled_local_gen(
+            ui_ws,
+            ui_ws / "build/ide/request.json",
+            ui_ws / "build/proposals/05-abstain",
+            [{"path": "src/Main.scuzz", "search": ui_anchor_line, "replacement": ui_abstain_line}],
+            change="Add Tap +1 prompt",
+        )
+        assert gen_res.returncode == 0 and json.loads(gen_res.stdout)["result"] == "published", (gen_res.stdout, gen_res.stderr)
+        publish_behavior(ui_ws, "06-dup", req1, [("src/Main.scuzz", ui_abstain_src)])
+        publish_behavior(ui_ws, "07-base", req1, [("src/Main.scuzz", ui_base_src)])
+
+        ed.send([{"op": "tap", "id": "button:Retry preparation"}])
+        c_abstain = ed.wait_armed_card("05-abstain")
+
+        # Verify short witness retained on disk (compiled replay checked after editor closes so ui-host is not rebuilt mid-session).
+        witnesses = c_abstain["evidence"].get("witnesses", [])
+        assert witnesses, c_abstain["evidence"]
+        wit_path = ui_ws / ".scuzz/ide/cards" / c_abstain["id"] / witnesses[0]["path"]
+        assert wit_path.is_file()
+
+        # Abstain with explicit reason ("Need another scenario") and verify reset + isolated reveal + warm next card 07-base!
+        ed.send([{"op": "tap", "id": "choicechip:Need another scenario"}, {"op": "tap", "id": "outlined:Can't decide"}])
+        c_base = ed.wait_armed_card("07-base")
+        sigs_after_abstain = ed.signals()
+        assert sigs_after_abstain["abstainReason"] == 0, sigs_after_abstain
+        assert "abstained" in sigs_after_abstain.get("deckLast", "") and "07-base" not in sigs_after_abstain.get("deckLast", ""), sigs_after_abstain
+
+        # Choose baseline lane on 07-base, then publish 08-reset against the refreshed request folding abstain + baseline feedback!
+        base_lane = "Choose left" if c_base["flip"] == 0 else "Choose right"
+        lanes_tapped.add(base_lane)
+        ed.send([{"op": "tap", "id": f"button:{base_lane}"}])
+        ed.wait_for(
+            lambda: ed.signals().get("deckArmed") == "" and len(json.loads((ui_ws / "build/ide/request.json").read_text()).get("feedback", [])) >= 2,
+            label="request refreshed with abstain + baseline feedback",
+        )
+        req_after_prefs = json.loads((ui_ws / "build/ide/request.json").read_text())
+        publish_behavior(ui_ws, "08-reset", req_after_prefs, [("src/Main.scuzz", ui_reset_src)])
+        c_reset = ed.wait_armed_card("08-reset")
+
+        # Dirty buffer refusal check before accepting 08-reset.
+        ed.goto_section(1, "Code")
+        ed.wait_for(lambda: ed.ui().get("editors"), label="Code editor")
+        ed.send([{"op": "caret", "offset": len(ui_orig)}, {"op": "key", "key": "x", "text": "x"}])
+        ed.wait_for(lambda: ed.signals().get("buf") == ui_orig + "x", label="dirty buffer edit")
+        reset_prop_lane = "Choose left" if c_reset["flip"] == 1 else "Choose right"
+        ed.goto_section(0, "Review")
+        ed.send([{"op": "tap", "id": f"button:{reset_prop_lane}"}])
+        ed.wait_for(lambda: "dirty" in json.dumps(ed.ui()).lower(), label="dirty buffer refusal")
+        assert (ui_ws / "src/Main.scuzz").read_text() == ui_orig
+
+        # Revert dirty edit, re-arm 08-reset after dirty retry, then accept 08-reset via its proposal lane!
+        ed.goto_section(1, "Code")
+        ed.send([{"op": "caret", "offset": len(ui_orig) + 1}, {"op": "key", "key": "Backspace", "text": ""}])
+        ed.wait_for(lambda: ed.signals().get("buf") == ui_orig, label="reverted buffer")
+        ed.goto_section(0, "Review")
+        ed.send([{"op": "tap", "id": "button:Retry preparation"}])
+        c_reset = ed.wait_armed_card("08-reset")
+        reset_prop_lane = "Choose left" if c_reset["flip"] == 1 else "Choose right"
+        lanes_tapped.add(reset_prop_lane)
+        ed.send([{"op": "tap", "id": f"button:{reset_prop_lane}"}])
+        ed.wait_for(lambda: (ui_ws / "src/Main.scuzz").read_text() == ui_reset_src and ed.signals().get("deckBusy") == 0, label="08-reset accepted")
+
+        # Test region focus controls on post-choice reveal.
+        ed.wait_for(lambda: "Retain region" in json.dumps(ed.ui()), label="region controls visible")
+        ed.send([{"op": "tap", "id": "outlined:Retain region"}, {"op": "tap", "id": "outlined:All regions"}])
+
+        # Rule suggestion -> untriggered draft rejected -> valid rule draft verified & installed!
+        ed.send([{"op": "tap", "id": "outlined:Suggest rule"}])
+        ed.wait_for(lambda: (ui_ws / "build/ide/rule-request.json").is_file(), label="rule-request.json")
+        rule_req = json.loads((ui_ws / "build/ide/rule-request.json").read_text())
+        assert rule_req["kind"] == "rule" and rule_req["preference"]["decision"] == "accept", rule_req
+
+        untriggered_verify = ui_verify_orig + '\ndef untriggeredDraft(t: Timeline): Verdict =\n  Verdict.afterHit(t, "button:NeverExists", "text:Counter")\n'
+        publish_rule(ui_ws, "01-bad-rule", rule_req, "count.scuzz_verify", untriggered_verify)
+        ed.send([{"op": "tap", "id": "outlined:Import rule draft"}])
+        ed.wait_for(lambda: "untriggered new claim" in ed.signals().get("ruleDiagnostic", ""), label="untriggered rule rejected")
+        assert ed.signals().get("ruleVerified") == 0 and "button:Install rule" not in json.dumps(ed.ui().get("taps", []))
+        ed.send([{"op": "tap", "id": "outlined:Reject rule"}])
+        ed.wait_for(lambda: ed.signals().get("ruleArmed", "") == "", label="01-bad-rule rejected")
+
+        valid_verify = ui_verify_orig + '\ndef afterPlusKeepsReset(t: Timeline): Verdict =\n  Verdict.afterHit(t, "button:+1", "button:Reset")\n'
+        publish_rule(ui_ws, "02-good-rule", rule_req, "count.scuzz_verify", valid_verify)
+        ed.send([{"op": "tap", "id": "outlined:Import rule draft"}])
+        ed.wait_for(lambda: ed.signals().get("ruleVerified") == 1, label="valid rule verified")
+        assert "Not a universal proof." in json.dumps(ed.ui())
+        ed.send([{"op": "tap", "id": "button:Install rule"}])
+        ed.wait_for(
+            lambda: "afterPlusKeepsReset" in (ui_ws / "count.scuzz_verify").read_text() and "Installed rule in count.scuzz_verify" in ed.signals().get("ruleStatus", ""),
+            label="rule installed on disk",
+        )
+
+        # Next-baseline request.json is automatically refreshed on rule installation and folds prior abstention, baseline choice, and acceptance!
+        req2 = json.loads((ui_ws / "build/ide/request.json").read_text())
+        assert req2["baseline"] != req1["baseline"], (req1["baseline"], req2["baseline"])
+        fb_decisions = {(f.get("decision"), f.get("reason", "")) for f in req2.get("feedback", [])}
+        assert ("abstain", "need-another-scenario") in fb_decisions, req2["feedback"]
+        assert ("baseline", "") in fb_decisions and ("accept", "") in fb_decisions, req2["feedback"]
+
+        # Installed rule blocks 09-violates-rule with exact afterPlusKeepsReset rejection, while compliant 10-next-ready arms!
+        ed.goto_section(0, "Review")
+        publish_behavior(ui_ws, "09-violates-rule", req2, [("src/Main.scuzz", ui_violate_rule_src)])
+        ed.wait_for(
+            lambda: "claim afterPlusKeepsReset rejected" in ed.signals().get("readyStatus", ""),
+            label="09-violates-rule blocked by installed afterPlusKeepsReset rule",
+            timeout=120.0,
+        )
+        shutil.rmtree(ui_ws / "build/proposals/09-violates-rule", ignore_errors=True)
+
+        publish_behavior(ui_ws, "10-next-ready", req2, [("src/Main.scuzz", ui_next_src)])
+        ed.send([{"op": "tap", "id": "button:Retry preparation"}])
+        c_next = ed.wait_armed_card("10-next-ready")
+        auto_decisions = [json.loads(p.read_text()).get("decision") for p in (ui_ws / ".scuzz/ide/records").glob("*.json") if json.loads(p.read_text()).get("kind") == "automatic"]
+        assert "no-observed-difference" in auto_decisions and "duplicate-source" in auto_decisions, auto_decisions
+    finally:
+        ed.close()
+
+    # Replay the durably retained short witness on the compiled engine!
+    assert wit_path.is_file()
+    wit_copy = base / "ui-wit-replay"
+    shutil.copytree(ui_ws, wit_copy, ignore=shutil.ignore_patterns("build", ".scuzz"))
+    wit_replay = subprocess.run([cli, "fuzz", "--replay", str(wit_path), str(wit_copy)], capture_output=True, text=True, timeout=180)
+    assert wit_replay.returncode == 0 and "fuzz replay ok" in wit_replay.stdout, (wit_replay.stdout, wit_replay.stderr)
+
+    # Interrupted journal write via LD_PRELOAD rename fault on Linux, followed by restart recovery + Undo + Session summary!
+    if os.uname().sysname == "Linux":
+        fault_c = base / "fault.c"
+        fault_so = base / "fault.so"
+        fault_c.write_text(
+            "#define _GNU_SOURCE\n#include <dlfcn.h>\n#include <errno.h>\n#include <string.h>\n"
+            "int rename(const char *from, const char *to) {\n"
+            "  static int failed;\n"
+            "  const char *suf = \"/src/Main.scuzz\";\n"
+            "  size_t n = strlen(to), m = strlen(suf);\n"
+            "  if (!failed && (strcmp(to, \"src/Main.scuzz\") == 0 || (n >= m && strcmp(to + n - m, suf) == 0))) {\n"
+            "    failed = 1; errno = EIO; return -1;\n"
+            "  }\n"
+            "  int (*next)(const char *, const char *) = dlsym(RTLD_NEXT, \"rename\");\n"
+            "  return next(from, to);\n"
+            "}\n"
+        )
+        subprocess.run(["clang", "-shared", "-fPIC", str(fault_c), "-ldl", "-o", str(fault_so)], check=True)
+        ed_fault = HeadlessEditor(editor_exe, ui_ws, [{"op": "tap", "id": "button:Start"}], extra_env={"LD_PRELOAD": str(fault_so)})
+        try:
+            c_resumed = ed_fault.wait_armed_card("10-next-ready")
+            next_prop_lane = "Choose left" if c_resumed["flip"] == 1 else "Choose right"
+            lanes_tapped.add(next_prop_lane)
+            ed_fault.send([{"op": "tap", "id": f"button:{next_prop_lane}"}])
+            ed_fault.wait_for(lambda: (ui_ws / ".scuzz/ide/journal.json").is_file() and (ui_ws / ".scuzz/ide/journal.json").read_text().strip() != "", label="interrupted journal retained")
+        finally:
+            ed_fault.close()
+        assert (ui_ws / "src/Main.scuzz").read_text() == ui_reset_src
+
+    # Restart cleanly: Cards.recover finishes 10-next-ready, restores paused status, then Undo 10-next-ready and verify summary!
+    ed_rec = HeadlessEditor(editor_exe, ui_ws, [])
+    try:
+        ed_rec.goto_section(2, "Session")
+        ed_rec.wait_for(lambda: "Session restored in paused state. Select Start to resume." in json.dumps(ed_rec.ui()), label="paused restore status")
+        if os.uname().sysname == "Linux":
+            assert (ui_ws / ".scuzz/ide/journal.json").read_text() == ""
+            assert (ui_ws / "src/Main.scuzz").read_text() == ui_next_src
+            ed_rec.goto_section(0, "Review")
+            ed_rec.send([{"op": "tap", "id": "outlined:Undo"}])
+            ed_rec.wait_for(lambda: (ui_ws / "src/Main.scuzz").read_text() == ui_reset_src, label="Undo restored 08-reset")
+        ed_rec.goto_section(2, "Session")
+        ed_rec.send([{"op": "tap", "id": "outlined:Refresh summary"}])
+        ed_rec.wait_for(lambda: "Rule reviews: installed 1 (active 1, undone 0); rejected 1" in json.dumps(ed_rec.ui()), label="UI session summary lines")
+        ui_sum_blob = json.dumps(ed_rec.ui())
+        assert "Conservative source measure" in ui_sum_blob, ui_sum_blob
+        assert "Accepted: 2; retained: 1;" in ui_sum_blob, ui_sum_blob
+        assert "Baseline choices: 1; Undo: 1" in ui_sum_blob, ui_sum_blob
+        assert "need-another-scenario: 1" in ui_sum_blob, ui_sum_blob
+        assert "08-reset" in ui_sum_blob and ": retained " in ui_sum_blob, ui_sum_blob
+        assert "10-next-ready" in ui_sum_blob and ": undone " in ui_sum_blob, ui_sum_blob
+    finally:
+        ed_rec.close()
+
+    # =========================================================================
+    # PART B: Complete IO Objective Session (scratch copy of examples/webhook)
+    # =========================================================================
+    io_orig = (io_ws / "src/Hook.scuzz").read_text()
+    io_ver_orig = (io_ws / "delivery.scuzz_verify").read_text()
+    old_store_arm = 'case Result.Ok(value) => if (!Json.isObj(value)) reply(400, "Expected a JSON object") else Fs.write(output, body).flatMap(_ => reply(200, "Stored")).handleErrorWith(_ => reply(503, "Cannot store delivery"))'
+    assert old_store_arm in io_orig
+    io_anchor_line = next(line for line in io_orig.splitlines() if old_store_arm in line)
+    io_audit_2_line = io_anchor_line.replace(
+        'Fs.write(output, body).flatMap(_ => reply(200, "Stored"))',
+        'Fs.write("delivery.log", "audit:local").flatMap(_ => Fs.write(output, body)).flatMap(_ => reply(200, "Stored"))',
+        1,
+    )
+    io_audit_1 = fmt_src(io_orig.replace(
+        'Fs.write(output, body).flatMap(_ => reply(200, "Stored"))',
+        'Fs.write("delivery.log", "audit:crank").flatMap(_ => Fs.write(output, body)).flatMap(_ => reply(200, "Stored"))',
+        1,
+    ))
+    io_audit_2 = fmt_src(io_orig.replace(
+        'Fs.write(output, body).flatMap(_ => reply(200, "Stored"))',
+        'Fs.write("delivery.log", "audit:local").flatMap(_ => Fs.write(output, body)).flatMap(_ => reply(200, "Stored"))',
+        1,
+    ))
+    io_audit_3 = fmt_src(io_orig.replace(
+        'Fs.write(output, body).flatMap(_ => reply(200, "Stored"))',
+        'Fs.write("delivery.log", "accepted:hmac-verified").flatMap(_ => Fs.write(output, body)).flatMap(_ => reply(200, "Stored"))',
+        1,
+    ))
+
+    # Seed session.json WITHOUT "allowed" to exercise restoredInit fallback on IO workspace too.
+    (io_ws / ".scuzz/ide").mkdir(parents=True, exist_ok=True)
+    (io_ws / ".scuzz/ide/session.json").write_text(json.dumps({"v": 1, "objective": "Write delivery.log audit receipt on authenticated /webhook deliveries"}))
+
+    # Exercise live loopback HTTP sync server (401 unauthorized, 400 malformed, 200 steer) + scuzz ide crank over IO candidates.
+    sync_port = free_port()
+    sync_token = "io-session-token-123456"
+    srv = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(sync_port), "--token", sync_token, str(io_ws)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{sync_port}/v1/ide/sync", timeout=2)
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 401
+                break
+            except urllib.error.URLError:
+                time.sleep(0.05)
+        else:
+            raise AssertionError("io sync server did not start")
+
+        bad_req = urllib.request.Request(
+            f"http://127.0.0.1:{sync_port}/v1/ide/sync",
+            data=b"{bad",
+            headers={"Authorization": f"Bearer {sync_token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(bad_req, timeout=5)
+            raise AssertionError("expected 400 for malformed JSON")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+
+        steer_req = urllib.request.Request(
+            f"http://127.0.0.1:{sync_port}/v1/ide/sync",
+            data=json.dumps({"v": 1, "id": "io-st-1", "kind": "steer", "prompt": "clarify port 8080 HMAC banner"}).encode(),
+            headers={"Authorization": f"Bearer {sync_token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(steer_req, timeout=5) as resp:
+            assert resp.status == 200
+            assert json.loads(resp.read().decode())["results"][0]["status"] == "queued"
+    finally:
+        srv.terminate()
+        try:
+            srv.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            srv.kill()
+            srv.wait()
+
+    # Populate broken IO candidate (breaks HMAC signature claim) + valid IO candidate for scuzz ide crank.
+    bad_io = io_ws / "build/proposals/01-broken-hmac/src"
+    bad_io.mkdir(parents=True, exist_ok=True)
+    (bad_io / "Hook.scuzz").write_text(io_orig.replace("sha256=", "broken=", 1))
+    good_io = io_ws / "build/proposals/02-crank-audit/src"
+    good_io.mkdir(parents=True, exist_ok=True)
+    (good_io / "Hook.scuzz").write_text(io_audit_1)
+
+    crank_io = subprocess.run(
+        [cli, "ide", "crank", "--rounds", "2", "--message-format=json", str(io_ws)],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert crank_io.returncode == 0, (crank_io.stdout, crank_io.stderr)
+    crank_doc = json.loads(crank_io.stdout)
+    assert crank_doc["rejected"] == 1 and crank_doc["published"] == 1, crank_doc
+
+    # Fetch verified IO card over live loopback GET /v1/ide/sync and record abstention ("outside-my-goal") via POST /v1/ide/sync!
+    srv2 = subprocess.Popen(
+        [cli, "ide", "serve", "--port", str(sync_port), "--token", sync_token, str(io_ws)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 10.0
+        feed_io = None
+        while time.monotonic() < deadline:
+            try:
+                get_req = urllib.request.Request(
+                    f"http://127.0.0.1:{sync_port}/v1/ide/sync",
+                    headers={"Authorization": f"Bearer {sync_token}"},
+                )
+                with urllib.request.urlopen(get_req, timeout=5) as resp:
+                    feed_io = json.loads(resp.read().decode())
+                    break
+            except urllib.error.URLError:
+                time.sleep(0.05)
+        assert feed_io and len(feed_io["cards"]) == 1 and feed_io["cards"][0]["proposal"] == "02-crank-audit", feed_io
+        crank_card_id = feed_io["cards"][0]["id"]
+        skip_req = urllib.request.Request(
+            f"http://127.0.0.1:{sync_port}/v1/ide/sync",
+            data=json.dumps({"v": 1, "id": "io-skip-1", "kind": "skip", "card": crank_card_id, "reason": "outside-my-goal"}).encode(),
+            headers={"Authorization": f"Bearer {sync_token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(skip_req, timeout=5) as resp:
+            skip_doc = json.loads(resp.read().decode())
+            assert skip_doc["results"][0]["status"] == "applied", skip_doc
+    finally:
+        srv2.terminate()
+        try:
+            srv2.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            srv2.kill()
+            srv2.wait()
+    shutil.rmtree(io_ws / "build/proposals/01-broken-hmac", ignore_errors=True)
+    shutil.rmtree(io_ws / "build/proposals/02-crank-audit", ignore_errors=True)
+
+    # Open IO workspace in Headless editor: verify fallback allowed paths, local generation, both lanes, and IO rule install + Undo!
+    ed_io = HeadlessEditor(editor_exe, io_ws, [])
+    try:
+        ed_io.goto_section(2, "Session")
+        ed_io.wait_for(lambda: "Session restored in paused state. Select Start to resume." in json.dumps(ed_io.ui()), label="IO restored status")
+        assert "src/Hook.scuzz,src/Main.scuzz" in json.dumps(ed_io.ui()), ed_io.ui()
+
+        ed_io.send([{"op": "tap", "id": "button:Start"}])
+        ed_io.wait_for(
+            lambda: (io_ws / "build/ide/request.json").is_file() and "External proposals: publish a complete directory" in json.dumps(ed_io.ui()),
+            label="IO session started",
+        )
+        ed_io.goto_section(0, "Review")
+
+        # Controlled local inference over loopback HTTP generates 03-local-io, plus 04-final-io in the 2-card queue!
+        io_req = json.loads((io_ws / "build/ide/request.json").read_text())
+        assert io_req.get("allowed") == ["src/Hook.scuzz", "src/Main.scuzz"], io_req
+        assert any(f.get("decision") == "abstain" and f.get("reason") == "outside-my-goal" for f in io_req.get("feedback", [])), io_req["feedback"]
+        gen_io_res, _, _ = run_controlled_local_gen(
+            io_ws,
+            io_ws / "build/ide/request.json",
+            io_ws / "build/proposals/03-local-io",
+            [{"path": "src/Hook.scuzz", "search": io_anchor_line, "replacement": io_audit_2_line}],
+            change="Write delivery.log audit receipt on authenticated deliveries",
+        )
+        assert gen_io_res.returncode == 0 and json.loads(gen_io_res.stdout)["result"] == "published", (gen_io_res.stdout, gen_io_res.stderr)
+        publish_behavior(io_ws, "04-final-io", io_req, [("src/Hook.scuzz", io_audit_3)])
+
+        c_io_2 = ed_io.wait_armed_card("03-local-io")
+        io_base_lane = "Choose left" if c_io_2["flip"] == 0 else "Choose right"
+        lanes_tapped.add(io_base_lane)
+        ed_io.send([{"op": "tap", "id": f"button:{io_base_lane}"}])
+
+        c_io_3 = ed_io.wait_armed_card("04-final-io")
+        io_acc_lane = "Choose left" if c_io_3["flip"] == 1 else "Choose right"
+        lanes_tapped.add(io_acc_lane)
+        ed_io.send([{"op": "tap", "id": f"button:{io_acc_lane}"}])
+        ed_io.wait_for(lambda: (io_ws / "src/Hook.scuzz").read_text() == io_audit_3 and ed_io.signals().get("deckBusy") == 0, label="04-final-io accepted")
+
+        # Guarantee both lane buttons were exercised across the session; if random flips happened to align, decide one more two-lane card on the remaining button!
+        if lanes_tapped != {"Choose left", "Choose right"}:
+            extra_req = json.loads((io_ws / "build/ide/request.json").read_text())
+            publish_behavior(io_ws, "05-lane-check", extra_req, [("src/Hook.scuzz", io_audit_2)])
+            c_extra = ed_io.wait_armed_card("05-lane-check")
+            missing_btn = next(iter({"Choose left", "Choose right"} - lanes_tapped))
+            lanes_tapped.add(missing_btn)
+            ed_io.send([{"op": "tap", "id": f"button:{missing_btn}"}])
+            ed_io.wait_for(lambda: ed_io.signals().get("deckBusy") == 0, label="extra lane settled")
+            if (io_ws / "src/Hook.scuzz").read_text() == io_audit_2:
+                ed_io.send([{"op": "tap", "id": "outlined:Undo"}])
+                ed_io.wait_for(lambda: (io_ws / "src/Hook.scuzz").read_text() == io_audit_3, label="restore io_audit_3")
+        assert lanes_tapped == {"Choose left", "Choose right"}, lanes_tapped
+
+        # Suggest, verify, install, and Undo a delivery.scuzz_verify IO rule, confirming rule Undo stays out of behavior Undo count!
+        ed_io.send([{"op": "tap", "id": "outlined:Suggest rule"}])
+        ed_io.wait_for(lambda: (io_ws / "build/ide/rule-request.json").is_file(), label="IO rule-request.json")
+        io_rule_req = json.loads((io_ws / "build/ide/rule-request.json").read_text())
+        io_rule_src = (
+            io_ver_orig
+            + '\ndef deliveryWritesAuditLog(t: Timeline): Verdict =\n'
+            + '  Verdict.every(t, i => !Timeline.driveHas(t, i, "delivery") || Timeline.fileTextIs(t, i, "delivery.log", "accepted:hmac-verified") || faulted(t, i))\n'
+        )
+        publish_rule(io_ws, "01-io-rule", io_rule_req, "delivery.scuzz_verify", io_rule_src)
+        ed_io.send([{"op": "tap", "id": "outlined:Import rule draft"}])
+        ed_io.wait_for(lambda: ed_io.signals().get("ruleVerified") == 1, label="IO rule verified", timeout=120.0)
+        ed_io.send([{"op": "tap", "id": "button:Install rule"}])
+        ed_io.wait_for(lambda: "deliveryWritesAuditLog" in (io_ws / "delivery.scuzz_verify").read_text(), label="IO rule installed")
+
+        # Undo the installed rule from Rule review and check that delivery.scuzz_verify reverts AND behavior Undo is not inflated!
+        ed_io.send([{"op": "tap", "id": "outlined:Undo"}])
+        ed_io.wait_for(lambda: (io_ws / "delivery.scuzz_verify").read_text() == io_ver_orig, label="IO rule undone")
+        ed_io.goto_section(2, "Session")
+        ed_io.send([{"op": "tap", "id": "outlined:Refresh summary"}])
+        ed_io.wait_for(lambda: "Rule reviews: installed 1 (active 0, undone 1); rejected 0" in json.dumps(ed_io.ui()), label="IO summary after rule Undo")
+        io_sum_blob = json.dumps(ed_io.ui())
+        assert "outside-my-goal: 1" in io_sum_blob, io_sum_blob
+        assert "04-final-io" in io_sum_blob and ": retained " in io_sum_blob, io_sum_blob
+    finally:
+        ed_io.close()
+
+    # Verify accepted IO workspace still passes scuzz fuzz --iterations 0!
+    io_check = subprocess.run([cli, "fuzz", "--iterations", "0", str(io_ws)], capture_output=True, text=True, timeout=180)
+    assert io_check.returncode == 0, (io_check.stdout, io_check.stderr)
+
+    # Verify external-edit journal conflict preserves external edits on restart recovery!
+    conflict_card = "e" * 64
+    (io_ws / "src/Hook.scuzz").write_text(io_audit_3 + "\n// external author note\n")
+    (io_ws / ".scuzz/ide/journal.json").write_text(json.dumps({
+        "operation": f"accept-{conflict_card}",
+        "card": conflict_card,
+        "decision": "accept",
+        "writes": [{
+            "path": "src/Hook.scuzz",
+            "before": io_orig,
+            "before_exists": True,
+            "after": io_audit_1,
+            "after_exists": True,
+        }],
+    }))
+    ed_conf = HeadlessEditor(editor_exe, io_ws, [{"op": "tap", "id": "choicechip:More evidence"}])
+    try:
+        ed_conf.wait_for(lambda: "recovery conflict: preserve external edits" in json.dumps(ed_conf.signals().get("deltaStatus", [])) and "recovery conflict: preserve external edits" in json.dumps(ed_conf.ui()), label="recovery conflict preserved")
+        assert "// external author note" in (io_ws / "src/Hook.scuzz").read_text()
+    finally:
+        ed_conf.close()
+PY_IDE_COMPLETE_SESSION
+
 fuzz_api_report() {
   local dir="examples/api-report" iterations=320 name="api-report"
   rm -f "$dir/.scuzz/mutate.results"

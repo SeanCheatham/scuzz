@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "2"
+events = ["resize 1280 900", "tap choicechip:More evidence", "tap outlined:Proposals", "pump 200", "tap choicechip:Need another scenario", "tap outlined:Can't decide", "pump 80", "tap button:Choose left", "pump 80", "tap button:Choose right", "pump 80", "tap outlined:Retain region", "tap outlined:All regions", "tap outlined:Suggest rule", "pump 80", "tap outlined:Import rule draft", "tap choicechip:Rule review", "tap outlined:Undo", "pump 80", "tap choicechip:Session", "tap button:Export request", "tap outlined:Refresh summary"]

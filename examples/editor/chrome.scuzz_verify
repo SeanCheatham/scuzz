@@ -309,7 +309,7 @@ def postResultExposesRegionFocus(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 0 || Timeline.signalInt(t, i, "evidenceDetails") != 0 || Timeline.signalStrHas(t, i, "deckLast", "") && !Timeline.a11yHas(t, i, "text:accepted ") && !Timeline.a11yHas(t, i, "text:baseline chosen ") && !Timeline.a11yHas(t, i, "text:abstained") || Timeline.a11yHas(t, i, "outlined:Retain region") && Timeline.a11yHas(t, i, "outlined:All regions"))
 
 def sessionDisplaysConservativeSummary(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 2 || Timeline.a11yHas(t, i, "text:Session summary") && Timeline.a11yHas(t, i, "text:Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior.") && Timeline.a11yHas(t, i, "outlined:Refresh summary"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 2 || Timeline.a11yHas(t, i, "text:Session summary") && Timeline.a11yHas(t, i, "text:Conservative source measure: counts non-undone acceptances whose touched files match accepted SHA-256 bytes. Does not prove preserved behavior.") && Timeline.a11yHas(t, i, "text:Rule reviews: installed ") && Timeline.a11yHas(t, i, "outlined:Refresh summary"))
 
 def choiceFeedbackContract(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.driveHas(t, i, "choiceFeedbackFlow") || Timeline.signalInt(t, i, "choiceFeedbackBound") == 1)
@@ -402,4 +402,42 @@ oracle behaviorAndRuleOperationsStaySeparated(beforeExists: Bool): Bool =
     goodInstall = Json.Obj([("operation", Json.Str(Str.concat("install-rule-", cid))), ("card", Json.Str(cid)), ("decision", Json.Str("install-rule")), ("writes", Json.Arr([verifyWrite]))])
     undoInstall = Cards.undoOperation(goodInstall, 30)
   } yield !Cards.validOperation(badAccept) && !Cards.validOperation(badInstall) && Cards.validOperation(goodInstall) && Cards.validAccepted(goodInstall) && Cards.validOperation(undoInstall)
+
+oracle ruleRecordsStayOutOfBehaviorCounts(ruleUndone: Bool, ruleRejected: Bool, behaviorUndone: Bool): Bool =
+  for {
+    behId = Hash.sha256("beh-card")
+    ruleId = Hash.sha256("rule-card")
+    rejId = Hash.sha256("rej-rule-card")
+    acceptedBody = """@main def main: IO[Unit] = IO.println(2)
+"""
+    diskBody = if (behaviorUndone) """@main def main: IO[Unit] = IO.println(1)
+""" else acceptedBody
+    abstainRec = Json.Obj([("operation", Json.Str("abstain-c0")), ("card", Json.Str("c0")), ("proposal", Json.Str("p0")), ("decision", Json.Str("abstain")), ("reason", Json.Str("need-another-scenario")), ("readiness_ms", Json.Int(20)), ("review_ms", Json.Int(100)), ("time", Json.Int(10)), ("writes", Json.Arr([]))])
+    baseRec = Json.Obj([("operation", Json.Str("baseline-c1")), ("card", Json.Str("c1")), ("proposal", Json.Str("p1")), ("decision", Json.Str("baseline")), ("readiness_ms", Json.Int(30)), ("review_ms", Json.Int(200)), ("time", Json.Int(20)), ("writes", Json.Arr([]))])
+    accRec = Json.Obj([("operation", Json.Str(Str.concat("accept-", behId))), ("card", Json.Str(behId)), ("proposal", Json.Str("p2")), ("decision", Json.Str("accept")), ("readiness_ms", Json.Int(40)), ("review_ms", Json.Int(300)), ("time", Json.Int(30)), ("writes", Json.Arr([Json.Obj([("path", Json.Str("src/Main.scuzz")), ("before", Json.Str("""@main def main: IO[Unit] = IO.println(1)
+""")), ("before_exists", Json.Bool(true)), ("after", Json.Str(acceptedBody)), ("after_exists", Json.Bool(true))])]))])
+    ruleWrite = Json.Obj([("path", Json.Str("rules.scuzz_verify")), ("before", Json.Str("")), ("before_exists", Json.Bool(false)), ("after", Json.Str("def keep(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n")), ("after_exists", Json.Bool(true))])
+    installRec = Json.Obj([("operation", Json.Str(Str.concat("install-rule-", ruleId))), ("card", Json.Str(ruleId)), ("kind", Json.Str("rule")), ("proposal", Json.Str("r1")), ("decision", Json.Str("install-rule")), ("time", Json.Int(40)), ("writes", Json.Arr([ruleWrite]))])
+    rejectRec = Json.Obj([("operation", Json.Str(Str.concat("reject-rule-", rejId))), ("card", Json.Str(rejId)), ("kind", Json.Str("rule")), ("proposal", Json.Str("r2")), ("decision", Json.Str("reject-rule")), ("time", Json.Int(50)), ("writes", Json.Arr([]))])
+    baseRecords = [abstainRec, baseRec, accRec, installRec]
+    withRuleUndo = if (ruleUndone) List.concat(baseRecords, [Cards.undoOperation(installRec, 45)]) else baseRecords
+    withRuleRej = if (ruleRejected) List.concat(withRuleUndo, [rejectRec]) else withRuleUndo
+    records = if (behaviorUndone) List.concat(withRuleRej, [Cards.undoOperation(accRec, 60)]) else withRuleRej
+    summary = Cards.summarizeRecords([("src/Main.scuzz", diskBody)], records)
+    lines = Cards.summaryLines(summary)
+    expectedBehUndo = if (behaviorUndone) 1 else 0
+    expectedRuleActive = if (ruleUndone) 0 else 1
+    expectedRuleUndo = if (ruleUndone) 1 else 0
+    expectedRuleRej = if (ruleRejected) 1 else 0
+  } yield Json.getInt(summary, "accepted", -1) == 1 && Json.getInt(summary, "retained_acceptances", -1) == (if (behaviorUndone) 0 else 1) && Json.getInt(summary, "baseline_choices", -1) == 1 && Json.getInt(summary, "abstentions", -1) == 1 && Json.getInt(summary, "undo", -1) == expectedBehUndo && Json.getInt(summary, "rules_installed", -1) == 1 && Json.getInt(summary, "rules_active", -1) == expectedRuleActive && Json.getInt(summary, "rules_undone", -1) == expectedRuleUndo && Json.getInt(summary, "rules_rejected", -1) == expectedRuleRej && List.contains(lines, Str.concat("Baseline choices: 1; Undo: ", Str.fromInt(expectedBehUndo))) && List.contains(lines, Str.concat("Rule reviews: installed 1 (active ", Str.concat(Str.fromInt(expectedRuleActive), Str.concat(", undone ", Str.concat(Str.fromInt(expectedRuleUndo), Str.concat("); rejected ", Str.fromInt(expectedRuleRej)))))))
+
+oracle restoredSessionInitFallsBackCleanly(hasObjective: Bool, hasAllowed: Bool): Bool =
+  for {
+    files = [("src/Main.scuzz", "a"), ("src/Other.scuzz", "b")]
+    saved = Json.Obj([("v", Json.Int(1)), ("objective", Json.Str(if (hasObjective) "Refine Counter" else "   ")), ("allowed", Json.Arr(if (hasAllowed) [Json.Str(" src/Other.scuzz "), Json.Str("")] else []))])
+    init = Session.restoredInit(saved, files)
+    emptyInit = Session.restoredInit(Json.Obj([]), files)
+    expectedPaths = if (hasAllowed) "src/Other.scuzz" else "src/Main.scuzz,src/Other.scuzz"
+    expectedStatus = if (hasObjective) "Session restored in paused state. Select Start to resume." else "Set an objective, then select Start."
+  } yield init._2 == expectedPaths && init._3 == expectedStatus && emptyInit._1 == "" && emptyInit._2 == "src/Main.scuzz,src/Other.scuzz" && emptyInit._3 == "Set an objective, then select Start."
 
