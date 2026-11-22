@@ -82,3 +82,6 @@ oracle recordCopyTypes(): Bool =
 oracle enumCaseNames(): Bool =
   Main.enumCaseNames()
 
+oracle unclaimedSpans(): Bool =
+  Main.unclaimedSpans()
+
