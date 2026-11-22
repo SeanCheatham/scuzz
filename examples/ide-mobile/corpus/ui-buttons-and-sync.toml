@@ -6,6 +6,7 @@ events = [
   "tap textbutton:Skip",
   "tap button:Queue steer",
   "tap textbutton:Dismiss alert",
+  "tap button:Queue steer",
   "type 0 keep cards compact",
   "tap button:Queue steer",
   "tap button:Sync",

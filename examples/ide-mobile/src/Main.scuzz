@@ -33,14 +33,17 @@ private def commitSwipe(dir: String, store: Signal[String], swipe: Signal[Int]):
   } yield ()
 
 private def submitSteer(dir: String, store: Signal[String], steerInput: Signal[String]): IO[Unit] =
-  Deck.queueSteer(Sync.readCell(store), Signal.get(steerInput)) match {
-    case Result.Err(msg) => IO.pure(Sync.writeCell(store, Sync.readCell(store).copy(syncStatus = msg, alert = msg)))
-    case Result.Ok(next) => for {
+  for {
+    cur = Sync.readCell(store)
+    _ <- Deck.queueSteer(cur, Signal.get(steerInput)) match {
+  case Result.Err(msg) => IO.pure(Sync.writeCell(store, cur.copy(syncStatus = msg, alert = msg)))
+  case Result.Ok(next) => for {
   _ = Signal.set(steerInput, "")
   _ = Sync.writeCell(store, next)
   _ <- Sync.persist(dir, store)
 } yield ()
-  }
+}
+  } yield ()
 
 private def openPairing(store: Signal[String], hostInput: Signal[String], portInput: Signal[String], tokenInput: Signal[String], pairErr: Signal[String], pairOpen: Signal[Int]): Unit =
   for {
