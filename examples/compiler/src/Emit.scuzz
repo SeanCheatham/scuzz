@@ -357,7 +357,19 @@ def emitStuck(): Slot =
   emitStuck()
 
 def emitFloatBits(s: String, prefix: String): Slot =
-  Slot(line(Str.concat(tmp(prefix, "fb"), Str.concat("bitcast double ", Str.concat(s, " to i64")))), pct(prefix, "fb"), false)
+  Slot(line(Str.concat(tmp(prefix, "fb"), Str.concat("bitcast double ", Str.concat(llvmFloat(s), " to i64")))), pct(prefix, "fb"), false)
+
+def llvmFloat(s: String): String =
+  llvmFloatClean(Str.replace(s, "_", ""))
+
+def llvmFloatClean(s: String): String =
+  if (Str.contains(s, ".")) s else llvmFloatExp(s, llvmExpAt(s, 0))
+
+def llvmExpAt(s: String, i: Int): Int =
+  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 101 || Str.charAt(s, i) == 69) i else llvmExpAt(s, i + 1)
+
+def llvmFloatExp(s: String, e: Int): String =
+  if (e < 0) Str.concat(s, ".0") else Str.concat(Str.slice(s, 0, e), Str.concat(".0", Str.slice(s, e, Str.len(s))))
 
 def emitVar(s: String, prefix: String, ens: List[En], ps: List[Param], strs: Strs, defs: Ftab, loc: String): Slot =
   if (s == ".closure.value" || hasParam(ps, s)) Slot("", Str.concat("%", s), s == ".closure.value" && paramTy(ps, s) == "") else emitFunOrCtor(s, prefix, ens, ps, strs, defs, loc, findDefPrefer(defs, s, modOfLoc(loc)))
@@ -701,8 +713,11 @@ def emitBin2L(le: Slot, re: Slot, op: String, prefix: String): Slot =
 
 def emitBin2R(lc: String, lv: String, re: Slot, op: String, prefix: String): Slot =
   re match {
-    case Slot(rc, rv, _) => Slot(join(lc, join(rc, line(Str.concat(tmp(prefix, "v"), intBinCode(op, lv, rv))))), pct(prefix, "v"), false)
+    case Slot(rc, rv, _) => Slot(join(lc, join(rc, emitIntBin(op, lv, rv, prefix))), pct(prefix, "v"), false)
   }
+
+def emitIntBin(op: String, left: String, right: String, prefix: String): String =
+  if (op == "<<" || op == ">>") join(line(Str.concat(tmp(prefix, "sh"), Str.concat("and i64 ", Str.concat(right, ", 63")))), line(Str.concat(tmp(prefix, "v"), intBinCode(op, left, pct(prefix, "sh"))))) else line(Str.concat(tmp(prefix, "v"), intBinCode(op, left, right)))
 
 def intBinCode(op: String, left: String, right: String): String =
   if (op == "/" || op == "%") cat6("call i64 @", if (op == "/") "sz_int_div" else "sz_int_rem", "(i64 ", left, ", i64 ", join(right, ")")) else cat6(llvmBin(op), " i64 ", left, ", ", right, "")
@@ -901,7 +916,7 @@ def hasSub(s: String, sub: String): Bool =
   Str.contains(s, sub)
 
 def callIsI64(f: String, defs: Ftab): Bool =
-  f == "Net.retryAfterMillis" || f == "Str.byteLen" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || Str.startsWith(f, "Icon.") || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.boolOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
+  f == "Net.retryAfterMillis" || f == "Str.byteLen" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || Str.startsWith(f, "Icon.") || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Float.toInt" || f == "Float.fromInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.boolOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
 
 def isTlI64Call(f: String): Bool =
   f == "Timeline.len" || f == "Timeline.exists" || f == "Timeline.signalInt" || f == "Timeline.signalListLen" || (f == "Timeline.signalStrHas" || f == "Timeline.fileTextIs" || f == "Timeline.fileSame") || tlHasRt(f) != "" || tlI64Rt(f) != ""
@@ -1635,7 +1650,7 @@ def phCallInt(f: String, args: List[Expr]): Bool =
   if (hasPhArg(args)) phFunArgInt(f) else phUsedAsIntArgs(args)
 
 def phFunArgInt(f: String): Bool =
-  f == "fromInt" || f == "Str.fromInt" || f == "Float.fromInt"
+  f == "fromInt" || f == "Str.fromInt" || f == "Float.fromInt" || f == "Float.toInt"
 
 def hasPhArg(xs: List[Expr]): Bool =
   !List.isEmpty(xs) && (isPhExpr(List.at(xs, 0)) || hasPhArg(List.tail(xs)))
@@ -2350,7 +2365,7 @@ def emitFloatToInt2(code: String, v: String, o: Bool, prefix: String, ps: List[P
   if (fromIntUnbox(v, ps)) Slot(join(code, join(line(Str.concat(tmp(prefix, "fu"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(v, ")")))), join(floatToIntBits(pct(prefix, "fu"), prefix), if (o) relPtr(v) else ""))), pct(prefix, "v"), false) else Slot(join(code, floatToIntBits(v, prefix)), pct(prefix, "v"), false)
 
 def floatToIntBits(v: String, prefix: String): String =
-  join(line(Str.concat(tmp(prefix, "fd"), Str.concat("bitcast i64 ", Str.concat(v, " to double")))), line(Str.concat(tmp(prefix, "v"), Str.concat("fptosi double ", Str.concat(pct(prefix, "fd"), " to i64")))))
+  join(line(Str.concat(tmp(prefix, "fd"), Str.concat("bitcast i64 ", Str.concat(v, " to double")))), line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @llvm.fptosi.sat.i64.f64(double ", Str.concat(pct(prefix, "fd"), ")")))))
 
 def emitFloatFromInt(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "ff"), Str.concat("sitofp i64 ", Str.concat(arg0(vals), " to double")))), line(Str.concat(tmp(prefix, "v"), Str.concat("bitcast double ", Str.concat(pct(prefix, "ff"), " to i64")))))), pct(prefix, "v"), false)
@@ -6722,7 +6737,7 @@ def preamble(): String =
   Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), join(signalDecls(), join(floatDecls(), join(decl("ptr @sz_error_value(ptr)"), join(decl("ptr @sz_io_handle_value(ptr, ptr, ptr)"), decls())))))))
 
 def floatDecls(): String =
-  join(decl("ptr @sz_box_float_bits(i64)"), join(decl("ptr @sz_list_sort_float(ptr)"), join(decl("ptr @sz_list_max_float(ptr)"), decl("ptr @sz_list_min_float(ptr)"))))
+  join(decl("ptr @sz_box_float_bits(i64)"), join(decl("ptr @sz_list_sort_float(ptr)"), join(decl("ptr @sz_list_max_float(ptr)"), join(decl("ptr @sz_list_min_float(ptr)"), decl("i64 @llvm.fptosi.sat.i64.f64(double)")))))
 
 def decls(): String =
   join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), join(declsV(), join(declsW(), join(declsX(), join(declsShow(), nl())))))))))))))))))))))))))

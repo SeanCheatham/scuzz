@@ -692,7 +692,7 @@ def wantLam(): String =
   "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:5:3\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:5\\00\", align 1\n\ndefine internal ptr @sz_neth_Main_plusOne_body(ptr %.closure.value, ptr %.closure.env) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %n = call i64 @sz_unbox_i64(ptr %.closure.value)\n  %nbody_v = add i64 %n, 1\n  %body_nr = call ptr @sz_box_i64(i64 %nbody_v)\n  call void @sz_panic_pop_src()\n  ret ptr %body_nr\n}\ndefine internal ptr @sz_user_Main_plusOne() {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %body_cl0 = call ptr @sz_list_nil()\n  %body_cl1 = call ptr @sz_list_cons(ptr null, ptr %body_cl0)\n  call void @sz_release(ptr %body_cl0)\n  %body_cl2 = call ptr @sz_list_cons(ptr @sz_neth_Main_plusOne_body, ptr %body_cl1)\n  call void @sz_release(ptr %body_cl1)\n  call void @sz_panic_pop_src()\n  ret ptr %body_cl2\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_fn_v = call ptr @sz_user_Main_plusOne()\n  %build_e_arg0_fnp = call ptr @sz_list_head(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_fnt = call ptr @sz_list_tail(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_envp = call ptr @sz_list_head(ptr %build_e_arg0_fnt)\n  %build_e_arg0_ab = call ptr @sz_box_i64(i64 5)\n  %build_e_arg0_v = call ptr %build_e_arg0_fnp(ptr %build_e_arg0_ab, ptr %build_e_arg0_envp)\n  call void @sz_release(ptr %build_e_arg0_ab)\n  call void @sz_release(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_u = call i64 @sz_unbox_i64(ptr %build_e_arg0_v)\n  call void @sz_release(ptr %build_e_arg0_v)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_u)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def allOk(): Bool =
-  Str.contains(Emit.preamble(), "declare i32 @sz_adt_tag(ptr) readonly") && irBoundCallback() && okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irChecked(srcLam()) && contInCtor() && fmParamBorrowed() && hoistChunkOk()
+  Str.contains(Emit.preamble(), "declare i32 @sz_adt_tag(ptr) readonly") && Str.contains(Emit.preamble(), "declare i64 @llvm.fptosi.sat.i64.f64(double)") && irShiftAndFloatSat() && irBoundCallback() && okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irChecked(srcLam()) && contInCtor() && fmParamBorrowed() && hoistChunkOk()
 
 def hoistChunkOk(): Bool =
   for {
@@ -703,7 +703,7 @@ tail""")
   } yield Emit.hoistNeth(marked) == Str.concat("body", Str.concat(prefix, "tail"))
 
 def dumpAll(): String =
-  if (!irBoundCallback()) "irBoundCallback" else if (!okHi()) "okHi" else if (!okIf()) "okIf" else if (!okCmp()) "okCmp" else if (!okList()) "okList" else if (!okOpt()) dumpOpt() else if (!okKw()) "okKw" else if (!okPair()) "okPair" else if (!okMod()) "okMod" else if (!okPtr()) dumpPtr() else if (!okFs()) "okFs" else if (!irDiff(srcLam(), wantLam()) || !irChecked(srcLam())) "okLam" else if (!contInCtor()) "contInCtor" else if (!fmParamBorrowed()) "fmParamBorrowed" else if (!hoistChunkOk()) "hoistChunkOk" else "other"
+  if (!irShiftAndFloatSat()) "irShiftAndFloatSat" else if (!irBoundCallback()) "irBoundCallback" else if (!okHi()) "okHi" else if (!okIf()) "okIf" else if (!okCmp()) "okCmp" else if (!okList()) "okList" else if (!okOpt()) dumpOpt() else if (!okKw()) "okKw" else if (!okPair()) "okPair" else if (!okMod()) "okMod" else if (!okPtr()) dumpPtr() else if (!okFs()) "okFs" else if (!irDiff(srcLam(), wantLam()) || !irChecked(srcLam())) "okLam" else if (!contInCtor()) "contInCtor" else if (!fmParamBorrowed()) "fmParamBorrowed" else if (!hoistChunkOk()) "hoistChunkOk" else "other"
 
 def dumpPtr(): String =
   if (!irDiff(srcIfPtr(), wantIfPtr()) || !irChecked(srcIfPtr())) "srcIfPtr" else if (!irDiff(srcTCons(), wantTCons()) || !irChecked(srcTCons())) "srcTCons" else if (!irDiff(srcTupPtr(), wantTupPtr()) || !irChecked(srcTupPtr())) "srcTupPtr" else if (!irDiff(srcT3(), wantT3()) || !irChecked(srcT3())) "srcT3" else if (!irDiff(srcIfTup(), wantIfTup()) || !irChecked(srcIfTup())) "srcIfTup" else if (!irDiff(srcNestTup(), wantNestTup()) || !irChecked(srcNestTup())) "srcNestTup" else "okPtr-other"
@@ -889,10 +889,10 @@ def evLive(): Bool =
   evExcluded() && Check.check(srcLive()) == "[]" && evCall(srcLive(), "reads", []) == "17" && evCall(srcLive(), "arm", []) == "<io>" && evCall(srcLive(), "reg", []) == "<io>" && evCall(srcLive(), "watch", []) == "<io>" && evCall(srcLive(), "rel", []) == "<io>" && evCall(srcLive(), "go", []) == "<io>"
 
 def evAllOk(): Bool =
-  evAdd() && evTco() && evTcoMatch() && evHeapTail() && evGenerated(0) && evGenerated(13) && evMatch() && evQualified() && evLookup() && evConstructors() && evAllModules() && evMapModel(0) && evMapModel(1) && evMapModel(2) && evKitsCovered() && evLive()
+  evAdd() && evTco() && evTcoMatch() && evHeapTail() && evGenerated(0) && evGenerated(13) && evMatch() && evQualified() && evLookup() && evConstructors() && evAllModules() && evMapModel(0) && evMapModel(1) && evMapModel(2) && evKitsCovered() && evLive() && shiftBoundaryParity() && floatToIntBoundaryParity() && floatLitParity()
 
 def evDump(): String =
-  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evHeapTail()) "evHeapTail" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon(Resolve.identity("Main", "Shape"), "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon(Resolve.identity("Main", "Pt"), Resolve.identity("Main", "Pt"), [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evQualified()) "evQualified" else if (!evLookup()) "evLookup" else if (!evConstructors()) "evConstructors" else if (!evAllModules()) "evAllModules" else if (!evMapModel(0) || !evMapModel(1) || !evMapModel(2)) "evMapModel" else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
+  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evHeapTail()) "evHeapTail" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon(Resolve.identity("Main", "Shape"), "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon(Resolve.identity("Main", "Pt"), Resolve.identity("Main", "Pt"), [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evQualified()) "evQualified" else if (!evLookup()) "evLookup" else if (!evConstructors()) "evConstructors" else if (!evAllModules()) "evAllModules" else if (!evMapModel(0) || !evMapModel(1) || !evMapModel(2)) "evMapModel" else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else if (!shiftBoundaryParity()) "shiftBoundaryParity" else if (!floatToIntBoundaryParity()) "floatToIntBoundaryParity" else if (!floatLitParity()) "floatLitParity" else "ev-other"
 
 def evLiveDump(): String =
   if (!evExcluded()) "evExcluded" else if (Check.check(srcLive()) != "[]") Check.check(srcLive()) else if (evCall(srcLive(), "reads", []) != "17") evCall(srcLive(), "reads", []) else if (evCall(srcLive(), "arm", []) != "<io>") "arm" else if (evCall(srcLive(), "reg", []) != "<io>") "reg" else if (evCall(srcLive(), "watch", []) != "<io>") "watch" else if (evCall(srcLive(), "rel", []) != "<io>") "rel" else "go"
@@ -1110,6 +1110,100 @@ def httpTuplePayload(): IO[Unit] =
   case Result.Err(e) => IO.fail(e)
 }
   } yield ()
+
+def srcShift(): String =
+  """def shifts(a: Int, b: Int): Int =
+  (a << b) + (a >> b)
+"""
+
+def wantShift(): String =
+  "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:1\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:5\\00\", align 1\n\ndefine internal i64 @sz_user_Main_shifts(i64 %a, i64 %b) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %body_l_sh = and i64 %b, 63\n  %body_l_v = shl i64 %a, %body_l_sh\n  %body_r_sh = and i64 %b, 63\n  %body_r_v = ashr i64 %a, %body_r_sh\n  %body_v = add i64 %body_l_v, %body_r_v\n  call void @sz_panic_pop_src()\n  ret i64 %body_v\n}\n\n"
+
+def srcFloatSat(): String =
+  """def sat(x: Float): Int =
+  Float.toInt(x) + Float.toInt(1e30) + Float.toInt(1_000.5)
+"""
+
+def wantFloatSat(): String =
+  "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:1\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:5\\00\", align 1\n\ndefine internal i64 @sz_user_Main_sat(i64 %x) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %body_l_l_fd = bitcast i64 %x to double\n  %body_l_l_v = call i64 @llvm.fptosi.sat.i64.f64(double %body_l_l_fd)\n  %body_l_r_arg0_fb = bitcast double 1.0e30 to i64\n  %body_l_r_fd = bitcast i64 %body_l_r_arg0_fb to double\n  %body_l_r_v = call i64 @llvm.fptosi.sat.i64.f64(double %body_l_r_fd)\n  %body_l_v = add i64 %body_l_l_v, %body_l_r_v\n  %body_r_arg0_fb = bitcast double 1000.5 to i64\n  %body_r_fd = bitcast i64 %body_r_arg0_fb to double\n  %body_r_v = call i64 @llvm.fptosi.sat.i64.f64(double %body_r_fd)\n  %body_v = add i64 %body_l_v, %body_r_v\n  call void @sz_panic_pop_src()\n  ret i64 %body_v\n}\n\n"
+
+def irShiftAndFloatSat(): Bool =
+  Str.contains(Emit.preamble(), "declare i64 @llvm.fptosi.sat.i64.f64(double)") && irDiff(srcShift(), wantShift()) && irChecked(srcShift()) && irDiff(srcFloatSat(), wantFloatSat()) && irChecked(srcFloatSat()) && !Str.contains(Emit.emitFull(srcFloatSat()), "fptosi double")
+
+private def srcShiftCases(): String =
+  """def pair(a: Int, b: Int): (Int, Int) =
+  (a << b, a >> b)
+
+def consts(): List[Int] =
+  [1 << -1, 1 << 0, 1 << 63, 1 << 64, 1 << 65, 5 << -9223372036854775808, 5 << 9223372036854775807, -9223372036854775808 >> -1, -9223372036854775808 >> 0, -9223372036854775808 >> 63, -9223372036854775808 >> 64, 9223372036854775807 >> -1, 9223372036854775807 >> 0, 9223372036854775807 >> 63, 9223372036854775807 >> 64, -1 >> 64]
+"""
+
+private def nativeShiftConsts(): List[Int] =
+  [1 << -1, 1 << 0, 1 << 63, 1 << 64, 1 << 65, 5 << -9223372036854775808, 5 << 9223372036854775807, -9223372036854775808 >> -1, -9223372036854775808 >> 0, -9223372036854775808 >> 63, -9223372036854775808 >> 64, 9223372036854775807 >> -1, 9223372036854775807 >> 0, 9223372036854775807 >> 63, 9223372036854775807 >> 64, -1 >> 64]
+
+private def wantShiftConsts(): List[Int] =
+  [-9223372036854775808, 1, -9223372036854775808, 1, 2, 5, -9223372036854775808, -1, -9223372036854775808, -1, -9223372036854775808, 0, 9223372036854775807, 0, 9223372036854775807, -1]
+
+def shiftBoundaryParity(): Bool =
+  for {
+    p = evProg(srcShiftCases())
+    vals = [0, 1, -1, 5, -9223372036854775808, 9223372036854775807]
+    counts = [-9223372036854775808, -65, -64, -1, 0, 1, 62, 63, 64, 65, 127, 9223372036854775807]
+    wantStr = Str.concat("[", Str.concat(List.join(List.map(wantShiftConsts(), Str.fromInt()), ", "), "]"))
+  } yield Check.check(srcShiftCases()) == "[]" && nativeShiftConsts() == wantShiftConsts() && Eval.show(Eval.callPure(p, "Main", "consts", [])) == wantStr && List.forall(vals, a => List.forall(counts, b => a << b == a << (b & 63) && a >> b == a >> (b & 63) && Eval.show(Eval.callPure(p, "Main", "pair", [Value.VInt(a), Value.VInt(b)])) == s"(${a << b}, ${a >> b})"))
+
+def shiftGeneratedParity(a: Int, b: Int): Bool =
+  a << b == a << (b & 63) && a >> b == a >> (b & 63) && evCall(srcShiftCases(), "pair", [Value.VInt(a), Value.VInt(b)]) == s"(${a << b}, ${a >> b})"
+
+private def srcFloatToIntCases(): String =
+  """def bounds(z: Float): List[Int] =
+  [Float.toInt(z / z), Float.toInt(1.0 / z), Float.toInt((0.0 - 1.0) / z), Float.toInt(1e30), Float.toInt(0.0 - 1e30), Float.toInt(9223372036854775808.0), Float.toInt(0.0 - 9223372036854775808.0), Float.toInt(0.0 - 9223372036854779904.0), Float.toInt(0.0 - 42.9), Float.toInt(0.0 - 0.9), Float.toInt(0.0 - z), Float.toInt(z), Float.toInt(0.9), Float.toInt(42.9)]
+
+def mapped(z: Float): List[Int] =
+  List.map([z / z, 1.0 / z, (0.0 - 1.0) / z, 1e30, 0.0 - 1e30, 0.0 - 3.9, 3.9], Float.toInt)
+
+def generated(n: Int): (Int, Int, Int) =
+  (Float.toInt(Float.fromInt(n)), Float.toInt(Float.fromInt(n) + 0.75), Float.toInt(Float.fromInt(n) * 1e20))
+"""
+
+private def nativeFloatToIntBounds(z: Float): List[Int] =
+  [Float.toInt(z / z), Float.toInt(1.0 / z), Float.toInt((0.0 - 1.0) / z), Float.toInt(1e30), Float.toInt(0.0 - 1e30), Float.toInt(9223372036854775808.0), Float.toInt(0.0 - 9223372036854775808.0), Float.toInt(0.0 - 9223372036854779904.0), Float.toInt(0.0 - 42.9), Float.toInt(0.0 - 0.9), Float.toInt(0.0 - z), Float.toInt(z), Float.toInt(0.9), Float.toInt(42.9)]
+
+private def wantFloatToIntBounds(): List[Int] =
+  [0, 9223372036854775807, -9223372036854775808, 9223372036854775807, -9223372036854775808, 9223372036854775807, -9223372036854775808, -9223372036854775808, -42, 0, 0, 0, 0, 42]
+
+private def nativeFloatToIntMapped(z: Float): List[Int] =
+  List.map([z / z, 1.0 / z, (0.0 - 1.0) / z, 1e30, 0.0 - 1e30, 0.0 - 3.9, 3.9], Float.toInt())
+
+private def wantFloatToIntMapped(): List[Int] =
+  [0, 9223372036854775807, -9223372036854775808, 9223372036854775807, -9223372036854775808, -3, 3]
+
+def floatToIntBoundaryParity(): Bool =
+  for {
+    p = evProg(srcFloatToIntCases())
+    wantBoundsStr = Str.concat("[", Str.concat(List.join(List.map(wantFloatToIntBounds(), Str.fromInt()), ", "), "]"))
+    wantMappedStr = Str.concat("[", Str.concat(List.join(List.map(wantFloatToIntMapped(), Str.fromInt()), ", "), "]"))
+  } yield Check.check(srcFloatToIntCases()) == "[]" && nativeFloatToIntBounds(0.0) == wantFloatToIntBounds() && nativeFloatToIntMapped(0.0) == wantFloatToIntMapped() && Eval.show(Eval.callPure(p, "Main", "bounds", [Value.VFloat(0.0)])) == wantBoundsStr && Eval.show(Eval.callPure(p, "Main", "mapped", [Value.VFloat(0.0)])) == wantMappedStr
+
+def floatToIntGeneratedParity(n: Int): Bool =
+  for {
+    a = Float.toInt(Float.fromInt(n))
+    b = Float.toInt(Float.fromInt(n) + 0.75)
+    c = Float.toInt(Float.fromInt(n) * 1e20)
+  } yield evCall(srcFloatToIntCases(), "generated", [Value.VInt(n)]) == s"($a, $b, $c)"
+
+private def srcFloatLitCases(): String =
+  "def check(): Bool =\n  for {\n    pi = 3.14159265358979323846\n    e = 2.7182818284590452353602874\n    big = 123456789012345678901234567890.0\n    tiny = 1e-100\n    huge = 1e100\n    over = 1e400\n    under = 1e-400\n    zeroHuge = 0.0e99999999999999999999999\n    sep = 1_000_000.25\n    lead = 003.14159265358979323846\n  } yield pi > 3.14159265358979 && pi < 3.1415926535898 && e > 2.71828182845904 && e < 2.71828182845905 && big > 1e29 && Float.toInt(big) == 9223372036854775807 && tiny > 0.0 && tiny < 1e-99 && tiny * huge == 1.0 && over == 1.0 / 0.0 && under == 0.0 && zeroHuge == 0.0 && sep == 1000000.25 && lead == pi\n\ndef summary(): String =\n  s\"${3.14159265358979323846}:${Float.toInt(3.14159265358979323846 * 1e15)}:${1e-100 * 1e100}:${Float.toInt(1e30)}:${Float.toInt(0.0 - 1e30)}:${1_000.5}\"\n"
+
+private def nativeFloatLitSummary(): String =
+  s"${3.14159265358979323846}:${Float.toInt(3.14159265358979323846 * 1e15)}:${1e-100 * 1e100}:${Float.toInt(1e30)}:${Float.toInt(0.0 - 1e30)}:${1_000.5}"
+
+def floatLitParity(): Bool =
+  for {
+    p = evProg(srcFloatLitCases())
+    longPi = Str.concat("3.14159265358979323846", Str.repeat("0", 140))
+    longZero = Str.concat("0.", Str.concat(Str.repeat("0", 140), "e99999999999999999999999"))
+  } yield Check.check(srcFloatLitCases()) == "[]" && Eval.floatLit("3.14159265358979323846") == 3.14159265358979323846 && Eval.floatLit("2.7182818284590452353602874") == 2.7182818284590452353602874 && Eval.floatLit("1e-100") == 1e-100 && Eval.floatLit("1e100") == 1e100 && Eval.floatLit("1e308") == 1e308 && Eval.floatLit("1e-308") == 1e-308 && Eval.floatLit("1e400") == 1.0 / 0.0 && Eval.floatLit("1e-400") == 0.0 && Eval.floatLit(longPi) == 3.14159265358979323846 && Eval.floatLit(longZero) == 0.0 && Eval.show(Eval.callPure(p, "Main", "check", [])) == "true" && Eval.show(Eval.callPure(p, "Main", "summary", [])) == Str.concat("\"", Str.concat(nativeFloatLitSummary(), "\""))
 
 def tabulatedLabelValues(): IO[Unit] =
   if (List.forall([0, 1, 130], n => for {

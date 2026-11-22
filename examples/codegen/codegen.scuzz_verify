@@ -151,3 +151,24 @@ accessibility 102 setValue -9223372036854775808
 oracle accessibilityTrailingSpace(): Bool =
   Verify.scriptJson(Str.concat("accessibility 0 setText x", " ")) == "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"accessibility\",\"i\":0,\"action\":\"setText\",\"text\":\"x \"}]}"
 
+oracle irShift(): Bool =
+  Main.irDiff(Main.srcShift(), Main.wantShift()) && Main.irChecked(Main.srcShift())
+
+oracle irFloatSat(): Bool =
+  Main.irDiff(Main.srcFloatSat(), Main.wantFloatSat()) && Main.irChecked(Main.srcFloatSat()) && Main.irShiftAndFloatSat()
+
+oracle shiftBoundaryParity(): Bool =
+  Main.shiftBoundaryParity()
+
+oracle shiftGeneratedParity(a: Int, b: Int): Bool =
+  Main.shiftGeneratedParity(a, b)
+
+oracle floatToIntBoundaryParity(): Bool =
+  Main.floatToIntBoundaryParity()
+
+oracle floatToIntGeneratedParity(n: Int): Bool =
+  Main.floatToIntGeneratedParity(n)
+
+oracle floatLitParity(): Bool =
+  Main.floatLitParity()
+
