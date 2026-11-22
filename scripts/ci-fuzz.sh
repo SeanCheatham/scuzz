@@ -2357,6 +2357,13 @@ def fmt_in_pkg(base_dir, rel, body):
     return target.read_text()
 
 
+def read_json(path):
+    try:
+        return json.loads(path.read_text()) if path.is_file() else {}
+    except Exception:
+        return {}
+
+
 def publish_behavior(ws, name, request_doc, files, generator="session-proof", override_base=None):
     stage = ws / "build" / f"{name}.stage"
     dest = ws / "build/proposals" / name
@@ -2712,7 +2719,7 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
             {"op": "tap", "id": "button:Start"},
         ])
         ed.wait_for(
-            lambda: (ui_ws / "build/ide/request.json").is_file() and "External proposals: publish a complete directory" in json.dumps(ed.ui()),
+            lambda: bool(read_json(ui_ws / "build/ide/request.json").get("baseline")) and "External proposals: publish a complete directory" in json.dumps(ed.ui()),
             label="initial UI session started",
         )
         ed.goto_section(0, "Review")
@@ -2840,7 +2847,7 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
         lanes_tapped.add(base_lane)
         ed.send([{"op": "tap", "id": f"button:{base_lane}"}])
         ed.wait_for(
-            lambda: ed.signals().get("deckArmed") == "" and len(json.loads((ui_ws / "build/ide/request.json").read_text()).get("feedback", [])) >= 2,
+            lambda: ed.signals().get("deckArmed") == "" and ed.signals().get("deckBusy") == 0 and len(read_json(ui_ws / "build/ide/request.json").get("feedback", [])) >= 2,
             label="request refreshed with abstain + baseline feedback",
         )
         req_after_prefs = json.loads((ui_ws / "build/ide/request.json").read_text())
@@ -2868,7 +2875,13 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
         reset_prop_lane = "Choose left" if c_reset["flip"] == 1 else "Choose right"
         lanes_tapped.add(reset_prop_lane)
         ed.send([{"op": "tap", "id": f"button:{reset_prop_lane}"}])
-        ed.wait_for(lambda: (ui_ws / "src/Main.scuzz").read_text() == ui_reset_src and ed.signals().get("deckBusy") == 0, label="08-reset accepted")
+        ed.wait_for(
+            lambda: (ui_ws / "src/Main.scuzz").read_text() == ui_reset_src
+            and ed.signals().get("deckBusy") == 0
+            and ed.signals().get("ruleChoiceCard") == c_reset["id"]
+            and read_json(ui_ws / "build/ide/request.json").get("baseline", "") not in ("", req_after_prefs["baseline"]),
+            label="08-reset accepted",
+        )
 
         # Test region focus controls on post-choice reveal.
         ed.wait_for(lambda: "Retain region" in json.dumps(ed.ui()), label="region controls visible")
@@ -2876,26 +2889,39 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
         # Rule suggestion -> untriggered draft rejected -> valid rule draft verified & installed!
         ed.send([{"op": "tap", "id": "outlined:Suggest rule"}])
-        ed.wait_for(lambda: (ui_ws / "build/ide/rule-request.json").is_file(), label="rule-request.json")
+        ed.wait_for(lambda: read_json(ui_ws / "build/ide/rule-request.json").get("kind") == "rule", label="rule-request.json")
         rule_req = json.loads((ui_ws / "build/ide/rule-request.json").read_text())
         assert rule_req["kind"] == "rule" and rule_req["preference"]["decision"] == "accept", rule_req
 
         untriggered_verify = ui_verify_orig + '\ndef untriggeredDraft(t: Timeline): Verdict =\n  Verdict.afterHit(t, "button:NeverExists", "text:Counter")\n'
         publish_rule(ui_ws, "01-bad-rule", rule_req, "count.scuzz_verify", untriggered_verify)
         ed.send([{"op": "tap", "id": "outlined:Import rule draft"}])
-        ed.wait_for(lambda: "untriggered new claim" in ed.signals().get("ruleDiagnostic", ""), label="untriggered rule rejected")
+        ed.wait_for(
+            lambda: "untriggered new claim" in ed.signals().get("ruleDiagnostic", "") and ed.signals().get("deckBusy") == 0,
+            label="untriggered rule rejected",
+        )
         assert ed.signals().get("ruleVerified") == 0 and "button:Install rule" not in json.dumps(ed.ui().get("taps", []))
         ed.send([{"op": "tap", "id": "outlined:Reject rule"}])
-        ed.wait_for(lambda: ed.signals().get("ruleArmed", "") == "", label="01-bad-rule rejected")
+        ed.wait_for(
+            lambda: ed.signals().get("ruleArmed", "") == "" and ed.signals().get("deckBusy") == 0,
+            label="01-bad-rule rejected",
+        )
 
         valid_verify = ui_verify_orig + '\ndef afterPlusKeepsReset(t: Timeline): Verdict =\n  Verdict.afterHit(t, "button:+1", "button:Reset")\n'
         publish_rule(ui_ws, "02-good-rule", rule_req, "count.scuzz_verify", valid_verify)
         ed.send([{"op": "tap", "id": "outlined:Import rule draft"}])
-        ed.wait_for(lambda: ed.signals().get("ruleVerified") == 1, label="valid rule verified")
+        ed.wait_for(
+            lambda: ed.signals().get("ruleVerified") == 1 and ed.signals().get("deckBusy") == 0,
+            label="valid rule verified",
+        )
         assert "Not a universal proof." in json.dumps(ed.ui())
+        req_before_rule = read_json(ui_ws / "build/ide/request.json")
         ed.send([{"op": "tap", "id": "button:Install rule"}])
         ed.wait_for(
-            lambda: "afterPlusKeepsReset" in (ui_ws / "count.scuzz_verify").read_text() and "Installed rule in count.scuzz_verify" in ed.signals().get("ruleStatus", ""),
+            lambda: "afterPlusKeepsReset" in (ui_ws / "count.scuzz_verify").read_text()
+            and "Installed rule in count.scuzz_verify" in ed.signals().get("ruleStatus", "")
+            and ed.signals().get("deckBusy") == 0
+            and read_json(ui_ws / "build/ide/request.json").get("inputs", "") not in ("", req_before_rule.get("inputs", "")),
             label="rule installed on disk",
         )
 
@@ -2970,7 +2996,10 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
             assert (ui_ws / "src/Main.scuzz").read_text() == ui_next_src
             ed_rec.goto_section(0, "Review")
             ed_rec.send([{"op": "tap", "id": "outlined:Undo"}])
-            ed_rec.wait_for(lambda: (ui_ws / "src/Main.scuzz").read_text() == ui_reset_src, label="Undo restored 08-reset")
+            ed_rec.wait_for(
+                lambda: (ui_ws / "src/Main.scuzz").read_text() == ui_reset_src and ed_rec.signals().get("deckBusy") == 0,
+                label="Undo restored 08-reset",
+            )
         ed_rec.goto_section(2, "Session")
         ed_rec.send([{"op": "tap", "id": "outlined:Refresh summary"}])
         ed_rec.wait_for(lambda: "Rule reviews: installed 1 (active 1, undone 0); rejected 1" in json.dumps(ed_rec.ui()), label="UI session summary lines")
@@ -3137,7 +3166,7 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
         ed_io.send([{"op": "tap", "id": "button:Start"}])
         ed_io.wait_for(
-            lambda: (io_ws / "build/ide/request.json").is_file() and "External proposals: publish a complete directory" in json.dumps(ed_io.ui()),
+            lambda: bool(read_json(io_ws / "build/ide/request.json").get("baseline")) and "External proposals: publish a complete directory" in json.dumps(ed_io.ui()),
             label="IO session started",
         )
         ed_io.goto_section(0, "Review")
@@ -3165,7 +3194,13 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
         io_acc_lane = "Choose left" if c_io_3["flip"] == 1 else "Choose right"
         lanes_tapped.add(io_acc_lane)
         ed_io.send([{"op": "tap", "id": f"button:{io_acc_lane}"}])
-        ed_io.wait_for(lambda: (io_ws / "src/Hook.scuzz").read_text() == io_audit_3 and ed_io.signals().get("deckBusy") == 0, label="04-final-io accepted")
+        ed_io.wait_for(
+            lambda: (io_ws / "src/Hook.scuzz").read_text() == io_audit_3
+            and ed_io.signals().get("deckBusy") == 0
+            and ed_io.signals().get("ruleChoiceCard") == c_io_3["id"]
+            and read_json(io_ws / "build/ide/request.json").get("baseline", "") not in ("", io_req["baseline"]),
+            label="04-final-io accepted",
+        )
 
         # Guarantee both lane buttons were exercised across the session; if random flips happened to align, decide one more two-lane card on the remaining button!
         if lanes_tapped != {"Choose left", "Choose right"}:
@@ -3178,12 +3213,17 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
             ed_io.wait_for(lambda: ed_io.signals().get("deckBusy") == 0, label="extra lane settled")
             if (io_ws / "src/Hook.scuzz").read_text() == io_audit_2:
                 ed_io.send([{"op": "tap", "id": "outlined:Undo"}])
-                ed_io.wait_for(lambda: (io_ws / "src/Hook.scuzz").read_text() == io_audit_3, label="restore io_audit_3")
+                ed_io.wait_for(
+                    lambda: (io_ws / "src/Hook.scuzz").read_text() == io_audit_3
+                    and ed_io.signals().get("deckBusy") == 0
+                    and ed_io.signals().get("ruleChoiceCard") == c_io_3["id"],
+                    label="restore io_audit_3",
+                )
         assert lanes_tapped == {"Choose left", "Choose right"}, lanes_tapped
 
         # Suggest, verify, install, and Undo a delivery.scuzz_verify IO rule, confirming rule Undo stays out of behavior Undo count!
         ed_io.send([{"op": "tap", "id": "outlined:Suggest rule"}])
-        ed_io.wait_for(lambda: (io_ws / "build/ide/rule-request.json").is_file(), label="IO rule-request.json")
+        ed_io.wait_for(lambda: read_json(io_ws / "build/ide/rule-request.json").get("kind") == "rule", label="IO rule-request.json")
         io_rule_req = json.loads((io_ws / "build/ide/rule-request.json").read_text())
         io_rule_src = (
             io_ver_orig
@@ -3192,13 +3232,30 @@ http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
         )
         publish_rule(io_ws, "01-io-rule", io_rule_req, "delivery.scuzz_verify", io_rule_src)
         ed_io.send([{"op": "tap", "id": "outlined:Import rule draft"}])
-        ed_io.wait_for(lambda: ed_io.signals().get("ruleVerified") == 1, label="IO rule verified", timeout=120.0)
+        ed_io.wait_for(
+            lambda: ed_io.signals().get("ruleVerified") == 1 and ed_io.signals().get("deckBusy") == 0,
+            label="IO rule verified",
+            timeout=120.0,
+        )
+        io_req_before_rule = read_json(io_ws / "build/ide/request.json")
         ed_io.send([{"op": "tap", "id": "button:Install rule"}])
-        ed_io.wait_for(lambda: "deliveryWritesAuditLog" in (io_ws / "delivery.scuzz_verify").read_text(), label="IO rule installed")
+        ed_io.wait_for(
+            lambda: "deliveryWritesAuditLog" in (io_ws / "delivery.scuzz_verify").read_text()
+            and "Installed rule in delivery.scuzz_verify" in ed_io.signals().get("ruleStatus", "")
+            and ed_io.signals().get("deckBusy") == 0
+            and read_json(io_ws / "build/ide/request.json").get("inputs", "") not in ("", io_req_before_rule.get("inputs", "")),
+            label="IO rule installed",
+        )
 
         # Undo the installed rule from Rule review and check that delivery.scuzz_verify reverts AND behavior Undo is not inflated!
+        io_req_after_rule = read_json(io_ws / "build/ide/request.json")
         ed_io.send([{"op": "tap", "id": "outlined:Undo"}])
-        ed_io.wait_for(lambda: (io_ws / "delivery.scuzz_verify").read_text() == io_ver_orig, label="IO rule undone")
+        ed_io.wait_for(
+            lambda: (io_ws / "delivery.scuzz_verify").read_text() == io_ver_orig
+            and ed_io.signals().get("deckBusy") == 0
+            and read_json(io_ws / "build/ide/request.json").get("inputs", "") not in ("", io_req_after_rule.get("inputs", "")),
+            label="IO rule undone",
+        )
         ed_io.goto_section(2, "Session")
         ed_io.send([{"op": "tap", "id": "outlined:Refresh summary"}])
         ed_io.wait_for(lambda: "Rule reviews: installed 1 (active 0, undone 1); rejected 0" in json.dumps(ed_io.ui()), label="IO summary after rule Undo")
