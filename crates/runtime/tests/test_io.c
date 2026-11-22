@@ -2817,6 +2817,7 @@ static void test_fuzz_probe_closures(void) {
   setenv("SCUZZ_EV_TIMELINE_DUMP", dump, 1);
   setenv("SCUZZ_EV_COVERAGE_DUMP", cov, 1);
   setenv("SCUZZ_EV_DRIVE_SCRIPT", script, 1);
+  setenv("SCUZZ_UI_RUNTIME", "headless", 1);
   unsetenv("SCUZZ_TESTRT");
   /* A key hit before the probe waits and lands first in the dump. */
   key = sz_string_from_cstr("Main:0:0:build");
@@ -2859,9 +2860,13 @@ static void test_fuzz_probe_closures(void) {
   assert(closure_verify_ran);
   {
     void *tl = sz_timeline_load(dump);
+    SzString *setup_name = sz_string_from_cstr("setup");
     assert(tl && sz_timeline_len(tl) >= 3);
+    assert(sz_timeline_drive_has(tl, 0, setup_name));
+    sz_release(setup_name);
     sz_timeline_free(tl);
   }
+  unsetenv("SCUZZ_UI_RUNTIME");
   {
     char spec[256];
     snprintf(spec, sizeof spec, "%s,%s", dump, dump);

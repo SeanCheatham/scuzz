@@ -336,7 +336,8 @@ void sz_scenario_run_setup(void) {
     /* UI first paint records this drive. An empty view is not a workload
      * state. IO drive scripts have no paint, so they snapshot now. */
     const char *ui = getenv("SCUZZ_UI_RUNTIME");
-    if (!(ui && ui[0]))
+    const char *ds = getenv("SCUZZ_DRIVE_SCRIPT");
+    if ((ds && ds[0]) || !(ui && ui[0]))
       sz_property_session_step();
   }
 }
