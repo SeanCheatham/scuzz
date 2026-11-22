@@ -42,7 +42,23 @@ for survivor in mut["survivors"]:
     assert survivor["diverged_workloads"], survivor
     assert set(survivor["diverged_workloads"]).issubset(workload_labels), (survivor, workload_labels)
     assert set(survivor["passed_claims"]).issubset(reached_claims), (survivor, reached_claims)
+assert "__verify" not in Path(sys.argv[1]).read_text(), sys.argv[1]
+assert "__verify" not in Path(sys.argv[2]).read_text(), sys.argv[2]
+if "failure" in summary:
+    fail = summary["failure"]
+    assert set(fail) == {
+        "kind", "rule", "file", "line", "column", "end_line", "end_column",
+        "workload", "repro", "events",
+    }, fail
+    assert fail["kind"] in {"oracle", "claim", "require", "property-assert", "property-check", "where"}, fail
+    assert fail["rule"] and "@sz:" not in fail["rule"] and "__verify" not in fail["file"], fail
+    assert fail["line"] >= 1 and fail["column"] >= 1, fail
+    assert (fail["end_line"], fail["end_column"]) > (fail["line"], fail["column"]), fail
+    assert fail["workload"] and isinstance(fail["events"], list), fail
+    diag_prefix = f"{fail['file']}:{fail['line']}:{fail['column']}: error: {fail['kind']} {fail['rule']} failed on {fail['workload']} ("
+    assert any(line.startswith(diag_prefix) for line in lines), (diag_prefix, lines)
 if summary["fuzz"]["ok"]:
+    assert "failure" not in summary, summary
     assert summary["fuzz"]["search"] == search
     assert summary["mutate"]["ran"] == min(budget - search, summary["mutate"]["sites"])
 coverage = summary["coverage"]
@@ -677,8 +693,175 @@ with tempfile.TemporaryDirectory(prefix='scuzz-replay-report-') as directory:
     row, = data['scope']['workloads']
     assert row['schedule_picks'] == data['declared_schedule_picks'] and row['script'] == 'drive checkOrder\n', row
     assert data['guards']['status'] == 'guarded', data
+    assert data['failure'] == {
+        'kind': 'claim',
+        'rule': 'leftFirstObserved',
+        'file': 'order.scuzz_verify',
+        'line': 1,
+        'column': 5,
+        'end_line': 1,
+        'end_column': 22,
+        'workload': 'replay',
+        'repro': str(pinned),
+        'events': ['drive checkOrder'],
+    }, data
 print('Replay reports: verdicts, modes, rule execution, choices, and stale report replacement pass')
 PY_REPLAY
+
+# Failed rules report source spans and shrunken witnesses across all rule kinds.
+python3 - <<'PY_RULE_FAILURE_SPANS'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+with tempfile.TemporaryDirectory(prefix='scuzz-rule-failure-spans-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname = "rule-failure-spans"\n[fuzz]\nscore_floor = 0\n')
+
+    def run_cmd(args, env=None):
+        return subprocess.run([str(cli), *map(str, args)], env=env, text=True, capture_output=True, timeout=180)
+
+    def check_case(engine, label, main_src, ver_src, scn_src, corpus_events, iterations, want_kind, want_rule, want_file, want_span, want_events):
+        shutil.rmtree(root / 'build', ignore_errors=True)
+        shutil.rmtree(root / '.scuzz', ignore_errors=True)
+        shutil.rmtree(root / 'corpus', ignore_errors=True)
+        (root / 'src/Main.scuzz').write_text(main_src)
+        ver_path = root / 'rules.scuzz_verify'
+        scn_path = root / 'run.scuzz_scenario'
+        if ver_src:
+            ver_path.write_text(ver_src)
+        else:
+            ver_path.unlink(missing_ok=True)
+        if scn_src:
+            scn_path.write_text(scn_src)
+        else:
+            scn_path.unlink(missing_ok=True)
+        if corpus_events is not None:
+            (root / 'corpus').mkdir(exist_ok=True)
+            (root / 'corpus/seed.toml').write_text('[fuzz]\nevents = ' + json.dumps(corpus_events) + '\n')
+        fmt = run_cmd(['fmt', root])
+        assert fmt.returncode == 0, (label, fmt.stdout, fmt.stderr)
+        env = dict(os.environ, SCUZZ_FUZZ_ENGINE=engine)
+        res = run_cmd(['fuzz', '--seed', 42, '--iterations', iterations, root], env=env)
+        assert res.returncode != 0, (engine, label, res.stdout, res.stderr)
+        combined = res.stdout + res.stderr
+        assert '__verify' not in combined and '@sz:' not in combined, (engine, label, combined)
+        summary_text = (root / 'build/fuzz/summary.json').read_text()
+        assert '__verify' not in summary_text and '@sz:' not in summary_text, (engine, label, summary_text)
+        summary = json.loads(summary_text)
+        fail = summary['failure']
+        line, col, end_line, end_col = want_span
+        assert (fail['kind'], fail['rule'], fail['file'], fail['line'], fail['column'], fail['end_line'], fail['end_column']) == (
+            want_kind, want_rule, want_file, line, col, end_line, end_col
+        ), (engine, label, fail)
+        assert fail['events'] == want_events, (engine, label, fail)
+        assert Path(fail['repro']).is_file(), (engine, label, fail)
+        ev_text = '; '.join(want_events) if want_events else 'no events'
+        want_diag = f"{want_file}:{line}:{col}: error: {want_kind} {want_rule} failed on {fail['workload']} ({ev_text})"
+        assert want_diag in res.stdout.splitlines(), (engine, label, want_diag, res.stdout)
+
+        if iterations == 0:
+            jres = run_cmd(['fuzz', '--seed', 42, '--iterations', 0, '--message-format=json', root], env=env)
+            assert jres.returncode != 0, (engine, label, jres.stdout, jres.stderr)
+            assert '__verify' not in jres.stdout + jres.stderr and '@sz:' not in jres.stdout + jres.stderr
+            jdata = json.loads(jres.stdout)
+            assert jdata['failure'] == fail, (engine, label, jdata['failure'], fail)
+
+        repro_copy = root / 'saved-repro.toml'
+        shutil.copy2(fail['repro'], repro_copy)
+        rep = run_cmd(['fuzz', '--replay', repro_copy, root], env=env)
+        assert rep.returncode != 0, (engine, label, rep.stdout, rep.stderr)
+        assert '__verify' not in rep.stdout + rep.stderr and '@sz:' not in rep.stdout + rep.stderr
+        rep_summary = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert rep_summary['failure'] == {
+            'kind': want_kind,
+            'rule': want_rule,
+            'file': want_file,
+            'line': line,
+            'column': col,
+            'end_line': end_line,
+            'end_column': end_col,
+            'workload': 'replay',
+            'repro': str(repro_copy),
+            'events': want_events,
+        }, (engine, label, rep_summary)
+        rep_diag = f"{want_file}:{line}:{col}: error: {want_kind} {want_rule} failed on replay ({ev_text})"
+        assert rep_diag in rep.stdout.splitlines(), (engine, label, rep_diag, rep.stdout)
+
+    two_reqs_src = (
+        'def bounded(x: Int): Int =\n'
+        '  x.require(v => v >= 0).require(v => v <= 5)\n\n'
+        '@main def main: IO[Unit] =\n'
+        '  IO.pure(())\n'
+    )
+    for engine in ('evaluator', 'compiled'):
+        check_case(
+            engine, 'oracle',
+            'def bump(n: Int): Int =\n  n - 1\n\n@main def main: IO[Unit] =\n  IO.pure(())\n',
+            'oracle increments(n: Int): Bool =\n  Main.bump(n) == n + 1\n',
+            '', ['drive increments 0'], 0,
+            'oracle', 'increments', 'rules.scuzz_verify', (1, 8, 1, 18), ['drive increments 0'],
+        )
+        check_case(
+            engine, 'claim',
+            '@main def main: IO[Unit] =\n  Fs.write("out.txt", "bad")\n',
+            'def cleanOut(t: Timeline): Verdict =\n  Verdict.every(t, i => !Timeline.fileTextIs(t, i, "out.txt", "bad"))\n',
+            '', None, 0,
+            'claim', 'cleanOut', 'rules.scuzz_verify', (1, 5, 1, 13), [],
+        )
+        check_case(
+            engine, 'require-first',
+            two_reqs_src,
+            'oracle checkNeg(): Bool =\n  Main.bounded(0 - 1) == 0 - 1\n',
+            '', ['drive checkNeg'], 0,
+            'require', 'require', 'Main.scuzz', (2, 5, 2, 12), ['drive checkNeg'],
+        )
+        check_case(
+            engine, 'require-second',
+            two_reqs_src,
+            'oracle checkHigh(): Bool =\n  Main.bounded(9) == 9\n',
+            '', ['drive checkHigh'], 0,
+            'require', 'require', 'Main.scuzz', (2, 26, 2, 33), ['drive checkHigh'],
+        )
+        check_case(
+            engine, 'io-require',
+            'def ioBounded(x: Int): IO[Int] =\n  IO.pure(x).require("ioCap", v => v <= 3)\n\n@main def main: IO[Unit] =\n  ioBounded(7).map(_ => ())\n',
+            '', '', None, 0,
+            'require', 'ioCap', 'Main.scuzz', (2, 14, 2, 21), [],
+        )
+        check_case(
+            engine, 'property-assert',
+            '@main def main: IO[Unit] =\n  Property.assert("mustHold", false)\n',
+            '', '', None, 0,
+            'property-assert', 'mustHold', 'Main.scuzz', (2, 3, 2, 18), [],
+        )
+        check_case(
+            engine, 'property-check',
+            'def checked(): Int =\n  Property.check("nonZero", false, 1)\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(checked()))\n',
+            '', '', None, 0,
+            'property-check', 'nonZero', 'Main.scuzz', (2, 3, 2, 17), [],
+        )
+        check_case(
+            engine, 'where-guard',
+            'def nonNeg(n: Int where n >= 0): Int =\n  n\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(nonNeg(0 - 2)))\n',
+            '', '', None, 0,
+            'where', 'Main.nonNeg n >= 0', 'Main.scuzz', (1, 19, 1, 24), [],
+        )
+        check_case(
+            engine, 'shrink-witness',
+            '@main def main: IO[Unit] =\n  IO.pure(())\n',
+            '',
+            'def setup(): IO[Unit] =\n  IO.pure(())\n\ndef noop(): IO[Unit] =\n  IO.pure(())\n\ndef checkBound(n: Int): IO[Unit] =\n  Property.assert("underTen", n < 10)\n',
+            ['drive noop', 'drive noop'], 16,
+            'property-assert', 'underTen', 'run.scuzz_scenario', (8, 3, 8, 18), ['drive checkBound 10'],
+        )
+print('Rule failure spans: oracle, claim, unnamed and IO require, property-assert, property-check, where, shrinking, JSON, and replay pass on both engines')
+PY_RULE_FAILURE_SPANS
 
 # Claim execution and trigger reach have separate results.
 python3 - <<'PY_REACH'
@@ -1060,6 +1243,10 @@ assert d["scope"]["required"]["failed"] >= 1
 assert d["mutate"]["ran"] == 0
 assert d["mutate"]["killed"] == 0 and d["mutate"]["inert"] == 0
 assert d["mutate"]["survivors"] == [] and d["mutate"]["incomplete_sites"] == [] and d["mutate"]["excluded_sites"] == []
+assert d["failure"]["kind"] == "oracle" and d["failure"]["rule"] == "bump", d["failure"]
+assert (d["failure"]["file"], d["failure"]["line"], d["failure"]["column"], d["failure"]["end_line"], d["failure"]["end_column"]) == (
+    "bump.scuzz_verify", 1, 8, 1, 12
+), d["failure"]
 PY
 if fuzz --replay /tmp/bad-example/build/fuzz/repro.toml /tmp/bad-example; then
   echo "replay should have reproduced the property failure" && exit 1
@@ -1099,6 +1286,7 @@ ev = json.loads(Path("/tmp/bad-example-survivor-ev.json").read_text())
 reused_json = json.loads(Path("/tmp/bad-example-survivor.json").read_text())
 compiled = json.loads(Path("/tmp/bad-example-survivor/build/fuzz/summary.json").read_text())
 assert ev["mutate"] == reused_json["mutate"] == compiled["mutate"], (ev["mutate"], reused_json["mutate"], compiled["mutate"])
+assert "failure" not in ev and "failure" not in reused_json and "failure" not in compiled, (ev, reused_json, compiled)
 mut = ev["mutate"]
 assert mut["killed"] == 2 and mut["survived"] == 4 and mut["ran"] == 6, mut
 assert mut["incomplete_sites"] == [] and mut["excluded_sites"] == [], mut

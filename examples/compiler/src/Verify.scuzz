@@ -6,7 +6,29 @@ record Breadth(varied: List[String], signalInt: List[String], signalListLen: Lis
 
 record MutSurvivor(site: Int, kind: String, file: String, line: Int, column: Int, endLine: Int, endColumn: Int, divergedWorkloads: List[String], passedClaims: List[String])
 
+record RuleSite(key: String, rejKind: String, kind: String, rule: String, file: String, line: Int, column: Int, endLine: Int, endColumn: Int)
+
+record RuleFailure(kind: String, rule: String, file: String, line: Int, column: Int, endLine: Int, endColumn: Int, workload: String, repro: String, events: List[String])
+
 record IBound(lo: Int, hi: Int, onLo: Bool, onHi: Bool, eq: Int, onEq: Bool, ok: Bool)
+
+record RuleEntry(siteKey: String, rejKind: String, rule: String, forced: Bool)
+
+record ReqStep(expr: Expr, next: Int)
+
+record ReqListStep(exprs: List[Expr], next: Int)
+
+record ReqArmsStep(arms: List[Arm], next: Int)
+
+record ReqArmStep(arm: Arm, next: Int)
+
+record TagHitStep(hit: Bool, next: Int)
+
+record RuleKeyStep(entries: List[RuleEntry], next: Int)
+
+record SiteWalk(sites: List[RuleSite], next: Int, reqOffs: List[Int])
+
+record RewriteCtx(ftab: Ftab, funs: List[Fun], ens: List[En], wn: Set[String], ambig: Set[String])
 
 import Parse.Fun
 import Parse.Param
@@ -19,7 +41,10 @@ import Parse.EnCase
 import Parse.Im
 import Parse.Alias
 import Parse.pretty
+import Lexer.Tok
+import Lexer.SpTok
 import Check.Out
+import Check.Ftab
 import Check.LineIndex
 import Type.Ty
 
@@ -488,23 +513,35 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
+def noRuleFailure(): RuleFailure =
+  RuleFailure("", "", "", 0, 0, 0, 0, "", "", [])
+
+def jRuleFailure(f: RuleFailure): String =
+  if (f.kind == "") "" else Str.concat(",\"failure\":{\"kind\":", Str.concat(Check.jsonStr(f.kind), Str.concat(",\"rule\":", Str.concat(Check.jsonStr(f.rule), Str.concat(",\"file\":", Str.concat(Check.jsonStr(f.file), Str.concat(",\"line\":", Str.concat(Str.fromInt(f.line), Str.concat(",\"column\":", Str.concat(Str.fromInt(f.column), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(f.endLine), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(f.endColumn), Str.concat(",\"workload\":", Str.concat(Check.jsonStr(f.workload), Str.concat(",\"repro\":", Str.concat(Check.jsonStr(f.repro), Str.concat(",\"events\":", Str.concat(jStrList(f.events), "}"))))))))))))))))))))
+
 def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String]): String =
-  summaryJsonAt(ok, seed, iterations, search, failures, corpus, corpFail, promo, repro, jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded), incomplete), classRaw, incomplete, covRows, branchRows, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, scope, properties)
+  summaryJsonAt(ok, seed, iterations, search, failures, corpus, corpFail, promo, repro, jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded), incomplete), classRaw, incomplete, covRows, branchRows, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, scope, properties, noRuleFailure())
 
 def summaryJsonMut(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, incompleteSites: List[Int], excludedSites: List[Int], survivors: List[MutSurvivor], covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String]): String =
-  summaryJsonAt(ok, seed, iterations, search, failures, corpus, corpFail, promo, repro, jMutReport(killed, survived, inert, ran, sites, oracles, invalid - List.len(excludedSites), List.len(excludedSites), incomplete, incompleteSites, excludedSites, survivors), classRaw, incomplete, covRows, branchRows, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, scope, properties)
+  summaryJsonMutFail(ok, seed, iterations, search, failures, corpus, corpFail, promo, repro, killed, survived, inert, ran, sites, oracles, classRaw, invalid, incomplete, incompleteSites, excludedSites, survivors, covRows, branchRows, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, scope, properties, noRuleFailure())
 
-def summaryJsonAt(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, mutJson: String, classRaw: String, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String]): String =
-  Str.concat(Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"status\":", Str.concat(Check.jsonStr(campaignStatus(ok, incomplete, scope)), ",\"fuzz\":")), Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(mutJson, Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), "}"))))))))))))
+def summaryJsonMutFail(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, incomplete: Int, incompleteSites: List[Int], excludedSites: List[Int], survivors: List[MutSurvivor], covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String], failure: RuleFailure): String =
+  summaryJsonAt(ok, seed, iterations, search, failures, corpus, corpFail, promo, repro, jMutReport(killed, survived, inert, ran, sites, oracles, invalid - List.len(excludedSites), List.len(excludedSites), incomplete, incompleteSites, excludedSites, survivors), classRaw, incomplete, covRows, branchRows, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br, scope, properties, failure)
+
+def summaryJsonAt(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, mutJson: String, classRaw: String, incomplete: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope, properties: List[String], failure: RuleFailure): String =
+  Str.concat(Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"status\":", Str.concat(Check.jsonStr(campaignStatus(ok, incomplete, scope)), ",\"fuzz\":")), Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(mutJson, Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), Str.concat(jRuleFailure(failure), "}")))))))))))))
 
 def replayJson(input: String, mode: String, asan: Bool, declaredPicks: List[String], scope: InputScope, properties: List[String]): String =
-  Str.concat("{\"v\":1,\"kind\":\"replay\",\"status\":", Str.concat(Check.jsonStr(List.at(scope.workloads, 0).status), Str.concat(jStrK("input", input), Str.concat(jStrK("mode", mode), Str.concat(",\"asan\":", Str.concat(jb(asan), Str.concat(",\"declared_schedule_picks\":", Str.concat(jStrList(declaredPicks), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), "}"))))))))))
+  replayJsonFail(input, mode, asan, declaredPicks, scope, properties, noRuleFailure())
+
+def replayJsonFail(input: String, mode: String, asan: Bool, declaredPicks: List[String], scope: InputScope, properties: List[String], failure: RuleFailure): String =
+  Str.concat("{\"v\":1,\"kind\":\"replay\",\"status\":", Str.concat(Check.jsonStr(List.at(scope.workloads, 0).status), Str.concat(jStrK("input", input), Str.concat(jStrK("mode", mode), Str.concat(",\"asan\":", Str.concat(jb(asan), Str.concat(",\"declared_schedule_picks\":", Str.concat(jStrList(declaredPicks), Str.concat(jScope(scope), Str.concat(jGuards(properties, scope.checkedClaims), Str.concat(jRuleFailure(failure), "}")))))))))))
 
 def campaignStatus(ok: Bool, incomplete: Int, scope: InputScope): String =
   if (incomplete > 0 || List.exists(scope.workloads, w => w.status == "incomplete")) "incomplete" else if (ok) "passed" else "failed"
 
 def propertyNames(raw: String): List[String] =
-  sortStrs(List.distinct(List.map(List.filter(linesOf(raw), l => Str.startsWith(l, "R:")), l => Hex.decode(Str.drop(l, 2)))))
+  sortStrs(List.distinct(List.map(List.filter(linesOf(raw), l => Str.startsWith(l, "R:")), l => stripRuleTag(Hex.decode(Str.drop(l, 2))))))
 
 def jGuards(properties: List[String], claims: List[String]): String =
   Str.concat(",\"guards\":{\"status\":", Str.concat(Check.jsonStr(if (List.isEmpty(properties) && List.isEmpty(claims)) "unguarded" else "guarded"), Str.concat(",\"properties\":", Str.concat(jStrList(properties), Str.concat(",\"claims\":", Str.concat(jStrList(claims), "}"))))))
@@ -1408,21 +1445,57 @@ def resolveKept(kept: List[(String, String, Prog)], p: Prog): List[(String, Stri
 def resolveKeptProg(p: Prog, aliases: List[Alias]): Prog =
   p.copy(enums = Check.expandEnums(p.enums, aliases), defs = Check.expandDefs(p.defs, aliases), body = Check.expandExpr(p.body, aliases), impls = List.map(p.impls, im => im.copy(methods = Check.expandDefs(im.methods, aliases))))
 
+def makeRewriteCtx(funs: List[Fun], ens: List[En], ambig: Set[String]): RewriteCtx =
+  for {
+    pins = Check.withLetterPins(ens)
+  } yield RewriteCtx(Check.ftabOfList(funs), funs, pins, whereShortSet(funs, ens), ambig)
+
+def whereShortSet(funs: List[Fun], ens: List[En]): Set[String] =
+  enWhereShortSet(ens, funWhereShortSet(funs, Set.empty()))
+
+def funWhereShortSet(ds: List[Fun], acc: Set[String]): Set[String] =
+  if (List.isEmpty(ds)) acc else for {
+  d = List.at(ds, 0)
+  next = if (!d.ora && paramsHaveWhere(d.params)) Set.add(acc, Resolve.short(d.name)) else acc
+} yield funWhereShortSet(List.tail(ds), next)
+
+def enWhereShortSet(ens: List[En], acc: Set[String]): Set[String] =
+  if (List.isEmpty(ens)) acc else for {
+  en = List.at(ens, 0)
+  next = if (en.isRec || recLike(en.name, en.cases)) if (paramsHaveWhere(firstCaseParams(en.cases))) Set.add(acc, Resolve.short(en.name)) else acc else caseWhereShortSet(en.cases, acc)
+} yield enWhereShortSet(List.tail(ens), next)
+
+def caseWhereShortSet(cs: List[EnCase], acc: Set[String]): Set[String] =
+  if (List.isEmpty(cs)) acc else for {
+  c = List.at(cs, 0)
+  next = if (paramsHaveWhere(c.fields)) Set.add(acc, Resolve.short(c.name)) else acc
+} yield caseWhereShortSet(List.tail(cs), next)
+
 def rewriteReqKeptGo(kept: List[(String, String, Prog)], p: Prog): List[(String, String)] =
   p match {
-    case Prog(_, enums, _, _, _, _, defs, _, _) => rewriteReqKeptFiles(kept, defs, enums)
+    case Prog(_, enums, _, _, _, _, defs, _, _) => for {
+  ftab = Check.ftabOfList(defs)
+  ambig = ambiguousKeysKeptWith(kept, ftab, defs, enums)
+  ctx = RewriteCtx(ftab, defs, Check.withLetterPins(enums), whereShortSet(defs, enums), ambig)
+} yield rewriteReqKeptFiles(kept, ctx)
   }
 
-def rewriteReqKeptFiles(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String)] =
-  if (List.isEmpty(kept)) Manifest.noPairs() else rewriteReqKeptHd(List.at(kept, 0), List.tail(kept), funs, ens)
+def rewriteReqKeptFiles(kept: List[(String, String, Prog)], ctx: RewriteCtx): List[(String, String)] =
+  if (List.isEmpty(kept)) Manifest.noPairs() else rewriteReqKeptHd(List.at(kept, 0), List.tail(kept), ctx)
 
-def rewriteReqKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String)] =
+def rewriteReqKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], ctx: RewriteCtx): List[(String, String)] =
   h match {
-    case (stem, src, fp) => (stem, rewriteReqKeep(src, fp, stem, funs, ens)) :: rewriteReqKeptFiles(rest, funs, ens)
+    case (stem, src, fp) => (stem, rewriteReqKeepCtx(src, fp, stem, ctx)) :: rewriteReqKeptFiles(rest, ctx)
   }
 
-def rewriteReqKeep(src: String, p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
-  if (progHasReq(p) || progNeedsWhere(p, funs, ens)) rewriteReqProg(p, stem, funs, ens) else src
+def rewriteReqKeepCtx(src: String, p: Prog, stem: String, ctx: RewriteCtx): String =
+  if (progNeedsRewriteCtx(p, stem, ctx)) Resolve.source(rewriteReqTreeCtx(p, stem, ctx)) else src
+
+def progNeedsRewrite(p: Prog, stem: String, funs: List[Fun], ens: List[En], ambig: Set[String]): Bool =
+  progNeedsRewriteCtx(p, stem, makeRewriteCtx(funs, ens, ambig))
+
+def progNeedsRewriteCtx(p: Prog, stem: String, ctx: RewriteCtx): Bool =
+  progHasReq(p) || progNeedsWhereCtx(p, stem, ctx) || progHasTaggedProp(p, stem, ctx.ambig)
 
 def expectedFromKept(kept: List[(String, String, Prog)]): Prog =
   expectedFromResolved(kept, Resolve.prog(mergeKept(kept)))
@@ -1432,27 +1505,34 @@ def expectedFromResolved(kept: List[(String, String, Prog)], p: Prog): Prog =
 
 def expectedFromKeptP(kept: List[(String, String, Prog)], p: Prog): Prog =
   p match {
-    case Prog(_, enums, _, _, _, _, defs, _, _) => if (keptNeedsRewrite(kept, defs, enums)) mergeKept(rewriteKeptTrees(kept, defs, enums)) else Parse.parseFiles(List.map(kept, entry => (entry._1, entry._2)))
+    case Prog(_, enums, _, _, _, _, defs, _, _) => for {
+  ftab = Check.ftabOfList(defs)
+  ambig = ambiguousKeysKeptWith(kept, ftab, defs, enums)
+  ctx = RewriteCtx(ftab, defs, Check.withLetterPins(enums), whereShortSet(defs, enums), ambig)
+} yield expectedFromKeptCtx(kept, ctx)
   }
 
-def keptNeedsRewrite(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): Bool =
-  if (List.isEmpty(kept)) false else keptNeedsRewriteHd(List.at(kept, 0), List.tail(kept), funs, ens)
+def expectedFromKeptCtx(kept: List[(String, String, Prog)], ctx: RewriteCtx): Prog =
+  if (keptNeedsRewriteCtx(kept, ctx)) mergeKept(rewriteKeptTreesCtx(kept, ctx)) else Parse.parseFiles(List.map(kept, entry => (entry._1, entry._2)))
 
-def keptNeedsRewriteHd(h: (String, String, Prog), rest: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): Bool =
+def keptNeedsRewriteCtx(kept: List[(String, String, Prog)], ctx: RewriteCtx): Bool =
+  if (List.isEmpty(kept)) false else keptNeedsRewriteHd(List.at(kept, 0), List.tail(kept), ctx)
+
+def keptNeedsRewriteHd(h: (String, String, Prog), rest: List[(String, String, Prog)], ctx: RewriteCtx): Bool =
   h match {
-    case (_, _, fp) => progHasReq(fp) || progNeedsWhere(fp, funs, ens) || keptNeedsRewrite(rest, funs, ens)
+    case (stem, _, fp) => progNeedsRewriteCtx(fp, stem, ctx) || keptNeedsRewriteCtx(rest, ctx)
   }
 
-def rewriteKeptTrees(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String, Prog)] =
-  if (List.isEmpty(kept)) noKept() else rewriteKeptHd(List.at(kept, 0), List.tail(kept), funs, ens)
+def rewriteKeptTreesCtx(kept: List[(String, String, Prog)], ctx: RewriteCtx): List[(String, String, Prog)] =
+  if (List.isEmpty(kept)) noKept() else rewriteKeptHd(List.at(kept, 0), List.tail(kept), ctx)
 
-def rewriteKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String, Prog)] =
+def rewriteKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], ctx: RewriteCtx): List[(String, String, Prog)] =
   h match {
-    case (stem, src, fp) => (stem, src, rewriteReqKeepProg(src, fp, stem, funs, ens)) :: rewriteKeptTrees(rest, funs, ens)
+    case (stem, src, fp) => (stem, src, rewriteReqKeepProgCtx(src, fp, stem, ctx)) :: rewriteKeptTreesCtx(rest, ctx)
   }
 
-def rewriteReqKeepProg(src: String, p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
-  if (progHasReq(p) || progNeedsWhere(p, funs, ens)) Parse.parseFile(stem, Resolve.source(rewriteReqTree(p, stem, funs, ens))) else Parse.parseFile(stem, src)
+def rewriteReqKeepProgCtx(src: String, p: Prog, stem: String, ctx: RewriteCtx): Prog =
+  if (progNeedsRewriteCtx(p, stem, ctx)) Parse.parseFile(stem, Resolve.source(rewriteReqTreeCtx(p, stem, ctx))) else Parse.parseFile(stem, src)
 
 def expectedTreeOk(): Bool =
   expectedTreeSrc("def n(): Int = 1") && expectedTreeSrc("def n(): Int = 1.require(true)") && parseEvLit()
@@ -1482,63 +1562,128 @@ def imHasReq(im: Im): Bool =
     case Im(_, _, _, methods) => defsHaveReq(methods)
   }
 
-def progNeedsWhere(p: Prog, funs: List[Fun], ens: List[En]): Bool =
-  p match {
-    case Prog(_, _, _, _, impls, _, defs, _, body) => exprNeedsWhere(body, funs, ens) || defsNeedWhere(defs, funs, ens) || implsNeedWhere(impls, funs, ens)
-  }
+def exprMayTouchWhere(e: Expr, wn: Set[String]): Bool =
+  if (List.isEmpty(Set.toList(wn))) false else exprMayTouchWhereGo(e, wn)
 
-def defsNeedWhere(ds: List[Fun], funs: List[Fun], ens: List[En]): Bool =
-  if (List.isEmpty(ds)) false else funNeedsWhere(List.at(ds, 0), funs, ens) || defsNeedWhere(List.tail(ds), funs, ens)
-
-def funNeedsWhere(d: Fun, funs: List[Fun], ens: List[En]): Bool =
-  d match {
-    case Fun(_, _, _, _, _, _, body, _, _) => exprNeedsWhere(body, funs, ens)
-  }
-
-def implsNeedWhere(xs: List[Im], funs: List[Fun], ens: List[En]): Bool =
-  if (List.isEmpty(xs)) false else imNeedsWhere(List.at(xs, 0), funs, ens) || implsNeedWhere(List.tail(xs), funs, ens)
-
-def imNeedsWhere(im: Im, funs: List[Fun], ens: List[En]): Bool =
-  im match {
-    case Im(_, _, _, methods) => defsNeedWhere(methods, funs, ens)
-  }
-
-def exprNeedsWhere(e: Expr, funs: List[Fun], ens: List[En]): Bool =
+def exprMayTouchWhereGo(e: Expr, wn: Set[String]): Bool =
   e match {
-    case Expr.EPrint(inner, _) => exprNeedsWhere(inner, funs, ens)
-    case Expr.ECall(f, args, _) => paramsHaveWhere(paramsOfCall(f, funs, ens)) || listNeedsWhere(args, funs, ens)
-    case Expr.EMethod(recv, _, args, _) => exprNeedsWhere(recv, funs, ens) || listNeedsWhere(args, funs, ens)
-    case Expr.EField(recv, _, _) => exprNeedsWhere(recv, funs, ens)
-    case Expr.EBin(_, l, r, _) => exprNeedsWhere(l, funs, ens) || exprNeedsWhere(r, funs, ens)
-    case Expr.EUn(_, inner, _) => exprNeedsWhere(inner, funs, ens)
-    case Expr.ELam(_, _, body) => exprNeedsWhere(body, funs, ens)
-    case Expr.EIf(c, t, el, _) => exprNeedsWhere(c, funs, ens) || exprNeedsWhere(t, funs, ens) || exprNeedsWhere(el, funs, ens)
-    case Expr.EMatch(s, arms, _) => exprNeedsWhere(s, funs, ens) || armsNeedWhere(arms, funs, ens)
-    case Expr.EList(xs) => listNeedsWhere(xs, funs, ens)
-    case Expr.ETuple(xs) => listNeedsWhere(xs, funs, ens)
-    case Expr.ENamed(_, inner) => exprNeedsWhere(inner, funs, ens)
-    case Expr.EAscribe(inner, _, _) => exprNeedsWhere(inner, funs, ens)
-    case Expr.EFor(bs, body, _) => bindsNeedWhere(bs, funs, ens) || exprNeedsWhere(body, funs, ens)
+    case Expr.EPrint(inner, _) => exprMayTouchWhereGo(inner, wn)
+    case Expr.ECall(f, args, _) => Set.contains(wn, Resolve.short(f)) || listMayTouchWhere(args, wn)
+    case Expr.EMethod(recv, name, args, _) => Set.contains(wn, name) || exprMayTouchWhereGo(recv, wn) || listMayTouchWhere(args, wn)
+    case Expr.EField(recv, _, _) => exprMayTouchWhereGo(recv, wn)
+    case Expr.EBin(_, l, r, _) => exprMayTouchWhereGo(l, wn) || exprMayTouchWhereGo(r, wn)
+    case Expr.EUn(_, inner, _) => exprMayTouchWhereGo(inner, wn)
+    case Expr.ELam(_, _, body) => exprMayTouchWhereGo(body, wn)
+    case Expr.EIf(c, t, el, _) => exprMayTouchWhereGo(c, wn) || exprMayTouchWhereGo(t, wn) || exprMayTouchWhereGo(el, wn)
+    case Expr.EMatch(s, arms, _) => exprMayTouchWhereGo(s, wn) || armsMayTouchWhere(arms, wn)
+    case Expr.EInterp(_, parts, _) => listMayTouchWhere(parts, wn)
+    case Expr.EList(xs) => listMayTouchWhere(xs, wn)
+    case Expr.ETuple(xs) => listMayTouchWhere(xs, wn)
+    case Expr.ENamed(_, inner) => exprMayTouchWhereGo(inner, wn)
+    case Expr.EAscribe(inner, _, _) => exprMayTouchWhereGo(inner, wn)
+    case Expr.EFor(bs, body, _) => bindsMayTouchWhere(bs, wn) || exprMayTouchWhereGo(body, wn)
     case _ => false
   }
 
-def listNeedsWhere(xs: List[Expr], funs: List[Fun], ens: List[En]): Bool =
-  if (List.isEmpty(xs)) false else exprNeedsWhere(List.at(xs, 0), funs, ens) || listNeedsWhere(List.tail(xs), funs, ens)
+def listMayTouchWhere(xs: List[Expr], wn: Set[String]): Bool =
+  if (List.isEmpty(xs)) false else exprMayTouchWhereGo(List.at(xs, 0), wn) || listMayTouchWhere(List.tail(xs), wn)
 
-def armsNeedWhere(xs: List[Arm], funs: List[Fun], ens: List[En]): Bool =
-  if (List.isEmpty(xs)) false else armNeedsWhere(List.at(xs, 0), funs, ens) || armsNeedWhere(List.tail(xs), funs, ens)
+def armsMayTouchWhere(xs: List[Arm], wn: Set[String]): Bool =
+  if (List.isEmpty(xs)) false else exprMayTouchWhereGo(List.at(xs, 0).body, wn) || armsMayTouchWhere(List.tail(xs), wn)
 
-def armNeedsWhere(a: Arm, funs: List[Fun], ens: List[En]): Bool =
-  a match {
-    case Arm(_, _, body) => exprNeedsWhere(body, funs, ens)
+def bindsMayTouchWhere(xs: List[Bind], wn: Set[String]): Bool =
+  if (List.isEmpty(xs)) false else exprMayTouchWhereGo(List.at(xs, 0).value, wn) || bindsMayTouchWhere(List.tail(xs), wn)
+
+def exprHasRuleExpr(e: Expr): Bool =
+  e match {
+    case Expr.EPrint(inner, _) => exprHasRuleExpr(inner)
+    case Expr.ECall(f, args, _) => isPropRuleCall(f, args) || listHasRuleExpr(args)
+    case Expr.EMethod(recv, name, args, _) => name == "require" || exprHasRuleExpr(recv) || listHasRuleExpr(args)
+    case Expr.EField(recv, _, _) => exprHasRuleExpr(recv)
+    case Expr.EBin(_, l, r, _) => exprHasRuleExpr(l) || exprHasRuleExpr(r)
+    case Expr.EUn(_, inner, _) => exprHasRuleExpr(inner)
+    case Expr.ELam(_, _, body) => exprHasRuleExpr(body)
+    case Expr.EIf(c, t, el, _) => exprHasRuleExpr(c) || exprHasRuleExpr(t) || exprHasRuleExpr(el)
+    case Expr.EMatch(s, arms, _) => exprHasRuleExpr(s) || armsHaveRuleExpr(arms)
+    case Expr.EInterp(_, parts, _) => listHasRuleExpr(parts)
+    case Expr.EList(xs) => listHasRuleExpr(xs)
+    case Expr.ETuple(xs) => listHasRuleExpr(xs)
+    case Expr.ENamed(_, inner) => exprHasRuleExpr(inner)
+    case Expr.EAscribe(inner, _, _) => exprHasRuleExpr(inner)
+    case Expr.EFor(bs, body, _) => bindsHaveRuleExpr(bs) || exprHasRuleExpr(body)
+    case _ => false
   }
 
-def bindsNeedWhere(xs: List[Bind], funs: List[Fun], ens: List[En]): Bool =
-  if (List.isEmpty(xs)) false else bindNeedsWhere(List.at(xs, 0), funs, ens) || bindsNeedWhere(List.tail(xs), funs, ens)
+def listHasRuleExpr(xs: List[Expr]): Bool =
+  if (List.isEmpty(xs)) false else exprHasRuleExpr(List.at(xs, 0)) || listHasRuleExpr(List.tail(xs))
 
-def bindNeedsWhere(b: Bind, funs: List[Fun], ens: List[En]): Bool =
+def armsHaveRuleExpr(xs: List[Arm]): Bool =
+  if (List.isEmpty(xs)) false else exprHasRuleExpr(List.at(xs, 0).body) || armsHaveRuleExpr(List.tail(xs))
+
+def bindsHaveRuleExpr(xs: List[Bind]): Bool =
+  if (List.isEmpty(xs)) false else exprHasRuleExpr(List.at(xs, 0).value) || bindsHaveRuleExpr(List.tail(xs))
+
+def progNeedsWhere(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Bool =
+  progNeedsWhereCtx(p, stem, makeRewriteCtx(funs, ens, Set.empty()))
+
+def progNeedsWhereCtx(p: Prog, stem: String, ctx: RewriteCtx): Bool =
+  if (List.isEmpty(Set.toList(ctx.wn))) false else p match {
+  case Prog(_, _, _, _, impls, _, defs, _, body) => exprNeedsWhere(body, mainEnv(stem), ctx) || defsNeedWhere(defs, ctx) || implsNeedWhere(impls, ctx)
+}
+
+def defsNeedWhere(ds: List[Fun], ctx: RewriteCtx): Bool =
+  if (List.isEmpty(ds)) false else funNeedsWhere(List.at(ds, 0), ctx) || defsNeedWhere(List.tail(ds), ctx)
+
+def funNeedsWhere(d: Fun, ctx: RewriteCtx): Bool =
+  d match {
+    case Fun(_, _, _, _, params, _, body, mod, _) => exprMayTouchWhereGo(body, ctx.wn) && exprNeedsWhere(body, Check.bindParams(params, Check.envSelfMod(mod)), ctx)
+  }
+
+def implsNeedWhere(xs: List[Im], ctx: RewriteCtx): Bool =
+  if (List.isEmpty(xs)) false else imNeedsWhere(List.at(xs, 0), ctx) || implsNeedWhere(List.tail(xs), ctx)
+
+def imNeedsWhere(im: Im, ctx: RewriteCtx): Bool =
+  im match {
+    case Im(_, _, _, methods) => defsNeedWhere(methods, ctx)
+  }
+
+def exprNeedsWhere(e: Expr, env: List[(String, Ty)], ctx: RewriteCtx): Bool =
+  if (!exprMayTouchWhereGo(e, ctx.wn)) false else e match {
+  case Expr.EPrint(inner, _) => exprNeedsWhere(inner, env, ctx)
+  case Expr.ECall(f, args, _) => Set.contains(ctx.wn, Resolve.short(f)) && paramsHaveWhere(whereCallTarget(f, env, ctx.ftab, ctx.ens)._2) || listNeedsWhere(args, env, ctx)
+  case Expr.EMethod(recv, name, args, _) => Set.contains(ctx.wn, name) && paramsHaveWhere(whereMethTarget(recv, name, env, ctx.funs, ctx.ens)._2) || exprNeedsWhere(recv, env, ctx) || listNeedsWhere(args, env, ctx)
+  case Expr.EField(recv, _, _) => exprNeedsWhere(recv, env, ctx)
+  case Expr.EBin(_, l, r, _) => exprNeedsWhere(l, env, ctx) || exprNeedsWhere(r, env, ctx)
+  case Expr.EUn(_, inner, _) => exprNeedsWhere(inner, env, ctx)
+  case Expr.ELam(p, ty, body) => exprNeedsWhere(body, Check.bindLam(p, ty, env), ctx)
+  case Expr.EIf(c, t, el, _) => exprNeedsWhere(c, env, ctx) || exprNeedsWhere(t, env, ctx) || exprNeedsWhere(el, env, ctx)
+  case Expr.EMatch(s, arms, _) => exprNeedsWhere(s, env, ctx) || armsMayTouchWhere(arms, ctx.wn) && armsNeedWhere(arms, inferTy(s, env, ctx.ftab, ctx.ens), env, ctx)
+  case Expr.EInterp(_, parts, _) => listNeedsWhere(parts, env, ctx)
+  case Expr.EList(xs) => listNeedsWhere(xs, env, ctx)
+  case Expr.ETuple(xs) => listNeedsWhere(xs, env, ctx)
+  case Expr.ENamed(_, inner) => exprNeedsWhere(inner, env, ctx)
+  case Expr.EAscribe(inner, _, _) => exprNeedsWhere(inner, env, ctx)
+  case Expr.EFor(bs, body, _) => forNeedsWhere(bs, body, env, ctx)
+  case _ => false
+}
+
+def listNeedsWhere(xs: List[Expr], env: List[(String, Ty)], ctx: RewriteCtx): Bool =
+  if (List.isEmpty(xs)) false else exprNeedsWhere(List.at(xs, 0), env, ctx) || listNeedsWhere(List.tail(xs), env, ctx)
+
+def armsNeedWhere(xs: List[Arm], scrutTy: String, env: List[(String, Ty)], ctx: RewriteCtx): Bool =
+  if (List.isEmpty(xs)) false else armNeedsWhere(List.at(xs, 0), scrutTy, env, ctx) || armsNeedWhere(List.tail(xs), scrutTy, env, ctx)
+
+def armNeedsWhere(a: Arm, scrutTy: String, env: List[(String, Ty)], ctx: RewriteCtx): Bool =
+  a match {
+    case Arm(pat, _, body) => exprMayTouchWhereGo(body, ctx.wn) && exprNeedsWhere(body, Check.bindPat(pat, scrutTy, env, ctx.ens), ctx)
+  }
+
+def forNeedsWhere(bs: List[Bind], body: Expr, env: List[(String, Ty)], ctx: RewriteCtx): Bool =
+  if (List.isEmpty(bs)) exprNeedsWhere(body, env, ctx) else forNeedsWhereHd(List.at(bs, 0), List.tail(bs), body, env, ctx)
+
+def forNeedsWhereHd(b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], ctx: RewriteCtx): Bool =
   b match {
-    case Bind(_, _, e) => exprNeedsWhere(e, funs, ens)
+    case Bind(d, name, v) => exprNeedsWhere(v, env, ctx) || (bindsMayTouchWhere(rest, ctx.wn) || exprMayTouchWhereGo(body, ctx.wn)) && forNeedsWhere(rest, body, Check.bindFor(d, name, inferTy(v, env, ctx.ftab, ctx.ens), env, ctx.ens), ctx)
   }
 
 def paramsHaveWhere(ps: List[Param]): Bool =
@@ -1549,23 +1694,21 @@ def paramHasWhere(p: Param): Bool =
     case Param(_, _, w, _) => w != ""
   }
 
-def paramsOfCall(f: String, funs: List[Fun], ens: List[En]): List[Param] =
-  paramsOfFun(Check.findFun(funs, f), f, ens)
+def whereCallTarget(f: String, env: List[(String, Ty)], ftab: Ftab, ens: List[En]): (String, List[Param]) =
+  whereCallFunHit(Check.findFunPrefer(ftab, f, env), f, ens)
 
-def paramsOfFun(hit: List[Fun], f: String, ens: List[En]): List[Param] =
-  if (List.isEmpty(hit)) ctorParams(ens, f) else funParams(List.at(hit, 0))
+def whereCallFunHit(hit: List[Fun], f: String, ens: List[En]): (String, List[Param]) =
+  if (List.isEmpty(hit)) ctorTarget(ens, f) else whereFunTarget(List.at(hit, 0))
 
-def funParams(d: Fun): List[Param] =
-  d match {
-    case Fun(_, _, _, _, ps, _, _, _, _) => ps
-  }
+def whereFunTarget(d: Fun): (String, List[Param]) =
+  (Resolve.qualified(d.mod, d.name), d.params)
 
-def ctorParams(ens: List[En], f: String): List[Param] =
-  if (List.isEmpty(ens)) noParam() else ctorParams1(List.at(ens, 0), List.tail(ens), f)
+def ctorTarget(ens: List[En], f: String): (String, List[Param]) =
+  if (List.isEmpty(ens)) ("", noParam()) else ctorTarget1(List.at(ens, 0), List.tail(ens), f)
 
-def ctorParams1(h: En, rest: List[En], f: String): List[Param] =
+def ctorTarget1(h: En, rest: List[En], f: String): (String, List[Param]) =
   h match {
-    case En(_, name, _, cases) => if (name == f) firstCaseParams(cases) else ctorParamsCase(cases, f, rest)
+    case En(_, name, _, cases) => if (name == f) (Resolve.display(name), firstCaseParams(cases)) else ctorTargetCase(name, cases, f, rest)
   }
 
 def firstCaseParams(cs: List[EnCase]): List[Param] =
@@ -1576,12 +1719,38 @@ def caseParams(c: EnCase): List[Param] =
     case EnCase(_, fs) => fs
   }
 
-def ctorParamsCase(cs: List[EnCase], f: String, rest: List[En]): List[Param] =
-  if (List.isEmpty(cs)) ctorParams(rest, f) else ctorParamsCase1(List.at(cs, 0), List.tail(cs), f, rest)
+def ctorTargetCase(enName: String, cs: List[EnCase], f: String, rest: List[En]): (String, List[Param]) =
+  if (List.isEmpty(cs)) ctorTarget(rest, f) else ctorTargetCase1(enName, List.at(cs, 0), List.tail(cs), f, rest)
 
-def ctorParamsCase1(c: EnCase, restCs: List[EnCase], f: String, rest: List[En]): List[Param] =
+def ctorTargetCase1(enName: String, c: EnCase, restCs: List[EnCase], f: String, rest: List[En]): (String, List[Param]) =
   c match {
-    case EnCase(name, fs) => if (name == f) fs else ctorParamsCase(restCs, f, rest)
+    case EnCase(name, fs) => if (name == f) (Str.concat(Resolve.display(enName), Str.concat(".", Resolve.short(name))), fs) else ctorTargetCase(enName, restCs, f, rest)
+  }
+
+def whereMethTarget(recv: Expr, name: String, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): (String, List[Param]) =
+  if (name == "require") ("", noParam()) else recv match {
+  case Expr.EVar(modVar, _) => if (Type.show(Check.lookupEnv(env, modVar)) != "") ("", noParam()) else whereMethVarTarget(modVar, name, funs, ens)
+  case _ => ("", noParam())
+}
+
+def whereMethVarTarget(modVar: String, name: String, funs: List[Fun], ens: List[En]): (String, List[Param]) =
+  whereMethFunHit(Check.findFunMod(funs, modVar, name), modVar, name, ens)
+
+def whereMethFunHit(hit: List[Fun], modVar: String, name: String, ens: List[En]): (String, List[Param]) =
+  if (!List.isEmpty(hit)) whereFunTarget(List.at(hit, 0)) else enCaseTarget(ens, modVar, name)
+
+def enCaseTarget(ens: List[En], modVar: String, caseName: String): (String, List[Param]) =
+  if (List.isEmpty(ens)) ("", noParam()) else enCaseTarget1(List.at(ens, 0), List.tail(ens), modVar, caseName)
+
+def enCaseTarget1(h: En, rest: List[En], modVar: String, caseName: String): (String, List[Param]) =
+  if (h.name == modVar || Resolve.qualified(h.mod, h.name) == modVar) enCaseFind(h.name, h.cases, caseName) else enCaseTarget(rest, modVar, caseName)
+
+def enCaseFind(enName: String, cs: List[EnCase], caseName: String): (String, List[Param]) =
+  if (List.isEmpty(cs)) ("", noParam()) else enCaseFind1(enName, List.at(cs, 0), List.tail(cs), caseName)
+
+def enCaseFind1(enName: String, c: EnCase, rest: List[EnCase], caseName: String): (String, List[Param]) =
+  c match {
+    case EnCase(name, fs) => if (Resolve.short(name) == caseName) (Str.concat(Resolve.display(enName), Str.concat(".", caseName)), fs) else enCaseFind(enName, rest, caseName)
   }
 
 def defsHaveReq(ds: List[Fun]): Bool =
@@ -1603,6 +1772,7 @@ def exprHasReq(e: Expr): Bool =
     case Expr.ELam(_, _, body) => exprHasReq(body)
     case Expr.EIf(c, t, el, _) => exprHasReq(c) || exprHasReq(t) || exprHasReq(el)
     case Expr.EMatch(s, arms, _) => exprHasReq(s) || armsHaveReq(arms)
+    case Expr.EInterp(_, parts, _) => listHasReq(parts)
     case Expr.EList(xs) => listHasReq(xs)
     case Expr.ETuple(xs) => listHasReq(xs)
     case Expr.ENamed(_, inner) => exprHasReq(inner)
@@ -1630,111 +1800,207 @@ def bindHasReq(b: Bind): Bool =
     case Bind(_, _, e) => exprHasReq(e)
   }
 
+def funOwnerKey(stem: String, name: String): String =
+  Str.concat(stem, Str.concat(".", name))
+
+def imOwnerKey(stem: String, im: Im, name: String): String =
+  Str.concat(stem, Str.concat(".impl.", Str.concat(im.tn, Str.concat(".", Str.concat(im.forTy, Str.concat(".", name))))))
+
+def mainOwnerKey(stem: String): String =
+  Str.concat(stem, ".$main")
+
 def rewriteReqProg(p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
-  Resolve.source(rewriteReqTree(p, stem, funs, ens))
+  rewriteReqProgWith(p, stem, funs, ens, Set.empty())
+
+def rewriteReqProgWith(p: Prog, stem: String, funs: List[Fun], ens: List[En], ambig: Set[String]): String =
+  Resolve.source(rewriteReqTreeWith(p, stem, funs, ens, ambig))
 
 def rewriteReqTree(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
-  rewriteReqTreeGo(p, stem, funs, Check.withLetterPins(ens))
+  rewriteReqTreeWith(p, stem, funs, ens, Set.empty())
 
-def rewriteReqTreeGo(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
+def rewriteReqTreeWith(p: Prog, stem: String, funs: List[Fun], ens: List[En], ambig: Set[String]): Prog =
+  rewriteReqTreeCtx(p, stem, makeRewriteCtx(funs, ens, ambig))
+
+def rewriteReqTreeCtx(p: Prog, stem: String, ctx: RewriteCtx): Prog =
   p match {
-    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens), p.mod)
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, stem, ctx), imps, rewriteReqDefs(defs, stem, ctx), main, rewriteReqAt(body, mainOwnerKey(stem), 0, mainEnv(stem), ctx).expr, p.mod)
   }
 
 def mainEnv(stem: String): List[(String, Ty)] =
   Check.envMod(stem)
 
-def rewriteReqImpls(xs: List[Im], funs: List[Fun], ens: List[En]): List[Im] =
-  if (List.isEmpty(xs)) xs else rewriteReqIm(List.at(xs, 0), funs, ens) :: rewriteReqImpls(List.tail(xs), funs, ens)
+def rewriteReqImpls(xs: List[Im], stem: String, ctx: RewriteCtx): List[Im] =
+  if (List.isEmpty(xs)) xs else rewriteReqIm(List.at(xs, 0), stem, ctx) :: rewriteReqImpls(List.tail(xs), stem, ctx)
 
-def rewriteReqIm(im: Im, funs: List[Fun], ens: List[En]): Im =
+def rewriteReqIm(im: Im, stem: String, ctx: RewriteCtx): Im =
   im match {
-    case Im(tn, targs, forTy, methods) => Im(tn, targs, forTy, rewriteReqDefs(methods, funs, ens), im.mod)
+    case Im(tn, targs, forTy, methods) => Im(tn, targs, forTy, rewriteReqImDefs(methods, stem, im, ctx), im.mod)
   }
 
-def rewriteReqDefs(ds: List[Fun], funs: List[Fun], ens: List[En]): List[Fun] =
-  if (List.isEmpty(ds)) ds else rewriteReqFun(List.at(ds, 0), funs, ens) :: rewriteReqDefs(List.tail(ds), funs, ens)
+def rewriteReqImDefs(ds: List[Fun], stem: String, im: Im, ctx: RewriteCtx): List[Fun] =
+  if (List.isEmpty(ds)) ds else rewriteReqFunOwner(List.at(ds, 0), imOwnerKey(stem, im, List.at(ds, 0).name), ctx) :: rewriteReqImDefs(List.tail(ds), stem, im, ctx)
 
-def rewriteReqFun(d: Fun, funs: List[Fun], ens: List[En]): Fun =
+def rewriteReqDefs(ds: List[Fun], stem: String, ctx: RewriteCtx): List[Fun] =
+  if (List.isEmpty(ds)) ds else rewriteReqFunOwner(List.at(ds, 0), funOwnerKey(stem, List.at(ds, 0).name), ctx) :: rewriteReqDefs(List.tail(ds), stem, ctx)
+
+def rewriteReqFunOwner(d: Fun, owner: String, ctx: RewriteCtx): Fun =
   d match {
-    case Fun(priv, ora, name, tparams, params, ret, body, mod, off) => Fun(priv, ora, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, Check.envSelfMod(mod)), funs, ens), mod, off)
+    case Fun(priv, ora, name, tparams, params, ret, body, mod, off) => if (!exprHasRuleExpr(body) && !exprMayTouchWhere(body, ctx.wn)) d else Fun(priv, ora, name, tparams, params, ret, rewriteReqAt(body, owner, 0, Check.bindParams(params, Check.envSelfMod(mod)), ctx).expr, mod, off)
   }
 
-def inferTy(e: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): String =
-  inferTyGot(Check.infer(e, env, Check.ftabOfList(funs), ens))
+def inferTy(e: Expr, env: List[(String, Ty)], ftab: Ftab, ens: List[En]): String =
+  inferTyGot(Check.infer(e, env, ftab, ens))
 
 def inferTyGot(o: Out): String =
   if (Check.hasErr(o)) "A" else Check.tyStr(o)
 
-def rewriteReq(e: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
+def rewriteReqAt(e: Expr, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  if (!exprHasRuleExpr(e) && !exprMayTouchWhere(e, ctx.wn)) ReqStep(e, idx) else e match {
+  case Expr.EPrint(inner, off) => rewriteReqUnary(rewriteReqAt(inner, owner, idx, env, ctx), child => Expr.EPrint(child, off))
+  case Expr.ECall(f, args, off) => rewriteReqCallAt(f, args, off, owner, idx, env, ctx)
+  case Expr.EMethod(recv, name, args, off) => rewriteReqMethAt(recv, name, args, off, owner, idx, env, ctx)
+  case Expr.EField(recv, name, off) => rewriteReqUnary(rewriteReqAt(recv, owner, idx, env, ctx), child => Expr.EField(child, name, off))
+  case Expr.EBin(op, l, r, off) => rewriteReqBinAt(op, l, r, off, owner, idx, env, ctx)
+  case Expr.EUn(op, inner, off) => rewriteReqUnary(rewriteReqAt(inner, owner, idx, env, ctx), child => Expr.EUn(op, child, off))
+  case Expr.ELam(p, ty, body) => rewriteReqUnary(rewriteReqAt(body, owner, idx, Check.bindLam(p, ty, env), ctx), child => Expr.ELam(p, ty, child))
+  case Expr.EIf(c, t, el, off) => rewriteReqIfAt(c, t, el, off, owner, idx, env, ctx)
+  case Expr.EMatch(s, arms, off) => rewriteReqMatchAt(s, arms, off, owner, idx, env, ctx)
+  case Expr.EInterp(s, parts, off) => rewriteReqListWrap(rewriteReqListAt(parts, owner, idx, env, ctx), xs => Expr.EInterp(s, xs, off))
+  case Expr.EList(xs) => rewriteReqListWrap(rewriteReqListAt(xs, owner, idx, env, ctx), ys => Expr.EList(ys))
+  case Expr.ETuple(xs) => rewriteReqListWrap(rewriteReqListAt(xs, owner, idx, env, ctx), ys => Expr.ETuple(ys))
+  case Expr.ENamed(n, inner) => rewriteReqUnary(rewriteReqAt(inner, owner, idx, env, ctx), child => Expr.ENamed(n, child))
+  case Expr.EAscribe(inner, ty, off) => rewriteReqUnary(rewriteReqAt(inner, owner, idx, env, ctx), child => Expr.EAscribe(child, ty, off))
+  case Expr.EFor(bs, body, off) => rewriteReqForAt(bs, body, off, owner, idx, env, ctx)
+  case _ => ReqStep(e, idx)
+}
+
+def rewriteReqUnary(step: ReqStep, build: Expr => Expr): ReqStep =
+  ReqStep(build(step.expr), step.next)
+
+def rewriteReqListWrap(step: ReqListStep, build: List[Expr] => Expr): ReqStep =
+  ReqStep(build(step.exprs), step.next)
+
+def rewriteReqBinAt(op: String, l: Expr, r: Expr, off: Int, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  for {
+    s1 = rewriteReqAt(l, owner, idx, env, ctx)
+    s2 = rewriteReqAt(r, owner, s1.next, env, ctx)
+  } yield ReqStep(Expr.EBin(op, s1.expr, s2.expr, off), s2.next)
+
+def rewriteReqIfAt(c: Expr, t: Expr, el: Expr, off: Int, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  for {
+    s1 = rewriteReqAt(c, owner, idx, env, ctx)
+    s2 = rewriteReqAt(t, owner, s1.next, env, ctx)
+    s3 = rewriteReqAt(el, owner, s2.next, env, ctx)
+  } yield ReqStep(Expr.EIf(s1.expr, s2.expr, s3.expr, off), s3.next)
+
+def rewriteReqMatchAt(s: Expr, arms: List[Arm], off: Int, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  for {
+    s1 = rewriteReqAt(s, owner, idx, env, ctx)
+    s2 = rewriteReqArmsAt(arms, inferTy(s, env, ctx.ftab, ctx.ens), owner, s1.next, env, ctx)
+  } yield ReqStep(Expr.EMatch(s1.expr, s2.arms, off), s2.next)
+
+def hasExactLen(xs: List[Expr], n: Int): Bool =
+  if (n <= 0) List.isEmpty(xs) else !List.isEmpty(xs) && hasExactLen(List.tail(xs), n - 1)
+
+def isPropRuleCall(f: String, args: List[Expr]): Bool =
+  f == "Property.assert" && hasExactLen(args, 2) || f == "Property.check" && hasExactLen(args, 3)
+
+def rewriteReqCallAt(f: String, args: List[Expr], off: Int, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  if (isPropRuleCall(f, args)) rewritePropCallAt(f, args, off, Str.concat(owner, Str.concat("#", Str.fromInt(idx))), owner, idx + 1, env, ctx) else for {
+  step = rewriteReqListAt(args, owner, idx, env, ctx)
+} yield ReqStep(wrapWhereCall(f, step.exprs, off, env, ctx), step.next)
+
+def rewritePropCallAt(f: String, args: List[Expr], off: Int, siteKey: String, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  for {
+    step = rewriteReqListAt(args, owner, idx, env, ctx)
+    ys = step.exprs
+    tagged = if (Set.contains(ctx.ambig, siteKey)) tagNameExpr(List.at(ys, 0), siteKey) :: List.tail(ys) else ys
+  } yield ReqStep(Expr.ECall(f, tagged, off), step.next)
+
+def tagNameExpr(e: Expr, siteKey: String): Expr =
   e match {
-    case Expr.EPrint(inner, off) => Expr.EPrint(rewriteReq(inner, env, funs, ens), off)
-    case Expr.ECall(f, args, off) => wrapWhereCall(f, rewriteReqList(args, env, funs, ens), off, funs, ens)
-    case Expr.EMethod(recv, name, args, off) => rewriteReqMeth(rewriteReq(recv, env, funs, ens), name, rewriteReqList(args, env, funs, ens), off, env, funs, ens)
-    case Expr.EField(recv, name, off) => Expr.EField(rewriteReq(recv, env, funs, ens), name, off)
-    case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteReq(l, env, funs, ens), rewriteReq(r, env, funs, ens), off)
-    case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteReq(inner, env, funs, ens), off)
-    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteReq(body, Check.bindLam(p, ty, env), funs, ens))
-    case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteReq(c, env, funs, ens), rewriteReq(t, env, funs, ens), rewriteReq(el, env, funs, ens), off)
-    case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteReq(s, env, funs, ens), rewriteReqArms(arms, inferTy(s, env, funs, ens), env, funs, ens), off)
-    case Expr.EList(xs) => Expr.EList(rewriteReqList(xs, env, funs, ens))
-    case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs, env, funs, ens))
-    case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteReq(inner, env, funs, ens))
-    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteReq(inner, env, funs, ens), ty, off)
-    case Expr.EFor(bs, body, off) => rewriteReqFor(bs, body, off, env, funs, ens)
-    case _ => e
+    case Expr.EStr(s, off) => Expr.EStr(tagRuleName(siteKey, s), off)
+    case _ => Expr.ECall("Str.concat", Expr.EStr(tagRuleName(siteKey, ""), 0) :: e :: noExpr(), 0)
   }
 
-def wrapWhereCall(f: String, args: List[Expr], off: Int, funs: List[Fun], ens: List[En]): Expr =
-  wrapWhereHit(f, args, off, paramsOfCall(f, funs, ens))
+def wrapWhereCall(f: String, args: List[Expr], off: Int, env: List[(String, Ty)], ctx: RewriteCtx): Expr =
+  if (!Set.contains(ctx.wn, Resolve.short(f))) Expr.ECall(f, args, off) else wrapWhereCallTarget(f, args, off, whereCallTarget(f, env, ctx.ftab, ctx.ens), ctx.ambig)
 
-def wrapWhereHit(f: String, args: List[Expr], off: Int, ps: List[Param]): Expr =
-  if (!paramsHaveWhere(ps)) Expr.ECall(f, args, off) else wrapWhereAl(f, args, off, ps, Check.alignCall(ps, args))
+def wrapWhereCallTarget(f: String, args: List[Expr], off: Int, target: (String, List[Param]), ambig: Set[String]): Expr =
+  if (!paramsHaveWhere(target._2)) Expr.ECall(f, args, off) else wrapWhereAl(f, args, off, target._1, target._2, Check.alignCall(target._2, args), ambig)
 
-def wrapWhereAl(f: String, args: List[Expr], off: Int, ps: List[Param], al: (List[Expr], String)): Expr =
+def wrapWhereAl(f: String, args: List[Expr], off: Int, ownerDisp: String, ps: List[Param], al: (List[Expr], String), ambig: Set[String]): Expr =
   al match {
-    case (xs, err) => if (err != "") Expr.ECall(f, args, off) else Expr.ECall(f, wrapWhereArgs(f, xs, ps), off)
+    case (xs, err) => if (err != "") Expr.ECall(f, args, off) else Expr.ECall(f, wrapWhereArgs(ownerDisp, 0, xs, ps, ambig), off)
   }
 
-def wrapWhereArgs(f: String, xs: List[Expr], ps: List[Param]): List[Expr] =
-  if (List.isEmpty(ps) || List.isEmpty(xs)) xs else wrapWhereArg(f, List.at(xs, 0), List.at(ps, 0)) :: wrapWhereArgs(f, List.tail(xs), List.tail(ps))
+def wrapWhereMeth(recv: Expr, name: String, args: List[Expr], off: Int, env: List[(String, Ty)], ctx: RewriteCtx): Expr =
+  if (!Set.contains(ctx.wn, name)) Expr.EMethod(recv, name, args, off) else wrapWhereMethTarget(recv, name, args, off, whereMethTarget(recv, name, env, ctx.funs, ctx.ens), ctx.ambig)
 
-def wrapWhereArg(f: String, e: Expr, p: Param): Expr =
+def wrapWhereMethTarget(recv: Expr, name: String, args: List[Expr], off: Int, target: (String, List[Param]), ambig: Set[String]): Expr =
+  if (!paramsHaveWhere(target._2)) Expr.EMethod(recv, name, args, off) else wrapWhereMethAl(recv, name, args, off, target._1, target._2, Check.alignCall(target._2, args), ambig)
+
+def wrapWhereMethAl(recv: Expr, name: String, args: List[Expr], off: Int, ownerDisp: String, ps: List[Param], al: (List[Expr], String), ambig: Set[String]): Expr =
+  al match {
+    case (xs, err) => if (err != "") Expr.EMethod(recv, name, args, off) else Expr.EMethod(recv, name, wrapWhereArgs(ownerDisp, 0, xs, ps, ambig), off)
+  }
+
+def wrapWhereArgs(ownerDisp: String, paramIdx: Int, xs: List[Expr], ps: List[Param], ambig: Set[String]): List[Expr] =
+  if (List.isEmpty(ps) || List.isEmpty(xs)) xs else wrapWhereArg(ownerDisp, paramIdx, List.at(xs, 0), List.at(ps, 0), ambig) :: wrapWhereArgs(ownerDisp, paramIdx + 1, List.tail(xs), List.tail(ps), ambig)
+
+def wrapWhereArg(ownerDisp: String, paramIdx: Int, e: Expr, p: Param, ambig: Set[String]): Expr =
   p match {
-    case Param(n, _, w, _) => if (w == "") e else Expr.ECall("Property.check", Expr.EStr(Str.concat(f, Str.concat(" ", w)), 0) :: Expr.ELam(n, "", Check.dfltExpr(w)) :: e :: noExpr(), 0)
+    case Param(n, _, w, _) => if (w == "") e else for {
+  siteKey = whereSiteKey(ownerDisp, paramIdx)
+  label = Str.concat(ownerDisp, Str.concat(" ", w))
+  tagged = if (Set.contains(ambig, siteKey)) tagRuleName(siteKey, label) else label
+} yield Expr.ECall("Property.check", Expr.EStr(tagged, 0) :: Expr.ELam(n, "", Check.dfltExpr(w)) :: e :: noExpr(), 0)
   }
 
-def rewriteReqFor(bs: List[Bind], body: Expr, off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
-  rewriteReqForGo(bs, noBind(), env, body, off, funs, ens)
+def whereSiteKey(ownerDisp: String, paramIdx: Int): String =
+  Str.concat("where:", Str.concat(ownerDisp, Str.concat("#", Str.fromInt(paramIdx))))
 
-def rewriteReqForGo(bs: List[Bind], acc: List[Bind], env: List[(String, Ty)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
-  if (List.isEmpty(bs)) Expr.EFor(List.reverse(acc), rewriteReq(body, env, funs, ens), off) else rewriteReqForHd(List.at(bs, 0), List.tail(bs), acc, env, body, off, funs, ens)
+def rewriteReqForAt(bs: List[Bind], body: Expr, off: Int, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  rewriteReqForGo(bs, noBind(), owner, idx, env, body, off, ctx)
 
-def rewriteReqForHd(b: Bind, rest: List[Bind], acc: List[Bind], env: List[(String, Ty)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
+def rewriteReqForGo(bs: List[Bind], acc: List[Bind], owner: String, idx: Int, env: List[(String, Ty)], body: Expr, off: Int, ctx: RewriteCtx): ReqStep =
+  if (List.isEmpty(bs)) for {
+  end = rewriteReqAt(body, owner, idx, env, ctx)
+} yield ReqStep(Expr.EFor(List.reverse(acc), end.expr, off), end.next) else rewriteReqForHd(List.at(bs, 0), List.tail(bs), acc, owner, idx, env, body, off, ctx)
+
+def rewriteReqForHd(b: Bind, rest: List[Bind], acc: List[Bind], owner: String, idx: Int, env: List[(String, Ty)], body: Expr, off: Int, ctx: RewriteCtx): ReqStep =
   b match {
-    case Bind(d, name, v) => rewriteReqForVal(d, name, rewriteReq(v, env, funs, ens), rest, acc, env, body, off, funs, ens)
+    case Bind(d, name, v) => for {
+  step = rewriteReqAt(v, owner, idx, env, ctx)
+  nv = step.expr
+  needEnv = bindsHaveRuleExpr(rest) || exprHasRuleExpr(body) || bindsMayTouchWhere(rest, ctx.wn) || exprMayTouchWhere(body, ctx.wn)
+  nextEnv = if (needEnv) Check.bindFor(d, name, inferTy(nv, env, ctx.ftab, ctx.ens), env, ctx.ens) else env
+} yield rewriteReqForGo(rest, Bind(d, name, nv) :: acc, owner, step.next, nextEnv, body, off, ctx)
   }
 
-def rewriteReqForVal(d: Bool, name: String, nv: Expr, rest: List[Bind], acc: List[Bind], env: List[(String, Ty)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
-  rewriteReqForGo(rest, Bind(d, name, nv) :: acc, Check.bindFor(d, name, inferTy(nv, env, funs, ens), env, ens), body, off, funs, ens)
+def rewriteReqMethAt(recv: Expr, name: String, args: List[Expr], off: Int, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqStep =
+  for {
+    rStep = rewriteReqAt(recv, owner, idx, env, ctx)
+    nextIdx = if (name == "require") rStep.next + 1 else rStep.next
+    aStep = rewriteReqListAt(args, owner, nextIdx, env, ctx)
+    siteKey = Str.concat(owner, Str.concat("#", Str.fromInt(rStep.next)))
+    out = if (name == "require") rewriteRequire(rStep.expr, aStep.exprs, siteKey, off, env, ctx) else wrapWhereMeth(rStep.expr, name, aStep.exprs, off, env, ctx)
+  } yield ReqStep(out, aStep.next)
 
-def rewriteReqMeth(recv: Expr, name: String, args: List[Expr], off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
-  if (name == "require") rewriteRequire(recv, args, off, env, funs, ens) else Expr.EMethod(recv, name, args, off)
+def rewriteRequire(recv: Expr, args: List[Expr], siteKey: String, off: Int, env: List[(String, Ty)], ctx: RewriteCtx): Expr =
+  rewriteRequireTy(recv, args, siteKey, off, env, ctx, Check.infer(recv, env, ctx.ftab, ctx.ens))
 
-def rewriteRequire(recv: Expr, args: List[Expr], off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
-  rewriteRequireTy(recv, args, off, env, funs, ens, Check.infer(recv, env, Check.ftabOfList(funs), ens))
+def rewriteRequireTy(recv: Expr, args: List[Expr], siteKey: String, off: Int, env: List[(String, Ty)], ctx: RewriteCtx, ro: Out): Expr =
+  if (Check.hasErr(ro) || !Type.isIo(ro.ty)) Expr.ECall("Property.check", reqNameTagged(args, siteKey, ctx.ambig) :: forceIoPred(reqPredE(args), env, ctx) :: recv :: noExpr(), off) else rewriteIoRequire(recv, reqNameTagged(args, siteKey, ctx.ambig), reqPredE(args), off, env, ctx)
 
-def rewriteRequireTy(recv: Expr, args: List[Expr], off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En], ro: Out): Expr =
-  if (Check.hasErr(ro) || !Type.isIo(ro.ty)) Expr.ECall("Property.check", reqNameE(args) :: forceIoPred(reqPredE(args), env, funs, ens) :: recv :: noExpr(), off) else rewriteIoRequire(recv, reqNameE(args), reqPredE(args), off, env, funs, ens)
-
-def forceIoPred(pred: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
-  forceIoPredTy(pred, Check.infer(pred, env, Check.ftabOfList(funs), ens))
+def forceIoPred(pred: Expr, env: List[(String, Ty)], ctx: RewriteCtx): Expr =
+  forceIoPredTy(pred, Check.infer(pred, env, ctx.ftab, ctx.ens))
 
 def forceIoPredTy(pred: Expr, po: Out): Expr =
   if (!Check.hasErr(po) && Type.isIo(po.ty)) Expr.ECall("Property.force", pred :: noExpr(), 0) else pred
 
-def rewriteIoRequire(recv: Expr, nameE: Expr, pred: Expr, off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
-  rewriteIoPred(recv, nameE, pred, off, Check.infer(pred, env, Check.ftabOfList(funs), ens))
+def rewriteIoRequire(recv: Expr, nameE: Expr, pred: Expr, off: Int, env: List[(String, Ty)], ctx: RewriteCtx): Expr =
+  rewriteIoPred(recv, nameE, pred, off, Check.infer(pred, env, ctx.ftab, ctx.ens))
 
 def rewriteIoPred(recv: Expr, nameE: Expr, pred: Expr, off: Int, po: Out): Expr =
   pred match {
@@ -1751,27 +2017,44 @@ def reqFor(recv: Expr, nameE: Expr, pred: Expr, off: Int): Expr =
 def reqForIoPred(recv: Expr, nameE: Expr, pred: Expr, off: Int): Expr =
   Expr.EFor(Bind(true, "reqv", recv) :: Bind(true, "reqok", pred) :: Bind(true, "_", Expr.ECall("Property.assert", nameE :: Expr.EVar("reqok", off) :: noExpr(), off)) :: noBind(), Expr.EVar("reqv", off), off)
 
-def reqNameE(args: List[Expr]): Expr =
-  if (List.len(args) < 2) Expr.EStr("require", 0) else reqNameHit(List.at(args, 0))
+def reqLabelOf(args: List[Expr]): String =
+  if (List.isEmpty(args) || List.isEmpty(List.tail(args))) "require" else reqLabelHit(List.at(args, 0))
 
-def reqNameHit(e: Expr): Expr =
+def reqLabelHit(e: Expr): String =
   e match {
-    case Expr.EStr(s, _) => Expr.EStr(s, 0)
-    case _ => Expr.EStr("require", 0)
+    case Expr.EStr(s, _) => s
+    case _ => "require"
   }
 
+def reqNameTagged(args: List[Expr], siteKey: String, ambig: Set[String]): Expr =
+  for {
+    label = reqLabelOf(args)
+    out = if (Set.contains(ambig, siteKey)) tagRuleName(siteKey, label) else label
+  } yield Expr.EStr(out, 0)
+
 def reqPredE(args: List[Expr]): Expr =
-  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) List.at(args, 0) else List.at(List.tail(args), 0)
+  if (List.isEmpty(args)) Expr.EBool(true) else if (List.isEmpty(List.tail(args))) List.at(args, 0) else List.at(List.tail(args), 0)
 
-def rewriteReqList(xs: List[Expr], env: List[(String, Ty)], funs: List[Fun], ens: List[En]): List[Expr] =
-  if (List.isEmpty(xs)) xs else rewriteReq(List.at(xs, 0), env, funs, ens) :: rewriteReqList(List.tail(xs), env, funs, ens)
+def rewriteReqListAt(xs: List[Expr], owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqListStep =
+  if (List.isEmpty(xs)) ReqListStep(noExpr(), idx) else for {
+  h = rewriteReqAt(List.at(xs, 0), owner, idx, env, ctx)
+  t = rewriteReqListAt(List.tail(xs), owner, h.next, env, ctx)
+} yield ReqListStep(h.expr :: t.exprs, t.next)
 
-def rewriteReqArms(xs: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): List[Arm] =
-  if (List.isEmpty(xs)) xs else rewriteReqArm(List.at(xs, 0), scrutTy, env, funs, ens) :: rewriteReqArms(List.tail(xs), scrutTy, env, funs, ens)
+def rewriteReqArmsAt(xs: List[Arm], scrutTy: String, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqArmsStep =
+  if (List.isEmpty(xs)) ReqArmsStep(noArm(), idx) else for {
+  h = rewriteReqArmAt(List.at(xs, 0), scrutTy, owner, idx, env, ctx)
+  t = rewriteReqArmsAt(List.tail(xs), scrutTy, owner, h.next, env, ctx)
+} yield ReqArmsStep(h.arm :: t.arms, t.next)
 
-def rewriteReqArm(a: Arm, scrutTy: String, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Arm =
+def noArm(): List[Arm] =
+  []
+
+def rewriteReqArmAt(a: Arm, scrutTy: String, owner: String, idx: Int, env: List[(String, Ty)], ctx: RewriteCtx): ReqArmStep =
   a match {
-    case Arm(pat, g, body) => Arm(pat, g, rewriteReq(body, Check.bindPat(pat, scrutTy, env, ens), funs, ens))
+    case Arm(pat, g, body) => if (!exprHasRuleExpr(body) && !exprMayTouchWhere(body, ctx.wn)) ReqArmStep(a, idx) else for {
+  step = rewriteReqAt(body, owner, idx, Check.bindPat(pat, scrutTy, env, ctx.ens), ctx)
+} yield ReqArmStep(Arm(pat, g, step.expr), step.next)
   }
 
 def seeds(src: String): String =
@@ -2311,4 +2594,751 @@ def jWorkload(w: Workload): String =
 
 def checkedClaimNames(raw: String): List[String] =
   sortStrs(List.distinct(List.map(List.filter(linesOf(raw), l => Str.startsWith(l, "checked\t")), l => Str.drop(l, 8))))
+
+def noRuleSites(): List[RuleSite] =
+  []
+
+def tagRuleName(key: String, label: String): String =
+  Str.concat("@sz:", Str.concat(key, Str.concat("@", label)))
+
+def splitRuleTag(raw: String): (String, String) =
+  if (!Str.startsWith(raw, "@sz:")) ("", raw) else splitRuleTagAt(raw, findIdx(raw, "@", 4))
+
+def splitRuleTagAt(raw: String, j: Int): (String, String) =
+  if (j < 4) ("", raw) else (Str.slice(raw, 4, j), Str.drop(raw, j + 1))
+
+def stripRuleTag(raw: String): String =
+  splitRuleTag(raw)._2
+
+def stripRuleTagsInText(s: String): String =
+  if (!Str.contains(s, "@sz:")) s else stripRuleTagsGo(s, 0, Builder.empty())
+
+def stripRuleTagsGo(s: String, pos: Int, b: Builder): String =
+  stripRuleTagsHit(s, pos, findIdx(s, "@sz:", pos), b)
+
+def stripRuleTagsHit(s: String, pos: Int, i: Int, b: Builder): String =
+  if (i < 0) Builder.result(Builder.append(b, Str.drop(s, pos))) else stripRuleTagsEnd(s, pos, i, findIdx(s, "@", i + 4), b)
+
+def stripRuleTagsEnd(s: String, pos: Int, i: Int, j: Int, b: Builder): String =
+  if (j <= i + 4 || Str.contains(Str.slice(s, i + 4, j), nl())) stripRuleTagsGo(s, i + 4, Builder.append(b, Str.slice(s, pos, i + 4))) else stripRuleTagsGo(s, j + 1, Builder.append(b, Str.slice(s, pos, i)))
+
+def progHasTaggedProp(p: Prog, stem: String, ambig: Set[String]): Bool =
+  if (List.isEmpty(Set.toList(ambig))) false else p match {
+  case Prog(_, _, _, _, impls, _, defs, _, body) => exprHasTaggedProp(body, mainOwnerKey(stem), 0, ambig).hit || defsHaveTaggedProp(defs, stem, ambig) || implsHaveTaggedProp(impls, stem, ambig)
+}
+
+def defsHaveTaggedProp(ds: List[Fun], stem: String, ambig: Set[String]): Bool =
+  if (List.isEmpty(ds)) false else exprHasTaggedProp(List.at(ds, 0).body, funOwnerKey(stem, List.at(ds, 0).name), 0, ambig).hit || defsHaveTaggedProp(List.tail(ds), stem, ambig)
+
+def implsHaveTaggedProp(xs: List[Im], stem: String, ambig: Set[String]): Bool =
+  if (List.isEmpty(xs)) false else imDefsHaveTaggedProp(List.at(xs, 0).methods, stem, List.at(xs, 0), ambig) || implsHaveTaggedProp(List.tail(xs), stem, ambig)
+
+def imDefsHaveTaggedProp(ds: List[Fun], stem: String, im: Im, ambig: Set[String]): Bool =
+  if (List.isEmpty(ds)) false else exprHasTaggedProp(List.at(ds, 0).body, imOwnerKey(stem, im, List.at(ds, 0).name), 0, ambig).hit || imDefsHaveTaggedProp(List.tail(ds), stem, im, ambig)
+
+def exprHasTaggedProp(e: Expr, owner: String, idx: Int, ambig: Set[String]): TagHitStep =
+  e match {
+    case Expr.EPrint(inner, _) => exprHasTaggedProp(inner, owner, idx, ambig)
+    case Expr.ECall(f, args, _) => if (isPropRuleCall(f, args)) for {
+  hit = Set.contains(ambig, Str.concat(owner, Str.concat("#", Str.fromInt(idx))))
+  rest = listHasTaggedProp(args, owner, idx + 1, ambig)
+} yield TagHitStep(hit || rest.hit, rest.next) else listHasTaggedProp(args, owner, idx, ambig)
+    case Expr.EMethod(recv, name, args, _) => for {
+  r = exprHasTaggedProp(recv, owner, idx, ambig)
+  next = if (name == "require") r.next + 1 else r.next
+  a = listHasTaggedProp(args, owner, next, ambig)
+} yield TagHitStep(r.hit || a.hit, a.next)
+    case Expr.EField(recv, _, _) => exprHasTaggedProp(recv, owner, idx, ambig)
+    case Expr.EBin(_, l, r, _) => for {
+  s1 = exprHasTaggedProp(l, owner, idx, ambig)
+  s2 = exprHasTaggedProp(r, owner, s1.next, ambig)
+} yield TagHitStep(s1.hit || s2.hit, s2.next)
+    case Expr.EUn(_, inner, _) => exprHasTaggedProp(inner, owner, idx, ambig)
+    case Expr.ELam(_, _, body) => exprHasTaggedProp(body, owner, idx, ambig)
+    case Expr.EIf(c, t, el, _) => for {
+  s1 = exprHasTaggedProp(c, owner, idx, ambig)
+  s2 = exprHasTaggedProp(t, owner, s1.next, ambig)
+  s3 = exprHasTaggedProp(el, owner, s2.next, ambig)
+} yield TagHitStep(s1.hit || s2.hit || s3.hit, s3.next)
+    case Expr.EMatch(s, arms, _) => for {
+  s1 = exprHasTaggedProp(s, owner, idx, ambig)
+  s2 = armsHaveTaggedProp(arms, owner, s1.next, ambig)
+} yield TagHitStep(s1.hit || s2.hit, s2.next)
+    case Expr.EInterp(_, parts, _) => listHasTaggedProp(parts, owner, idx, ambig)
+    case Expr.EList(xs) => listHasTaggedProp(xs, owner, idx, ambig)
+    case Expr.ETuple(xs) => listHasTaggedProp(xs, owner, idx, ambig)
+    case Expr.ENamed(_, inner) => exprHasTaggedProp(inner, owner, idx, ambig)
+    case Expr.EAscribe(inner, _, _) => exprHasTaggedProp(inner, owner, idx, ambig)
+    case Expr.EFor(bs, body, _) => for {
+  s1 = bindsHaveTaggedProp(bs, owner, idx, ambig)
+  s2 = exprHasTaggedProp(body, owner, s1.next, ambig)
+} yield TagHitStep(s1.hit || s2.hit, s2.next)
+    case _ => TagHitStep(false, idx)
+  }
+
+def listHasTaggedProp(xs: List[Expr], owner: String, idx: Int, ambig: Set[String]): TagHitStep =
+  if (List.isEmpty(xs)) TagHitStep(false, idx) else for {
+  h = exprHasTaggedProp(List.at(xs, 0), owner, idx, ambig)
+  t = listHasTaggedProp(List.tail(xs), owner, h.next, ambig)
+} yield TagHitStep(h.hit || t.hit, t.next)
+
+def armsHaveTaggedProp(xs: List[Arm], owner: String, idx: Int, ambig: Set[String]): TagHitStep =
+  if (List.isEmpty(xs)) TagHitStep(false, idx) else for {
+  h = exprHasTaggedProp(List.at(xs, 0).body, owner, idx, ambig)
+  t = armsHaveTaggedProp(List.tail(xs), owner, h.next, ambig)
+} yield TagHitStep(h.hit || t.hit, t.next)
+
+def bindsHaveTaggedProp(xs: List[Bind], owner: String, idx: Int, ambig: Set[String]): TagHitStep =
+  if (List.isEmpty(xs)) TagHitStep(false, idx) else for {
+  h = exprHasTaggedProp(List.at(xs, 0).value, owner, idx, ambig)
+  t = bindsHaveTaggedProp(List.tail(xs), owner, h.next, ambig)
+} yield TagHitStep(h.hit || t.hit, t.next)
+
+def ambiguousKeysKept(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): Set[String] =
+  ambiguousKeysKeptWith(kept, Check.ftabOfList(funs), funs, ens)
+
+def ambiguousKeysKeptWith(kept: List[(String, String, Prog)], ftab: Ftab, funs: List[Fun], ens: List[En]): Set[String] =
+  ambiguousKeysEntries(List.concat(whereKeyEntries(funs, ens), keptRuleKeyEntries(kept, ftab, Check.withLetterPins(ens))))
+
+def ambiguousKeysEntries(entries: List[RuleEntry]): Set[String] =
+  for {
+    counts = List.foldLeft(entries, Map.empty(), pair => for {
+  m = pair._1
+  row = pair._2
+  bucket = Str.concat(row.rejKind, Str.concat(":", row.rule))
+} yield Map.set(m, bucket, Map.getOrElse(m, bucket, 0) + 1))
+  } yield List.foldLeft(entries, Set.empty(), pair => for {
+  acc = pair._1
+  row = pair._2
+  bucket = Str.concat(row.rejKind, Str.concat(":", row.rule))
+} yield if (row.forced || Map.getOrElse(counts, bucket, 0) > 1) Set.add(acc, row.siteKey) else acc)
+
+def whereKeyEntries(funs: List[Fun], ens: List[En]): List[RuleEntry] =
+  List.concat(funWhereKeyEntries(funs), enWhereKeyEntries(ens))
+
+def funWhereKeyEntries(ds: List[Fun]): List[RuleEntry] =
+  if (List.isEmpty(ds)) [] else List.concat(funOneWhereKeys(List.at(ds, 0)), funWhereKeyEntries(List.tail(ds)))
+
+def funOneWhereKeys(d: Fun): List[RuleEntry] =
+  if (d.ora) [] else paramWhereKeys(Resolve.qualified(d.mod, d.name), d.params, 0)
+
+def enWhereKeyEntries(ens: List[En]): List[RuleEntry] =
+  if (List.isEmpty(ens)) [] else List.concat(enOneWhereKeys(List.at(ens, 0)), enWhereKeyEntries(List.tail(ens)))
+
+def enOneWhereKeys(en: En): List[RuleEntry] =
+  if (en.isRec || recLike(en.name, en.cases)) paramWhereKeys(Resolve.display(en.name), firstCaseParams(en.cases), 0) else enCasesWhereKeys(Resolve.display(en.name), en.cases)
+
+def enCasesWhereKeys(enDisp: String, cs: List[EnCase]): List[RuleEntry] =
+  if (List.isEmpty(cs)) [] else List.concat(paramWhereKeys(Str.concat(enDisp, Str.concat(".", Resolve.short(List.at(cs, 0).name))), List.at(cs, 0).fields, 0), enCasesWhereKeys(enDisp, List.tail(cs)))
+
+def paramWhereKeys(ownerDisp: String, ps: List[Param], j: Int): List[RuleEntry] =
+  if (List.isEmpty(ps)) [] else paramWhereKeysHd(ownerDisp, List.at(ps, 0), List.tail(ps), j)
+
+def paramWhereKeysHd(ownerDisp: String, p: Param, rest: List[Param], j: Int): List[RuleEntry] =
+  p match {
+    case Param(_, _, w, _) => if (w == "") paramWhereKeys(ownerDisp, rest, j + 1) else RuleEntry(whereSiteKey(ownerDisp, j), "check", Str.concat(ownerDisp, Str.concat(" ", w)), false) :: paramWhereKeys(ownerDisp, rest, j + 1)
+  }
+
+def srcMayHaveRuleExpr(src: String): Bool =
+  Str.contains(src, "require") || Str.contains(src, "Property.")
+
+def keptRuleKeyEntries(kept: List[(String, String, Prog)], ftab: Ftab, ens: List[En]): List[RuleEntry] =
+  if (List.isEmpty(kept)) [] else for {
+  h = List.at(kept, 0)
+  own = if (!srcMayHaveRuleExpr(h._2)) [] else progRuleKeyEntries(h._3, h._1, ftab, ens, false)
+} yield List.concat(own, keptRuleKeyEntries(List.tail(kept), ftab, ens))
+
+def progRuleKeyEntries(p: Prog, stem: String, ftab: Ftab, ens: List[En], forceAll: Bool): List[RuleEntry] =
+  p match {
+    case Prog(_, _, _, _, impls, _, defs, _, body) => List.concat(implsRuleKeyEntries(impls, stem, ftab, ens, forceAll), List.concat(defsRuleKeyEntries(defs, stem, ftab, ens, forceAll), exprRuleKeyEntries(body, mainOwnerKey(stem), 0, mainEnv(stem), ftab, ens, forceAll).entries))
+  }
+
+def implsRuleKeyEntries(xs: List[Im], stem: String, ftab: Ftab, ens: List[En], forceAll: Bool): List[RuleEntry] =
+  if (List.isEmpty(xs)) [] else List.concat(imRuleKeyEntries(List.at(xs, 0).methods, stem, List.at(xs, 0), ftab, ens, forceAll), implsRuleKeyEntries(List.tail(xs), stem, ftab, ens, forceAll))
+
+def imRuleKeyEntries(ds: List[Fun], stem: String, im: Im, ftab: Ftab, ens: List[En], forceAll: Bool): List[RuleEntry] =
+  if (List.isEmpty(ds)) [] else List.concat(funRuleKeyEntries(List.at(ds, 0), imOwnerKey(stem, im, List.at(ds, 0).name), ftab, ens, forceAll), imRuleKeyEntries(List.tail(ds), stem, im, ftab, ens, forceAll))
+
+def defsRuleKeyEntries(ds: List[Fun], stem: String, ftab: Ftab, ens: List[En], forceAll: Bool): List[RuleEntry] =
+  if (List.isEmpty(ds)) [] else List.concat(funRuleKeyEntries(List.at(ds, 0), funOwnerKey(stem, List.at(ds, 0).name), ftab, ens, forceAll), defsRuleKeyEntries(List.tail(ds), stem, ftab, ens, forceAll))
+
+def funRuleKeyEntries(d: Fun, owner: String, ftab: Ftab, ens: List[En], forceAll: Bool): List[RuleEntry] =
+  if (!exprHasRuleExpr(d.body)) [] else exprRuleKeyEntries(d.body, owner, 0, Check.bindParams(d.params, Check.envSelfMod(d.mod)), ftab, ens, forceAll).entries
+
+def isStrExpr(e: Expr): Bool =
+  e match {
+    case Expr.EStr(_, _) => true
+    case _ => false
+  }
+
+def propCallLabel(e: Expr, fallback: String): String =
+  e match {
+    case Expr.EStr(s, _) => s
+    case _ => fallback
+  }
+
+def isIoRecvExpr(recv: Expr, env: List[(String, Ty)], ftab: Ftab, ens: List[En]): Bool =
+  for {
+    ro = Check.infer(recv, env, ftab, ens)
+  } yield !Check.hasErr(ro) && Type.isIo(ro.ty)
+
+def exprRuleKeyEntries(e: Expr, owner: String, idx: Int, env: List[(String, Ty)], ftab: Ftab, ens: List[En], forceAll: Bool): RuleKeyStep =
+  if (!exprHasRuleExpr(e)) RuleKeyStep([], idx) else e match {
+  case Expr.EPrint(inner, _) => exprRuleKeyEntries(inner, owner, idx, env, ftab, ens, forceAll)
+  case Expr.ECall(f, args, _) => if (isPropRuleCall(f, args)) for {
+  siteKey = Str.concat(owner, Str.concat("#", Str.fromInt(idx)))
+  rk = if (f == "Property.assert") "assert" else "check"
+  lbl = propCallLabel(List.at(args, 0), rk)
+  force = forceAll || !isStrExpr(List.at(args, 0))
+  rest = listRuleKeyEntries(args, owner, idx + 1, env, ftab, ens, forceAll)
+} yield RuleKeyStep(RuleEntry(siteKey, rk, lbl, force) :: rest.entries, rest.next) else listRuleKeyEntries(args, owner, idx, env, ftab, ens, forceAll)
+  case Expr.EMethod(recv, name, args, _) => for {
+  r = exprRuleKeyEntries(recv, owner, idx, env, ftab, ens, forceAll)
+  isReq = name == "require"
+  next = if (isReq) r.next + 1 else r.next
+  a = listRuleKeyEntries(args, owner, next, env, ftab, ens, forceAll)
+  siteKey = Str.concat(owner, Str.concat("#", Str.fromInt(r.next)))
+  rk = if (isReq && isIoRecvExpr(recv, env, ftab, ens)) "assert" else "check"
+  own = if (isReq) RuleEntry(siteKey, rk, reqLabelOf(args), forceAll) :: [] else []
+} yield RuleKeyStep(List.concat(r.entries, List.concat(own, a.entries)), a.next)
+  case Expr.EField(recv, _, _) => exprRuleKeyEntries(recv, owner, idx, env, ftab, ens, forceAll)
+  case Expr.EBin(_, l, r, _) => for {
+  s1 = exprRuleKeyEntries(l, owner, idx, env, ftab, ens, forceAll)
+  s2 = exprRuleKeyEntries(r, owner, s1.next, env, ftab, ens, forceAll)
+} yield RuleKeyStep(List.concat(s1.entries, s2.entries), s2.next)
+  case Expr.EUn(_, inner, _) => exprRuleKeyEntries(inner, owner, idx, env, ftab, ens, forceAll)
+  case Expr.ELam(p, ty, body) => exprRuleKeyEntries(body, owner, idx, Check.bindLam(p, ty, env), ftab, ens, forceAll)
+  case Expr.EIf(c, t, el, _) => for {
+  s1 = exprRuleKeyEntries(c, owner, idx, env, ftab, ens, forceAll)
+  s2 = exprRuleKeyEntries(t, owner, s1.next, env, ftab, ens, forceAll)
+  s3 = exprRuleKeyEntries(el, owner, s2.next, env, ftab, ens, forceAll)
+} yield RuleKeyStep(List.concat(s1.entries, List.concat(s2.entries, s3.entries)), s3.next)
+  case Expr.EMatch(s, arms, _) => for {
+  s1 = exprRuleKeyEntries(s, owner, idx, env, ftab, ens, forceAll)
+  s2 = if (!armsHaveRuleExpr(arms)) RuleKeyStep([], s1.next) else armsRuleKeyEntries(arms, inferTy(s, env, ftab, ens), owner, s1.next, env, ftab, ens, forceAll)
+} yield RuleKeyStep(List.concat(s1.entries, s2.entries), s2.next)
+  case Expr.EInterp(_, parts, _) => listRuleKeyEntries(parts, owner, idx, env, ftab, ens, forceAll)
+  case Expr.EList(xs) => listRuleKeyEntries(xs, owner, idx, env, ftab, ens, forceAll)
+  case Expr.ETuple(xs) => listRuleKeyEntries(xs, owner, idx, env, ftab, ens, forceAll)
+  case Expr.ENamed(_, inner) => exprRuleKeyEntries(inner, owner, idx, env, ftab, ens, forceAll)
+  case Expr.EAscribe(inner, _, _) => exprRuleKeyEntries(inner, owner, idx, env, ftab, ens, forceAll)
+  case Expr.EFor(bs, body, _) => forRuleKeyEntries(bs, body, owner, idx, env, ftab, ens, forceAll)
+  case _ => RuleKeyStep([], idx)
+}
+
+def listRuleKeyEntries(xs: List[Expr], owner: String, idx: Int, env: List[(String, Ty)], ftab: Ftab, ens: List[En], forceAll: Bool): RuleKeyStep =
+  if (List.isEmpty(xs)) RuleKeyStep([], idx) else for {
+  h = exprRuleKeyEntries(List.at(xs, 0), owner, idx, env, ftab, ens, forceAll)
+  t = listRuleKeyEntries(List.tail(xs), owner, h.next, env, ftab, ens, forceAll)
+} yield RuleKeyStep(List.concat(h.entries, t.entries), t.next)
+
+def armsRuleKeyEntries(xs: List[Arm], scrutTy: String, owner: String, idx: Int, env: List[(String, Ty)], ftab: Ftab, ens: List[En], forceAll: Bool): RuleKeyStep =
+  if (List.isEmpty(xs)) RuleKeyStep([], idx) else for {
+  a = List.at(xs, 0)
+  h = if (!exprHasRuleExpr(a.body)) RuleKeyStep([], idx) else exprRuleKeyEntries(a.body, owner, idx, Check.bindPat(a.pat, scrutTy, env, ens), ftab, ens, forceAll)
+  t = armsRuleKeyEntries(List.tail(xs), scrutTy, owner, h.next, env, ftab, ens, forceAll)
+} yield RuleKeyStep(List.concat(h.entries, t.entries), t.next)
+
+def forRuleKeyEntries(bs: List[Bind], body: Expr, owner: String, idx: Int, env: List[(String, Ty)], ftab: Ftab, ens: List[En], forceAll: Bool): RuleKeyStep =
+  if (List.isEmpty(bs)) exprRuleKeyEntries(body, owner, idx, env, ftab, ens, forceAll) else for {
+  b = List.at(bs, 0)
+  h = exprRuleKeyEntries(b.value, owner, idx, env, ftab, ens, forceAll)
+  needEnv = bindsHaveRuleExpr(List.tail(bs)) || exprHasRuleExpr(body)
+  nextEnv = if (needEnv) Check.bindFor(b.draw, b.name, inferTy(b.value, env, ftab, ens), env, ens) else env
+  t = forRuleKeyEntries(List.tail(bs), body, owner, h.next, nextEnv, ftab, ens, forceAll)
+} yield RuleKeyStep(List.concat(h.entries, t.entries), t.next)
+
+def rewriteFuzzWrap(verWrap: String, drv: String, files: List[(String, String)]): String =
+  if (verWrap == "" && drv == "") "" else for {
+  kept = parseKept(files)
+  merged = Resolve.prog(mergeKept(kept))
+  resolved = resolveKept(kept, merged)
+  funs = Check.expandDefs(merged.defs, merged.aliases)
+  ens = Check.expandEnums(merged.enums, merged.aliases)
+  ftab = Check.ftabOfList(funs)
+  pins = Check.withLetterPins(ens)
+  liveEntries = keptRuleKeyEntries(resolved, ftab, pins)
+  ambig = ambiguousKeysEntries(List.concat(whereKeyEntries(funs, ens), liveEntries))
+  assertLabels = List.foldLeft(liveEntries, Set.empty(), pair => if (pair._2.rejKind == "assert") Set.add(pair._1, pair._2.rule) else pair._1)
+  drvOut = if (drv == "") "" else rewriteScenarioDrv(drv, funs, ens, ambig)
+  verOut = if (verWrap == "") "" else rewriteVerifyWrapSrc(verWrap, merged, funs, ens, ambig, assertLabels)
+} yield Str.concat(drvOut, verOut)
+
+def rewriteScenarioDrv(drv: String, liveFuns: List[Fun], liveEns: List[En], baseAmbig: Set[String]): String =
+  for {
+    rawP = Parse.parseFile("__scn", drv)
+    scnEn = Check.expandEnums(rawP.enums, rawP.aliases)
+    scnFuns = Check.expandDefs(rawP.defs, rawP.aliases)
+    allFuns = List.concat(scnFuns, liveFuns)
+    allEns = List.concat(scnEn, liveEns)
+    ftab = Check.ftabOfList(allFuns)
+    pins = Check.withLetterPins(allEns)
+    idx = Resolve.indexOf(Prog("", allEns, rawP.aliases, [], [], rawP.imps, allFuns, "", Expr.EUnit, ""))
+    resP = resolveKeptProg(Resolve.program(rawP, idx), rawP.aliases)
+    scnEntries = List.concat(whereKeyEntries(scnFuns, scnEn), progRuleKeyEntries(resP, "__scn", ftab, pins, true))
+    scnKeys = List.foldLeft(scnEntries, baseAmbig, pair => Set.add(pair._1, pair._2.siteKey))
+    ctx = RewriteCtx(ftab, allFuns, pins, whereShortSet(allFuns, allEns), scnKeys)
+  } yield if (progNeedsRewriteCtx(resP, "__scn", ctx)) Resolve.source(rewriteReqTreeCtx(resP, "__scn", ctx)) else drv
+
+def rewriteVerifyWrapSrc(verWrap: String, liveMerged: Prog, liveFuns: List[Fun], liveEns: List[En], ambig: Set[String], assertLabels: Set[String]): String =
+  for {
+    rawWrap = Parse.parseFile(wrapMod(), verWrap)
+    wrapEn = Check.expandEnums(rawWrap.enums, rawWrap.aliases)
+    wrapFuns = Check.expandDefs(rawWrap.defs, rawWrap.aliases)
+    allFuns = List.concat(wrapFuns, liveFuns)
+    allEns = List.concat(wrapEn, liveEns)
+    wn = whereShortSet(allFuns, allEns)
+    needsOraTag = wrapNeedsOraTag(rawWrap.defs, assertLabels)
+  } yield if (!needsOraTag && List.isEmpty(Set.toList(wn))) verWrap else for {
+  allAliases = List.concat(rawWrap.aliases, liveMerged.aliases)
+  idx = Resolve.indexOf(liveMerged.copy(enums = List.concat(rawWrap.enums, liveMerged.enums), aliases = allAliases, imps = List.concat(rawWrap.imps, liveMerged.imps), defs = List.concat(rawWrap.defs, liveMerged.defs)))
+  wrapProg = resolveKeptProg(Resolve.program(rawWrap, idx), allAliases)
+  ctx = RewriteCtx(Check.ftabOfList(allFuns), allFuns, Check.withLetterPins(allEns), wn, ambig)
+  needsW = progNeedsWhereCtx(wrapProg, wrapMod(), ctx)
+} yield if (!needsW && !needsOraTag) verWrap else Resolve.source(rewriteVerifyWrapTree(wrapProg, ctx, assertLabels))
+
+def wrapNeedsOraTag(ds: List[Fun], assertLabels: Set[String]): Bool =
+  if (List.isEmpty(Set.toList(assertLabels)) || List.isEmpty(ds)) false else wrapFunNeedsOraTag(List.at(ds, 0), assertLabels) || wrapNeedsOraTag(List.tail(ds), assertLabels)
+
+def wrapFunNeedsOraTag(d: Fun, assertLabels: Set[String]): Bool =
+  Str.startsWith(d.name, "_drv_") && Set.contains(assertLabels, Str.drop(d.name, 5))
+
+def rewriteVerifyWrapTree(p: Prog, ctx: RewriteCtx, assertLabels: Set[String]): Prog =
+  p.copy(defs = List.map(p.defs, d => rewriteVerifyWrapFun(d, ctx, assertLabels)))
+
+def rewriteVerifyWrapFun(d: Fun, ctx: RewriteCtx, assertLabels: Set[String]): Fun =
+  for {
+    oraTag = if (wrapFunNeedsOraTag(d, assertLabels)) Str.drop(d.name, 5) else ""
+  } yield if (oraTag == "" && !exprMayTouchWhere(d.body, ctx.wn)) d else d.copy(body = rewriteWrapExpr(d.body, Check.bindParams(d.params, Check.envSelfMod(d.mod)), ctx, oraTag))
+
+def rewriteWrapExpr(e: Expr, env: List[(String, Ty)], ctx: RewriteCtx, oraTag: String): Expr =
+  if (oraTag == "" && !exprMayTouchWhere(e, ctx.wn)) e else e match {
+  case Expr.EPrint(inner, off) => Expr.EPrint(rewriteWrapExpr(inner, env, ctx, oraTag), off)
+  case Expr.ECall(f, args, off) => if (f == "Property.assert" && oraTag != "" && hasExactLen(args, 2) && isExactStrLit(List.at(args, 0), oraTag)) Expr.ECall(f, Expr.EStr(tagRuleName(Str.concat("oracle:", oraTag), oraTag), 0) :: rewriteWrapList(List.tail(args), env, ctx, oraTag), off) else wrapWhereCall(f, rewriteWrapList(args, env, ctx, oraTag), off, env, ctx)
+  case Expr.EMethod(recv, name, args, off) => wrapWhereMeth(rewriteWrapExpr(recv, env, ctx, oraTag), name, rewriteWrapList(args, env, ctx, oraTag), off, env, ctx)
+  case Expr.EField(recv, name, off) => Expr.EField(rewriteWrapExpr(recv, env, ctx, oraTag), name, off)
+  case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteWrapExpr(l, env, ctx, oraTag), rewriteWrapExpr(r, env, ctx, oraTag), off)
+  case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteWrapExpr(inner, env, ctx, oraTag), off)
+  case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteWrapExpr(body, Check.bindLam(p, ty, env), ctx, oraTag))
+  case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteWrapExpr(c, env, ctx, oraTag), rewriteWrapExpr(t, env, ctx, oraTag), rewriteWrapExpr(el, env, ctx, oraTag), off)
+  case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteWrapExpr(s, env, ctx, oraTag), List.map(arms, a => Arm(a.pat, a.g, rewriteWrapExpr(a.body, Check.bindPat(a.pat, inferTy(s, env, ctx.ftab, ctx.ens), env, ctx.ens), ctx, oraTag))), off)
+  case Expr.EInterp(s, parts, off) => Expr.EInterp(s, rewriteWrapList(parts, env, ctx, oraTag), off)
+  case Expr.EList(xs) => Expr.EList(rewriteWrapList(xs, env, ctx, oraTag))
+  case Expr.ETuple(xs) => Expr.ETuple(rewriteWrapList(xs, env, ctx, oraTag))
+  case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteWrapExpr(inner, env, ctx, oraTag))
+  case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteWrapExpr(inner, env, ctx, oraTag), ty, off)
+  case Expr.EFor(bs, body, off) => rewriteWrapFor(bs, [], env, body, off, ctx, oraTag)
+  case _ => e
+}
+
+def isExactStrLit(e: Expr, want: String): Bool =
+  e match {
+    case Expr.EStr(s, _) => s == want
+    case _ => false
+  }
+
+def rewriteWrapList(xs: List[Expr], env: List[(String, Ty)], ctx: RewriteCtx, oraTag: String): List[Expr] =
+  List.map(xs, x => rewriteWrapExpr(x, env, ctx, oraTag))
+
+def rewriteWrapFor(bs: List[Bind], acc: List[Bind], env: List[(String, Ty)], body: Expr, off: Int, ctx: RewriteCtx, oraTag: String): Expr =
+  if (List.isEmpty(bs)) Expr.EFor(List.reverse(acc), rewriteWrapExpr(body, env, ctx, oraTag), off) else for {
+  b = List.at(bs, 0)
+  nv = rewriteWrapExpr(b.value, env, ctx, oraTag)
+} yield rewriteWrapFor(List.tail(bs), Bind(b.draw, b.name, nv) :: acc, Check.bindFor(b.draw, b.name, inferTy(nv, env, ctx.ftab, ctx.ens), env, ctx.ens), body, off, ctx, oraTag)
+
+def expandToks(toks: List[SpTok]): List[SpTok] =
+  if (List.isEmpty(toks)) [] else expandTokHd(List.at(toks, 0), List.tail(toks))
+
+def expandTokHd(h: SpTok, rest: List[SpTok]): List[SpTok] =
+  h.tok match {
+    case Tok.Interp(s) => List.concat(expandInterpToks(s, 0, h.off + 2, h.stem), expandToks(rest))
+    case _ => h :: expandToks(rest)
+  }
+
+def expandInterpToks(s: String, i: Int, base: Int, stem: String): List[SpTok] =
+  if (i >= Str.len(s)) [] else expandInterpCh(s, i, base, stem, Str.charAt(s, i))
+
+def expandInterpCh(s: String, i: Int, base: Int, stem: String, c: Int): List[SpTok] =
+  if (c == 92 && i + 1 < Str.len(s)) expandInterpToks(s, i + 2, base, stem) else if (c == 36 && i + 1 < Str.len(s) && Str.charAt(s, i + 1) == 123) expandInterpHole(s, i, Parse.interpCloseBrace(s, i + 2, 1), base, stem) else expandInterpToks(s, i + 1, base, stem)
+
+def expandInterpHole(s: String, i: Int, j: Int, base: Int, stem: String): List[SpTok] =
+  List.concat(expandToks(List.map(Lexer.lex(Str.slice(s, i + 2, j - 1)), t => if (t.tok == Tok.Eof) SpTok(Tok.Comma, -1, stem, 0) else SpTok(t.tok, t.off + base + i + 2, stem, t.column))), expandInterpToks(s, j, base, stem))
+
+def reqOffsOfToks(toks: List[SpTok]): List[Int] =
+  if (List.isEmpty(toks) || List.isEmpty(List.tail(toks)) || List.isEmpty(List.tail(List.tail(toks)))) [] else reqOffsStep(List.at(toks, 0), List.at(toks, 1), List.at(toks, 2), List.tail(toks))
+
+def reqOffsStep(t0: SpTok, t1: SpTok, t2: SpTok, rest: List[SpTok]): List[Int] =
+  if (t0.tok == Tok.Dot && t1.tok == Tok.Ident("require") && t2.tok == Tok.LParen && t1.off >= 0) t1.off :: reqOffsOfToks(rest) else reqOffsOfToks(rest)
+
+def countReqInGuard(g: String): Int =
+  if (g == "" || !Str.contains(g, "require")) 0 else List.len(reqOffsOfToks(expandToks(Lexer.lex(g))))
+
+def atMainOff(toks: List[SpTok]): Int =
+  if (List.isEmpty(toks)) -1 else if (List.at(toks, 0).tok == Tok.AtMain) List.at(toks, 0).off else atMainOff(List.tail(toks))
+
+def sortInts(xs: List[Int]): List[Int] =
+  List.sortBy(xs, n => n)
+
+def progDeclOffs(p: Prog, toks: List[SpTok]): List[Int] =
+  sortInts(List.filter(atMainOff(toks) :: List.concat(List.map(p.defs, d => d.off), List.flatMap(p.impls, im => List.map(im.methods, m => m.off))), n => n >= 0))
+
+def nextDeclOff(offs: List[Int], after: Int, fallback: Int): Int =
+  if (List.isEmpty(offs)) fallback else if (List.at(offs, 0) > after) List.at(offs, 0) else nextDeclOff(List.tail(offs), after, fallback)
+
+def sliceOffs(offs: List[Int], lo: Int, hi: Int): List[Int] =
+  List.filter(offs, n => n >= lo && n < hi)
+
+def toksFromOff(toks: List[SpTok], off: Int): List[SpTok] =
+  if (List.isEmpty(toks)) [] else if (List.at(toks, 0).off >= off) toks else toksFromOff(List.tail(toks), off)
+
+def skipGroup(toks: List[SpTok], open: Tok, close: Tok, depth: Int): List[SpTok] =
+  if (List.isEmpty(toks)) [] else for {
+  t = List.at(toks, 0).tok
+  next = if (t == open) depth + 1 else if (t == close) depth - 1 else depth
+} yield if (next <= 0) List.tail(toks) else skipGroup(List.tail(toks), open, close, next)
+
+def funBodyStartOff(toks: List[SpTok], defOff: Int): Int =
+  funBodySeekParams(toksFromOff(toks, defOff), defOff)
+
+def funBodySeekParams(toks: List[SpTok], fallback: Int): Int =
+  if (List.isEmpty(toks)) fallback else List.at(toks, 0).tok match {
+  case Tok.LBracket => funBodySeekParams(skipGroup(List.tail(toks), Tok.LBracket, Tok.RBracket, 1), fallback)
+  case Tok.LParen => funBodySeekEq(skipGroup(List.tail(toks), Tok.LParen, Tok.RParen, 1), fallback)
+  case Tok.Eq => if (List.isEmpty(List.tail(toks))) fallback else List.at(List.tail(toks), 0).off
+  case _ => funBodySeekParams(List.tail(toks), fallback)
+}
+
+def funBodySeekEq(toks: List[SpTok], fallback: Int): Int =
+  if (List.isEmpty(toks)) fallback else List.at(toks, 0).tok match {
+  case Tok.Eq => if (List.isEmpty(List.tail(toks))) fallback else List.at(List.tail(toks), 0).off
+  case Tok.LBracket => funBodySeekEq(skipGroup(List.tail(toks), Tok.LBracket, Tok.RBracket, 1), fallback)
+  case Tok.LParen => funBodySeekEq(skipGroup(List.tail(toks), Tok.LParen, Tok.RParen, 1), fallback)
+  case _ => funBodySeekEq(List.tail(toks), fallback)
+}
+
+def whereOffMapOfSrc(src: String, stem: String): Map[String, Int] =
+  scanWhereDecls(Lexer.lex(src), stem, "", 0, Map.empty())
+
+def tokIdentOf(t: Tok): String =
+  t match {
+    case Tok.Ident(s) => s
+    case _ => ""
+  }
+
+def readDotIdent(toks: List[SpTok], acc: String): (String, List[SpTok]) =
+  if (!List.isEmpty(toks) && !List.isEmpty(List.tail(toks)) && List.at(toks, 0).tok == Tok.Dot && tokIdentOf(List.at(toks, 1).tok) != "") readDotIdent(List.tail(List.tail(toks)), Str.concat(acc, Str.concat(".", tokIdentOf(List.at(toks, 1).tok)))) else (acc, toks)
+
+def skipOptTParams(toks: List[SpTok]): List[SpTok] =
+  if (!List.isEmpty(toks) && List.at(toks, 0).tok == Tok.LBracket) skipGroup(List.tail(toks), Tok.LBracket, Tok.RBracket, 1) else toks
+
+def scanParamWheres(toks: List[SpTok], ownerDisp: String, paramIdx: Int, depth: Int, acc: Map[String, Int]): (List[SpTok], Map[String, Int]) =
+  if (List.isEmpty(toks)) ([], acc) else for {
+  sp = List.at(toks, 0)
+  rest = List.tail(toks)
+  t = sp.tok
+} yield if (t == Tok.LParen || t == Tok.LBracket || t == Tok.LBrace) scanParamWheres(rest, ownerDisp, paramIdx, depth + 1, acc) else if (t == Tok.RParen || t == Tok.RBracket || t == Tok.RBrace) if (depth <= 1 && t == Tok.RParen) (rest, acc) else scanParamWheres(rest, ownerDisp, paramIdx, depth - 1, acc) else if (depth == 1 && t == Tok.Comma) scanParamWheres(rest, ownerDisp, paramIdx + 1, depth, acc) else if (depth == 1 && t == Tok.Where) scanParamWheres(rest, ownerDisp, paramIdx, depth, Map.set(acc, whereSiteKey(ownerDisp, paramIdx), sp.off)) else scanParamWheres(rest, ownerDisp, paramIdx, depth, acc)
+
+def scanDeclParams(toks: List[SpTok], ownerDisp: String, acc: Map[String, Int]): (List[SpTok], Map[String, Int]) =
+  for {
+    afterTp = skipOptTParams(toks)
+  } yield if (!List.isEmpty(afterTp) && List.at(afterTp, 0).tok == Tok.LParen) scanParamWheres(List.tail(afterTp), ownerDisp, 0, 1, acc) else (afterTp, acc)
+
+def isTopResetTok(t: Tok): Bool =
+  t == Tok.Def || t == Tok.Oracle || t == Tok.Private || t == Tok.Record || t == Tok.TypeKw || t == Tok.Trait || t == Tok.Impl || t == Tok.Import || t == Tok.AtMain
+
+def scanWhereDecls(toks: List[SpTok], stem: String, curEnum: String, braceDepth: Int, acc: Map[String, Int]): Map[String, Int] =
+  if (List.isEmpty(toks)) acc else for {
+  sp = List.at(toks, 0)
+  rest = List.tail(toks)
+  t = sp.tok
+} yield if (t == Tok.Eof) acc else if (t == Tok.LBrace) scanWhereDecls(rest, stem, curEnum, braceDepth + 1, acc) else if (t == Tok.RBrace) scanWhereDecls(rest, stem, curEnum, if (braceDepth > 0) braceDepth - 1 else 0, acc) else if (braceDepth == 0 && t == Tok.Def && !List.isEmpty(rest) && tokIdentOf(List.at(rest, 0).tok) != "") for {
+  nm = readDotIdent(List.tail(rest), tokIdentOf(List.at(rest, 0).tok))
+  ownerDisp = if (hasDot(nm._1)) nm._1 else Resolve.qualified(stem, nm._1)
+  step = scanDeclParams(nm._2, ownerDisp, acc)
+} yield scanWhereDecls(step._1, stem, "", 0, step._2) else if (braceDepth == 0 && t == Tok.Record && !List.isEmpty(rest) && tokIdentOf(List.at(rest, 0).tok) != "") for {
+  rname = tokIdentOf(List.at(rest, 0).tok)
+  step = scanDeclParams(List.tail(rest), Resolve.qualified(stem, rname), acc)
+} yield scanWhereDecls(step._1, stem, "", 0, step._2) else if (braceDepth == 0 && t == Tok.Enum && !List.isEmpty(rest) && tokIdentOf(List.at(rest, 0).tok) != "") scanWhereDecls(List.tail(rest), stem, Resolve.qualified(stem, tokIdentOf(List.at(rest, 0).tok)), 0, acc) else if (braceDepth == 0 && curEnum != "" && t == Tok.Case && !List.isEmpty(rest) && tokIdentOf(List.at(rest, 0).tok) != "") for {
+  cname = tokIdentOf(List.at(rest, 0).tok)
+  step = scanDeclParams(List.tail(rest), Str.concat(curEnum, Str.concat(".", cname)), acc)
+} yield scanWhereDecls(step._1, stem, curEnum, 0, step._2) else scanWhereDecls(rest, stem, if (braceDepth == 0 && isTopResetTok(t)) "" else curEnum, braceDepth, acc)
+
+def mkRuleSite(key: String, rejKind: String, kind: String, rule: String, file: String, src: String, off: Int): RuleSite =
+  for {
+    loc = Check.locOf(src, off)
+  } yield RuleSite(key, rejKind, kind, rule, file, loc._1, loc._2, loc._3, loc._4)
+
+def whereSitesOfProg(src: String, file: String, stem: String, defs: List[Fun], ens: List[En]): List[RuleSite] =
+  if (!Str.contains(src, "where")) [] else for {
+  woffs = whereOffMapOfSrc(src, stem)
+} yield List.concat(funWhereSites(src, file, stem, defs, woffs), enWhereSites(src, file, stem, ens, woffs))
+
+def funWhereSites(src: String, file: String, stem: String, ds: List[Fun], woffs: Map[String, Int]): List[RuleSite] =
+  if (List.isEmpty(ds)) [] else List.concat(funOneWhereSites(src, file, stem, List.at(ds, 0), woffs), funWhereSites(src, file, stem, List.tail(ds), woffs))
+
+def funOneWhereSites(src: String, file: String, stem: String, d: Fun, woffs: Map[String, Int]): List[RuleSite] =
+  if (d.ora || d.mod != "" && d.mod != stem) [] else paramWhereSites(src, file, if (hasDot(d.name)) d.name else Resolve.qualified(if (d.mod == "") stem else d.mod, d.name), d.params, 0, d.off, woffs)
+
+def enWhereSites(src: String, file: String, stem: String, ens: List[En], woffs: Map[String, Int]): List[RuleSite] =
+  if (List.isEmpty(ens)) [] else List.concat(enOneWhereSites(src, file, stem, List.at(ens, 0), woffs), enWhereSites(src, file, stem, List.tail(ens), woffs))
+
+def enOneWhereSites(src: String, file: String, stem: String, en: En, woffs: Map[String, Int]): List[RuleSite] =
+  if (en.mod != "" && en.mod != stem && Resolve.owner(en.name) != stem) [] else if (en.isRec || recLike(en.name, en.cases)) paramWhereSites(src, file, Resolve.qualified(stem, en.name), firstCaseParams(en.cases), 0, 0, woffs) else enCaseWhereSites(src, file, Resolve.qualified(stem, en.name), en.cases, woffs)
+
+def enCaseWhereSites(src: String, file: String, enDisp: String, cs: List[EnCase], woffs: Map[String, Int]): List[RuleSite] =
+  if (List.isEmpty(cs)) [] else List.concat(paramWhereSites(src, file, Str.concat(enDisp, Str.concat(".", Resolve.short(List.at(cs, 0).name))), List.at(cs, 0).fields, 0, 0, woffs), enCaseWhereSites(src, file, enDisp, List.tail(cs), woffs))
+
+def paramWhereSites(src: String, file: String, ownerDisp: String, ps: List[Param], j: Int, fallbackOff: Int, woffs: Map[String, Int]): List[RuleSite] =
+  if (List.isEmpty(ps)) [] else for {
+  p = List.at(ps, 0)
+  rest = paramWhereSites(src, file, ownerDisp, List.tail(ps), j + 1, fallbackOff, woffs)
+  siteKey = whereSiteKey(ownerDisp, j)
+  off = Map.getOrElse(woffs, siteKey, fallbackOff)
+} yield if (p.w == "") rest else mkRuleSite(siteKey, "check", "where", Str.concat(ownerDisp, Str.concat(" ", p.w)), file, src, off) :: rest
+
+def exprSitesAt(e: Expr, src: String, file: String, owner: String, idx: Int, reqOffs: List[Int], env: List[(String, Ty)], ftab: Ftab, ens: List[En]): SiteWalk =
+  if (!exprHasRuleExpr(e) && List.isEmpty(reqOffs)) SiteWalk([], idx, reqOffs) else e match {
+  case Expr.EPrint(inner, _) => exprSitesAt(inner, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.ECall(f, args, off) => if (isPropRuleCall(f, args)) for {
+  siteKey = Str.concat(owner, Str.concat("#", Str.fromInt(idx)))
+  rk = if (f == "Property.assert") "assert" else "check"
+  kind = if (f == "Property.assert") "property-assert" else "property-check"
+  lbl = propCallLabel(List.at(args, 0), rk)
+  site = mkRuleSite(siteKey, rk, kind, lbl, file, src, off)
+  rest = listSitesAt(args, src, file, owner, idx + 1, reqOffs, env, ftab, ens)
+} yield SiteWalk(site :: rest.sites, rest.next, rest.reqOffs) else listSitesAt(args, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.EMethod(recv, name, args, off) => for {
+  r = exprSitesAt(recv, src, file, owner, idx, reqOffs, env, ftab, ens)
+  isReq = name == "require"
+  reqOff = if (List.isEmpty(r.reqOffs)) off else List.at(r.reqOffs, 0)
+  remOffs = if (isReq && !List.isEmpty(r.reqOffs)) List.tail(r.reqOffs) else r.reqOffs
+  nextIdx = if (isReq) r.next + 1 else r.next
+  a = listSitesAt(args, src, file, owner, nextIdx, remOffs, env, ftab, ens)
+  siteKey = Str.concat(owner, Str.concat("#", Str.fromInt(r.next)))
+  rk = if (isReq && isIoRecvExpr(recv, env, ftab, ens)) "assert" else "check"
+  own = if (isReq) mkRuleSite(siteKey, rk, "require", reqLabelOf(args), file, src, reqOff) :: [] else []
+} yield SiteWalk(List.concat(r.sites, List.concat(own, a.sites)), a.next, a.reqOffs)
+  case Expr.EField(recv, _, _) => exprSitesAt(recv, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.EBin(_, l, r, _) => for {
+  s1 = exprSitesAt(l, src, file, owner, idx, reqOffs, env, ftab, ens)
+  s2 = exprSitesAt(r, src, file, owner, s1.next, s1.reqOffs, env, ftab, ens)
+} yield SiteWalk(List.concat(s1.sites, s2.sites), s2.next, s2.reqOffs)
+  case Expr.EUn(_, inner, _) => exprSitesAt(inner, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.ELam(p, ty, body) => exprSitesAt(body, src, file, owner, idx, reqOffs, Check.bindLam(p, ty, env), ftab, ens)
+  case Expr.EIf(c, t, el, _) => for {
+  s1 = exprSitesAt(c, src, file, owner, idx, reqOffs, env, ftab, ens)
+  s2 = exprSitesAt(t, src, file, owner, s1.next, s1.reqOffs, env, ftab, ens)
+  s3 = exprSitesAt(el, src, file, owner, s2.next, s2.reqOffs, env, ftab, ens)
+} yield SiteWalk(List.concat(s1.sites, List.concat(s2.sites, s3.sites)), s3.next, s3.reqOffs)
+  case Expr.EMatch(s, arms, _) => for {
+  s1 = exprSitesAt(s, src, file, owner, idx, reqOffs, env, ftab, ens)
+  s2 = if (!armsHaveRuleExpr(arms) && List.isEmpty(s1.reqOffs)) SiteWalk([], s1.next, s1.reqOffs) else armsSitesAt(arms, inferTy(s, env, ftab, ens), src, file, owner, s1.next, s1.reqOffs, env, ftab, ens)
+} yield SiteWalk(List.concat(s1.sites, s2.sites), s2.next, s2.reqOffs)
+  case Expr.EInterp(_, parts, _) => listSitesAt(parts, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.EList(xs) => listSitesAt(xs, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.ETuple(xs) => listSitesAt(xs, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.ENamed(_, inner) => exprSitesAt(inner, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.EAscribe(inner, _, _) => exprSitesAt(inner, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case Expr.EFor(bs, body, _) => forSitesAt(bs, body, src, file, owner, idx, reqOffs, env, ftab, ens)
+  case _ => SiteWalk([], idx, reqOffs)
+}
+
+def listSitesAt(xs: List[Expr], src: String, file: String, owner: String, idx: Int, reqOffs: List[Int], env: List[(String, Ty)], ftab: Ftab, ens: List[En]): SiteWalk =
+  if (List.isEmpty(xs)) SiteWalk([], idx, reqOffs) else for {
+  h = exprSitesAt(List.at(xs, 0), src, file, owner, idx, reqOffs, env, ftab, ens)
+  t = listSitesAt(List.tail(xs), src, file, owner, h.next, h.reqOffs, env, ftab, ens)
+} yield SiteWalk(List.concat(h.sites, t.sites), t.next, t.reqOffs)
+
+def armsSitesAt(xs: List[Arm], scrutTy: String, src: String, file: String, owner: String, idx: Int, reqOffs: List[Int], env: List[(String, Ty)], ftab: Ftab, ens: List[En]): SiteWalk =
+  if (List.isEmpty(xs)) SiteWalk([], idx, reqOffs) else for {
+  a = List.at(xs, 0)
+  afterGuard = List.drop(reqOffs, countReqInGuard(a.g))
+  h = if (!exprHasRuleExpr(a.body) && List.isEmpty(afterGuard)) SiteWalk([], idx, afterGuard) else exprSitesAt(a.body, src, file, owner, idx, afterGuard, Check.bindPat(a.pat, scrutTy, env, ens), ftab, ens)
+  t = armsSitesAt(List.tail(xs), scrutTy, src, file, owner, h.next, h.reqOffs, env, ftab, ens)
+} yield SiteWalk(List.concat(h.sites, t.sites), t.next, t.reqOffs)
+
+def forSitesAt(bs: List[Bind], body: Expr, src: String, file: String, owner: String, idx: Int, reqOffs: List[Int], env: List[(String, Ty)], ftab: Ftab, ens: List[En]): SiteWalk =
+  if (List.isEmpty(bs)) exprSitesAt(body, src, file, owner, idx, reqOffs, env, ftab, ens) else for {
+  b = List.at(bs, 0)
+  h = exprSitesAt(b.value, src, file, owner, idx, reqOffs, env, ftab, ens)
+  needEnv = bindsHaveRuleExpr(List.tail(bs)) || exprHasRuleExpr(body)
+  nextEnv = if (needEnv) Check.bindFor(b.draw, b.name, inferTy(b.value, env, ftab, ens), env, ens) else env
+  t = forSitesAt(List.tail(bs), body, src, file, owner, h.next, h.reqOffs, nextEnv, ftab, ens)
+} yield SiteWalk(List.concat(h.sites, t.sites), t.next, t.reqOffs)
+
+def progSitesOfEntry(stem: String, src: String, file: String, fp: Prog, ftab: Ftab, pins: List[En]): List[RuleSite] =
+  if (!srcMayHaveRuleExpr(src) && !Str.contains(src, "where")) [] else for {
+  ws = whereSitesOfProg(src, file, stem, fp.defs, fp.enums)
+  bodySites = if (!srcMayHaveRuleExpr(src)) [] else for {
+  toks = Lexer.lex(src)
+  allReqOffs = if (!Str.contains(src, "require")) [] else reqOffsOfToks(expandToks(toks))
+  declOffs = progDeclOffs(fp, toks)
+  ims = List.flatMap(fp.impls, im => List.flatMap(im.methods, m => funSitesAt(m, src, file, imOwnerKey(stem, im, m.name), toks, allReqOffs, declOffs, ftab, pins)))
+  ds = List.flatMap(fp.defs, d => funSitesAt(d, src, file, funOwnerKey(stem, d.name), toks, allReqOffs, declOffs, ftab, pins))
+  mOff = atMainOff(toks)
+  mReqs = if (mOff < 0 || List.isEmpty(allReqOffs)) [] else sliceOffs(allReqOffs, funBodyStartOff(toks, mOff), nextDeclOff(declOffs, mOff, Str.len(src)))
+  ms = if (mOff < 0 || !exprHasRuleExpr(fp.body)) [] else exprSitesAt(fp.body, src, file, mainOwnerKey(stem), 0, mReqs, mainEnv(stem), ftab, pins).sites
+} yield List.concat(ims, List.concat(ds, ms))
+} yield List.concat(ws, bodySites)
+
+def funSitesAt(d: Fun, src: String, file: String, owner: String, toks: List[SpTok], allReqOffs: List[Int], declOffs: List[Int], ftab: Ftab, ens: List[En]): List[RuleSite] =
+  if (!exprHasRuleExpr(d.body)) [] else for {
+  reqs = if (List.isEmpty(allReqOffs)) [] else sliceOffs(allReqOffs, funBodyStartOff(toks, d.off), nextDeclOff(declOffs, d.off, Str.len(src)))
+} yield exprSitesAt(d.body, src, file, owner, 0, reqs, Check.bindParams(d.params, Check.envSelfMod(d.mod)), ftab, ens).sites
+
+def ruleSitesOf(liveFiles: List[(String, String)], scnPair: (String, String), verPairs: List[(String, String)]): List[RuleSite] =
+  for {
+    kept = parseKept(liveFiles)
+    merged = Resolve.prog(mergeKept(kept))
+    resolved = resolveKept(kept, merged)
+    funs = Check.expandDefs(merged.defs, merged.aliases)
+    ens = Check.expandEnums(merged.enums, merged.aliases)
+    ftab = Check.ftabOfList(funs)
+    pins = Check.withLetterPins(ens)
+    liveSites = List.flatMap(resolved, row => progSitesOfEntry(row._1, row._2, Check.fileOf(row._1), row._3, ftab, pins))
+    withScn = if (scnPair._2 == "") liveSites else mergeScenarioSites(liveSites, scnPair._1, scnPair._2, funs, ens)
+    verSites = List.flatMap(verPairs, vp => verifyFileSites(vp._1, vp._2, ftab, pins))
+  } yield List.concat(verSites, withScn)
+
+def mergeScenarioSites(liveSites: List[RuleSite], scnFile: String, scnSrc: String, liveFuns: List[Fun], liveEns: List[En]): List[RuleSite] =
+  for {
+    rawP = Parse.parseFile("__scn", scnSrc)
+    scnEn = Check.expandEnums(rawP.enums, rawP.aliases)
+    scnFuns = Check.expandDefs(rawP.defs, rawP.aliases)
+    allFuns = List.concat(scnFuns, liveFuns)
+    allEns = List.concat(scnEn, liveEns)
+    ftab = Check.ftabOfList(allFuns)
+    idx = Resolve.indexOf(Prog("", allEns, rawP.aliases, [], [], rawP.imps, allFuns, "", Expr.EUnit, ""))
+    resP = resolveKeptProg(Resolve.program(rawP, idx), rawP.aliases)
+    toks = Lexer.lex(scnSrc)
+    allReqOffs = if (!Str.contains(scnSrc, "require")) [] else reqOffsOfToks(expandToks(toks))
+    declOffs = progDeclOffs(resP, toks)
+    pins = Check.withLetterPins(allEns)
+    ctxTy = ctxTyOf(resP.defs)
+    ws = whereSitesOfProg(scnSrc, scnFile, "__scn", resP.defs, resP.enums)
+    replOwners = List.map(List.filter(resP.defs, d => hasDot(d.name)), d => Str.concat(d.name, "#"))
+    keptLive = List.filter(liveSites, s => !List.exists(replOwners, pre => Str.startsWith(s.key, pre)))
+    ds = List.flatMap(resP.defs, d => scenarioDefSites(d, ctxTy, scnSrc, scnFile, toks, allReqOffs, declOffs, ftab, pins))
+  } yield List.concat(ws, List.concat(ds, keptLive))
+
+def scenarioDefSites(d: Fun, ctxTy: String, src: String, file: String, toks: List[SpTok], allReqOffs: List[Int], declOffs: List[Int], ftab: Ftab, ens: List[En]): List[RuleSite] =
+  if (hasDot(d.name)) funSitesAt(d.copy(mod = replMod(d.name)), src, file, d.name, toks, allReqOffs, declOffs, ftab, ens) else for {
+  owner = if (isCtxDriver(d, ctxTy)) Str.concat("__scn._scn_", d.name) else funOwnerKey("__scn", d.name)
+} yield funSitesAt(d, src, file, owner, toks, allReqOffs, declOffs, ftab, ens)
+
+def verifyFileSites(verFile: String, verSrc: String, ftab: Ftab, pins: List[En]): List[RuleSite] =
+  for {
+    toks = Lexer.lex(verSrc)
+    p = Parse.parse(toks)
+    allReqOffs = if (!Str.contains(verSrc, "require")) [] else reqOffsOfToks(expandToks(toks))
+    declOffs = progDeclOffs(p, toks)
+    topSites = List.flatMap(p.defs, d => verifyTopDefSite(d, verFile, verSrc))
+    helperSites = if (!srcMayHaveRuleExpr(verSrc)) [] else List.flatMap(p.defs, d => funSitesAt(d, verSrc, verFile, funOwnerKey(verFile, d.name), toks, allReqOffs, declOffs, ftab, pins))
+  } yield List.concat(topSites, helperSites)
+
+def verifyTopDefSite(d: Fun, verFile: String, verSrc: String): List[RuleSite] =
+  if (!d.priv && d.ora) mkRuleSite(Str.concat("oracle:", d.name), "assert", "oracle", d.name, verFile, verSrc, d.off) :: [] else if (isClaim(d)) mkRuleSite(Str.concat("claim:", d.name), "claim", "claim", d.name, verFile, verSrc, d.off) :: [] else []
+
+def rejectionReasonLine(rejection: String): String =
+  rejectionReasonGo(List.filter(linesOf(rejection), l => l != ""))
+
+def rejectionReasonGo(lines: List[String]): String =
+  if (List.isEmpty(lines)) "" else if (List.at(lines, 0) == "v1") if (List.isEmpty(List.tail(lines))) "" else List.at(List.tail(lines), 0) else List.at(lines, 0)
+
+def parseRejectionReason(reason: String): (String, String, String) =
+  if (Str.startsWith(reason, "oracle ") && Str.endsWith(reason, " rejected")) for {
+  raw = Str.slice(reason, 7, Str.len(reason) - 9)
+  sp = splitRuleTag(raw)
+} yield ("assert", sp._1, sp._2) else if (Str.startsWith(reason, "property check failed: ")) for {
+  raw = Str.drop(reason, 23)
+  sp = splitRuleTag(raw)
+} yield ("check", sp._1, sp._2) else if (Str.startsWith(reason, "claim ")) parseClaimRejection(Str.drop(reason, 6)) else parseFailedClaimReason(reason, findIdx(reason, " failed: ", 0))
+
+def parseClaimRejection(rest: String): (String, String, String) =
+  for {
+    i = findIdx(rest, " rejected", 0)
+  } yield if (i <= 0) ("", "", "") else ("claim", Str.concat("claim:", Str.slice(rest, 0, i)), Str.slice(rest, 0, i))
+
+def parseFailedClaimReason(reason: String, i: Int): (String, String, String) =
+  if (i <= 0) ("", "", "") else for {
+  tail = Str.drop(reason, i + 9)
+  j = findIdx(tail, " at state ", 0)
+  nm = if (j > 0) Str.slice(tail, 0, j) else tail
+} yield ("claim", Str.concat("claim:", nm), nm)
+
+def resolveFailure(sites: List[RuleSite], rejection: String, workload: String, repro: String, events: List[String]): RuleFailure =
+  for {
+    parsed = parseRejectionReason(rejectionReasonLine(rejection))
+    rk = parsed._1
+    tagKey = parsed._2
+    rule = parsed._3
+  } yield if (rk == "") noRuleFailure() else resolveFailureHit(findRuleSite(sites, rk, tagKey, rule), rule, workload, repro, events)
+
+def findRuleSite(sites: List[RuleSite], rk: String, tagKey: String, rule: String): List[RuleSite] =
+  if (tagKey != "") for {
+  byKey = List.filter(sites, s => s.key == tagKey)
+} yield if (!List.isEmpty(byKey)) byKey else List.filter(sites, s => s.rejKind == rk && s.rule == rule) else List.filter(sites, s => s.rejKind == rk && s.rule == rule)
+
+def resolveFailureHit(hits: List[RuleSite], rule: String, workload: String, repro: String, events: List[String]): RuleFailure =
+  if (List.isEmpty(hits)) noRuleFailure() else for {
+  s = List.at(hits, 0)
+  cleanRule = if (rule != "") rule else s.rule
+} yield RuleFailure(s.kind, cleanRule, s.file, s.line, s.column, s.endLine, s.endColumn, workload, repro, events)
+
+def failureHuman(f: RuleFailure): String =
+  if (f.kind == "") "" else Str.concat(f.file, Str.concat(":", Str.concat(Str.fromInt(f.line), Str.concat(":", Str.concat(Str.fromInt(f.column), Str.concat(": error: ", Str.concat(f.kind, Str.concat(" ", Str.concat(f.rule, Str.concat(" failed on ", Str.concat(f.workload, Str.concat(" (", Str.concat(if (List.isEmpty(f.events)) "no events" else List.join(f.events, "; "), ")")))))))))))))
+
+def cleanProbeText(text: String, wrapSrc: String, sites: List[RuleSite], scnFile: String): String =
+  cleanVerifyPaths(stripRuleTagsInText(text), wrapSrc, sites, scnFile)
+
+def cleanVerifyPaths(text: String, wrapSrc: String, sites: List[RuleSite], scnFile: String): String =
+  if (!Str.contains(text, "__verify.scuzz:")) text else cleanVerifyPathsGo(text, 0, Builder.empty(), wrapSrc, sites, scnFile)
+
+def cleanVerifyPathsGo(text: String, pos: Int, b: Builder, wrapSrc: String, sites: List[RuleSite], scnFile: String): String =
+  for {
+    i = findIdx(text, "__verify.scuzz:", pos)
+  } yield if (i < 0) Builder.result(Builder.append(b, Str.drop(text, pos))) else cleanVerifyPathsAt(text, pos, i, b, wrapSrc, sites, scnFile)
+
+def readDigitsEnd(s: String, i: Int): Int =
+  if (i >= Str.len(s)) i else if (Str.charAt(s, i) >= 48 && Str.charAt(s, i) <= 57) readDigitsEnd(s, i + 1) else i
+
+def cleanVerifyPathsAt(text: String, pos: Int, i: Int, b: Builder, wrapSrc: String, sites: List[RuleSite], scnFile: String): String =
+  for {
+    lStart = i + 15
+    lEnd = readDigitsEnd(text, lStart)
+    hasCol = lEnd > lStart && lEnd < Str.len(text) && Str.charAt(text, lEnd) == 58
+    cStart = lEnd + 1
+    cEnd = if (hasCol) readDigitsEnd(text, cStart) else lEnd
+    valid = hasCol && cEnd > cStart
+    wrapLine = if (valid) Str.toInt(Str.slice(text, lStart, lEnd), 1) else 1
+    repl = mapVerifyLineLoc(wrapLine, wrapSrc, sites, scnFile)
+    nextPos = if (!valid) lStart else if (repl == "" && cEnd + 2 <= Str.len(text) && Str.slice(text, cEnd, cEnd + 2) == ": ") cEnd + 2 else cEnd
+  } yield cleanVerifyPathsGo(text, nextPos, Builder.append(Builder.append(b, Str.slice(text, pos, i)), if (valid) repl else "__verify"), wrapSrc, sites, scnFile)
+
+def mapVerifyLineLoc(line: Int, wrapSrc: String, sites: List[RuleSite], scnFile: String): String =
+  if (wrapSrc == "") fallbackVerifyLoc(sites, scnFile) else for {
+  p = Parse.parse(Lexer.lex(wrapSrc))
+  hit = findWrapDefAtLine(p.defs, wrapSrc, line, "")
+} yield mapWrapDefNameLoc(hit, sites, scnFile)
+
+def findWrapDefAtLine(ds: List[Fun], wrapSrc: String, line: Int, best: String): String =
+  if (List.isEmpty(ds)) best else for {
+  d = List.at(ds, 0)
+  dLine = Check.locOf(wrapSrc, d.off)._1
+  nextBest = if (dLine <= line) d.name else best
+} yield findWrapDefAtLine(List.tail(ds), wrapSrc, line, nextBest)
+
+def mapWrapDefNameLoc(fnName: String, sites: List[RuleSite], scnFile: String): String =
+  if (Str.startsWith(fnName, "_drv_")) siteKeyLocStr(sites, Str.concat("oracle:", Str.drop(fnName, 5)), scnFile) else if (Str.startsWith(fnName, "_claim_")) siteKeyLocStr(sites, Str.concat("claim:", Str.drop(fnName, 7)), scnFile) else fallbackVerifyLoc(sites, scnFile)
+
+def siteKeyLocStr(sites: List[RuleSite], key: String, scnFile: String): String =
+  for {
+    hits = List.filter(sites, s => s.key == key)
+  } yield if (!List.isEmpty(hits)) fmtSiteLoc(List.at(hits, 0)) else fallbackVerifyLoc(sites, scnFile)
+
+def fmtSiteLoc(s: RuleSite): String =
+  Str.concat(s.file, Str.concat(":", Str.concat(Str.fromInt(s.line), Str.concat(":", Str.fromInt(s.column)))))
+
+def fallbackVerifyLoc(sites: List[RuleSite], scnFile: String): String =
+  if (scnFile != "") Str.concat(scnFile, ":1:1") else if (!List.isEmpty(sites)) fmtSiteLoc(List.at(sites, 0)) else ""
 
