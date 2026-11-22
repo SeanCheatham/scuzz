@@ -3,6 +3,91 @@ def filesRemainValid(t: Timeline): Verdict =
 
 def cancellationPreserves(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {
-  case (a, b) => !Timeline.driveHas(t, b, "cancel") || Timeline.fileSame(t, a, b, "one")
+  case (a, b) => (!Timeline.driveHas(t, b, "cancel") || Timeline.fileSame(t, a, b, "one")) && (Timeline.fileSame(t, a, b, "one") && Timeline.fileSame(t, a, b, "two") || Timeline.effectHas(t, b, "Fs.write"))
 })
+
+oracle protocolInputRange(cancel: Bool): Bool =
+  Property.force(IO.attempt(Protocol.run(0, cancel))) == Result.Err("request input out of range") && Property.force(IO.attempt(Protocol.run(3, cancel))) == Result.Err("request input out of range")
+
+private def proofSource(body: String): String =
+  Str.concat("""def dom(n: Int): Bool = n == n
+def trig(n: Int): Bool = n == 0
+""", body)
+
+private def hasQueryParts(result: Result[String, Proof.Queries], domPart: String, violPart: String, reachPart: String): Bool =
+  result match {
+    case Result.Ok(q) => Str.contains(q.domain, domPart) && Str.contains(q.violation, violPart) && Str.contains(q.reach, reachPart)
+    case Result.Err(_) => false
+  }
+
+private def hasErrPart(result: Result[String, Proof.Queries], reasonPart: String): Bool =
+  result match {
+    case Result.Ok(_) => false
+    case Result.Err(reason) => Str.contains(reason, reasonPart)
+  }
+
+oracle proofCoreAndBitwise(): Bool =
+  for {
+    bitwise = Proof.queries(proofSource("""oracle claim(n: Int): Bool = (((n & 255): Int) | (n ^ -1)) != ~n
+"""), "claim", "dom", "trig")
+    arith = Proof.queries(proofSource("""oracle claim(n: Int): Bool = (if (n == -9223372036854775808) -n else n + 1 - 1 * n) <= 0 && !(n < 0 || n >= 10 && n > 9)
+"""), "claim", "dom", "trig")
+    bound = Proof.queries(proofSource("""oracle claim(n: Int): Bool = for { x = n + 1 } yield x > n
+"""), "claim", "dom", "trig")
+  } yield hasQueryParts(bitwise, "(declare-fun p0 () (_ BitVec 64))", "(bvor (bvand p0 (_ bv255 64)) (bvxor p0 (bvneg (_ bv1 64))))", "(= p0 (_ bv0 64))") && hasQueryParts(bitwise, "(= p0 p0)", "(bvnot p0)", "(and (= p0 p0)") && hasQueryParts(arith, "(= p0 p0)", "#x8000000000000000", "(= p0 (_ bv0 64))") && hasQueryParts(arith, "(= p0 p0)", "(bvmul (_ bv1 64) p0)", "(= p0 (_ bv0 64))") && hasQueryParts(bound, "(= p0 p0)", "(bvsgt (bvadd p0 (_ bv1 64)) p0)", "(= p0 (_ bv0 64))")
+
+oracle proofMatchInt(): Bool =
+  hasQueryParts(Proof.queries(proofSource("""oracle claim(n: Int): Bool = n match { case 0 => true case -1 => false case x if x > 10 => x >= 11 case _ => n < 0 case 2 => false }
+"""), "claim", "dom", "trig"), "(= p0 p0)", "(ite (= p0 (_ bv0 64)) true (ite (= p0 (bvneg (_ bv1 64))) false (ite (bvsgt p0 (_ bv10 64)) (bvsge p0 (_ bv11 64)) (bvslt p0 (_ bv0 64)))))", "(= p0 (_ bv0 64))")
+
+oracle proofMatchBool(): Bool =
+  hasQueryParts(Proof.queries(proofSource("""def domB(b: Bool): Bool = b || !b
+def trigB(b: Bool): Bool = b
+oracle claim(b: Bool): Bool = b match { case true if b == false => false case false => true case true => b }
+"""), "claim", "domB", "trigB"), "(declare-fun p0 () Bool)", "(ite (and (= p0 true) (= p0 false)) false (ite (= p0 false) true p0))", "(and (or p0 (not p0)) p0)")
+
+oracle proofWhereDomain(): Bool =
+  for {
+    whereOk = Proof.queries(proofSource("""def step(a: Int where a >= 0, b: Int where b >= a): Int = b - a
+oracle claim(n: Int where n >= 0 && n <= 10): Bool = (n == 0 || step(0, n) >= 0) && (if (n >= 1) step(1, n) >= 0 else true)
+"""), "claim", "dom", "trig")
+  } yield hasQueryParts(whereOk, "(and (and (bvsge p0 (_ bv0 64)) (bvsle p0 (_ bv10 64))) (= p0 p0))", "(=> (not (= p0 (_ bv0 64)))", "(= p0 (_ bv0 64))") && hasQueryParts(whereOk, "(= p0 p0)", "(ite (bvsge p0 (_ bv1 64))", "(= p0 (_ bv0 64))")
+
+oracle proofWhereMatch(): Bool =
+  hasQueryParts(Proof.queries(proofSource("""def pos(x: Int where x > 0): Bool = x >= 1
+oracle claim(n: Int): Bool = n match { case x if x > 0 && pos(x) => pos(x) case _ => true }
+"""), "claim", "dom", "trig"), "(= p0 p0)", "(=> (bvsgt p0 (_ bv0 64)) (bvsgt p0 (_ bv0 64)))", "(= p0 (_ bv0 64))")
+
+oracle proofExporterHelpers(): Bool =
+  for {
+    filtered = Main.protocolRules("""def keepVerdict(t: Timeline): Verdict = Verdict.ok()
+oracle protocolInputRange(): Bool = true
+oracle dropProof(): Bool = true
+""")
+    rendered = Json.stringify(Main.graphJson("""def ok(): Bool = true
+""", """oracle first(a: Int): Bool = a == a
+""")) match {
+  case Result.Ok(text) => text
+  case Result.Err(_) => ""
+}
+    ens = Parse.parse(Lexer.lex("""record B[T](x: T)
+""")).enums
+  } yield Str.contains(filtered, "keepVerdict") && Str.contains(filtered, "protocolInputRange") && !Str.contains(filtered, "dropProof") && Str.contains(rendered, "Amount") && Str.contains(rendered, "_drv_first") && Verify.typeTok("Int", ens, 0) == "i" && Verify.typeTok("String", ens, 0) == "s" && Verify.typeTok("Bool", ens, 0) == "b" && Verify.typeTok("List[Int]", ens, 0) == "[i]" && Verify.typeTok("B[Int]", ens, 0) == "B(i)" && Verify.tyHead("[Int]") == ""
+
+oracle proofRejections(): Bool =
+  hasErrPart(Proof.queries("""oracle bad(: Bool = true
+""", "bad", "dom", "trig"), "invalid: source check fails") && hasErrPart(Proof.queries(proofSource("""def plain(n: Int): Bool = true
+"""), "claim", "dom", "trig"), "unsupported: one named author oracle") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int): Bool = (n << 1) == n
+"""), "claim", "dom", "trig"), "integer operator <<") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int): Bool = (n >> 1) == n
+"""), "claim", "dom", "trig"), "integer operator >>") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int): Bool = n / 2 == 0
+"""), "claim", "dom", "trig"), "integer operator /") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int): Bool = (n match { case 0 => true case 1 => false })
+"""), "claim", "dom", "trig"), "partial match") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int): Bool = (n match { case x if x > 0 => true })
+"""), "claim", "dom", "trig"), "partial match") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int): Bool = (n match { case 0 | 1 => true case _ => false })
+"""), "claim", "dom", "trig"), "match pattern") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int): Bool = (n match { case _ => true case 0 => (n << 1) == 0 })
+"""), "claim", "dom", "trig"), "integer operator <<") && hasErrPart(Proof.queries(proofSource("""oracle claim(n: Int where (n >> 1) == 0): Bool = true
+"""), "claim", "dom", "trig"), "integer operator >>") && hasErrPart(Proof.queries(proofSource("""def f(n: Int = 0): Int = n
+oracle claim(n: Int): Bool = f(n) == n
+"""), "claim", "dom", "trig"), "function signature") && hasErrPart(Proof.queries(proofSource("""def loop(n: Int): Int = loop(n)
+oracle claim(n: Int): Bool = loop(n) == 0
+"""), "claim", "dom", "trig"), "recursive call")
 

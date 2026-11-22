@@ -1,4 +1,4 @@
-def request(path: String, n: Int, entered: Deferred[Unit], released: Ref[Int], writes: Ref[Int]): IO[Unit] =
+private def request(path: String, n: Int, entered: Deferred[Unit], released: Ref[Int], writes: Ref[Int]): IO[Unit] =
   Resource.use(Resource.make(IO.pure(()), _ => Ref.update(released, count => count + 1)), _ => for {
   started <- Clock.monotonic()
   _ <- Deferred.complete(entered, ())
@@ -14,13 +14,13 @@ def request(path: String, n: Int, entered: Deferred[Unit], released: Ref[Int], w
 }
 } yield ())
 
-def outcome(result: Result[String, Unit]): IO[Unit] =
+private def outcome(result: Result[String, Unit]): IO[Unit] =
   result match {
     case Result.Ok(_) => IO.println("request completes")
     case Result.Err(error) => if (error == "Fs: injected fault" || error == "Fs: partial write" || error == "Fs: error after replacement" || error == "fiber interrupted") IO.println(Str.concat("request stops: ", error)) else IO.fail(error)
   }
 
-def execute(n: Int, cancel: Bool): IO[Unit] =
+private def execute(n: Int, cancel: Bool): IO[Unit] =
   if (n < 1 || n > 2) IO.fail("request input out of range") else for {
   released <- Ref.of(0)
   writes <- Ref.of(0)
@@ -43,7 +43,7 @@ def execute(n: Int, cancel: Bool): IO[Unit] =
   _ <- Property.assert("two requests bound writes", writeCount >= 0 && writeCount <= 2 && (!cancel || writeCount <= 1))
 } yield ()
 
-def succeeds(result: Result[String, Unit]): Bool =
+private def succeeds(result: Result[String, Unit]): Bool =
   result match {
     case Result.Ok(_) => true
     case Result.Err(_) => false

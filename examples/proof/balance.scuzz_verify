@@ -1,3 +1,9 @@
 oracle balance(n: Int): Bool =
   bounded(n) >= 0 && bounded(n) <= 100
 
+oracle domainPredicates(n: Int): Bool =
+  inputDomain(n) && boundaryTrigger(9223372036854775807) && !boundaryTrigger(0) && boundaryTrigger(n) == (n == 9223372036854775807) && !contradiction(n) && !contradiction(0) && !contradiction(-1) && !impossible(n) && !impossible(9223372036854775807)
+
+oracle amountValidation(n: Int): Bool =
+  bounded(-1) == 0 && bounded(0) == 1 && bounded(99) == 100 && bounded(100) == 100 && validated("0") == Result.Ok(1) && validated("99") == Result.Ok(100) && validated("100") == Result.Ok(100) && validated("-1") == Result.Err("amount out of range") && validated("101") == Result.Err("amount out of range") && validated("bad") == Result.Err("Str.parseInt: invalid integer") && validated(Str.fromInt(n)) == (if (n < 0 || n > 100) Result.Err("amount out of range") else Result.Ok(bounded(n)))
+
