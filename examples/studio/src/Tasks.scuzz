@@ -15,7 +15,7 @@ private def nl(): String =
 """
 
 private def stripMarks(s: String): String =
-  if (Str.startsWith(s, doneMark())) stripMarks(Str.trim(Str.slice(s, 1, Str.len(s)))) else s
+  Str.replaceMatch(s, "^(#[[:space:]]*)+", "")
 
 def resolvePath(envPath: String): String =
   if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
@@ -75,9 +75,12 @@ def addTo(xs: List[Item], s: String): List[Item] =
   } yield if (Str.len(label) == 0) xs else List.append(xs, Item(done, label))
 
 def renameFirst(xs: List[Item], s: String): List[Item] =
-  for {
-    label = cleanLabel(s)
-  } yield if (List.isEmpty(xs) || Str.len(label) == 0) xs else List.setAt(xs, 0, Item(List.at(xs, 0).done, label))
+  xs match {
+    case [] => []
+    case head :: tail => for {
+  label = cleanLabel(s)
+} yield if (Str.len(label) == 0) xs else Item(head.done, label) :: tail
+  }
 
 def deleteLabel(xs: List[Item], s: String): List[Item] =
   List.filter(xs, x => x.label != s)
@@ -87,6 +90,12 @@ def flipLabel(xs: List[Item], s: String): List[Item] =
 
 def clearAll(_xs: List[Item]): List[Item] =
   []
+
+def settledSaveStatus(current: List[Item], saved: List[Item]): String =
+  if (current == saved) "Saved" else "Modified"
+
+def resolveStatus(current: List[Item], saved: List[Item], saving: Int, saveErr: Int, savedOnce: Int): String =
+  if (saving == 1) "Saving" else if (saveErr == 1) "Save failed" else if (current != saved) "Modified" else if (savedOnce == 1) "Saved" else "Ready"
 
 def loadItems(text: String): List[Item] =
   List.map(loadList(text), s => parseItem(s))

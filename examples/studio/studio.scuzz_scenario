@@ -31,5 +31,5 @@ def flipItem(s: String): IO[Unit] =
   Tasks.updateFile("/tmp/scuzz_studio_drv.txt", xs => Tasks.flipLabel(xs, s)).map(res => finishStore(res))
 
 def clearItems(): IO[Unit] =
-  Tasks.saveFile("/tmp/scuzz_studio_drv.txt", Tasks.clearAll([])).map(res => finishStore(res))
+  Tasks.updateFile("/tmp/scuzz_studio_drv.txt", xs => Tasks.clearAll(xs)).map(res => finishStore(res))
 
