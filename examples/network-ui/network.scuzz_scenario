@@ -7,3 +7,9 @@ def Main.request(url: String): IO[(Int, Map[String, String], String)] =
     response <- IO.ensure(Net.httpGet("https://127.0.0.1:18089/message", Map.empty()), Fiber.interrupt(server))
   } yield response
 
+def rejectedUrl(): IO[Unit] =
+  for {
+    cell = Signal.make(Main.Screen("Ready", 2))
+    _ <- Main.load(cell, "ftp://127.0.0.1:18089/message")
+  } yield ()
+

@@ -1,8 +1,17 @@
+def mainStartsReady(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  main = i == 0
+  state = Timeline.signalStrHas(t, 0, "status", "Ready")
+} yield !main || state && Timeline.signalStrHas(t, 0, "taps", "Taps: 0") && Timeline.a11yHas(t, 0, "button:Load") && Timeline.a11yHas(t, 0, "button:Tap") && !Timeline.effectHas(t, 0, "Net.httpGet"))
+
 def controls(t: Timeline): Verdict =
-  Verdict.alwaysHas(t, "button:Load")
+  Verdict.and(Verdict.alwaysHas(t, "button:Load"), Verdict.alwaysHas(t, "button:Tap"))
 
 def responsive(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Tap", "text:Taps: 1")
+
+def rejectedUrlSkipsNetwork(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "rejectedUrl") || !Timeline.effectHas(t, i, "Net.httpGet"))
 
 oracle validMessage(status: Int, body: String): Bool =
   Main.decode(status, body) match {
@@ -14,7 +23,40 @@ oracle decodedMessage(): Bool =
   Main.decode(200, "{\"message\":\"hello\"}") == Result.Ok("hello")
 
 oracle invalidResponse(): Bool =
-  Main.decode(503, "{\"message\":\"hello\"}") == Result.Err("HTTP 503") && Main.decode(200, "{") == Result.Err("Invalid JSON") && Main.decode(200, "{}") == Result.Err("Missing message")
+  Main.decode(503, "{\"message\":\"hello\"}") == Result.Err("HTTP 503") && Main.decode(200, "{") == Result.Err("Invalid JSON") && Main.decode(200, "{}") == Result.Err("Missing message") && Main.decode(200, "{\"message\":\"\"}") == Result.Err("Missing message") && Main.decode(200, "{\"message\":null}") == Result.Err("Missing message") && Main.decode(200, "{\"message\":1}") == Result.Err("Missing message") && Main.decode(200, "[]") == Result.Err("Missing message")
+
+oracle urlSchemeAndHelpers(): Bool =
+  for {
+    httpMin = Main.parseUrl("http://a")
+    httpsMin = Main.parseUrl("https://a")
+    trimmed = Main.parseUrl("  http://127.0.0.1:8080/message  ")
+    defaultUrl = Main.parseUrl("")
+    envUrl = Property.force(Main.endpoint())
+    badHttpRoot = Main.parseUrl("http://")
+    badHttpsRoot = Main.parseUrl("https://")
+    badScheme = Main.parseUrl("ftp://example.com/message")
+    badBare = Main.parseUrl("example.com/message")
+    badBlank = Main.parseUrl("   ")
+    badSpace = Main.parseUrl("https://example.com/bad path")
+    state = Signal.make(Main.Screen("Ready", 3))
+    _ = Property.force(Main.finish(state, (200, Map.empty(), "{\"message\":\"pong\"}")))
+    afterFinish = Signal.get(state)
+    finishErr = Property.force(IO.attempt(Main.finish(state, (500, Map.empty(), "{}"))))
+    afterErr = Signal.get(state)
+    busyState = Signal.make(Main.Screen("Loading", 4))
+    _ = Property.force(Main.load(busyState, "https://127.0.0.1:18089/message"))
+    afterBusy = Signal.get(busyState)
+    badUrlState = Signal.make(Main.Screen("Ready", 5))
+    _ = Property.force(Main.load(badUrlState, "ftp://127.0.0.1:18089/message"))
+    afterBadUrl = Signal.get(badUrlState)
+    goodLoadState = Signal.make(Main.Screen("Ready", 6))
+    _ = Property.force(Main.load(goodLoadState, "https://127.0.0.1:18089/message"))
+    afterGoodLoad = Signal.get(goodLoadState)
+    directResp = Property.force(IO.attempt(Main.request("https://127.0.0.1:18089/message")))
+  } yield httpMin == Result.Ok("http://a") && httpsMin == Result.Ok("https://a") && trimmed == Result.Ok("http://127.0.0.1:8080/message") && defaultUrl == Result.Ok("https://example.com/message") && envUrl == "https://example.com/message" && Main.validUrl("http://a") && Main.validUrl("https://a") && !Main.validUrl("http://") && !Main.validUrl("https://") && !Main.validUrl("ftp://a") && !Main.validUrl("https://a b") && badHttpRoot == Result.Err("SCUZZ_NETWORK_URL must use http:// or https://") && badHttpsRoot == Result.Err("SCUZZ_NETWORK_URL must use http:// or https://") && badScheme == Result.Err("SCUZZ_NETWORK_URL must use http:// or https://") && badBare == Result.Err("SCUZZ_NETWORK_URL must use http:// or https://") && badBlank == Result.Err("SCUZZ_NETWORK_URL must use http:// or https://") && badSpace == Result.Err("SCUZZ_NETWORK_URL must use http:// or https://") && afterFinish == Main.Screen("Loaded: pong", 3) && finishErr == Result.Err("HTTP 500") && afterErr == Main.Screen("Loaded: pong", 3) && afterBusy == Main.Screen("Loading", 4) && afterBadUrl == Main.Screen("Invalid URL.", 5) && (afterGoodLoad == Main.Screen("Loaded: hello", 6) || afterGoodLoad == Main.Screen("Failed. Try again.", 6)) && directResp match {
+  case Result.Ok(resp) => resp._1 == 200
+  case Result.Err(_) => true
+}
 
 def startsLoading(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Load", "text:Loading")
@@ -23,5 +65,5 @@ def settles(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Load") || !Timeline.signalStrHas(t, Timeline.len(t) - 1, "status", "Loading"))
 
 def requestResult(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Load") || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:Loaded: hello") || Timeline.faultKindHas(t, i, "net") && Timeline.a11yHas(t, Timeline.len(t) - 1, "text:Failed. Try again."))
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Load") || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:Loaded: hello") && Timeline.signalStrHas(t, Timeline.len(t) - 1, "status", "Loaded: hello") || Timeline.faultKindHas(t, i, "net") && Timeline.a11yHas(t, Timeline.len(t) - 1, "text:Failed. Try again.") && Timeline.signalStrHas(t, Timeline.len(t) - 1, "status", "Failed. Try again."))
 

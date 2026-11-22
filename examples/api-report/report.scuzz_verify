@@ -11,7 +11,52 @@ oracle rejectsStatus(n: Int): Bool =
 }
 
 oracle rejectsJson(): Bool =
-  Report.decode(200, "{") == Result.Err("API returned invalid JSON") && Report.decode(200, "{}") == Result.Err("API response must be an array") && Report.decode(200, "[{}]") == Result.Err("Each record must have a string state")
+  Report.decode(200, "{") == Result.Err("API returned invalid JSON") && Report.decode(200, "{}") == Result.Err("API response must be an array") && Report.decode(200, "[{}]") == Result.Err("Each record must have a string state") && Report.decode(200, "[{\"state\":null}]") == Result.Err("Each record must have a string state") && Report.decode(200, "[{\"state\":1}]") == Result.Err("Each record must have a string state") && Report.decode(200, "[1]") == Result.Err("Each record must have a string state")
+
+oracle recordAndHeaderHelpers(): Bool =
+  for {
+    hdrs = Report.requestHeaders("tok-1")
+    openRow = Json.Obj([("id", Json.Int(1)), ("state", Json.Str("open"))])
+    closedRow = Json.Obj([("id", Json.Int(2)), ("state", Json.Str("closed"))])
+    nullRow = Json.Obj([("state", Json.Null())])
+    intRow = Json.Obj([("state", Json.Int(3))])
+    emptyObj = Json.Obj([])
+    nonObj = Json.Arr([])
+    links = Report.linkHeader(Map.set(Map.set(Map.empty(), "link", "<a>; rel=prev"), "Link", "<b>; rel=next"))
+  } yield Map.get(hdrs, "Authorization") == Some("Bearer tok-1") && Map.get(hdrs, "Accept") == Some("application/json") && Map.get(hdrs, "User-Agent") == Some("scuzz-api-report") && Report.validRecord(openRow) && Report.validRecord(closedRow) && !Report.validRecord(nullRow) && !Report.validRecord(intRow) && !Report.validRecord(emptyObj) && !Report.validRecord(nonObj) && Report.isOpen(openRow) && !Report.isOpen(closedRow) && !Report.isOpen(emptyObj) && Report.linkHeader(Map.empty()) == "" && Str.contains(links, "<a>; rel=prev") && Str.contains(links, "<b>; rel=next")
+
+oracle writeAndConfigGuards(): Bool =
+  for {
+    wroteRows = Property.force(IO.attempt(Report.writeRows([Json.Obj([("id", Json.Int(7)), ("state", Json.Str("open"))])], "report.json").flatMap(_ => Fs.read("report.json"))))
+    badScheme = Property.force(IO.attempt(Main.runConfigured("http://127.0.0.1:18083/records", "sim-token", "report.json")))
+    missingTok = Property.force(IO.attempt(Report.run("https://127.0.0.1:18083/records", "", "report.json", 5000)))
+    defaultOut = Property.force(IO.attempt(for {
+  _ <- Fs.write("report.json", "[]")
+  server <- Fiber.fork(Net.serveOnceTls(18083, _ => IO.pure((200, Map.empty(), "[{\"id\":9,\"state\":\"open\"}]"))))
+  _ <- IO.ensure(Main.runConfigured("https://127.0.0.1:18083/records", "sim-token", ""), Fiber.interrupt(server))
+  saved <- Fs.read("report.json")
+} yield saved == "[{\"id\":9,\"state\":\"open\"}]"))
+    customOut = Property.force(IO.attempt(for {
+  _ <- Fs.write("custom-report.json", "[]")
+  server <- Fiber.fork(Net.serveOnceTls(18083, _ => IO.pure((200, Map.empty(), "[{\"id\":10,\"state\":\"open\"}]"))))
+  _ <- IO.ensure(Main.runConfigured("https://127.0.0.1:18083/records", "sim-token", "custom-report.json"), Fiber.interrupt(server))
+  saved <- Fs.read("custom-report.json")
+} yield saved == "[{\"id\":10,\"state\":\"open\"}]"))
+  } yield wroteRows match {
+  case Result.Ok(saved) => saved == "[{\"id\":7,\"state\":\"open\"}]"
+  case Result.Err(_) => true
+} && badScheme == Result.Err("SCUZZ_API_URL must use HTTPS") && missingTok == Result.Err("Set SCUZZ_API_TOKEN") && defaultOut match {
+  case Result.Ok(ok) => ok
+  case Result.Err(_) => true
+} && customOut match {
+  case Result.Ok(ok) => ok
+  case Result.Err(_) => true
+}
+
+def mainIdlePreservesReport(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  main = i == 0
+} yield !main || Timeline.fileTextIs(t, 0, "report.json", "[]") && !Timeline.effectHas(t, 0, "Net.httpGet"))
 
 def successWrites(t: Timeline): Verdict =
   Verdict.stepEvery(t, pair => pair match {
@@ -72,7 +117,7 @@ oracle pageProgress(n: Int): Bool =
   Report.nextPage(Map.set(Map.empty(), "X-Next-Page", Str.fromInt(n)), 1) == (if (n > 1 && n <= 100) n else -1)
 
 oracle pageHeaderForms(): Bool =
-  Report.nextPage(Map.empty(), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", ""), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", " 2 "), 1) == 2 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "https://other/"), 1) == -1 && Report.nextPage(Map.set(Map.set(Map.empty(), "X-Next-Page", "2"), "x-next-page", "3"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "999999999999999999999"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "100"), 100) == -1
+  Report.nextPage(Map.empty(), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", ""), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", " 2 "), 1) == 2 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "+2"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "-2"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "https://other/"), 1) == -1 && Report.nextPage(Map.set(Map.set(Map.empty(), "X-Next-Page", "2"), "x-next-page", "3"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "999999999999999999999"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "100"), 100) == -1
 
 oracle pageAddresses(): Bool =
   Report.pageUrl("https://api/records", 1) == "https://api/records" && Report.pageUrl("https://api/records", 2) == "https://api/records?page=2" && Report.pageUrl("https://api/records?state=all", 3) == "https://api/records?state=all&page=3"
