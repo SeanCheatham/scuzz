@@ -13,3 +13,21 @@ oracle generatedEval(seed: Int where seed >= 0 && seed < 4096): Bool =
 oracle moduleIdentity(seed: Int where seed >= 0 && seed < 6): Bool =
   Cases.moduleChecked(seed)
 
+oracle coverageChecked(seed: Int where seed >= 0 && seed < 128): Bool =
+  Cases.coverageChecked(seed)
+
+oracle modernCoverageChecked(seed: Int where seed >= 0 && seed < 128): Bool =
+  Cases.modernCoverageChecked(seed)
+
+oracle modernEvaluated(seed: Int where seed >= 0 && seed < 256): Bool =
+  Cases.modernEvaluated(seed)
+
+oracle moduleEvaluatedAndFormatted(seed: Int where seed >= 0 && seed < 6): Bool =
+  Cases.moduleEvaluatedAndFormatted(seed)
+
+oracle exportChecked(seed: Int where seed >= 0 && seed < 54): Bool =
+  Cases.exportChecked(seed) && Str.contains(Cases.source(List.at(Cases.caseSeeds(), seed)), "def calculate") && List.exists(Cases.moduleFiles(seed % 6, true), pair => pair._1 == "Main" && Str.contains(pair._2, "@main")) && Cases.exported(List.at(Cases.caseSeeds(), seed)) == Cases.exported(List.at(Cases.caseSeeds(), seed)) && Cases.moduleExport(seed % 6) == Cases.moduleExport(seed % 6)
+
+oracle breadthFacts(): Bool =
+  Cases.coverageChecked(0) && Cases.coverageChecked(15) && Cases.coverageChecked(16) && Cases.coverageChecked(64) && Cases.coverageChecked(79) && Cases.coverageChecked(127) && Cases.modernCoverageChecked(0) && Cases.modernCoverageChecked(1) && Cases.modernCoverageChecked(2) && Cases.modernCoverageChecked(3) && Cases.modernCoverageChecked(4) && Cases.modernCoverageChecked(5) && Cases.modernCoverageChecked(6) && Cases.modernEvaluated(0) && Cases.modernEvaluated(2) && Cases.modernEvaluated(255) && Cases.moduleEvaluatedAndFormatted(0) && Cases.moduleEvaluatedAndFormatted(5) && Cases.exportChecked(0)
+
