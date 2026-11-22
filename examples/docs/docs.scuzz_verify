@@ -1,5 +1,5 @@
 def mainStartsOnIntro(t: Timeline): Verdict =
-  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "step") == 0 && Timeline.signalInt(t, i, "fileTab") == 0 && Timeline.signalInt(t, i, "howFail") == 0 && Timeline.signalInt(t, i, "howPass") == 0 && Timeline.signalInt(t, i, "countReady") == 0 && Timeline.signalInt(t, i, "coverShown") == 0 && Timeline.signalInt(t, i, "coverTotal") == 0 && Timeline.signalInt(t, i, "coverPlaying") == 0 && Timeline.signalStrHas(t, i, "howCamp", "Press Fuzz") && Timeline.signalStrHas(t, i, "trySrc", "n = inc(0)") && !Timeline.a11yHas(t, i, "outlined:Back"))
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "step") == 0 && Timeline.signalInt(t, i, "fileTab") == 0 && Timeline.signalInt(t, i, "howFail") == 0 && Timeline.signalInt(t, i, "howPass") == 0 && Timeline.signalInt(t, i, "runReady") == 0 && Timeline.signalInt(t, i, "viewReady") == 0 && Timeline.signalInt(t, i, "checkReady") == 0 && Timeline.signalInt(t, i, "countReady") == 0 && Timeline.signalInt(t, i, "searchReady") == 0 && Timeline.signalInt(t, i, "coverShown") == 0 && Timeline.signalInt(t, i, "coverTotal") == 0 && Timeline.signalInt(t, i, "coverPlaying") == 0 && Timeline.signalStrHas(t, i, "tryOut", "") && Timeline.signalStrHas(t, i, "checkOut", "") && Timeline.signalStrHas(t, i, "viewDiags", "") && Timeline.signalStrHas(t, i, "stateDiags", "") && Timeline.signalStrHas(t, i, "howCamp", "Press Fuzz") && Timeline.signalStrHas(t, i, "trySrc", "n = inc(0)") && Timeline.signalStrHas(t, i, "tryVer", "") && Timeline.signalListLen(t, i, "viewMounted") == 1 && Timeline.signalListLen(t, i, "stateMounted") == 1 && !Timeline.a11yHas(t, i, "outlined:Back"))
 
 def headingIsExposed(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.a11yHas(t, i, "heading:1"))
@@ -19,20 +19,76 @@ def activeStage(t: Timeline): Verdict =
 def trailStays(t: Timeline): Verdict =
   Verdict.every(t, i => if (Timeline.signalInt(t, i, "step") == 0) Timeline.a11yHas(t, i, "text:Intro 1/8") else if (Timeline.signalInt(t, i, "step") == 1) Timeline.a11yHas(t, i, "text:Run 2/8") else if (Timeline.signalInt(t, i, "step") == 2) Timeline.a11yHas(t, i, "text:View 3/8") else if (Timeline.signalInt(t, i, "step") == 3) Timeline.a11yHas(t, i, "text:Check 4/8") else if (Timeline.signalInt(t, i, "step") == 4) Timeline.a11yHas(t, i, "text:State 5/8") else if (Timeline.signalInt(t, i, "step") == 5) Timeline.a11yHas(t, i, "text:Search 6/8") else if (Timeline.signalInt(t, i, "step") == 6) Timeline.a11yHas(t, i, "text:Cover 7/8") else Timeline.a11yHas(t, i, "text:Mutation 8/8"))
 
+private def isRunStarterSrc(t: Timeline, i: Int): Bool =
+  Timeline.signalStrHas(t, i, "trySrc", "n = inc(0)") && Timeline.signalStrHas(t, i, "trySrc", "IO.println(Str.fromInt(n))") && !Timeline.signalStrHas(t, i, "trySrc", "View.column")
+
+private def isViewStarterSrc(t: Timeline, i: Int): Bool =
+  Timeline.signalStrHas(t, i, "trySrc", "View.text(\"Clicks: 0\")") && Timeline.signalStrHas(t, i, "trySrc", "IO.println(Str.fromInt(inc(0)))") && !Timeline.signalStrHas(t, i, "trySrc", "clicks = Signal.make(0)")
+
+private def isSignalStarterSrc(t: Timeline, i: Int): Bool =
+  Timeline.signalStrHas(t, i, "trySrc", "clicks = Signal.make(0)") && Timeline.signalStrHas(t, i, "trySrc", "Clicks: $n")
+
+private def hasStarterSrc(t: Timeline, i: Int): Bool =
+  isRunStarterSrc(t, i) || isViewStarterSrc(t, i) || isSignalStarterSrc(t, i)
+
+private def isEmptyStarterVer(t: Timeline, i: Int): Bool =
+  Timeline.signalStrHas(t, i, "tryVer", "")
+
+private def isCheckStarterVer(t: Timeline, i: Int): Bool =
+  Timeline.signalStrHas(t, i, "tryVer", "oracle incAdds(n: Int): Bool =") && Timeline.signalStrHas(t, i, "tryVer", "Main.inc(n) == n + 1") && !Timeline.signalStrHas(t, i, "tryVer", "oracle hidden")
+
+private def isSearchStarterVer(t: Timeline, i: Int): Bool =
+  Timeline.signalStrHas(t, i, "tryVer", "oracle incAdds(n: Int): Bool =") && Timeline.signalStrHas(t, i, "tryVer", "if (n == 3) false else true")
+
+private def hasStarterVer(t: Timeline, i: Int): Bool =
+  isEmptyStarterVer(t, i) || isCheckStarterVer(t, i) || isSearchStarterVer(t, i)
+
+private def starterMatchesStage(t: Timeline, i: Int): Bool =
+  for {
+    st = Timeline.signalInt(t, i, "step")
+    srcOk = !hasStarterSrc(t, i) || (if (st <= 1) isRunStarterSrc(t, i) else if (st <= 3) isViewStarterSrc(t, i) else isSignalStarterSrc(t, i))
+    verOk = !hasStarterVer(t, i) || (if (st < 3) isEmptyStarterVer(t, i) else if (st <= 4) isCheckStarterVer(t, i) else isSearchStarterVer(t, i))
+  } yield srcOk && verOk
+
+def stageStartersSyncAndKeepEdits(t: Timeline): Verdict =
+  Verdict.and(Verdict.every(t, i => starterMatchesStage(t, i)), Verdict.stepEvery(t, __tup => __tup match {
+  case (before, after) => Timeline.signalInt(t, after, "step") == Timeline.signalInt(t, before, "step") || hasStarterSrc(t, after) == hasStarterSrc(t, before) && hasStarterVer(t, after) == hasStarterVer(t, before)
+}))
+
+def viewAndStatePreviewsStayIsolated(t: Timeline): Verdict =
+  Verdict.and(Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 2 || !isViewStarterSrc(t, i) || !Timeline.a11yHas(t, i, "text:Clicks: 1")), Verdict.stepEvery(t, __tup => __tup match {
+  case (before, after) => Timeline.signalInt(t, after, "step") == Timeline.signalInt(t, before, "step") || Timeline.signalInt(t, after, "runReady") == Timeline.signalInt(t, before, "runReady") && Timeline.signalInt(t, after, "viewReady") == Timeline.signalInt(t, before, "viewReady") && Timeline.signalInt(t, after, "checkReady") == Timeline.signalInt(t, before, "checkReady") && Timeline.signalInt(t, after, "countReady") == Timeline.signalInt(t, before, "countReady") && Timeline.signalInt(t, after, "searchReady") == Timeline.signalInt(t, before, "searchReady") && Timeline.signalListLen(t, after, "viewMounted") == Timeline.signalListLen(t, before, "viewMounted") && Timeline.signalListLen(t, after, "stateMounted") == Timeline.signalListLen(t, before, "stateMounted")
+}))
+
 def countChangesOnlyWithControls(t: Timeline): Verdict =
   Verdict.stepEvery(t, __tup => __tup match {
-  case (before, after) => !Timeline.a11yHas(t, after, "text:Clicks: 1") || Timeline.a11yHas(t, before, "text:Clicks: 1") || Timeline.lastHitHas(t, after, "button:+1") || Timeline.signalInt(t, before, "step") != 4 && Timeline.signalInt(t, after, "step") == 4 || Timeline.signalInt(t, before, "step") != 2 && Timeline.signalInt(t, after, "step") == 2
+  case (before, after) => !Timeline.a11yHas(t, after, "text:Clicks: 1") || Timeline.a11yHas(t, before, "text:Clicks: 1") || Timeline.lastHitHas(t, after, "button:+1") || Timeline.signalInt(t, before, "step") != 4 && Timeline.signalInt(t, after, "step") == 4
 })
 
+private def checkRunStage1(t: Timeline, before: Int, after: Int): Bool =
+  for {
+    starterOk = !isRunStarterSrc(t, after) || Timeline.signalInt(t, after, "runReady") == 1 && Timeline.a11yHas(t, after, "text:1") && Timeline.a11yHas(t, after, "button:Continue")
+    badPrint = !Timeline.signalStrHas(t, after, "trySrc", "IO.println(1)") || Timeline.signalStrHas(t, after, "tryOut", "error:") && Timeline.a11yHas(t, after, "error:") && Timeline.signalInt(t, after, "runReady") == 0 && !Timeline.a11yHas(t, after, "button:Continue")
+    gatedOk = Timeline.signalInt(t, after, "runReady") == 1 == Timeline.a11yHas(t, after, "button:Continue")
+    isolated = Timeline.signalInt(t, after, "checkReady") == Timeline.signalInt(t, before, "checkReady") && Timeline.signalInt(t, after, "viewReady") == Timeline.signalInt(t, before, "viewReady") && Timeline.signalInt(t, after, "countReady") == Timeline.signalInt(t, before, "countReady")
+  } yield starterOk && badPrint && gatedOk && isolated
+
+private def checkRunStage2(t: Timeline, before: Int, after: Int): Bool =
+  for {
+    okBranch = Timeline.signalInt(t, after, "viewReady") == 1 && Timeline.signalStrHas(t, after, "viewDiags", "ok") && !Timeline.signalStrHas(t, after, "viewDiags", "error:") && Timeline.signalListLen(t, after, "viewMounted") == 1 && Timeline.a11yHas(t, after, "button:Continue")
+    errBranch = Timeline.signalInt(t, after, "viewReady") == 0 && (Timeline.signalStrHas(t, after, "viewDiags", "error:") || Timeline.signalStrHas(t, after, "viewDiags", "eval:")) && (Timeline.a11yHas(t, after, "error:") || Timeline.a11yHas(t, after, "eval:")) && Timeline.signalListLen(t, after, "viewMounted") == 0 && !Timeline.a11yHas(t, after, "button:Continue")
+    isolated = Timeline.signalInt(t, after, "countReady") == Timeline.signalInt(t, before, "countReady") && Timeline.signalListLen(t, after, "stateMounted") == Timeline.signalListLen(t, before, "stateMounted")
+  } yield (okBranch || errBranch) && isolated
+
+private def checkRunStage4(t: Timeline, before: Int, after: Int): Bool =
+  for {
+    okBranch = Timeline.signalStrHas(t, after, "stateDiags", "ok") && !Timeline.signalStrHas(t, after, "stateDiags", "error:") && Timeline.signalListLen(t, after, "stateMounted") == 1 && (!isSignalStarterSrc(t, after) || Timeline.signalInt(t, after, "countReady") == 0 && Timeline.a11yHas(t, after, "text:Clicks: 0") && !Timeline.a11yHas(t, after, "button:Continue"))
+    errBranch = (Timeline.signalStrHas(t, after, "stateDiags", "error:") || Timeline.signalStrHas(t, after, "stateDiags", "eval:")) && (Timeline.a11yHas(t, after, "error:") || Timeline.a11yHas(t, after, "eval:")) && Timeline.signalListLen(t, after, "stateMounted") == 0 && Timeline.signalInt(t, after, "countReady") == 0 && !Timeline.a11yHas(t, after, "button:Continue")
+    isolated = Timeline.signalInt(t, after, "viewReady") == Timeline.signalInt(t, before, "viewReady") && Timeline.signalListLen(t, after, "viewMounted") == Timeline.signalListLen(t, before, "viewMounted")
+  } yield (okBranch || errBranch) && isolated
+
 private def checkRunHit(t: Timeline, before: Int, after: Int): Bool =
-  if (Timeline.signalInt(t, before, "step") == 1) for {
-  starterOk = !(Timeline.signalStrHas(t, after, "trySrc", "n = inc(0)") && Timeline.signalStrHas(t, after, "trySrc", "IO.println(Str.fromInt(n))")) || Timeline.signalInt(t, after, "runReady") == 1 && Timeline.a11yHas(t, after, "text:1") && Timeline.a11yHas(t, after, "button:Continue")
-  badPrint = !Timeline.signalStrHas(t, after, "trySrc", "IO.println(1)") || Timeline.signalStrHas(t, after, "tryOut", "error:") && Timeline.a11yHas(t, after, "error:") && Timeline.signalInt(t, after, "runReady") == 0 && !Timeline.a11yHas(t, after, "button:Continue")
-  gatedOk = Timeline.signalInt(t, after, "runReady") == 1 == Timeline.a11yHas(t, after, "button:Continue")
-} yield starterOk && badPrint && gatedOk else for {
-  okBranch = Timeline.signalInt(t, after, "viewReady") == 1 && !Timeline.signalStrHas(t, after, "tryDiags", "error:") && Timeline.signalListLen(t, after, "tryMounted") == 1 && (Timeline.signalInt(t, after, "step") != 2 || Timeline.a11yHas(t, after, "button:Continue"))
-  errBranch = Timeline.signalInt(t, after, "viewReady") == 0 && (Timeline.signalStrHas(t, after, "tryDiags", "error:") || Timeline.signalStrHas(t, after, "tryDiags", "eval:")) && (Timeline.a11yHas(t, after, "error:") || Timeline.a11yHas(t, after, "eval:")) && Timeline.signalListLen(t, after, "tryMounted") == 0 && Timeline.signalInt(t, after, "countReady") == 0 && !Timeline.a11yHas(t, after, "button:Continue")
-} yield okBranch || errBranch
+  if (Timeline.signalInt(t, before, "step") == 1) checkRunStage1(t, before, after) else if (Timeline.signalInt(t, before, "step") == 2) checkRunStage2(t, before, after) else checkRunStage4(t, before, after)
 
 def runShowsIncOrDiag(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Run", pair => pair match {
@@ -43,27 +99,28 @@ def viewMountsClicks(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 2 || Timeline.signalInt(t, i, "viewReady") != 1 || Timeline.a11yHas(t, i, "text:Clicks: ") && Timeline.a11yHas(t, i, "button:+1") && (Timeline.signalStrHas(t, i, "trySrc", "Clicks: $n") || Timeline.a11yHas(t, i, "text:Clicks: 0")))
 
 def tryRunKeepsOk(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") == 1 || Timeline.signalInt(t, i, "viewReady") == 1 || !Timeline.signalStrHas(t, i, "trySrc", "View.column"))
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || (if (Timeline.signalInt(t, i, "step") == 2) Timeline.signalInt(t, i, "viewReady") == 1 || !Timeline.signalStrHas(t, i, "trySrc", "View.column") else if (Timeline.signalInt(t, i, "step") == 4) Timeline.signalStrHas(t, i, "stateDiags", "ok") || !Timeline.signalStrHas(t, i, "trySrc", "View.column") else true))
 
 def tryRunMountsFresh(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "viewReady") != 1 || !Timeline.signalStrHas(t, i, "trySrc", "clicks = Signal.make(0)") || Timeline.a11yHas(t, i, "text:Clicks: 0"))
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") != 4 || !Timeline.signalStrHas(t, i, "stateDiags", "ok") || !Timeline.signalStrHas(t, i, "trySrc", "clicks = Signal.make(0)") || Timeline.a11yHas(t, i, "text:Clicks: 0") && Timeline.signalInt(t, i, "countReady") == 0)
 
 def tryPlusOneCounts(t: Timeline): Verdict =
   Verdict.onHit(t, "button:+1", pair => pair match {
-  case (before, after) => if (Timeline.signalInt(t, before, "step") == 2 && !Timeline.signalStrHas(t, after, "trySrc", "Clicks: $n")) Timeline.a11yHas(t, after, "text:Clicks: 0") else !Timeline.a11yHas(t, before, "text:Clicks: 0") || !Timeline.signalStrHas(t, after, "trySrc", "Clicks: $n") || Timeline.a11yHas(t, after, "text:Clicks: 1")
+  case (before, after) => if (Timeline.signalInt(t, before, "step") == 2 && !Timeline.signalStrHas(t, after, "trySrc", "Clicks: $n")) Timeline.a11yHas(t, after, "text:Clicks: 0") && Timeline.signalInt(t, after, "countReady") == Timeline.signalInt(t, before, "countReady") else !Timeline.a11yHas(t, before, "text:Clicks: 0") || !Timeline.signalStrHas(t, after, "trySrc", "Clicks: $n") || Timeline.a11yHas(t, after, "text:Clicks: 1") && (Timeline.signalInt(t, before, "step") != 4 || Timeline.signalInt(t, after, "countReady") == 1)
 })
 
-private def checkOracleHit(t: Timeline, after: Int): Bool =
+private def checkOracleHit(t: Timeline, before: Int, after: Int): Bool =
   for {
     validInc = Timeline.signalStrHas(t, after, "tryVer", "Main.inc(n) == n + 1") && Timeline.signalStrHas(t, after, "tryVer", "oracle incAdds(n: Int): Bool =")
     badType = Timeline.signalStrHas(t, after, "tryVer", "oracle incAdds(n: Int): Int = n")
-    okBranch = Timeline.signalInt(t, after, "checkReady") == 1 && !Timeline.signalStrHas(t, after, "tryOut", "error:") && Timeline.a11yHas(t, after, "text:true") && Timeline.a11yHas(t, after, "button:Continue")
-    errBranch = Timeline.signalInt(t, after, "checkReady") == 0 && !Timeline.a11yHas(t, after, "button:Continue") && (Timeline.signalStrHas(t, after, "tryOut", "error:") || Timeline.signalStrHas(t, after, "tryOut", "fail ") || Timeline.signalStrHas(t, after, "tryOut", "no oracle ") || Timeline.signalStrHas(t, after, "tryOut", "is not an oracle"))
-  } yield (!validInc || !Timeline.signalStrHas(t, after, "trySrc", "n + 1") || okBranch) && (!badType || Timeline.signalStrHas(t, after, "tryOut", "error:") && Timeline.a11yHas(t, after, "error:") && !Timeline.a11yHas(t, after, "button:Continue")) && (okBranch || errBranch)
+    okBranch = Timeline.signalInt(t, after, "checkReady") == 1 && !Timeline.signalStrHas(t, after, "checkOut", "error:") && Timeline.a11yHas(t, after, "text:true") && Timeline.a11yHas(t, after, "button:Continue")
+    errBranch = Timeline.signalInt(t, after, "checkReady") == 0 && !Timeline.a11yHas(t, after, "button:Continue") && (Timeline.signalStrHas(t, after, "checkOut", "error:") || Timeline.signalStrHas(t, after, "checkOut", "fail ") || Timeline.signalStrHas(t, after, "checkOut", "no oracle ") || Timeline.signalStrHas(t, after, "checkOut", "is not an oracle"))
+    isolated = Timeline.signalInt(t, after, "runReady") == Timeline.signalInt(t, before, "runReady")
+  } yield (!validInc || !Timeline.signalStrHas(t, after, "trySrc", "n + 1") || okBranch) && (!badType || Timeline.signalStrHas(t, after, "checkOut", "error:") && Timeline.a11yHas(t, after, "error:") && !Timeline.a11yHas(t, after, "button:Continue")) && (okBranch || errBranch) && isolated
 
 def checkShowsTrueOrDiag(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Check", pair => pair match {
-  case (_, after) => checkOracleHit(t, after)
+  case (before, after) => checkOracleHit(t, before, after)
 })
 
 def checkShowsFilesAndTabs(t: Timeline): Verdict =
@@ -108,12 +165,12 @@ def searchFilterChipsToggle(t: Timeline): Verdict =
 }))
 
 def continueGatesAndSteps(t: Timeline): Verdict =
-  Verdict.and(Verdict.every(t, i => (Timeline.signalInt(t, i, "step") != 1 || Timeline.signalInt(t, i, "runReady") == 1 == Timeline.a11yHas(t, i, "button:Continue")) && (Timeline.signalInt(t, i, "step") != 2 || Timeline.signalInt(t, i, "viewReady") == 1 == Timeline.a11yHas(t, i, "button:Continue")) && (Timeline.signalInt(t, i, "step") != 3 || Timeline.signalInt(t, i, "checkReady") == 1 == Timeline.a11yHas(t, i, "button:Continue")) && (Timeline.signalInt(t, i, "step") != 4 || Timeline.signalInt(t, i, "countReady") == 1 == Timeline.a11yHas(t, i, "button:Continue")) && (Timeline.signalInt(t, i, "step") != 5 || Timeline.signalInt(t, i, "searchReady") == 1 == Timeline.a11yHas(t, i, "button:Continue"))), Verdict.onHit(t, "button:Continue", pair => pair match {
+  Verdict.and(Verdict.every(t, i => (Timeline.signalInt(t, i, "step") != 1 || Timeline.signalInt(t, i, "runReady") == 1 == Timeline.a11yHas(t, i, "button:Continue")) && (Timeline.signalInt(t, i, "step") != 2 || Timeline.signalInt(t, i, "viewReady") == 1 == Timeline.a11yHas(t, i, "button:Continue")) && (Timeline.signalInt(t, i, "step") != 3 || Timeline.signalInt(t, i, "checkReady") == 1 == Timeline.a11yHas(t, i, "button:Continue")) && (Timeline.signalInt(t, i, "step") != 4 || Timeline.signalInt(t, i, "countReady") == 1 == Timeline.a11yHas(t, i, "button:Continue") && Timeline.signalInt(t, i, "countReady") == 0 == Timeline.a11yHas(t, i, "text:Press Run, tap +1, then Continue.")) && (Timeline.signalInt(t, i, "step") != 5 || Timeline.signalInt(t, i, "searchReady") == 1 == Timeline.a11yHas(t, i, "button:Continue"))), Verdict.onHit(t, "button:Continue", pair => pair match {
   case (before, after) => Timeline.signalInt(t, after, "step") == Timeline.signalInt(t, before, "step") + 1
 }))
 
 def stateUnlocksContinue(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalListLen(t, i, "countNav") < 1 || !Timeline.lastHitHas(t, i, "button:+1") || Timeline.signalInt(t, i, "step") != 4 || !Timeline.a11yHas(t, i, "text:Clicks: 1") || Timeline.a11yHas(t, i, "button:Continue"))
+  Verdict.every(t, i => (Timeline.signalInt(t, i, "countReady") == 0 || Timeline.signalInt(t, i, "countReady") == 1) && (!Timeline.lastHitHas(t, i, "button:+1") || Timeline.signalInt(t, i, "step") != 4 || !Timeline.a11yHas(t, i, "text:Clicks: 1") || Timeline.signalInt(t, i, "countReady") == 1 && Timeline.a11yHas(t, i, "button:Continue")))
 
 private def checkBackHit(t: Timeline, before: Int, after: Int): Bool =
   for {
@@ -122,9 +179,8 @@ private def checkBackHit(t: Timeline, before: Int, after: Int): Bool =
     stepOk = prevStep > 0 && nextStep == prevStep - 1
     searchKept = Timeline.signalInt(t, after, "howFail") == Timeline.signalInt(t, before, "howFail") && Timeline.signalInt(t, after, "howPass") == Timeline.signalInt(t, before, "howPass")
     stateKept = Timeline.signalInt(t, after, "countReady") == Timeline.signalInt(t, before, "countReady") && (nextStep != 4 || Timeline.signalInt(t, after, "countReady") != 1 || Timeline.a11yHas(t, after, "button:Continue"))
-    outClean = (nextStep != 1 || Timeline.signalInt(t, after, "checkReady") == 0) && (nextStep != 3 || Timeline.signalInt(t, after, "runReady") == 0)
-    runStarterRestored = nextStep != 1 || !Timeline.signalStrHas(t, before, "trySrc", "View.column") || Timeline.signalStrHas(t, after, "trySrc", "n = inc(0)")
-  } yield stepOk && searchKept && stateKept && outClean && runStarterRestored
+    gatesKept = Timeline.signalInt(t, after, "runReady") == Timeline.signalInt(t, before, "runReady") && Timeline.signalInt(t, after, "viewReady") == Timeline.signalInt(t, before, "viewReady") && Timeline.signalInt(t, after, "checkReady") == Timeline.signalInt(t, before, "checkReady")
+  } yield stepOk && searchKept && stateKept && gatesKept
 
 def backNavigatesAndPreservesState(t: Timeline): Verdict =
   Verdict.and(Verdict.every(t, i => Timeline.signalInt(t, i, "step") > 0 == Timeline.a11yHas(t, i, "outlined:Back")), Verdict.onHit(t, "outlined:Back", pair => pair match {
@@ -159,5 +215,5 @@ def mutantShowsDiff(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 7 || Timeline.a11yHas(t, i, "text:live source") && Timeline.a11yHas(t, i, "text:mutant source") && Timeline.a11yHas(t, i, "text:- ") && Timeline.a11yHas(t, i, "text:+ ") && Timeline.a11yHas(t, i, "text:incAdds reject"))
 
 def viewListSignalsHoldStageViews(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalListLen(t, i, "tryMounted") == (if (Timeline.signalStrHas(t, i, "tryDiags", "error:") || Timeline.signalStrHas(t, i, "tryDiags", "eval:")) 0 else 1) && Timeline.signalListLen(t, i, "countNav") == 1 && Timeline.signalListLen(t, i, "claimBody") == (if (Timeline.signalInt(t, i, "step") == 3) 1 else 0) && Timeline.signalListLen(t, i, "coverBody") == (if (Timeline.signalInt(t, i, "step") == 6) 1 else 0) && Timeline.signalListLen(t, i, "mutBody") == (if (Timeline.signalInt(t, i, "step") == 7) 1 else 0))
+  Verdict.every(t, i => Timeline.signalListLen(t, i, "viewMounted") == (if (Timeline.signalStrHas(t, i, "viewDiags", "error:") || Timeline.signalStrHas(t, i, "viewDiags", "eval:")) 0 else 1) && Timeline.signalListLen(t, i, "stateMounted") == (if (Timeline.signalStrHas(t, i, "stateDiags", "error:") || Timeline.signalStrHas(t, i, "stateDiags", "eval:")) 0 else 1) && Timeline.signalListLen(t, i, "claimBody") == (if (Timeline.signalInt(t, i, "step") == 3) 1 else 0) && Timeline.signalListLen(t, i, "coverBody") == (if (Timeline.signalInt(t, i, "step") == 6) 1 else 0) && Timeline.signalListLen(t, i, "mutBody") == (if (Timeline.signalInt(t, i, "step") == 7) 1 else 0))
 
