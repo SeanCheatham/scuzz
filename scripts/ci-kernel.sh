@@ -578,6 +578,42 @@ def batchAlias(value: List[Read]): List[Read] =
 def optionAlias(value: Option[Read]): Option[Read] =
   for { all @ _ = value } yield all
 
+record Batch[A](item: A, count: Int)
+
+enum Packet[A]:
+  case Ready(value: A)
+  case Idle
+
+enum ResultTree:
+  case Leaf(value: Read)
+  case Branch(left: ResultTree, right: ResultTree)
+  case Empty
+
+def forwardedBatch(text: String): Batch[Read] =
+  for {
+    batch = Batch(Str.parseInt(text), 3)
+  } yield batch
+
+def recordHandled(text: String): Int =
+  for {
+    batch = forwardedBatch(text)
+  } yield consume(batch.item) + batch.count
+
+def packetHandled(flag: Bool, text: String): Int =
+  (if (flag) Packet.Ready(Str.parseInt(text)) else Packet.Idle) match {
+    case Packet.Ready(Result.Ok(n)) => n
+    case Packet.Ready(Result.Err(_)) => -1
+    case _ => 0
+  }
+
+def treeHandled(tree: ResultTree): Int =
+  tree match {
+    case ResultTree.Leaf(Result.Ok(n)) => n
+    case ResultTree.Leaf(Result.Err(_)) => -1
+    case ResultTree.Branch(left, right) => treeHandled(left) + treeHandled(right)
+    case _ => 0
+  }
+
 def pairHandled(text: String): Int =
   for {
     pair = (Str.parseInt(text), 2)
@@ -611,6 +647,12 @@ def validatedEnv(name: String): IO[String] =
     _ <- IO.println(Str.fromInt(resultReceiver("bad")))
     _ <- IO.println(Str.fromInt(pairHandled("7")))
     _ <- IO.println(Str.fromInt(pairHandled("bad")))
+    _ <- IO.println(Str.fromInt(recordHandled("7")))
+    _ <- IO.println(Str.fromInt(recordHandled("bad")))
+    _ <- IO.println(Str.fromInt(packetHandled(true, "7")))
+    _ <- IO.println(Str.fromInt(packetHandled(true, "bad")))
+    _ <- IO.println(Str.fromInt(packetHandled(false, "7")))
+    _ <- IO.println(Str.fromInt(treeHandled(ResultTree.Branch(ResultTree.Leaf(Str.parseInt("5")), ResultTree.Leaf(Str.parseInt("bad"))))))
     _ <- validatedEnv("SCUZZ_UNSET_GUARD_TEST").flatMap(s => IO.println(s))
   } yield ()
 '''
@@ -622,7 +664,8 @@ def validatedEnv(name: String): IO[String] =
             output = output[1:]
         assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1', '7', '-1', '7', '-1',
                           'ok:1,100', 'error:Str.parseInt: invalid integer',
-                          'error:quantity must be 1 through 100', 'ok:', '7', '-1', '9', '1', 'unset'], (engine, output)
+                          'error:quantity must be 1 through 100', 'ok:', '7', '-1', '9', '1',
+                          '10', '2', '7', '-1', '0', '4', 'unset'], (engine, output)
     bad = [('_ = List.map(["7", "bad"], text => Str.parseInt(text))', '()', 'Result list is discarded'),
            ('ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
            ('_ignored = [Str.parseInt("bad")]', '()', 'Result list is discarded'),
@@ -648,6 +691,20 @@ def validatedEnv(name: String): IO[String] =
            ('result = Str.parseInt("bad")\n    pair = (result, 7)\n    _ = pair._2', '()', 'discarded in live code'),
            ('result = Str.parseInt("bad")\n    _ = (result, 7)._2', '()', 'discarded in live code'),
            ('pair <- IO.both(IO.attempt(IO.pure(7)), IO.pure(1))\n    _ = pair._2', '()', 'discarded in live code'),
+           ('_ = Input.Read(Str.parseInt("bad"), 7)', '()', 'discarded in live code'),
+           ('rec = Input.Read(Str.parseInt("bad"), 7)', '()', 'discarded in live code'),
+           ('rec <- IO.pure(Input.Read(Str.parseInt("bad"), 7))\n    _ = rec.count', '()', 'discarded in live code'),
+           ('rec = Input.Read(Str.parseInt("bad"), 7)\n    _ = rec.count', '()', 'discarded in live code'),
+           ('result = Str.parseInt("bad")\n    _ = Input.Read(result, 7).count', '()', 'discarded in live code'),
+           ('batch = Main.Batch([Str.parseInt("bad")], 2)\n    _ = batch.count', '()', 'Result list is discarded'),
+           ('_ = Main.Packet.Ready(Str.parseInt("bad"))', '()', 'discarded in live code'),
+           ('pkt = Main.Packet.Ready(Str.parseInt("bad"))', '()', 'discarded in live code'),
+           ('tree = Main.ResultTree.Branch(Main.ResultTree.Leaf(Str.parseInt("bad")), Main.ResultTree.Empty)', '()', 'discarded in live code'),
+           ('pkt = Main.Packet.Ready(Str.parseInt("bad"))', 'pkt match { case Main.Packet.Ready(_) => ()\ncase Main.Packet.Idle => () }', 'discarded in live code'),
+           ('pkt = Main.Packet.Ready(Str.parseInt("bad"))', 'pkt match { case Main.Packet.Ready(res) => ()\ncase Main.Packet.Idle => () }', 'discarded in live code'),
+           ('pkt = Main.Packet.Ready(Str.parseInt("bad"))', 'pkt match { case Main.Packet.Idle => ()\ncase _ => () }', 'discarded in live code'),
+           ('rec = Input.Read(Str.parseInt("bad"), 7)', 'rec match { case Input.Read(count = _) => () }', 'discarded in live code'),
+           ('rec = Input.Read(Str.parseInt("bad"), 7)', 'rec match { case Input.Read(res, _) => () }', 'discarded in live code'),
            ('_ = Str.parseInt("7")', '()', 'discarded'),
            ('result = Str.parseInt("7")', '()', 'discarded'),
            ('_ignored = Str.parseInt("7")', '()', 'discarded'),

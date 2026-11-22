@@ -413,7 +413,74 @@ def drop(value: Pair): Pair = for { all @ (result, _) = value } yield all""", ""
 def drop(value: Pair[Int]): Int = for { pair = value } yield pair._2""", "def drop(): IO[Int] = for { pair <- IO.both(IO.attempt(IO.pure(7)), IO.pure(1)) } yield pair._2"], src => rejects(src, "Result value is discarded")) && rejects("def drop(): Int = for { pair = (Option.Some(Str.parseInt(\"bad\")), 7) } yield pair._2", "Result option is discarded") && rejects("def drop(): Int = for { pair = ([Str.parseInt(\"bad\")], 7) } yield pair._2", "Result list is discarded") && Check.check("""type Pair = (Result[String, Int], Int)
 def keep(value: Pair): Pair = for { copy = value } yield copy""") == "[]" && Check.check("""type Pair = (Result[String, Int], Int)
 def keep(value: Pair): Int = for { pair = value } yield (pair._1 match { case Result.Ok(n) => n
-case Result.Err(_) => 0 }) + pair._2""") == "[]" && Check.check("def keep(): Int = for { pair = (Str.parseInt(\"7\"), Str.parseInt(\"8\")) } yield (pair._1 match { case Result.Ok(a) => a\ncase Result.Err(_) => 0 }) + (pair._2 match { case Result.Ok(b) => b\ncase Result.Err(_) => 0 })") == "[]" && Check.check("def keep(value: (Int, Bool)): Int = for { pair = value } yield pair._1") == "[]"
+case Result.Err(_) => 0 }) + pair._2""") == "[]" && Check.check("def keep(): Int = for { pair = (Str.parseInt(\"7\"), Str.parseInt(\"8\")) } yield (pair._1 match { case Result.Ok(a) => a\ncase Result.Err(_) => 0 }) + (pair._2 match { case Result.Ok(b) => b\ncase Result.Err(_) => 0 })") == "[]" && Check.check("def keep(value: (Int, Bool)): Int = for { pair = value } yield pair._1") == "[]" && resultUserContainers() && resultContainerMatches()
+
+private def resultContainerSchema(): String =
+  """record Read(result: Result[String, Int], count: Int)
+record Dual(first: Result[String, Int], second: Result[String, Int])
+record Batch[A](item: A, count: Int)
+record Swap[A, B](left: A, right: B)
+record Outer(inner: Read, label: String)
+enum Packet[A]:
+  case Ready(value: A)
+  case Idle
+enum ResultTree:
+  case Leaf(value: Result[String, Int])
+  case Branch(left: ResultTree, right: ResultTree)
+  case Empty
+enum IntTree:
+  case Leaf(value: Int)
+  case Branch(left: IntTree, right: IntTree)
+enum Ping:
+  case Step(next: Pong)
+  case Done(value: Result[String, Int])
+enum Pong:
+  case Back(next: Ping)
+  case Stop
+type ReadBatch = Batch[Result[String, Int]]
+def consume(r: Result[String, Int]): Int = r match {
+  case Result.Ok(n) => n
+  case Result.Err(_) => -1
+}
+def takePacket(p: Packet[Result[String, Int]]): Int = p match {
+  case Packet.Ready(r) => consume(r)
+  case Packet.Idle => 0
+}
+"""
+
+private def resultUserContainers(): Bool =
+  for {
+    schema = resultContainerSchema()
+    badValue = ["def drop(): Unit = for { _ = Read(Str.parseInt(\"bad\"), 7) } yield ()", "def drop(): Unit = for { rec = Read(Str.parseInt(\"bad\"), 7) } yield ()", "def drop(): IO[Unit] = for { rec <- IO.pure(Read(Str.parseInt(\"bad\"), 7)) } yield ()", "def drop(): Int = for { rec = Read(Str.parseInt(\"bad\"), 7) } yield rec.count", "def drop(): Int = for { all @ _ = Read(Str.parseInt(\"bad\"), 7) } yield all.count", "def drop(v: Read): Read = for { all @ Read(result, _) = v } yield all", "def drop(): Int = for { r = Str.parseInt(\"bad\")\n rec = Read(r, 7) } yield rec.count", "def drop(): Int = for { r = Str.parseInt(\"bad\") } yield Read(r, 7).count", "def drop(): Int = for { r = Str.parseInt(\"bad\") } yield Read(count = 7, result = r).count", "def drop(): Int = Read(Str.parseInt(\"bad\"), 7).count", "def drop(): Int = Outer(Read(Str.parseInt(\"bad\"), 7), \"ok\").inner.count", "def drop(): Read = for { rec = Read(Str.parseInt(\"bad\"), 7) } yield rec.copy(result = Result.Ok(0))", "def drop(): Read = Read(Str.parseInt(\"bad\"), 7).copy(result = Result.Ok(0))", "def drop(): Int = for { dual = Dual(Str.parseInt(\"7\"), Str.parseInt(\"bad\")) } yield consume(dual.first)", "def drop(): Int = for { outer = Outer(Read(Str.parseInt(\"bad\"), 7), \"x\") } yield Str.len(outer.label) + outer.inner.count", "def drop(): Int = for { pair = (Read(Str.parseInt(\"bad\"), 7), 1) } yield pair._1.count + pair._2", "def drop(b: ReadBatch): Int = for { copy = b } yield copy.count", "def drop(): Int = for { s = Swap(1, Str.parseInt(\"bad\")) } yield s.left", "def drop(): Unit = for { _ = Packet.Ready(Str.parseInt(\"bad\")) } yield ()", "def drop(): Unit = for { pkt = Packet.Ready(Str.parseInt(\"bad\")) } yield ()", "def drop(): IO[Unit] = for { pkt <- IO.pure(Packet.Ready(Str.parseInt(\"bad\"))) } yield ()", "def drop(): Int = for { pkt = Packet.Ready(Str.parseInt(\"bad\")) } yield Property.check(\"erased\", takePacket(pkt) >= 0, 7)", "def drop(t: ResultTree): Unit = for { _ = t } yield ()", "def drop(p: Ping): Unit = for { copy = p } yield ()"]
+    good = ["def keep(v: Read): Read = for { copy = v } yield copy", "def keep(v: Read): Read = for { all @ _ = v } yield all", "def keep(v: Read): Read = for { rec = v } yield rec.copy(count = rec.count + 1)", "def keep(v: Read): Int = for { rec = v } yield consume(rec.result) + rec.count", "def keep(d: Dual): Int = for { x = d } yield consume(x.first) + consume(x.second)", "def keep(b: ReadBatch): Int = for { x = b } yield consume(x.item) + x.count", "def keep(s: Swap[Int, Result[String, Int]]): Int = for { x = s } yield x.left + consume(x.right)", "def keep(p: Packet[Result[String, Int]]): Packet[Result[String, Int]] = for { x = p } yield x", "def keep(b: Batch[Int]): Unit = for { _ = b } yield ()", "def keep(p: Packet[Int]): Unit = for { _ = p } yield ()", "def keep(p: Packet[Int => Result[String, Int]]): Unit = for { _ = p } yield ()", "def keep(t: IntTree): Unit = for { _ = t } yield ()"]
+  } yield List.forall(badValue, src => rejects(Str.concat(schema, src), "Result value is discarded in live code")) && rejects(Str.concat(schema, "def drop(): Int = for { b = Batch([Str.parseInt(\"bad\")], 2) } yield b.count"), "Result list is discarded in live code") && rejects(Str.concat(schema, "def drop(): Int = for { b = Batch(Option.Some(Str.parseInt(\"bad\")), 2) } yield b.count"), "Result option is discarded in live code") && List.forall(good, src => Check.check(Str.concat(schema, src)) == "[]") && Str.contains(Check.checkFiles([("Domain", schema), ("Main", "def drop(v: Domain.Read): Int = for { rec = v } yield rec.count")]), "Result value is discarded in live code") && Check.checkFiles([("Main", schema), ("__verify", "oracle checkCount(n: Int): Bool = for { rec = Main.Read(Str.parseInt(\"bad\"), n) } yield rec.count == n")]) == "[]"
+
+private def resultContainerMatches(): Bool =
+  for {
+    schema = resultContainerSchema()
+    badValue = ["def drop(r: Result[String, Int]): Int = r match { case _ => 0 }", "def drop(v: Read): Int = v match { case Read(_, n) => n }", "def drop(v: Read): Int = v match { case Read(count = n) => n }", "def drop(v: Read): Int = v match { case Read(res, n) => n }", "def drop(v: Read): Read = v match { case all @ Read(res, _) => all }", "def drop(v: Read): Int = v match { case all @ _ => all.count }", """def drop(p: Packet[Result[String, Int]]): Int = p match { case Packet.Ready(_) => 1
+case Packet.Idle => 0 }""", """def drop(p: Packet[Result[String, Int]]): Int = p match { case Packet.Ready(res) => 1
+case Packet.Idle => 0 }""", "def drop(p: Packet[Result[String, Int]]): Int = p match { case Packet.Ready(res) => Property.check(\"erased\", consume(res) >= 0, 1)\ncase Packet.Idle => 0 }", """def drop(p: Packet[Result[String, Int]]): Int = p match { case Packet.Idle => 0
+case _ => 1 }""", """def drop(p: Packet[Result[String, Int]]): Int = p match { case whole @ Packet.Ready(_) => 1
+case Packet.Idle => 0 }""", """def drop(p: Packet[Read]): Int = p match { case Packet.Ready(rec) => rec.count
+case Packet.Idle => 0 }""", """def drop(t: ResultTree): Int = t match { case ResultTree.Leaf(Result.Ok(n)) => n
+case ResultTree.Leaf(Result.Err(_)) => -1
+case _ => 0 }"""]
+    good = ["""def keep(v: Read): Int = v match { case Read(Result.Ok(n), c) => n + c
+case Read(Result.Err(_), c) => c }""", """def keep(p: Packet[Result[String, Int]]): Int = p match { case Packet.Ready(Result.Ok(n)) => n
+case Packet.Ready(Result.Err(_)) => -1
+case Packet.Idle => 0 }""", """def keep(p: Packet[Result[String, Int]]): Int = p match { case Packet.Ready(Result.Ok(n)) => n
+case Packet.Ready(Result.Err(_)) => -1
+case _ => 0 }""", """def keep(p: Packet[Result[String, Int]]): Int = p match { case whole @ Packet.Ready(_) => takePacket(whole)
+case Packet.Idle => 0 }""", """def keep(p: Packet[Result[String, Int]]): Packet[Result[String, Int]] = p match { case Packet.Idle => Packet.Idle
+case _ => p }""", """def sumTree(t: ResultTree): Int = t match { case ResultTree.Leaf(Result.Ok(n)) => n
+case ResultTree.Leaf(Result.Err(_)) => -1
+case ResultTree.Branch(l, r) => sumTree(l) + sumTree(r)
+case _ => 0 }"""]
+  } yield List.forall(badValue, src => rejects(Str.concat(schema, src), "Result value is discarded in live code")) && rejects(Str.concat(schema, """def drop(p: Packet[List[Result[String, Int]]]): Int = p match { case Packet.Ready(_) => 1
+case Packet.Idle => 0 }"""), "Result list is discarded in live code") && rejects(Str.concat(schema, """def drop(p: Packet[Option[Result[String, Int]]]): Int = p match { case Packet.Ready(_) => 1
+case Packet.Idle => 0 }"""), "Result option is discarded in live code") && List.forall(good, src => Check.check(Str.concat(schema, src)) == "[]") && Check.checkFiles([("Main", schema), ("__verify", """oracle checkIdle(p: Main.Packet[Result[String, Int]]): Bool = p match { case Main.Packet.Idle => true
+case _ => true }""")]) == "[]"
 
 def ioTypeArgs(): Bool =
   genericTypeArgs() && ioTypeCompatibility() && namedIoTypes() && signalTypes() && attemptTypes() && kitLookup() && resultTypes() && ioCombinators()
@@ -1927,7 +1994,7 @@ def orderedListTypes(): Bool =
   Check.check("def right(): List[Int] = List.sort([2, 1])") == "[]" && Check.check("def right(): List[String] = List.sort([\"b\", \"a\"])") == "[]" && Check.check("def right(): Int = List.max([1, 2])") == "[]" && Check.check("def right(): String = List.min([\"b\", \"a\"])") == "[]" && Check.check("def right(): List[Float] = List.sort([2.0, 1.0])") == "[]" && Check.check("def right(): Float = List.max([1.0, 2.0])") == "[]" && Check.check("def right(): Float = List.min([1.0, 2.0])") == "[]" && rejects("def wrong(): Bool = List.min([true, false])", "List.min needs List[Int], List[Float], or List[String]")
 
 def dumpFail(): String =
-  if (!erasedInputGuards()) "erasedInputGuards" else if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else if (!moduleIdentity()) Str.concat("moduleIdentity:", Check.checkFiles(Cases.moduleFiles(0, false))) else "other"
+  if (!enumCaseNames()) "enumCaseNames" else if (!privateRecords()) "privateRecords" else if (!recordCopyTypes()) "recordCopyTypes" else if (!resultBindings()) "resultBindings" else if (!resultFieldBindings()) "resultFieldBindings" else if (!resultListBindings()) "resultListBindings" else if (!resultLiveUse()) "resultLiveUse" else if (!totalBindingPatterns()) "totalBindingPatterns" else if (!effectBindingTypes()) "effectBindingTypes" else if (!orderedListTypes()) "orderedListTypes" else if (!erasedInputGuards()) "erasedInputGuards" else if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else if (!moduleIdentity()) Str.concat("moduleIdentity:", Check.checkFiles(Cases.moduleFiles(0, false))) else "other"
 
 def dumpTyckRes(): String =
   if (!tyckDiff(srcResArity(), wantResArity())) Str.concat("Resource arity: ", Check.check(srcResArity())) else if (!tyckDiff(srcResDraw(), wantResDraw())) Str.concat("Resource binding: ", Check.check(srcResDraw())) else if (!tyckDiff(srcResLam(), wantResLam())) Str.concat("Resource cleanup: ", Check.check(srcResLam())) else if (!tyckDiff(srcResUnk(), wantResUnk())) Str.concat("Resource lookup: ", Check.check(srcResUnk())) else if (!tyckDiff(srcJsonUnk(), wantJsonUnk())) Str.concat("JSON lookup: ", Check.check(srcJsonUnk())) else if (!tyckDiff(srcDefUnk(), wantDefUnk())) Str.concat("Deferred lookup: ", Check.check(srcDefUnk())) else if (!tyckDiff(srcDefMis(), wantDefMis())) Str.concat("Deferred payload: ", Check.check(srcDefMis())) else if (!tyckDiff(srcQueUnk(), wantQueUnk())) Str.concat("Queue lookup: ", Check.check(srcQueUnk())) else if (!tyckDiff(srcQueMis(), wantQueMis())) Str.concat("Queue offer: ", Check.check(srcQueMis())) else if (!tyckDiff(srcQueTake(), wantQueTake())) Str.concat("Queue take: ", Check.check(srcQueTake())) else if (!tyckDiff(srcQuePay(), wantQuePay())) Str.concat("Queue payload: ", Check.check(srcQuePay())) else if (!tyckDiff(srcNetStr(), wantNetStr())) Str.concat("Net handler: ", Check.check(srcNetStr())) else if (!emptyCtorTypes()) "empty constructor types" else if (!queueRefineTypes()) "queue refinement" else if (!queueLambdaPinTypes()) "queue lambda types" else if (!nestedPatTypes()) dumpNestedPat() else if (!lambdaApplyTypes()) "lambda application" else if (!expectedLamTypes()) "expected lambda types" else "tyckRes"
