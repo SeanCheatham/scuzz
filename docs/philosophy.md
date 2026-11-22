@@ -803,14 +803,16 @@ Escape, a second control activation, and outside pointer input cancel it.
 Outside pointer input closes the popup and consumes that input.
 A newer external Signal value replaces pending input. Stale focus transfer cannot overwrite it.
 Type-ahead matches option prefixes. Repeated characters cycle through matching options.
-ASCII matching ignores case. Other UTF-8 bytes match exactly.
+Full Unicode case folding compares the prefix. Use the common and full mappings.
+Exclude Turkic mappings.
+Invalid UTF-8 bytes match the same bytes.
 The prefix expires after one second. Input journals record the time for exact replay.
 Search keeps input time monotonic when it changes event order. Explicit replay rejects backwards time.
 Wheel and touch input scroll the popup. Scrolling keeps the pending option visible.
 Popup input stays inside the active dialog. Escape closes the popup before the dialog.
 Browser semantics use a named combobox, a linked listbox, and indexed options.
 The browser keeps focus on the combobox and reports the pending active option.
-Editable selection and full Unicode case folding remain open.
+Editable selection remains open.
 
 Use `View.segmented(selected, label, choices)` for equal-width choices.
 Choices use `List[String]`. The selected Signal holds an index that starts at zero.

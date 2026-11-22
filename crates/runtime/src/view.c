@@ -5,6 +5,7 @@
 #include "rt_util.h"
 #include "image.h"
 #include "text.h"
+#include "casefold.h"
 #ifdef __EMSCRIPTEN__
 #include "web.h"
 static SzView *web_route_book;
@@ -5878,14 +5879,8 @@ void sz_view_input_time(SzView *root, int64_t milliseconds) {
   root->input_time = milliseconds;
 }
 
-static unsigned char select_fold(unsigned char c) {
-  return c >= 'A' && c <= 'Z' ? (unsigned char)(c + 'a' - 'A') : c;
-}
-
 static int select_prefix(const char *label, const char *prefix, int length) {
-  for (int i = 0; i < length; i++)
-    if (!label[i] || select_fold((unsigned char)label[i]) != select_fold((unsigned char)prefix[i])) return 0;
-  return 1;
+  return sz_select_casefold_prefix(label, prefix, length);
 }
 
 static int select_search(SzView *root, SzView *v, const char *text) {

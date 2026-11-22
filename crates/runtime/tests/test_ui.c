@@ -21927,6 +21927,80 @@ static void test_select_keyboard_window(void) {
   assert(end_bytes == before_bytes && end_count == before_count);
 }
 
+static int casefold_active(const char *const *labels, int count, const char *const *keys, int key_count) {
+  SzSignalInt *selected = sz_signal_int(-1);
+  SzSignalList *options = select_test_options(labels, count);
+  SzView *select = sz_view_select(selected, "Fold", options);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  sz_view_focus(select, select);
+  sz_view_input_time(select, 0);
+  for (int i = 0; i < key_count; i++) assert(sz_view_handle_key(select, keys[i], "", 0));
+  int active = sz_view_select_active(select);
+  sz_view_free(select);
+  sz_signal_list_free(options);
+  sz_signal_int_free(selected);
+  return active;
+}
+
+static void test_select_casefold(void) {
+  size_t before_bytes, before_count, end_bytes, end_count;
+  const char *accent[] = {"Alpha", "Éclair"};
+  const char *sharp[] = {"Alpha", "Fuß"};
+  const char *sharp_only[] = {"Alpha", "ß"};
+  const char *sigma[] = {"Alpha", "Σigma"};
+  const char *plain_i[] = {"Alpha", "istanbul"};
+  const char *dot_i[] = {"Alpha", "İstanbul"};
+  const char *ligature[] = {"Alpha", "ﬁle"};
+  const char *han[] = {"Alpha", "中文"};
+  const char *raw[] = {"Alpha", "\xffray"};
+  const char *cycle[] = {"Alpha", "Beta", "Bravo"};
+  const char *e_key[] = {"e"};
+  const char *ee_key[] = {"é"};
+  const char *EE_key[] = {"É"};
+  const char *fuss[] = {"f", "u", "s", "s"};
+  const char *FUSS[] = {"F", "U", "S", "S"};
+  const char *sharp_key[] = {"ß"};
+  const char *sigma_key[] = {"σ"};
+  const char *final_key[] = {"ς"};
+  const char *capital_sigma[] = {"Σ"};
+  const char *i_key[] = {"i"};
+  const char *dot_key[] = {"İ"};
+  const char *fi_key[] = {"f", "i"};
+  const char *FI_key[] = {"F", "I"};
+  const char *han_key[] = {"中"};
+  const char *han_miss[] = {"文"};
+  const char *raw_key[] = {"\xff"};
+  const char *b_key[] = {"b"};
+  const char *B_key[] = {"B"};
+  sz_alloc_stats(&before_bytes, &before_count);
+  assert(casefold_active(accent, 2, e_key, 1) == 0);
+  assert(casefold_active(accent, 2, ee_key, 1) == 1);
+  assert(casefold_active(accent, 2, EE_key, 1) == 1);
+  assert(casefold_active(sharp, 2, fuss, 4) == 1);
+  assert(casefold_active(sharp, 2, FUSS, 4) == 1);
+  assert(casefold_active(sharp, 2, sharp_key, 1) == 0);
+  assert(casefold_active(sharp_only, 2, sharp_key, 1) == 1);
+  assert(casefold_active(sharp_only, 2, (const char *const[]){"s", "s"}, 2) == 1);
+  assert(casefold_active(sigma, 2, sigma_key, 1) == 1);
+  assert(casefold_active(sigma, 2, final_key, 1) == 1);
+  assert(casefold_active(sigma, 2, capital_sigma, 1) == 1);
+  assert(casefold_active(plain_i, 2, dot_key, 1) == 0);
+  assert(casefold_active(plain_i, 2, i_key, 1) == 1);
+  assert(casefold_active(dot_i, 2, dot_key, 1) == 1);
+  assert(casefold_active(dot_i, 2, i_key, 1) == 1);
+  assert(casefold_active(ligature, 2, fi_key, 2) == 1);
+  assert(casefold_active(ligature, 2, FI_key, 2) == 1);
+  assert(casefold_active(han, 2, han_key, 1) == 1);
+  assert(casefold_active(han, 2, han_miss, 1) == 0);
+  assert(casefold_active(raw, 2, raw_key, 1) == 1);
+  assert(casefold_active(raw, 2, e_key, 1) == 0);
+  assert(casefold_active(cycle, 3, b_key, 1) == 1);
+  assert(casefold_active(cycle, 3, (const char *const[]){"b", "b"}, 2) == 2);
+  assert(casefold_active(cycle, 3, B_key, 1) == 1);
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(end_bytes == before_bytes && end_count == before_count);
+}
+
 static void select_test_replace(SzSignalList *options, const char *const *labels, int count) {
   SzSignalList *next = select_test_options(labels, count);
   sz_signal_list_set(options, sz_signal_list_get(next));
@@ -22891,6 +22965,7 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && !strcmp(argv[1], "--select")) {
     test_select_keyboard_window();
+    test_select_casefold();
     test_select_reactive_options();
     test_select_pointer_identity();
     test_select_scope_and_journal();
@@ -23734,6 +23809,7 @@ int main(int argc, char **argv) {
   test_opacity_utf8_labels();
   test_inline_text_actions();
   test_select_keyboard_window();
+  test_select_casefold();
   test_select_reactive_options();
   test_select_pointer_identity();
   test_select_scope_and_journal();

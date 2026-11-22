@@ -115,11 +115,12 @@ Segmented choice checks cover names, equal widths, keys, repeated labels, and br
 Empty, single, and 100-choice groups have shared runtime checks.
 Physical-device and real screen-reader checks for segmented choices remain open.
 Select checks cover pending input, commit, cancel, type-ahead, dialogs, and bounded popup rows.
+Type-ahead uses the Unicode full case fold. The fold uses common and full mappings and excludes Turkic mappings.
 Native checks cover empty, invalid, repeated, and 1000-option lists.
 Browser checks cover combobox relations, active options, keys, wheel input, touch input, and viewport changes.
 Physical-device and real screen-reader checks for select controls remain open.
 Reactive option checks cover replacement, empty lists, recovery, retained fields, and stale pointer input.
-Editable options and full Unicode case folding remain open.
+Editable options remain open.
 Compiled UI corpus replay under ASan covers Headless with portable software paint.
 Prebuilt Skia and GPU backends remain uninstrumented.
 Expansion checks cover header input, body conditions, nested fields, focus return, and linked browser regions.
