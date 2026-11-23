@@ -166,6 +166,7 @@ def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: Lis
 def listProblem(elem: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   elem match {
     case Ty.Named(name) => if (isScalar(name) || isUnitEnum(name, dec)) "" else recordProblem(name, path, dec, fuel, seen)
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1 && fuel > 0) listProblem(List.at(args, 0), path, dec, fuel - 1, seen) else badRead(path)
     case _ => badRead(path)
   }
 
@@ -353,8 +354,15 @@ def foldAcc(elem: Ty, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr
 def elemBody(elem: Ty, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
   elem match {
     case Ty.Named(name) => namedElem(name, item, idx, xs, path, slot, dec, fuel)
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1) listElem(List.at(args, 0), item, idx, xs, path, slot, dec, fuel) else errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
     case _ => errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
   }
+
+def listElem(elem: Ty, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EIf(jsonIsArr(item, dec.off), listElemFold(elem, item, xs, indexPath(path, idx, dec.off), joinSlot(slot, "n"), dec, fuel), errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off)), dec.off)
+
+def listElemFold(elem: Ty, item: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(call3("List.foldLeft", call1("List.zipWithIndex", jsonArr(item, dec.off), dec.off), okSeed(elem, dec.off), foldLam(elem, path, slot, dec, fuel), dec.off), Arm(okBind(dec.off, joinSlot(slot, "x")), "", okConsExpr(call1("List.reverse", Expr.EVar(valName(dec.off, joinSlot(slot, "x")), dec.off), dec.off), xs, dec.off)) :: Arm(errPat(dec.off, joinSlot(slot, "x")), "", errPass(joinSlot(slot, "x"), dec.off)) :: [], dec.off)
 
 def namedElem(name: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
   if (name == "String") scalarElem("Str", item, idx, xs, path, slot, dec) else if (name == "Int") scalarElem("Int", item, idx, xs, path, slot, dec) else if (name == "Bool") scalarElem("Bool", item, idx, xs, path, slot, dec) else if (name == "Float") scalarElem("Float", item, idx, xs, path, slot, dec) else if (isUnitEnum(name, dec)) enumElem(name, item, idx, xs, path, slot, dec) else recordElem(name, item, idx, xs, path, slot, dec, fuel)
@@ -393,7 +401,10 @@ def okSeed(elem: Ty, off: Int): Expr =
   Expr.EAscribe(Expr.EMethod(Expr.EVar("Result", off), "Ok", Expr.EAscribe(Expr.EList([]), listTy(elem), off) :: [], off), Str.concat("Result[String, ", Str.concat(listTy(elem), "]")), off)
 
 def okCons(elem: String, xs: String, off: Int): Expr =
-  Expr.EMethod(Expr.EVar("Result", off), "Ok", call2("List.cons", Expr.EVar(elem, off), Expr.EVar(xs, off), off) :: [], off)
+  okConsExpr(Expr.EVar(elem, off), xs, off)
+
+def okConsExpr(elem: Expr, xs: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Ok", call2("List.cons", elem, Expr.EVar(xs, off), off) :: [], off)
 
 def errText(off: Int, message: String): Expr =
   Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EStr(message, off) :: [], off)

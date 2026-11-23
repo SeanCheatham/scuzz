@@ -2185,18 +2185,21 @@ int rename(const char *from, const char *to) {
   return next(from, to);
 }
 ''')
-# This host proof uses an owned process with a frame limit and a wall deadline.
+# This host proof uses an owned process. The wall deadline is its frame budget.
+# The headless pump sleeps 16 ms per live frame.
 if os.uname().sysname == "Linux":
     library = root / "fault.so"
     subprocess.run(["clang", "-shared", "-fPIC", str(fault), "-ldl", "-o", str(library)], check=True)
     inject = write_ops(root, [{"op": "tap", "id": "button:Start"}])
     (root / "debug.json").unlink(missing_ok=True)
-    env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(inject), SCUZZ_UI_INJECT=str(inject), SCUZZ_UI_DEBUG_DUMP=str(root / "debug.json"), LD_PRELOAD=str(library))
+    live_frames = 15000
+    frame_s = 0.016
+    env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES=str(live_frames), SCUZZ_UI_SCRIPT=str(inject), SCUZZ_UI_INJECT=str(inject), SCUZZ_UI_DEBUG_DUMP=str(root / "debug.json"), LD_PRELOAD=str(library))
     log = open(root / "live.log", "w")
     review_wall_start = time.monotonic()
     proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
     def await_state(predicate):
-        deadline = time.monotonic() + 180
+        deadline = review_wall_start + live_frames * frame_s
         while time.monotonic() < deadline:
             assert proc.poll() is None, (root / "live.log").read_text()[-3000:]
             try:
@@ -2206,7 +2209,11 @@ if os.uname().sysname == "Linux":
             if result:
                 return result
             time.sleep(0.05)
-        raise AssertionError("live review deadline")
+        shown = ""
+        if (root / "debug.json").exists():
+            try: shown = (root / "debug.json").read_text()[:500]
+            except OSError: shown = ""
+        raise AssertionError("live review deadline\n" + (root / "live.log").read_text()[-1500:] + shown)
     def ready_card():
         for path in (root / ".scuzz/ide/cards").glob("*/card.json"):
             c = json.loads(path.read_text())
