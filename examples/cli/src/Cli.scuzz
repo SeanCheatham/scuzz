@@ -937,7 +937,16 @@ def watchUiEnv(out: String, target: String, toml: String): String =
   Str.concat(Drive.runEnvOf(out, target, "", toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.stamp")), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.dylib")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "inject.json")), Str.concat(" SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.json")), " ")))))))))))
 
 def watchUiPoll(path: String, out: String, target: String, name: String, gen: Int, pid: Int, hold: String): IO[Bool] =
-  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(false) else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => watchUiControl(path, out, target, name, gen, pid, hold, Str.trim(command))))
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(false) else watchUiArmed(path, out, target, name, gen, pid, hold))
+
+def watchUiArmed(path: String, out: String, target: String, name: String, gen: Int, pid: Int, hold: String): IO[Bool] =
+  watchUiQuit(out).flatMap(quit => if (quit) IO.pure(false) else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => watchUiControl(path, out, target, name, gen, pid, hold, Str.trim(command))))
+
+def watchUiQuit(out: String): IO[Bool] =
+  Fs.read(Drive.joinSlash(out, "inject.json")).map(text => watchUiQuitText(text)).handleErrorWith(_ => IO.pure(false))
+
+def watchUiQuitText(text: String): Bool =
+  Str.contains(text, "\"op\":\"quit\"") || Str.contains(text, "\"op\": \"quit\"")
 
 def watchUiControl(path: String, out: String, target: String, name: String, gen: Int, pid: Int, hold: String, command: String): IO[Bool] =
   if (command == "q") IO.pure(false) else if (command == "r") watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiHold(path, out, target, name, gen, pid) else watchUiLink(name, out).flatMap(linked => if (linked) IO.pure(true) else watchUiPoll(path, out, target, name, gen, pid, ""))) else Drive.srcText(path).flatMap(text => watchUiSame(path, out, target, name, gen, pid, hold, text))
