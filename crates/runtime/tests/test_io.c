@@ -35,6 +35,40 @@
 #include <time.h>
 #include <unistd.h>
 
+static SzList *json_test_path(const char *left, const char *right) {
+  SzString *a = sz_string_from_cstr(left);
+  SzString *b = sz_string_from_cstr(right);
+  SzList *path = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+  sz_release(a);
+  sz_release(b);
+  return path;
+}
+
+static void json_path_expect(const char *text, int ok, const char *err, int null_leaf,
+                             int64_t n) {
+  SzString *input = sz_string_from_cstr(text);
+  SzAdt *parsed = sz_json_parse(input);
+  SzList *path = json_test_path("order", "quantity");
+  SzAdt *result;
+  assert(sz_adt_tag(parsed) == 1);
+  result = sz_json_path((SzAdt *)sz_adt_payload(parsed), path);
+  sz_release(path);
+  sz_release(parsed);
+  sz_release(input);
+  assert(sz_adt_tag(result) == ok);
+  if (ok) {
+    SzAdt *value = (SzAdt *)sz_adt_payload(result);
+    if (null_leaf)
+      assert(sz_json_is_null(value));
+    else {
+      assert(sz_json_is_int(value));
+      assert(sz_unbox_i64(sz_adt_payload(value)) == n);
+    }
+  } else
+    assert(strcmp(sz_string_cstr((SzString *)sz_adt_payload(result)), err) == 0);
+  sz_release(result);
+}
+
 static SzIo *repeat_n_drop(int64_t n, SzIo *inner);
 static SzIo *both_drop(SzIo *left, SzIo *right);
 
@@ -7439,6 +7473,12 @@ int main(void) {
       assert(strcmp(sz_string_cstr((SzString *)sz_adt_payload(missing)),
                     "Json.field: missing field") == 0);
       sz_release(missing);
+      json_path_expect("{\"order\":{}}", 0, "Json.path: missing field order.quantity", 0, 0);
+      json_path_expect("{\"order\":1}", 0, "Json.path: wrong case at order.quantity", 0, 0);
+      json_path_expect("[]", 0, "Json.path: wrong case at order", 0, 0);
+      json_path_expect("{\"order\":null}", 0, "Json.path: wrong case at order.quantity", 0, 0);
+      json_path_expect("{\"order\":{\"quantity\":null}}", 1, "", 1, 0);
+      json_path_expect("{\"order\":{\"quantity\":7}}", 1, "", 0, 7);
     }
     {
       SzString *rep = sz_string_replace(c, a, b);

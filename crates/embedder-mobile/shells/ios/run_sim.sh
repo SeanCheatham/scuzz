@@ -11,12 +11,65 @@ CONSOLE=""
 BUNDLE=""
 APP_NAME=""
 
+# pgrep reads argv. ps comm is the executable path. Match both.
 app_pids() {
-  [ -n "$APP_NAME" ] && pgrep -f "/${DEVICE}/.*/${APP_NAME}.app/${APP_NAME}([[:space:]]|$)" || true
+  [ -n "$APP_NAME" ] || return 0
+  local suffix="/${APP_NAME}.app/${APP_NAME}"
+  {
+    pgrep -f "/${DEVICE}/.*/${APP_NAME}.app/${APP_NAME}([[:space:]]|$)" || true
+    ps -axo pid=,comm= 2>/dev/null | while IFS= read -r row; do
+      row="${row#"${row%%[![:space:]]*}"}"
+      [ -n "$row" ] || continue
+      pid="${row%% *}"
+      comm="${row#"$pid"}"
+      comm="${comm#"${comm%%[![:space:]]*}"}"
+      case "$comm" in
+        *"$suffix") printf '%s\n' "$pid" ;;
+      esac
+    done
+  } | awk 'NF && !seen[$1]++ { print $1 }'
 }
 
 app_alive() {
   [ -n "$(app_pids)" ]
+}
+
+kill_app() {
+  local pid
+  for pid in $(app_pids); do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+}
+
+# Child processes of the console inherit the session pipe.
+descendants() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    descendants "$child"
+    printf '%s\n' "$child"
+  done
+}
+
+# Reap these pids together. Do not wait when a process does not exit.
+reap_all() {
+  local limit="$1" n=0 alive pid
+  shift
+  while [ "$n" -lt "$limit" ]; do
+    alive=0
+    for pid in "$@"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        alive=1
+      fi
+    done
+    [ "$alive" -eq 0 ] && break
+    n=$((n + 1))
+    sleep 0.1 || true
+  done
+  for pid in "$@"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
 }
 
 terminate_bundle() {
@@ -29,30 +82,30 @@ terminate_bundle() {
   if kill -0 "$term_pid" 2>/dev/null; then
     kill -KILL "$term_pid" 2>/dev/null || true
   fi
-  wait "$term_pid" 2>/dev/null || true
+  reap_all 20 "$term_pid"
+}
+
+stop_console() {
+  local pid
+  [ -n "$CONSOLE" ] || return 0
+  local pids
+  pids="$(descendants "$CONSOLE" || true)"
+  for pid in $pids "$CONSOLE"; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  # Word splitting is the pid list.
+  reap_all 100 $pids "$CONSOLE"
+  CONSOLE=""
 }
 
 stop_app() {
+  local n
+  kill_app
   if [ -n "$BUNDLE" ]; then
     terminate_bundle
   fi
-  if [ -n "$CONSOLE" ]; then
-    kill -KILL "$CONSOLE" 2>/dev/null || true
-    wait "$CONSOLE" 2>/dev/null || true
-    CONSOLE=""
-  fi
-  local pid n
-  for pid in $(app_pids); do
-    kill "$pid" 2>/dev/null || true
-  done
-  n=0
-  while app_alive && [ "$n" -lt 15 ]; do
-    n=$((n + 1))
-    sleep 0.1 || true
-  done
-  for pid in $(app_pids); do
-    kill -KILL "$pid" 2>/dev/null || true
-  done
+  stop_console
+  kill_app
   n=0
   while app_alive && [ "$n" -lt 20 ]; do
     n=$((n + 1))
