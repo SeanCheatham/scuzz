@@ -546,6 +546,13 @@ orders = [('{"name":"bolt","item":{"quantity":2},"note":"ok"}', 'ok:bolt:2:"ok"'
           ('{"name":"bolt","item":{"quantity":"2"},"note":"ok"}', 'error:Json.decode: wrong case at item.quantity'),
           ('{"name":"bolt","item":{"quantity":2},"note":null}', 'ok:bolt:2:null'),
           ('{"name":"bolt","item":null,"note":"ok"}', 'error:Json.decode: wrong case at item.quantity')]
+lists = [('{"names":["a","b"],"lines":[{"qty":2},{"qty":3}],"flags":[true,false],"ratios":[1.5,2.5],"counts":[4,5]}', 'ok:a,b:2,3:true,false:4,5:pair'),
+         ('{"names":[],"lines":[],"flags":[],"ratios":[],"counts":[]}', 'ok:::::empty'),
+         ('{"lines":[],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: missing field names'),
+         ('{"names":["a",1],"lines":[],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: wrong case at names.1'),
+         ('{"names":[null],"lines":[],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: wrong case at names.0'),
+         ('{"names":[],"lines":[{"qty":2},{"qty":true}],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: wrong case at lines.1.qty'),
+         ('{"names":[],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: missing field lines')]
 ranges = [('{"name":"bolt","item":{"quantity":2},"note":null}', 'true'),
           ('{"name":"bolt","item":{"quantity":101},"note":null}', 'false')]
 
@@ -588,13 +595,14 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(PATHS, text => IO.println(nested(text)))
     _ <- IO.foreachDiscard(QUANTITIES, text => IO.println(Str.fromBool(Input.accepted(Input.decodeQuantity(text)))))
     _ <- IO.foreachDiscard(ORDERS, text => IO.println(Input.orderText(text)))
+    _ <- IO.foreachDiscard(LISTS, text => IO.println(Input.listText(text)))
     _ <- IO.foreachDiscard(RANGES, text => IO.println(Str.fromBool(Input.orderInRange(text))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('RANGES', array([text for text, _ in ranges]))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('RANGES', array([text for text, _ in ranges]))
     (root / 'src/Main.scuzz').write_text(source)
     expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
-    expected += [value for _, value in orders] + [value for _, value in ranges]
+    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in ranges]
     command('fmt', root)
     for engine in ['run', 'eval']:
         output = command(engine, root)
@@ -636,7 +644,9 @@ oracle boundaries(): Bool =
         assert 'non-exhaustive match' in diagnostic if 'match' in body else 'type error' in diagnostic, diagnostic
         (root / 'src/Bad.scuzz').unlink()
     for body, needle in [
-        ('record Row(xs: List[Int])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('record Row(xs: Map[String, Int])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('record Row(xs: List[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('record Node(name: String, kids: List[Node])\ndef decodeNode(json: Json): Result[String, Node] =\n  Json.decode(json)\n', 'Json.decode: cannot read kids'),
         ('def badPos(json: Json): Json =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
     ]:
         (root / 'src/BadDecode.scuzz').write_text(body)
