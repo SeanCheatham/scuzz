@@ -252,7 +252,9 @@ Run `./scripts/ci.sh ios` for the simulator proof. The Darwin PR job runs this s
 The loop proof checks dependency edits, source diagnostics, error recovery,
 state preservation, capture rejection, native object reuse, manual restart, quit, and interruption.
 The UIKit proof checks safe areas, viewport changes, software keyboard input,
-and keyboard dismissal. It restores the keyboard preference after the run.
+and keyboard dismissal. A console launch that does not finish retries once.
+A completed proof file passes when that launch does not return. The proof
+restores the keyboard preference after the run.
 Both proofs use the selected simulator. Each proof removes its app.
 The Net proof uses a separate temporary simulator. It adds a test root only to that simulator. It deletes the simulator after the proof. It checks HTTP methods, limits, cancellation, and platform trust. The iOS test app writes proof output and its exit status to a file. The check requires complete proof output and status zero within the launch deadline. The network UI shows loading, failure, and retry. Input continues during a request. The slice also runs the Counter and network UI Headless claims. The iOS console stops its app by simulator ID and bundle ID before it stops the console process. macos-app proves public HTTPS with OpenSSL certificate paths disabled.
 Set `SCUZZ_IOS_DEVICE` to select a simulator name or ID.

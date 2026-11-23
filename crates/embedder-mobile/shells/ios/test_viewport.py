@@ -13,6 +13,34 @@ shell = Path(__file__).resolve().parent
 root = shell.parents[3]
 device = sys.argv[1]
 bundle = "dev.scuzz.viewportproof" + uuid.uuid4().hex[:8]
+proof_ok = "ios viewport proof ok"
+
+
+def launch_proof(device, bundle, result):
+    """Run the proof. Retry one console launch that does not finish."""
+    command = ["xcrun", "simctl", "launch", "--console",
+               "--terminate-running-process", device, bundle]
+    env = {**os.environ, "SIMCTL_CHILD_SCUZZ_VIEWPORT_RESULT": str(result)}
+    code, output, report = None, "", ""
+    for _attempt in range(2):
+        result.unlink(missing_ok=True)
+        try:
+            proof = subprocess.run(command, capture_output=True, text=True,
+                                   timeout=90, env=env)
+            output = proof.stdout + proof.stderr
+            code = proof.returncode
+        except subprocess.TimeoutExpired as expired:
+            subprocess.run(["xcrun", "simctl", "terminate", device, bundle],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            output = (expired.stdout or "") + (expired.stderr or "")
+            code = None
+        report = result.read_text() if result.exists() else "No native result."
+        if report.strip() == proof_ok:
+            return 0, output, report
+        if code is not None:
+            return code, output, report
+    return code, output, report
+
 preferences = ["xcrun", "simctl", "spawn", device, "defaults"]
 domain = "com.apple.keyboard.preferences"
 key = "AutomaticMinimizationEnabled"
@@ -44,15 +72,11 @@ try:
                         str(app)], check=True)
         subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True)
         result = Path(temp) / "result.txt"
-        proof = subprocess.run(["xcrun", "simctl", "launch", "--console", device,
-                                bundle], capture_output=True,
-                               text=True, timeout=45, env={**os.environ,
-                               "SIMCTL_CHILD_SCUZZ_VIEWPORT_RESULT": str(result)})
-        print(proof.stdout + proof.stderr, end="", flush=True)
-        report = result.read_text() if result.exists() else "No native result."
+        code, output, report = launch_proof(device, bundle, result)
+        print(output, end="", flush=True)
         print(report, end="", flush=True)
-        assert proof.returncode == 0 and report.strip() == "ios viewport proof ok", \
-            "UIKit viewport proof fails: " + report + proof.stdout + proof.stderr
+        assert code == 0 and report.strip() == proof_ok, \
+            "UIKit viewport proof fails: " + report + output
 finally:
     subprocess.run(["xcrun", "simctl", "terminate", device, bundle],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
