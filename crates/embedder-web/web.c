@@ -181,6 +181,9 @@ EM_JS(void, web_slider_range, (const char *minimum, const char *maximum, const c
   Module.webFrame.items.at(-1).range = {minimum: UTF8ToString(Number(minimum)),
     maximum: UTF8ToString(Number(maximum)), value: UTF8ToString(Number(value))};
 });
+EM_JS(void, web_progress_busy, (int busy), {
+  Module.webFrame.items.at(-1).busy = Boolean(busy);
+});
 void sz_web_control(SzView *view, int role, const char *label, const char *route,
                     const char *copy, const char *value, SzView *related,
                     int checked, float x, float y, float w, float h,
@@ -189,7 +192,10 @@ void sz_web_control(SzView *view, int role, const char *label, const char *route
                     sz_view_id(related), checked, x, y, w, h, clipped, cx, cy, cw, ch, ink, selection, font, line_h, inset, gutter, sz_view_tab_stop(view), sz_view_paint_opacity(view));
   web_description(sz_view_id(sz_view_tooltip_owner(view)));
   if (sz_view_web_in_group(view)) web_in_group();
-  if (role == SZ_A11Y_SLIDER || role == SZ_A11Y_SPLIT || role == SZ_A11Y_PROGRESS || role == SZ_A11Y_CIRCULAR) {
+  if (role == SZ_A11Y_PROGRESS || role == SZ_A11Y_CIRCULAR)
+    web_progress_busy(sz_view_progress_busy(view));
+  if (role == SZ_A11Y_SLIDER || role == SZ_A11Y_SPLIT ||
+      ((role == SZ_A11Y_PROGRESS || role == SZ_A11Y_CIRCULAR) && !sz_view_progress_busy(view))) {
     char minimum[32], maximum[32], current[32];
     snprintf(minimum, sizeof minimum, "%lld", (long long)(role == SZ_A11Y_SLIDER ? sz_view_slider_minimum(view) : 0));
     snprintf(maximum, sizeof maximum, "%lld", (long long)(role == SZ_A11Y_SLIDER ? sz_view_slider_maximum(view) : 100));

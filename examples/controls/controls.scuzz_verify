@@ -67,6 +67,15 @@ def progressKeepsNamesAndClampedValues(t: Timeline): Verdict =
   value = if (raw < 0) 0 else if (raw > 100) 100 else raw
 } yield Timeline.a11yHas(t, i, Str.concat("progress:Linear completion=", Str.fromInt(value))) && Timeline.a11yHas(t, i, Str.concat("circular:Circular completion=", Str.fromInt(value))) && !Timeline.a11yHas(t, i, "Private completion"))
 
+def taskFollowsSignals(t: Timeline): Verdict =
+  Verdict.every(t, i => for {
+  shown = Timeline.signalInt(t, i, "taskShown")
+  keep = Timeline.signalInt(t, i, "taskKeep")
+  mode = Timeline.signalInt(t, i, "taskMode")
+  value = Timeline.signalInt(t, i, "taskValue")
+  present = shown != 0 && keep != 0
+} yield value == 35 && (present && mode != 0) == Timeline.a11yHas(t, i, "progress:Task=busy") && (present && mode == 0) == Timeline.a11yHas(t, i, "progress:Task=35"))
+
 def muteSetsZero(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Mute", pair => pair match {
   case (before, after) => Timeline.signalInt(t, after, "volume") == 0 && Timeline.a11yHas(t, after, "slider:Volume=0")

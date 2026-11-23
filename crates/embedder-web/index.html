@@ -528,9 +528,17 @@ var Module = {
           node.committed = item.value;
           node.placeholder = item.role === 3 ? item.label : '';
         } else if (item.role === 10 || item.role === 20) {
-          node.setAttribute('aria-valuemin', item.range.minimum);
-          node.setAttribute('aria-valuemax', item.range.maximum);
-          node.setAttribute('aria-valuenow', item.range.value);
+          if (item.busy) {
+            node.setAttribute('aria-busy', 'true');
+            node.removeAttribute('aria-valuemin');
+            node.removeAttribute('aria-valuemax');
+            node.removeAttribute('aria-valuenow');
+          } else {
+            node.removeAttribute('aria-busy');
+            node.setAttribute('aria-valuemin', item.range.minimum);
+            node.setAttribute('aria-valuemax', item.range.maximum);
+            node.setAttribute('aria-valuenow', item.range.value);
+          }
         } else if (item.role === 8 || item.role === 42) {
           if (item.role === 42) node.setAttribute('aria-controls', 'view-' + item.related);
           node.setAttribute('aria-valuemin', item.range.minimum);

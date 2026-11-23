@@ -754,6 +754,19 @@ Paint and accessibility clamp the value without writing the Signal.
 Indicators do not receive keyboard or pointer input.
 The browser exposes the name, range, and value with the progressbar role.
 See the [W3C range properties](https://www.w3.org/WAI/ARIA/apg/practices/range-related-properties/).
+Use `View.busy(value, busy, name)` for a linear progress indicator with no numeric value.
+`value` and `busy` are Signal[Int] values. `name` is the accessible name.
+A nonzero `busy` Signal shows no percentage.
+Paint and accessibility omit the value, the minimum, and the maximum.
+A zero `busy` Signal shows the clamped percentage from `value`.
+The update does not write either Signal.
+`View.visibility` hides the indicator. `View.showWhen` removes it.
+The indicator does not receive keyboard or pointer input.
+Headless text reports `progress:name=busy` while the indicator is busy.
+A determinate indicator reports `progress:name=` and the clamped percentage.
+A hidden or removed indicator has no progress line for that name.
+`View.circularProgress` stays a determinate percentage.
+Physical-device and real screen-reader checks remain open.
 Use `View.split(fraction, label, start, end)` for two resizable panes.
 The label names the primary pane and its vertical separator. An empty label uses Primary pane.
 The fraction is a percent from 0 through 100. Display clamps the value without writing it.
