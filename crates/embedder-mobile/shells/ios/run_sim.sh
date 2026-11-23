@@ -41,16 +41,35 @@ kill_app() {
   done
 }
 
-# Reap a child. Do not wait when the process does not exit.
-reap_bounded() {
-  local pid="$1" n=0
-  while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 20 ]; do
+# Child processes of the console inherit the session pipe.
+descendants() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    descendants "$child"
+    printf '%s\n' "$child"
+  done
+}
+
+# Reap these pids together. Do not wait when a process does not exit.
+reap_all() {
+  local limit="$1" n=0 alive pid
+  shift
+  while [ "$n" -lt "$limit" ]; do
+    alive=0
+    for pid in "$@"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        alive=1
+      fi
+    done
+    [ "$alive" -eq 0 ] && break
     n=$((n + 1))
     sleep 0.1 || true
   done
-  if ! kill -0 "$pid" 2>/dev/null; then
-    wait "$pid" 2>/dev/null || true
-  fi
+  for pid in "$@"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
 }
 
 terminate_bundle() {
@@ -63,7 +82,20 @@ terminate_bundle() {
   if kill -0 "$term_pid" 2>/dev/null; then
     kill -KILL "$term_pid" 2>/dev/null || true
   fi
-  reap_bounded "$term_pid"
+  reap_all 20 "$term_pid"
+}
+
+stop_console() {
+  local pid
+  [ -n "$CONSOLE" ] || return 0
+  local pids
+  pids="$(descendants "$CONSOLE" || true)"
+  for pid in $pids "$CONSOLE"; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  # Word splitting is the pid list.
+  reap_all 100 $pids "$CONSOLE"
+  CONSOLE=""
 }
 
 stop_app() {
@@ -72,11 +104,7 @@ stop_app() {
   if [ -n "$BUNDLE" ]; then
     terminate_bundle
   fi
-  if [ -n "$CONSOLE" ]; then
-    kill -KILL "$CONSOLE" 2>/dev/null || true
-    reap_bounded "$CONSOLE"
-    CONSOLE=""
-  fi
+  stop_console
   kill_app
   n=0
   while app_alive && [ "$n" -lt 20 ]; do
