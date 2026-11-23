@@ -8,6 +8,10 @@ record Order(name: String, item: Piece, note: Json)
 
 record Mark(on: Bool, ratio: Float)
 
+record Line(qty: Int)
+
+record Cart(names: List[String], lines: List[Line], flags: List[Bool], ratios: List[Float], counts: List[Int])
+
 type Effect[E, A] = IO[E, A]
 type Sale = Order
 def aliasEffect[E, A](effect: Effect[E, A]): Effect[E, A] =
@@ -135,6 +139,31 @@ def flagOk(text: String): Bool =
     case Result.Err(_) => false
   }
 
+def ratioMark(xs: List[Float]): String =
+  xs match {
+    case [] => "empty"
+    case a :: b :: rest => if (List.isEmpty(rest) && a == 1.5 && b == 2.5) "pair" else "bad"
+    case _ => "bad"
+  }
+
+def showCart(result: Result[String, Cart]): String =
+  result match {
+    case Result.Ok(Cart(names, lines, flags, ratios, counts)) => s"ok:${List.join(names, ",")}:${List.join(List.map(lines, line => Str.fromInt(line.qty)), ",")}:${List.join(List.map(flags, flag => Str.fromBool(flag)), ",")}:${List.join(List.map(counts, n => Str.fromInt(n)), ",")}:${ratioMark(ratios)}"
+    case Result.Err(error) => s"error:$error"
+  }
+
+def decodeCart(json: Json): Result[String, Cart] =
+  Json.decode(json)
+
+def listText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showCart(decodeCart(json))
+    case Result.Err(error) => s"error:$error"
+  }
+
+def listProof(): Bool =
+  listText("{\"names\":[\"a\",\"b\"],\"lines\":[{\"qty\":2},{\"qty\":3}],\"flags\":[true,false],\"ratios\":[1.5,2.5],\"counts\":[4,5]}") == "ok:a,b:2,3:true,false:4,5:pair" && listText("{\"names\":[],\"lines\":[],\"flags\":[],\"ratios\":[],\"counts\":[]}") == "ok:::::empty" && listText("{\"lines\":[],\"flags\":[],\"ratios\":[],\"counts\":[]}") == "error:Json.decode: missing field names" && listText("{\"names\":[\"a\",1],\"lines\":[],\"flags\":[],\"ratios\":[],\"counts\":[]}") == "error:Json.decode: wrong case at names.1" && listText("{\"names\":[null],\"lines\":[],\"flags\":[],\"ratios\":[],\"counts\":[]}") == "error:Json.decode: wrong case at names.0" && listText("{\"names\":[],\"lines\":[{\"qty\":2},{\"qty\":true}],\"flags\":[],\"ratios\":[],\"counts\":[]}") == "error:Json.decode: wrong case at lines.1.qty" && listText("{\"names\":[],\"flags\":[],\"ratios\":[],\"counts\":[]}") == "error:Json.decode: missing field lines" && listText("{\"names\":null,\"lines\":[],\"flags\":[],\"ratios\":[],\"counts\":[]}") == "error:Json.decode: wrong case at names" && listText("{\"names\":[\"a\"],\"lines\":[],\"flags\":[null],\"ratios\":[],\"counts\":[]}") == "error:Json.decode: wrong case at flags.0" && listText("{\"names\":[],\"lines\":[],\"flags\":[],\"ratios\":[1],\"counts\":[]}") == "error:Json.decode: wrong case at ratios.0" && listText("{\"names\":[],\"lines\":[],\"flags\":[],\"ratios\":[],\"counts\":[1,\"x\"]}") == "error:Json.decode: wrong case at counts.1"
+
 def orderProof(): Bool =
   orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "ok:bolt:2:\"ok\"" && textOrder("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "ok:bolt:2:\"ok\"" && saleText("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "ok:bolt:2:\"ok\"" && orderText("{\"name\":\"bolt\",\"item\":{},\"note\":\"ok\"}") == "error:Json.decode: missing field item.quantity" && orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":\"2\"},\"note\":\"ok\"}") == "error:Json.decode: wrong case at item.quantity" && orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":null}") == "ok:bolt:2:null" && orderText("{\"name\":\"bolt\",\"item\":null,\"note\":\"ok\"}") == "error:Json.decode: wrong case at item.quantity" && orderText("[]") == "error:Json.decode: wrong case at name" && orderText("{\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "error:Json.decode: missing field name" && orderText("{\"name\":null,\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "error:Json.decode: wrong case at name" && orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":101},\"note\":null}") == "ok:bolt:101:null" && orderInRange("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":null}") && !orderInRange("{\"name\":\"bolt\",\"item\":{\"quantity\":101},\"note\":null}") && flagOk("{\"on\":true,\"ratio\":1.5}") && !flagOk("{\"on\":true,\"ratio\":1}")
 
@@ -161,7 +190,7 @@ def accepted(result: Result[String, Quantity]): Bool =
   }
 
 def proof(): Bool =
-  parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100")) && orderProof()
+  parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100")) && orderProof() && listProof()
 
 def forward(text: String): Result[String, Int] =
   for {

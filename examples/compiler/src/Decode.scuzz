@@ -96,7 +96,7 @@ def decodeReason(arg: Expr, ty: String, reason: String, dec: DecodeCtx): Expr =
   if (reason != "") Expr.ECall("Json.decode", Expr.EStr(reason, dec.off) :: [], dec.off) else bindDecode(arg, recordName(ty), dec)
 
 def topReason(ty: String, dec: DecodeCtx): String =
-  if (isRecordTy(ty, dec)) fieldProblems(recordFields(recordName(ty), dec.enums), "", dec, 32) else "Json.decode needs a record result"
+  if (isRecordTy(ty, dec)) fieldProblems(recordFields(recordName(ty), dec.enums), "", dec, 32, recordName(ty) :: []) else "Json.decode needs a record result"
 
 def resultPayload(expected: String, aliases: List[Alias]): String =
   payloadOf(Type.parse(expandTy(expected, aliases)))
@@ -141,119 +141,247 @@ def recordFieldsEn(en: En, rest: List[En], name: String): List[Param] =
 def caseFields(cases: List[EnCase]): List[Param] =
   if (List.isEmpty(cases)) [] else List.at(cases, 0).fields
 
-def fieldProblems(fields: List[Param], prefix: String, dec: DecodeCtx, fuel: Int): String =
-  if (List.isEmpty(fields)) "" else fieldProblem(List.at(fields, 0), List.tail(fields), prefix, dec, fuel)
+def fieldProblems(fields: List[Param], prefix: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (List.isEmpty(fields)) "" else fieldProblem(List.at(fields, 0), List.tail(fields), prefix, dec, fuel, seen)
 
-def fieldProblem(field: Param, rest: List[Param], prefix: String, dec: DecodeCtx, fuel: Int): String =
-  problemNext(typeProblem(expandTy(field.ty, dec.aliases), joinPath(prefix, field.name), dec, fuel - 1), rest, prefix, dec, fuel)
+def fieldProblem(field: Param, rest: List[Param], prefix: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  problemNext(typeProblem(expandTy(field.ty, dec.aliases), joinPath(prefix, field.name), dec, fuel - 1, seen), rest, prefix, dec, fuel, seen)
 
-def problemNext(reason: String, rest: List[Param], prefix: String, dec: DecodeCtx, fuel: Int): String =
-  if (reason != "") reason else fieldProblems(rest, prefix, dec, fuel)
+def problemNext(reason: String, rest: List[Param], prefix: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (reason != "") reason else fieldProblems(rest, prefix, dec, fuel, seen)
 
-def typeProblem(ty: String, path: String, dec: DecodeCtx, fuel: Int): String =
-  if (fuel <= 0) badRead(path) else typeProblemOf(Type.parse(ty), path, dec, fuel)
+def typeProblem(ty: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (fuel <= 0) badRead(path) else typeProblemOf(Type.parse(ty), path, dec, fuel, seen)
 
-def typeProblemOf(ty: Ty, path: String, dec: DecodeCtx, fuel: Int): String =
+def typeProblemOf(ty: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   ty match {
-    case Ty.Named(name) => nameProblem(name, path, dec, fuel)
+    case Ty.Named(name) => nameProblem(name, path, dec, fuel, seen)
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1) listProblem(List.at(args, 0), path, dec, fuel, seen) else badRead(path)
     case _ => badRead(path)
   }
 
-def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int): String =
-  if (isScalar(name) || name == "Json") "" else if (isPlainRecord(name, dec.enums)) fieldProblems(recordFields(name, dec.enums), path, dec, fuel) else badRead(path)
+def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (isScalar(name) || name == "Json") "" else recordProblem(name, path, dec, fuel, seen)
+
+def listProblem(elem: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  elem match {
+    case Ty.Named(name) => if (isScalar(name)) "" else recordProblem(name, path, dec, fuel, seen)
+    case _ => badRead(path)
+  }
+
+def recordProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (!isPlainRecord(name, dec.enums) || List.contains(seen, name)) badRead(path) else fieldProblems(recordFields(name, dec.enums), path, dec, fuel, name :: seen)
 
 def isScalar(name: String): Bool =
   name == "String" || name == "Int" || name == "Bool" || name == "Float"
 
 def bindDecode(arg: Expr, ctor: String, dec: DecodeCtx): Expr =
-  Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], genRecord(recvName(dec.off), ctor, "", dec, 32), dec.off)
+  Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], genRecord(recvName(dec.off), ctor, strExpr("", dec.off), "", dec, 32), dec.off)
 
-def genRecord(recv: String, ctor: String, prefix: String, dec: DecodeCtx, fuel: Int): Expr =
-  if (fuel <= 0) errText(dec.off, badRead(prefix)) else readFields(recv, ctor, recordFields(ctor, dec.enums), [], prefix, dec, fuel)
+def genRecord(recv: String, ctor: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (fuel <= 0) errText(dec.off, badRead(pathText(path))) else readFields(recv, ctor, recordFields(ctor, dec.enums), [], path, slot, dec, fuel)
 
-def readFields(recv: String, ctor: String, fields: List[Param], done: List[Expr], prefix: String, dec: DecodeCtx, fuel: Int): Expr =
-  if (List.isEmpty(fields)) if (List.isEmpty(done)) emptyObj(recv, ctor, prefix, dec) else okRecord(ctor, done, dec.off) else readOne(recv, ctor, List.at(fields, 0), List.tail(fields), done, prefix, dec, fuel)
+def readFields(recv: String, ctor: String, fields: List[Param], done: List[Expr], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (List.isEmpty(fields)) if (List.isEmpty(done)) emptyObj(recv, ctor, path, dec) else okRecord(ctor, done, dec.off) else readOne(recv, ctor, List.at(fields, 0), List.tail(fields), done, path, slot, dec, fuel)
 
-def readOne(recv: String, ctor: String, field: Param, rest: List[Param], done: List[Expr], prefix: String, dec: DecodeCtx, fuel: Int): Expr =
-  readTyped(recv, ctor, field.name, expandTy(field.ty, dec.aliases), rest, done, joinPath(prefix, field.name), prefix, dec, fuel)
+def readOne(recv: String, ctor: String, field: Param, rest: List[Param], done: List[Expr], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  readTyped(recv, ctor, field.name, expandTy(field.ty, dec.aliases), rest, done, joinPathExpr(path, field.name, dec.off), joinSlot(slot, field.name), path, slot, dec, fuel)
 
-def readTyped(recv: String, ctor: String, name: String, ty: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): Expr =
-  Expr.EMatch(jsonField(recv, name, dec.off), kindArms(Type.parse(ty), recv, ctor, rest, done, fieldPath, prefix, dec, fuel), dec.off)
+def readTyped(recv: String, ctor: String, name: String, ty: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(jsonField(recv, name, dec.off), kindArms(Type.parse(ty), recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel), dec.off)
 
-def kindArms(ty: Ty, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+def kindArms(ty: Ty, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
   ty match {
-    case Ty.Named(name) => namedArms(name, recv, ctor, rest, done, fieldPath, prefix, dec, fuel)
-    case _ => Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+    case Ty.Named(name) => namedArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1) listArms(List.at(args, 0), recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else badArms(fieldPath, fieldSlot, dec)
+    case _ => badArms(fieldPath, fieldSlot, dec)
   }
 
-def namedArms(name: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
-  if (name == "String") scalarArms("Str", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Int") scalarArms("Int", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Bool") scalarArms("Bool", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Float") scalarArms("Float", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Json") jsonArms(recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else recordArms(name, recv, ctor, rest, done, fieldPath, prefix, dec, fuel)
+def namedArms(name: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  if (name == "String") scalarArms("Str", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Int") scalarArms("Int", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Bool") scalarArms("Bool", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Float") scalarArms("Float", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Json") jsonArms(recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else recordArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
 
-def scalarArms(tag: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
-  Arm(okTag(tag, dec.off, fieldPath), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, fieldPath), dec.off)), prefix, dec, fuel)) :: Arm("Result.Ok(_)", "", errText(dec.off, wrongMsg(fieldPath))) :: Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+def scalarArms(tag: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okTag(tag, dec.off, fieldSlot), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, fieldSlot), dec.off)), path, slot, dec, fuel)) :: Arm("Result.Ok(_)", "", errExpr(dec.off, wrongExpr(fieldPath, dec.off))) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
 
-def jsonArms(recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
-  Arm(okBind(dec.off, fieldPath), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, fieldPath), dec.off)), prefix, dec, fuel)) :: Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+def jsonArms(recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okBind(dec.off, fieldSlot), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, fieldSlot), dec.off)), path, slot, dec, fuel)) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
 
-def recordArms(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
-  Arm(okBind(dec.off, fieldPath), "", nestRecord(typeName, recv, ctor, rest, done, fieldPath, prefix, dec, fuel)) :: Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+def recordArms(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okBind(dec.off, fieldSlot), "", nestRecord(typeName, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
 
-def nestRecord(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): Expr =
-  Expr.EMatch(genRecord(valName(dec.off, fieldPath), typeName, fieldPath, dec, fuel - 1), Arm(okRec(dec.off, fieldPath), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(recName(dec.off, fieldPath), dec.off)), prefix, dec, fuel)) :: Arm(errPat(dec.off, fieldPath), "", errPass(dec.off, fieldPath)) :: [], dec.off)
+def listArms(elem: Ty, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okBind(dec.off, fieldSlot), "", listValue(elem, valName(dec.off, fieldSlot), recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
 
-def nextField(recv: String, ctor: String, rest: List[Param], done: List[Expr], prefix: String, dec: DecodeCtx, fuel: Int): Expr =
-  readFields(recv, ctor, rest, done, prefix, dec, fuel)
+def badArms(fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): List[Arm] =
+  Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
 
-def emptyObj(recv: String, ctor: String, path: String, dec: DecodeCtx): Expr =
-  Expr.EIf(Expr.EMethod(Expr.EVar("Json", dec.off), "isObj", Expr.EVar(recv, dec.off) :: [], dec.off), okRecord(ctor, [], dec.off), errText(dec.off, wrongMsg(path)), dec.off)
+def nestRecord(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(genRecord(valName(dec.off, fieldSlot), typeName, fieldPath, fieldSlot, dec, fuel - 1), Arm(okRec(dec.off, fieldSlot), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(recName(dec.off, fieldSlot), dec.off)), path, slot, dec, fuel)) :: Arm(errPat(dec.off, fieldSlot), "", errPass(fieldSlot, dec.off)) :: [], dec.off)
+
+def listValue(elem: Ty, jsonVar: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EIf(jsonIsArr(jsonVar, dec.off), listFold(elem, jsonVar, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel), errExpr(dec.off, wrongExpr(fieldPath, dec.off)), dec.off)
+
+def listFold(elem: Ty, jsonVar: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(call3("List.foldLeft", call1("List.zipWithIndex", jsonArr(jsonVar, dec.off), dec.off), okSeed(elem, dec.off), foldLam(elem, fieldPath, fieldSlot, dec, fuel), dec.off), Arm(okBind(dec.off, joinSlot(fieldSlot, "x")), "", nextField(recv, ctor, rest, snoc(done, call1("List.reverse", Expr.EVar(valName(dec.off, joinSlot(fieldSlot, "x")), dec.off), dec.off)), path, slot, dec, fuel)) :: Arm(errPat(dec.off, joinSlot(fieldSlot, "x")), "", errPass(joinSlot(fieldSlot, "x"), dec.off)) :: [], dec.off)
+
+def foldLam(elem: Ty, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", dec.off), Arm(pairPat(accName(dec.off, slot), pairName(dec.off, slot)), "", foldPair(elem, path, slot, dec, fuel)) :: [], dec.off))
+
+def foldPair(elem: Ty, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EVar(pairName(dec.off, slot), dec.off), Arm(pairPat(idxName(dec.off, slot), itemName(dec.off, slot)), "", foldAcc(elem, path, slot, dec, fuel)) :: [], dec.off)
+
+def foldAcc(elem: Ty, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EVar(accName(dec.off, slot), dec.off), Arm(okBind(dec.off, joinSlot(slot, "x")), "", elemBody(elem, itemName(dec.off, slot), idxName(dec.off, slot), valName(dec.off, joinSlot(slot, "x")), path, slot, dec, fuel)) :: Arm(errPat(dec.off, joinSlot(slot, "x")), "", errPass(joinSlot(slot, "x"), dec.off)) :: [], dec.off)
+
+def elemBody(elem: Ty, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  elem match {
+    case Ty.Named(name) => namedElem(name, item, idx, xs, path, slot, dec, fuel)
+    case _ => errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
+  }
+
+def namedElem(name: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (name == "String") scalarElem("Str", item, idx, xs, path, slot, dec) else if (name == "Int") scalarElem("Int", item, idx, xs, path, slot, dec) else if (name == "Bool") scalarElem("Bool", item, idx, xs, path, slot, dec) else if (name == "Float") scalarElem("Float", item, idx, xs, path, slot, dec) else recordElem(name, item, idx, xs, path, slot, dec, fuel)
+
+def scalarElem(tag: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(item, dec.off), Arm(jsonPat(tag, dec.off, joinSlot(slot, "v")), "", okCons(valName(dec.off, joinSlot(slot, "v")), xs, dec.off)) :: Arm("_", "", errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))) :: [], dec.off)
+
+def recordElem(typeName: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(genRecord(item, typeName, indexPath(path, idx, dec.off), joinSlot(slot, "e"), dec, fuel - 1), Arm(okRec(dec.off, joinSlot(slot, "e")), "", okCons(recName(dec.off, joinSlot(slot, "e")), xs, dec.off)) :: Arm(errPat(dec.off, joinSlot(slot, "e")), "", errPass(joinSlot(slot, "e"), dec.off)) :: [], dec.off)
+
+def nextField(recv: String, ctor: String, rest: List[Param], done: List[Expr], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  readFields(recv, ctor, rest, done, path, slot, dec, fuel)
+
+def emptyObj(recv: String, ctor: String, path: Expr, dec: DecodeCtx): Expr =
+  Expr.EIf(Expr.EMethod(Expr.EVar("Json", dec.off), "isObj", Expr.EVar(recv, dec.off) :: [], dec.off), okRecord(ctor, [], dec.off), errExpr(dec.off, wrongExpr(path, dec.off)), dec.off)
 
 def jsonField(recv: String, name: String, off: Int): Expr =
   Expr.EMethod(Expr.EVar("Json", off), "field", Expr.EVar(recv, off) :: Expr.EStr(name, off) :: [], off)
 
+def jsonIsArr(name: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Json", off), "isArr", Expr.EVar(name, off) :: [], off)
+
+def jsonArr(name: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Json", off), "arr", Expr.EVar(name, off) :: [], off)
+
 def okRecord(ctor: String, args: List[Expr], off: Int): Expr =
   Expr.EMethod(Expr.EVar("Result", off), "Ok", Expr.ECall(ctor, args, off) :: [], off)
+
+def okSeed(elem: Ty, off: Int): Expr =
+  Expr.EAscribe(Expr.EMethod(Expr.EVar("Result", off), "Ok", Expr.EAscribe(Expr.EList([]), listTy(elem), off) :: [], off), Str.concat("Result[String, ", Str.concat(listTy(elem), "]")), off)
+
+def okCons(elem: String, xs: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Ok", call2("List.cons", Expr.EVar(elem, off), Expr.EVar(xs, off), off) :: [], off)
 
 def errText(off: Int, message: String): Expr =
   Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EStr(message, off) :: [], off)
 
-def errMap(path: String, off: Int): Expr =
-  Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EIf(Expr.EBin("==", Expr.EVar(errName(off, path), off), Expr.EStr("Json.field: missing field", off), off), Expr.EStr(missingMsg(path), off), Expr.EStr(wrongMsg(path), off), off) :: [], off)
+def errExpr(off: Int, message: Expr): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Err", message :: [], off)
 
-def errPass(off: Int, path: String): Expr =
-  Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EVar(errName(off, path), off) :: [], off)
+def errMap(path: Expr, slot: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EIf(Expr.EBin("==", Expr.EVar(errName(off, slot), off), Expr.EStr("Json.field: missing field", off), off), missingExpr(path, off), wrongExpr(path, off), off) :: [], off)
+
+def errPass(slot: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EVar(errName(off, slot), off) :: [], off)
 
 def snoc(args: List[Expr], arg: Expr): List[Expr] =
   List.concat(args, arg :: [])
 
-def okTag(tag: String, off: Int, path: String): String =
-  Str.concat("Result.Ok(Json.", Str.concat(tag, Str.concat("(", Str.concat(valName(off, path), "))"))))
+def call1(name: String, arg: Expr, off: Int): Expr =
+  Expr.ECall(name, arg :: [], off)
 
-def okBind(off: Int, path: String): String =
-  Str.concat("Result.Ok(", Str.concat(valName(off, path), ")"))
+def call2(name: String, left: Expr, right: Expr, off: Int): Expr =
+  Expr.ECall(name, left :: right :: [], off)
 
-def okRec(off: Int, path: String): String =
-  Str.concat("Result.Ok(", Str.concat(recName(off, path), ")"))
+def call3(name: String, a: Expr, b: Expr, c: Expr, off: Int): Expr =
+  Expr.ECall(name, a :: b :: c :: [], off)
 
-def errPat(off: Int, path: String): String =
-  Str.concat("Result.Err(", Str.concat(errName(off, path), ")"))
+def okTag(tag: String, off: Int, slot: String): String =
+  Str.concat("Result.Ok(Json.", Str.concat(tag, Str.concat("(", Str.concat(valName(off, slot), "))"))))
+
+def jsonPat(tag: String, off: Int, slot: String): String =
+  Str.concat("Json.", Str.concat(tag, Str.concat("(", Str.concat(valName(off, slot), ")"))))
+
+def okBind(off: Int, slot: String): String =
+  Str.concat("Result.Ok(", Str.concat(valName(off, slot), ")"))
+
+def okRec(off: Int, slot: String): String =
+  Str.concat("Result.Ok(", Str.concat(recName(off, slot), ")"))
+
+def errPat(off: Int, slot: String): String =
+  Str.concat("Result.Err(", Str.concat(errName(off, slot), ")"))
+
+def pairPat(left: String, right: String): String =
+  Str.concat("(", Str.concat(left, Str.concat(", ", Str.concat(right, ")"))))
 
 def recvName(off: Int): String =
   Str.concat("__ScuzzJson", Str.fromInt(off))
 
-def valName(off: Int, path: String): String =
-  Str.concat("__ScuzzV", Str.concat(Str.fromInt(off), Str.concat("_", pathId(path))))
+def valName(off: Int, slot: String): String =
+  Str.concat("__ScuzzV", Str.concat(Str.fromInt(off), Str.concat("_", slot)))
 
-def errName(off: Int, path: String): String =
-  Str.concat("__ScuzzE", Str.concat(Str.fromInt(off), Str.concat("_", pathId(path))))
+def errName(off: Int, slot: String): String =
+  Str.concat("__ScuzzE", Str.concat(Str.fromInt(off), Str.concat("_", slot)))
 
-def recName(off: Int, path: String): String =
-  Str.concat("__ScuzzR", Str.concat(Str.fromInt(off), Str.concat("_", pathId(path))))
+def recName(off: Int, slot: String): String =
+  Str.concat("__ScuzzR", Str.concat(Str.fromInt(off), Str.concat("_", slot)))
 
-def pathId(path: String): String =
-  Str.replace(path, ".", "_")
+def accName(off: Int, slot: String): String =
+  Str.concat("__ScuzzA", Str.concat(Str.fromInt(off), Str.concat("_", slot)))
+
+def pairName(off: Int, slot: String): String =
+  Str.concat("__ScuzzP", Str.concat(Str.fromInt(off), Str.concat("_", slot)))
+
+def idxName(off: Int, slot: String): String =
+  Str.concat("__ScuzzI", Str.concat(Str.fromInt(off), Str.concat("_", slot)))
+
+def itemName(off: Int, slot: String): String =
+  Str.concat("__ScuzzJ", Str.concat(Str.fromInt(off), Str.concat("_", slot)))
+
+def joinSlot(slot: String, name: String): String =
+  if (slot == "") name else Str.concat(slot, Str.concat("_", name))
 
 def joinPath(prefix: String, name: String): String =
   if (prefix == "") name else Str.concat(prefix, Str.concat(".", name))
+
+def strExpr(text: String, off: Int): Expr =
+  Expr.EStr(text, off)
+
+def pathText(path: Expr): String =
+  path match {
+    case Expr.EStr(text, _) => text
+    case _ => ""
+  }
+
+def joinPathExpr(path: Expr, name: String, off: Int): Expr =
+  path match {
+    case Expr.EStr(text, _) => if (text == "") strExpr(name, off) else strExpr(Str.concat(text, Str.concat(".", name)), off)
+    case _ => call2("Str.concat", path, strExpr(Str.concat(".", name), off), off)
+  }
+
+def indexPath(path: Expr, idx: String, off: Int): Expr =
+  call2("Str.concat", pathDot(path, off), call1("Str.fromInt", Expr.EVar(idx, off), off), off)
+
+def pathDot(path: Expr, off: Int): Expr =
+  path match {
+    case Expr.EStr(text, _) => if (text == "") strExpr("", off) else strExpr(Str.concat(text, "."), off)
+    case _ => call2("Str.concat", path, strExpr(".", off), off)
+  }
+
+def listTy(elem: Ty): String =
+  Str.concat("List[", Str.concat(Type.show(elem), "]"))
+
+def missingExpr(path: Expr, off: Int): Expr =
+  path match {
+    case Expr.EStr(text, _) => strExpr(missingMsg(text), off)
+    case _ => call2("Str.concat", strExpr("Json.decode: missing field ", off), path, off)
+  }
+
+def wrongExpr(path: Expr, off: Int): Expr =
+  path match {
+    case Expr.EStr(text, _) => strExpr(wrongMsg(text), off)
+    case _ => call2("Str.concat", strExpr("Json.decode: wrong case at ", off), path, off)
+  }
 
 def missingMsg(path: String): String =
   Str.concat("Json.decode: missing field ", path)
