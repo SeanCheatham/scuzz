@@ -74,7 +74,19 @@ def runOn(dir: String, out: String, sim: Sim, watch: Bool): IO[Unit] =
   IO.println(Str.concat("iOS simulator: ", Str.concat(sim.name, Str.concat(" (", Str.concat(sim.id, ")"))))).flatMap(_ => stamp(dir).flatMap(before => build(dir, out).flatMap(ok => if (!ok) IO.fail("ios build") else boot(sim).flatMap(_ => start(dir, out, sim, watch, before)))))
 
 def boot(sim: Sim): IO[Unit] =
-  IO.println("Start the simulator.").flatMap(_ => IO.timeout(180000, checked(Str.concat("xcrun simctl bootstatus ", Str.concat(Drive.shQuote(sim.id), " -b")))).flatMap(_ => checked(Str.concat("open -a Simulator --args -CurrentDeviceUDID ", Drive.shQuote(sim.id)))))
+  IO.println("Start the simulator.").flatMap(_ => bootTry(sim, true))
+
+def bootTry(sim: Sim, retry: Bool): IO[Unit] =
+  bootWait(sim).flatMap(_ => bootOpen(sim)).handleErrorWith(err => if (retry && err == "timeout") bootStop(sim).flatMap(_ => bootTry(sim, false)) else IO.fail(err))
+
+def bootWait(sim: Sim): IO[Unit] =
+  IO.timeout(420000, checked(Str.concat("xcrun simctl bootstatus ", Str.concat(Drive.shQuote(sim.id), " -b"))))
+
+def bootOpen(sim: Sim): IO[Unit] =
+  checked(Str.concat("open -a Simulator --args -CurrentDeviceUDID ", Drive.shQuote(sim.id)))
+
+def bootStop(sim: Sim): IO[Unit] =
+  IO.timeout(60000, checked(Str.concat("xcrun simctl shutdown ", Drive.shQuote(sim.id)))).handleErrorWith(_ => IO.pure(()))
 
 def build(dir: String, out: String): IO[Bool] =
   IO.println("Build the iOS app.").flatMap(_ => Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => buildManifest(dir, out, Manifest.parse(toml)))).handleErrorWith(_ => IO.println("Build fails. Fix the source and retry.").map(_ => false))

@@ -121,9 +121,10 @@ jobs:
           test "$CHECK_RESULT" = success
 
   # Bounded Darwin coverage on every push/PR. Release packaging stays workflow_dispatch.
+  # A cold simulator can spend several minutes in data migration. The limit covers that boot and one retry.
   macos-smoke:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Cache Skia CPU prebuilt
