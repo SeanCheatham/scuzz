@@ -382,12 +382,16 @@ with tempfile.TemporaryDirectory(prefix='scuzz-lsp-editor-') as directory:
         {'jsonrpc': '2.0', 'id': 9, 'method': 'textDocument/rename', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': shadow_line, 'character': shadow_col}, 'newName': 'y'}},
         {'jsonrpc': '2.0', 'id': 10, 'method': 'textDocument/rename', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': x_param_line, 'character': x_param_col}, 'newName': 'match'}},
         {'jsonrpc': '2.0', 'id': 11, 'method': 'textDocument/rename', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}, 'newName': 'greeting'}},
+        {'jsonrpc': '2.0', 'id': 13, 'method': 'textDocument/references', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}, 'context': {'includeDeclaration': True}}},
+        {'jsonrpc': '2.0', 'id': 14, 'method': 'textDocument/references', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}, 'context': {'includeDeclaration': False}}},
+        {'jsonrpc': '2.0', 'id': 15, 'method': 'textDocument/references', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': x_param_line, 'character': x_param_col}, 'context': {'includeDeclaration': False}}},
+        {'jsonrpc': '2.0', 'id': 16, 'method': 'textDocument/references', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': 0, 'character': 0}}},
         {'jsonrpc': '2.0', 'id': 12, 'method': 'shutdown', 'params': None},
         {'jsonrpc': '2.0', 'method': 'exit', 'params': None},
     ])
     by_id = {m['id']: m['result'] for m in msgs if 'id' in m}
     caps = by_id[1]['capabilities']
-    assert caps.get('inlayHintProvider') is True and caps.get('foldingRangeProvider') is True and caps.get('codeActionProvider') is True, caps
+    assert caps.get('inlayHintProvider') is True and caps.get('foldingRangeProvider') is True and caps.get('codeActionProvider') is True and caps.get('referencesProvider') is True, caps
 
     inlays = [(h['position']['line'], h['label']) for h in by_id[2]]
     y_line = next(i for i, l in enumerate(unformatted_main.splitlines()) if 'y = x + 1' in l)
@@ -413,6 +417,24 @@ with tempfile.TemporaryDirectory(prefix='scuzz-lsp-editor-') as directory:
     assert by_id[9] is None and by_id[10] is None, (by_id[9], by_id[10])
     cross_changes = by_id[11]['changes']
     assert 'Help.greeting' in cross_changes[main_uri][0]['newText'] and 'def greeting(n: Int): String' in cross_changes[help_uri][0]['newText'], cross_changes
+
+    def at_pos(locs, uri, line, col):
+        return any(loc['uri'] == uri and loc['range']['start']['line'] == line and loc['range']['start']['character'] == col for loc in locs)
+
+    help_lines = help_file.read_text().splitlines()
+    word_def_line = next(i for i, line in enumerate(help_lines) if line.startswith('def word'))
+    word_def_col = help_lines[word_def_line].index('word')
+    word_refs = by_id[13]
+    word_uses = by_id[14]
+    assert at_pos(word_refs, help_uri, word_def_line, word_def_col), word_refs
+    assert at_pos(word_refs, main_uri, calc_line, word_col), word_refs
+    assert any('Help.word' in line for line in unformatted_main.splitlines()) and len(word_refs) >= 2, word_refs
+    assert not at_pos(word_uses, help_uri, word_def_line, word_def_col), word_uses
+    assert at_pos(word_uses, main_uri, calc_line, word_col) and all(loc['uri'] == main_uri for loc in word_uses), word_uses
+    x_uses = by_id[15]
+    assert x_uses and not at_pos(x_uses, main_uri, x_param_line, x_param_col), x_uses
+    assert all(unformatted_main.splitlines()[loc['range']['start']['line']][loc['range']['start']['character']:].startswith('x') for loc in x_uses), x_uses
+    assert by_id[16] is None, by_id[16]
 
     clean_msgs = lsp_session(ws, [
         {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': ws.as_uri()}},

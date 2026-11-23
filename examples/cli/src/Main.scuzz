@@ -648,7 +648,50 @@ def lspWireOver(): Bool =
   Lsp.overlayHas(Lsp.overlayPut([], "/x", ""), "/x") && Lsp.overlayGet(Lsp.overlayPut([], "/x", ""), "/x") == "" && !Lsp.overlayHas([], "/x")
 
 def lspWireCaps(): Bool =
-  Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "\"file://x\"") && Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "bar") && !Str.contains(Lsp.caps(), "prepareProvider") && !Str.contains(Lsp.caps(), "documentSymbol") && Str.contains(Lsp.caps(), "\"inlayHintProvider\":true") && Str.contains(Lsp.caps(), "\"foldingRangeProvider\":true") && Str.contains(Lsp.caps(), "\"codeActionProvider\":true") && !Str.contains(Lsp.caps(), "declarationProvider") && !Str.contains(Lsp.caps(), "triggerCharacters") && Str.contains(Lsp.caps(), "utf-8") && lspEditorSliceOk()
+  Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "\"file://x\"") && Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "bar") && !Str.contains(Lsp.caps(), "prepareProvider") && !Str.contains(Lsp.caps(), "documentSymbol") && Str.contains(Lsp.caps(), "\"referencesProvider\":true") && Str.contains(Lsp.caps(), "\"inlayHintProvider\":true") && Str.contains(Lsp.caps(), "\"foldingRangeProvider\":true") && Str.contains(Lsp.caps(), "\"codeActionProvider\":true") && !Str.contains(Lsp.caps(), "declarationProvider") && !Str.contains(Lsp.caps(), "triggerCharacters") && Str.contains(Lsp.caps(), "utf-8") && lspRefsOk() && lspEditorSliceOk()
+
+def lspRefsOk(): Bool =
+  for {
+    scopeSrc = """def first(x: Int): Int =
+  x + 1
+
+def second(x: Int): Int =
+  for {
+    x = x + 10
+    y = x * 2
+  } yield y match {
+    case 0 => x
+    case y => y + 1
+  }
+"""
+    refParam = Lsp.referencesJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 10, true)
+    refParamUse = Lsp.referencesJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 10, false)
+    refOuter = Lsp.referencesJson("file:///ws/src/Main.scuzz", scopeSrc, 3, 11, true)
+    refInner = Lsp.referencesJson("file:///ws/src/Main.scuzz", scopeSrc, 5, 4, true)
+    refName = Lsp.referencesJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 4, true)
+    refNameUse = Lsp.referencesJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 4, false)
+    refKw = Lsp.referencesJson("file:///ws/src/Main.scuzz", scopeSrc, 0, 0, true)
+    argSrc = """def f(n: Int): Int =
+  f(n = n)
+"""
+    refArg = Lsp.referencesJson("file:///ws/src/Main.scuzz", argSrc, 1, 4, true)
+    refArgUse = Lsp.referencesJson("file:///ws/src/Main.scuzz", argSrc, 1, 8, true)
+    mainSrc = """def run(): String =
+  Help.word()
+"""
+    mods = [Lsp.ModFile("Main", "/ws/src/Main.scuzz", mainSrc), Lsp.ModFile("Help", "/ws/dep/src/Help.scuzz", "def word(): String =\n  \"ok\"\n")]
+    refCross = Lsp.referencesWorkspaceJson(mods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", mainSrc, 1, 7, true)
+    refCrossUse = Lsp.referencesWorkspaceJson(mods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", mainSrc, 1, 7, false)
+    refMod = Lsp.referencesWorkspaceJson(mods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", mainSrc, 1, 2, true)
+    refModUse = Lsp.referencesWorkspaceJson(mods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", mainSrc, 1, 2, false)
+    impSrc = """import Help.word
+
+def run(): String =
+  word()
+"""
+    impMods = [Lsp.ModFile("Main", "/ws/src/Main.scuzz", impSrc), Lsp.ModFile("Help", "/ws/dep/src/Help.scuzz", "def word(): String =\n  \"ok\"\n")]
+    refImp = Lsp.referencesWorkspaceJson(impMods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", impSrc, 3, 2, true)
+  } yield Str.contains(refParam, "\"line\":0,\"character\":10") && Str.contains(refParam, "\"line\":1,\"character\":2") && !Str.contains(refParam, "\"line\":3") && !Str.contains(refParamUse, "\"line\":0") && Str.contains(refParamUse, "\"line\":1,\"character\":2") && Str.contains(refOuter, "\"line\":3,\"character\":11") && Str.contains(refOuter, "\"line\":5,\"character\":8") && !Str.contains(refOuter, "\"line\":5,\"character\":4") && !Str.contains(refOuter, "\"line\":6") && Str.contains(refInner, "\"line\":5,\"character\":4") && Str.contains(refInner, "\"line\":6,\"character\":8") && Str.contains(refInner, "\"line\":8,\"character\":14") && !Str.contains(refInner, "\"line\":5,\"character\":8") && !Str.contains(refInner, "\"line\":0") && Str.contains(refName, "\"line\":0,\"character\":4") && refNameUse == "[]" && refKw == "null" && refArg == "null" && Str.contains(refArgUse, "\"line\":0,\"character\":6") && Str.contains(refArgUse, "\"line\":1,\"character\":8") && !Str.contains(refArgUse, "\"character\":4") && Str.contains(refCross, "file:///ws/dep/src/Help.scuzz") && Str.contains(refCross, "\"line\":0,\"character\":4") && Str.contains(refCross, "file:///ws/src/Main.scuzz") && Str.contains(refCross, "\"line\":1,\"character\":7") && !Str.contains(refCrossUse, "Help.scuzz") && Str.contains(refCrossUse, "\"line\":1,\"character\":7") && Str.contains(refMod, "file:///ws/dep/src/Help.scuzz") && Str.contains(refMod, "\"line\":1,\"character\":2") && Str.contains(refMod, "\"character\":6") && !Str.contains(refMod, "\"character\":7") && !Str.contains(refModUse, "Help.scuzz") && Str.contains(refModUse, "\"line\":1,\"character\":2") && Str.contains(refImp, "\"line\":0,\"character\":12") && Str.contains(refImp, "\"line\":3,\"character\":2") && Str.contains(refImp, "file:///ws/dep/src/Help.scuzz")
 
 private def lspEditorSliceOk(): Bool =
   for {
