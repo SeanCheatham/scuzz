@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# Stop the app when the CLI closes its input or sends quit.
+# Stop the app when the CLI closes its input, sends quit, or the inject file contains a quit op.
 set -euo pipefail
 
 APP="${1:?missing app executable}"
 WORKER=""
 OWNER=""
+INJECT_WATCH=""
 
 stop() {
+  if [ -n "$INJECT_WATCH" ]; then
+    kill -KILL "$INJECT_WATCH" 2>/dev/null || true
+    wait "$INJECT_WATCH" 2>/dev/null || true
+    INJECT_WATCH=""
+  fi
   if [ -n "$OWNER" ]; then
     kill -KILL "$OWNER" 2>/dev/null || true
     wait "$OWNER" 2>/dev/null || true
@@ -32,6 +38,18 @@ WORKER=$!
   kill -TERM "$$" 2>/dev/null || true
 ) &
 OWNER=$!
+if [ -n "${SCUZZ_UI_INJECT:-}" ]; then
+  (
+    while true; do
+      if [ -f "$SCUZZ_UI_INJECT" ] && grep -q '"op": *"quit"' "$SCUZZ_UI_INJECT"; then
+        break
+      fi
+      sleep 0.2
+    done
+    kill -TERM "$$" 2>/dev/null || true
+  ) &
+  INJECT_WATCH=$!
+fi
 result=0
 wait "$WORKER" || result=$?
 WORKER=""

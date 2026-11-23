@@ -5768,6 +5768,7 @@ def internSigExpr(e: Expr, acc: Strs): Strs =
     case Expr.ETuple(xs) => internSigList(xs, acc)
     case Expr.ENamed(_, inner) => internSigExpr(inner, acc)
     case Expr.EAscribe(inner, _, _) => internSigExpr(inner, acc)
+    case Expr.EStr(text, _) => intern(acc, text)
     case _ => acc
   }
 

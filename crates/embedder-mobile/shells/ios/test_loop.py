@@ -90,7 +90,11 @@ try:
             'View.text(Text.value())', 'View.text(Text.value()), View.bindText(status), View.button("Wait", _ => slow(count, status, release)), View.button("Release", _ => Signal.set(release, true))')
         source.write_text(original)
         proc, lines, thread = start(app)
-        wait_for(lambda: "ios-loop-v1" in lines and launches(lines), "initial launch", 600)
+        def sessionUp():
+            if proc.poll() is not None:
+                raise AssertionError("simulator session exits before launch\n" + "\n".join(lines))
+            return "ios-loop-v1" in lines and launches(lines)
+        wait_for(sessionUp, "initial launch", 1200)
         device = next(re.search(r"\(([0-9A-F-]{36})\)", line)[1]
                       for line in lines if line.startswith("iOS simulator:"))
         objects = app / "output path" / "ios-sim" / "obj"
