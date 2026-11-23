@@ -1365,7 +1365,10 @@ def methodUsesResult(recv: Expr, name: String, args: List[Expr], s: String, sTy:
   if (live && resultMethodCall(recv, s, sTy, ens)) callUsesPath(Str.concat(Type.appName(sTy), Str.concat(".", name)), recv :: args, s, sTy, path, true, ens) else exprUsesPathEns(recv, s, sTy, path, live, ens) || (!live || name != "require") && listUsesPathEns(args, s, sTy, path, live, ens)
 
 def resultMethodCall(recv: Expr, s: String, sTy: Ty, ens: List[En]): Bool =
-  resultCarrierTy(sTy, ens) && isVarNamed(recv, s) && (Type.appName(sTy) == "Map" || Type.appName(sTy) == "Ref")
+  resultCarrierTy(sTy, ens) && isVarNamed(recv, s) && resultMethodName(Type.appName(sTy))
+
+def resultMethodName(name: String): Bool =
+  name == "Map" || name == "Ref" || name == "Set" || name == "Stream" || name == "Queue" || name == "Signal"
 
 def recordFieldsByName(ens: List[En], name: String): List[Param] =
   recordFieldsByFound(findUserEn(ens, name))
@@ -1388,10 +1391,13 @@ def callUsesPath(f: String, args: List[Expr], s: String, sTy: Ty, path: List[Str
   if (!live) f == s || listUsesPathEns(args, s, sTy, path, false, ens) else if (f == "Property.check") List.len(args) >= 3 && exprUsesPathEns(List.at(args, 2), s, sTy, path, true, ens) else if (isErasedPropertyCall(f)) false else if (resultCarrierTy(sTy, ens) && resultHideCall(f, sTy, path, ens)) listStoredUses(args, s, sTy, path, ens) else if (resultCarrierTy(sTy, ens) && resultPredCall(f)) resultPredUses(args, s, sTy, path, ens) else List.isEmpty(path) && f == s || listUsesPathEns(args, s, sTy, path, true, ens)
 
 def resultHideCall(f: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
-  if (f == "Ref.set" || f == "Ref.update" || f == "Map.size" || f == "Map.isEmpty" || f == "Map.nonEmpty" || f == "Map.contains") true else if (f == "Map.keys") !mapKeyCarries(containerPathTy(sTy, path, ens), ens) else f == "Map.values" && !mapValCarries(containerPathTy(sTy, path, ens), ens)
+  if (resultHideName(f)) true else if (f == "Map.keys") !mapKeyCarries(containerPathTy(sTy, path, ens), ens) else f == "Map.values" && !mapValCarries(containerPathTy(sTy, path, ens), ens)
+
+def resultHideName(f: String): Bool =
+  f == "Ref.set" || f == "Ref.update" || f == "Map.size" || f == "Map.isEmpty" || f == "Map.nonEmpty" || f == "Map.contains" || f == "Set.size" || f == "Set.isEmpty" || f == "Set.nonEmpty" || f == "Set.contains" || f == "Set.isSubset" || f == "Set.isDisjoint" || f == "Stream.count" || f == "Stream.drain" || f == "Queue.offer" || f == "Signal.set"
 
 def resultPredCall(f: String): Bool =
-  f == "Map.exists" || f == "Map.forall"
+  f == "Map.exists" || f == "Map.forall" || f == "Set.exists" || f == "Set.forall" || f == "Stream.exists" || f == "Stream.forall" || f == "Stream.none"
 
 def mapKeyCarries(ty: Ty, ens: List[En]): Bool =
   Type.appName(ty) == "Map" && mapArgCarries(Type.appArgs(ty), ens)
@@ -1596,6 +1602,10 @@ def resultCarrierSeen(ty: Ty, ens: List[En], seen: List[String], fuel: Int): Boo
   case Ty.App("Option", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
   case Ty.App("Map", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
   case Ty.App("Ref", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
+  case Ty.App("Set", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
+  case Ty.App("Stream", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
+  case Ty.App("Queue", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
+  case Ty.App("Signal", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
   case Ty.Tuple(parts) => List.exists(parts, item => resultCarrierSeen(item, ens, seen, fuel - 1))
   case Ty.Arrow(_, _) => false
   case _ => resultCarrierUser(ty, Type.show(ty), findUserEn(ens, Type.headName(ty)), ens, seen, fuel)
@@ -1650,7 +1660,7 @@ def recordPathSelected(ty: Ty, en: En, args: List[Ty], selected: List[Param], re
   if (List.isEmpty(selected)) ty else containerPathTy(substTySim(Type.parse(List.at(selected, 0).ty), en.tparams, args), rest, ens)
 
 def resultDiscardedMessage(ty: Ty): String =
-  if (Type.appName(ty) == "List") "Result list is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Option") "Result option is discarded in live code; match it, return it, or pass it to a function" else if (Type.appName(ty) == "Map") "Result map is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Ref") "Result reference is discarded in live code; return it or pass it to a function" else "Result value is discarded in live code; match it, return it, or pass it to a function"
+  if (Type.appName(ty) == "List") "Result list is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Option") "Result option is discarded in live code; match it, return it, or pass it to a function" else if (Type.appName(ty) == "Map") "Result map is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Ref") "Result reference is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Set") "Result set is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Stream") "Result stream is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Queue") "Result queue is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Signal") "Result signal is discarded in live code; return it or pass it to a function" else "Result value is discarded in live code; match it, return it, or pass it to a function"
 
 def resultAlternativeErr(pat: String, ty: String, checkLive: Bool, rest: List[Bind], body: Expr, ens: List[En], i: Int): String =
   resultAlternativeNext(resultBindErr(Str.take(pat, i), ty, checkLive, rest, body, ens), Str.drop(pat, i + 3), ty, checkLive, rest, body, ens)
@@ -3077,7 +3087,7 @@ def matchWildResultErr(ty: String, parsed: Ty, unguardedPriors: List[String], se
   if (!resultCarrierTy(parsed, ens)) "" else if (!List.isEmpty(unguardedPriors) && coverComplete(List.map(unguardedPriors, p => [p]), [ty], ens)) "" else if (List.isEmpty(seenPriors)) matchWildEmptyPriors(ty, parsed, ens, seen, fuel) else if (Type.appName(parsed) == "Result") if (!List.exists(seenPriors, p => !coverWild(coverClean(p), ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, unguardedPriors, seenPriors, ens, seen, fuel) else if (List.isEmpty(coverCases(ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, unguardedPriors, seenPriors, ens, seen, fuel)
 
 def matchWildEmptyPriors(ty: String, parsed: Ty, ens: List[En], seen: List[String], fuel: Int): String =
-  if (fuel <= 0 || List.contains(seen, ty)) "" else if (Type.appName(parsed) == "Result" || Type.appName(parsed) == "List" || Type.appName(parsed) == "Option" || Type.appName(parsed) == "Map" || Type.appName(parsed) == "Ref") resultDiscardedMessage(parsed) else if (List.isEmpty(coverCases(ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, [], [], ens, ty :: seen, fuel - 1)
+  if (fuel <= 0 || List.contains(seen, ty)) "" else if (Type.appName(parsed) == "Result" || Type.appName(parsed) == "List" || Type.appName(parsed) == "Option" || Type.appName(parsed) == "Map" || Type.appName(parsed) == "Ref" || Type.appName(parsed) == "Set" || Type.appName(parsed) == "Stream" || Type.appName(parsed) == "Queue" || Type.appName(parsed) == "Signal") resultDiscardedMessage(parsed) else if (List.isEmpty(coverCases(ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, [], [], ens, ty :: seen, fuel - 1)
 
 def matchWildCasesPriors(cases: List[EnCase], ty: String, unguardedPriors: List[String], seenPriors: List[String], ens: List[En], seen: List[String], fuel: Int): String =
   if (List.isEmpty(cases)) "" else matchWildCaseStep(List.at(cases, 0), List.tail(cases), ty, unguardedPriors, seenPriors, ens, seen, fuel)
