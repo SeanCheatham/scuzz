@@ -156,7 +156,7 @@ def typeProblem(ty: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[
 def typeProblemOf(ty: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   ty match {
     case Ty.Named(name) => nameProblem(name, path, dec, fuel, seen)
-    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1) listProblem(List.at(args, 0), path, dec, fuel, seen) else badRead(path)
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1) listProblem(List.at(args, 0), path, dec, fuel, seen) else if (name == "Option" && List.len(args) == 1) optionProblem(List.at(args, 0), path, dec, fuel, seen) else badRead(path)
     case _ => badRead(path)
   }
 
@@ -165,6 +165,12 @@ def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: Lis
 
 def listProblem(elem: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   elem match {
+    case Ty.Named(name) => if (isScalar(name)) "" else recordProblem(name, path, dec, fuel, seen)
+    case _ => badRead(path)
+  }
+
+def optionProblem(inner: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  inner match {
     case Ty.Named(name) => if (isScalar(name)) "" else recordProblem(name, path, dec, fuel, seen)
     case _ => badRead(path)
   }
@@ -188,7 +194,61 @@ def readOne(recv: String, ctor: String, field: Param, rest: List[Param], done: L
   readTyped(recv, ctor, field.name, expandTy(field.ty, dec.aliases), rest, done, joinPathExpr(path, field.name, dec.off), joinSlot(slot, field.name), path, slot, dec, fuel)
 
 def readTyped(recv: String, ctor: String, name: String, ty: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
-  Expr.EMatch(jsonField(recv, name, dec.off), kindArms(Type.parse(ty), recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel), dec.off)
+  readDecoded(Type.parse(ty), recv, ctor, name, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
+
+def readDecoded(ty: Ty, recv: String, ctor: String, name: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  ty match {
+    case Ty.App(app, args) => if (app == "Option" && List.len(args) == 1) readOption(List.at(args, 0), recv, ctor, name, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else matchField(ty, recv, ctor, name, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
+    case _ => matchField(ty, recv, ctor, name, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
+  }
+
+def matchField(ty: Ty, recv: String, ctor: String, name: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(jsonField(recv, name, dec.off), kindArms(ty, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel), dec.off)
+
+def readOption(inner: Ty, recv: String, ctor: String, name: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EAscribe(optionDecoded(inner, recv, name, fieldPath, fieldSlot, dec, fuel), optionResult(inner), dec.off), Arm(okBind(dec.off, optSlot(fieldSlot)), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, optSlot(fieldSlot)), dec.off)), path, slot, dec, fuel)) :: Arm(errPat(dec.off, optSlot(fieldSlot)), "", errPass(optSlot(fieldSlot), dec.off)) :: [], dec.off)
+
+def optionDecoded(inner: Ty, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx, fuel: Int): Expr =
+  inner match {
+    case Ty.Named(typeName) => if (isScalar(typeName)) scalarOption(if (typeName == "String") "Str" else typeName, typeName, recv, name, fieldPath, fieldSlot, dec) else recordOption(typeName, recv, name, fieldPath, fieldSlot, dec, fuel)
+    case _ => errExpr(dec.off, wrongExpr(fieldPath, dec.off))
+  }
+
+def scalarOption(tag: String, typeName: String, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(jsonField(recv, name, dec.off), Arm(nullPat(), "", okValue(optionNone(typeName, dec.off), dec.off)) :: Arm(okTag(tag, dec.off, fieldSlot), "", okValue(optionSome(Expr.EVar(valName(dec.off, fieldSlot), dec.off), dec.off), dec.off)) :: Arm("Result.Ok(_)", "", errExpr(dec.off, wrongExpr(fieldPath, dec.off))) :: Arm(errPat(dec.off, fieldSlot), "", missingOption(typeName, fieldPath, fieldSlot, dec)) :: [], dec.off)
+
+def recordOption(typeName: String, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(jsonField(recv, name, dec.off), Arm(nullPat(), "", okValue(optionNone(typeName, dec.off), dec.off)) :: Arm(okBind(dec.off, fieldSlot), "", optionRecordValue(typeName, fieldPath, fieldSlot, dec, fuel)) :: Arm(errPat(dec.off, fieldSlot), "", missingOption(typeName, fieldPath, fieldSlot, dec)) :: [], dec.off)
+
+def optionRecordValue(typeName: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(genRecord(valName(dec.off, fieldSlot), typeName, fieldPath, fieldSlot, dec, fuel - 1), Arm(okRec(dec.off, fieldSlot), "", okValue(optionSome(Expr.EVar(recName(dec.off, fieldSlot), dec.off), dec.off), dec.off)) :: Arm(errPat(dec.off, fieldSlot), "", errPass(fieldSlot, dec.off)) :: [], dec.off)
+
+def missingOption(typeName: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
+  Expr.EIf(missingField(fieldSlot, dec.off), okValue(optionNone(typeName, dec.off), dec.off), errExpr(dec.off, wrongExpr(fieldPath, dec.off)), dec.off)
+
+def missingField(slot: String, off: Int): Expr =
+  Expr.EBin("==", Expr.EVar(errName(off, slot), off), Expr.EStr("Json.field: missing field", off), off)
+
+def optionNone(typeName: String, off: Int): Expr =
+  Expr.EAscribe(Expr.EMethod(Expr.EVar("Option", off), "None", [], off), Str.concat("Option[", Str.concat(typeName, "]")), off)
+
+def optionSome(value: Expr, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Option", off), "Some", value :: [], off)
+
+def okValue(value: Expr, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Ok", value :: [], off)
+
+def nullPat(): String =
+  "Result.Ok(Json.Null)"
+
+def optSlot(slot: String): String =
+  joinSlot(slot, "o")
+
+def optionResult(inner: Ty): String =
+  inner match {
+    case Ty.Named(name) => Str.concat("Result[String, Option[", Str.concat(name, "]]"))
+    case _ => "Result[String, Option[String]]"
+  }
 
 def kindArms(ty: Ty, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
   ty match {
