@@ -1359,7 +1359,13 @@ def exprUsesPathEns(e: Expr, s: String, sTy: Ty, path: List[String], live: Bool,
   }
 
 def methodUsesPath(recv: Expr, name: String, args: List[Expr], s: String, sTy: Ty, path: List[String], live: Bool, ens: List[En]): Bool =
-  if (live && name == "copy" && !List.isEmpty(path) && isVarNamed(recv, s) && copyReplacesField(recordFieldsByName(ens, Type.headName(sTy)), args, List.at(path, 0))) listUsesPathEns(args, s, sTy, path, live, ens) else exprUsesPathEns(recv, s, sTy, path, live, ens) || (!live || name != "require") && listUsesPathEns(args, s, sTy, path, live, ens)
+  if (live && name == "copy" && !List.isEmpty(path) && isVarNamed(recv, s) && copyReplacesField(recordFieldsByName(ens, Type.headName(sTy)), args, List.at(path, 0))) listUsesPathEns(args, s, sTy, path, live, ens) else methodUsesResult(recv, name, args, s, sTy, path, live, ens)
+
+def methodUsesResult(recv: Expr, name: String, args: List[Expr], s: String, sTy: Ty, path: List[String], live: Bool, ens: List[En]): Bool =
+  if (live && resultMethodCall(recv, s, sTy, ens)) callUsesPath(Str.concat(Type.appName(sTy), Str.concat(".", name)), recv :: args, s, sTy, path, true, ens) else exprUsesPathEns(recv, s, sTy, path, live, ens) || (!live || name != "require") && listUsesPathEns(args, s, sTy, path, live, ens)
+
+def resultMethodCall(recv: Expr, s: String, sTy: Ty, ens: List[En]): Bool =
+  resultCarrierTy(sTy, ens) && isVarNamed(recv, s) && (Type.appName(sTy) == "Map" || Type.appName(sTy) == "Ref")
 
 def recordFieldsByName(ens: List[En], name: String): List[Param] =
   recordFieldsByFound(findUserEn(ens, name))
@@ -1379,7 +1385,78 @@ def copyPosHasField(ps: List[Param], posLen: Int, field: String, idx: Int): Bool
   if (idx >= posLen || List.isEmpty(ps)) false else List.at(ps, 0).name == field || copyPosHasField(List.tail(ps), posLen, field, idx + 1)
 
 def callUsesPath(f: String, args: List[Expr], s: String, sTy: Ty, path: List[String], live: Bool, ens: List[En]): Bool =
-  if (!live) f == s || listUsesPathEns(args, s, sTy, path, false, ens) else if (f == "Property.check") List.len(args) >= 3 && exprUsesPathEns(List.at(args, 2), s, sTy, path, true, ens) else if (isErasedPropertyCall(f)) false else List.isEmpty(path) && f == s || listUsesPathEns(args, s, sTy, path, true, ens)
+  if (!live) f == s || listUsesPathEns(args, s, sTy, path, false, ens) else if (f == "Property.check") List.len(args) >= 3 && exprUsesPathEns(List.at(args, 2), s, sTy, path, true, ens) else if (isErasedPropertyCall(f)) false else if (resultCarrierTy(sTy, ens) && resultHideCall(f, sTy, path, ens)) listStoredUses(args, s, sTy, path, ens) else if (resultCarrierTy(sTy, ens) && resultPredCall(f)) resultPredUses(args, s, sTy, path, ens) else List.isEmpty(path) && f == s || listUsesPathEns(args, s, sTy, path, true, ens)
+
+def resultHideCall(f: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  if (f == "Ref.set" || f == "Ref.update" || f == "Map.size" || f == "Map.isEmpty" || f == "Map.nonEmpty" || f == "Map.contains") true else if (f == "Map.keys") !mapKeyCarries(containerPathTy(sTy, path, ens), ens) else f == "Map.values" && !mapValCarries(containerPathTy(sTy, path, ens), ens)
+
+def resultPredCall(f: String): Bool =
+  f == "Map.exists" || f == "Map.forall"
+
+def mapKeyCarries(ty: Ty, ens: List[En]): Bool =
+  Type.appName(ty) == "Map" && mapArgCarries(Type.appArgs(ty), ens)
+
+def mapArgCarries(args: List[Ty], ens: List[En]): Bool =
+  !List.isEmpty(args) && resultCarrierTy(List.at(args, 0), ens)
+
+def mapValCarries(ty: Ty, ens: List[En]): Bool =
+  Type.appName(ty) == "Map" && mapValArgCarries(Type.appArgs(ty), ens)
+
+def mapValArgCarries(args: List[Ty], ens: List[En]): Bool =
+  List.len(args) >= 2 && resultCarrierTy(List.at(args, 1), ens)
+
+def resultPredUses(args: List[Expr], s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  if (List.isEmpty(args)) false else resultPredStep(List.at(args, 0), List.tail(args), s, sTy, path, ens)
+
+def resultPredStep(mapE: Expr, rest: List[Expr], s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  if (List.isEmpty(rest)) storedArgUses(mapE, s, sTy, path, ens) else if (predHandles(List.at(rest, 0))) exprUsesPathEns(mapE, s, sTy, path, true, ens) || storedArgUses(List.at(rest, 0), s, sTy, path, ens) || listStoredUses(List.tail(rest), s, sTy, path, ens) else listStoredUses(mapE :: rest, s, sTy, path, ens)
+
+def predHandles(e: Expr): Bool =
+  e match {
+    case Expr.ELam(p, _, body) => p != "" && p != "_" && exprUsesPath(body, p, [], true)
+    case Expr.EVar(_, _) => true
+    case Expr.EAscribe(inner, _, _) => predHandles(inner)
+    case Expr.ENamed(_, inner) => predHandles(inner)
+    case _ => false
+  }
+
+def listStoredUses(xs: List[Expr], s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  List.exists(xs, e => storedArgUses(e, s, sTy, path, ens))
+
+def storedArgUses(e: Expr, s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  e match {
+    case Expr.EVar(_, _) => false
+    case Expr.EPrint(inner, _) => storedArgUses(inner, s, sTy, path, ens)
+    case Expr.ECall(f, args, _) => storedCallUses(f, args, s, sTy, path, ens)
+    case Expr.EMethod(recv, name, args, _) => storedMethodUses(recv, name, args, s, sTy, path, ens)
+    case Expr.EField(recv, _, _) => storedArgUses(recv, s, sTy, path, ens)
+    case Expr.EBin(_, l, r, _) => storedArgUses(l, s, sTy, path, ens) || storedArgUses(r, s, sTy, path, ens)
+    case Expr.EUn(_, inner, _) => storedArgUses(inner, s, sTy, path, ens)
+    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && storedArgUses(body, s, sTy, path, ens)
+    case Expr.EIf(c, t, el, _) => storedArgUses(c, s, sTy, path, ens) || storedArgUses(t, s, sTy, path, ens) || storedArgUses(el, s, sTy, path, ens)
+    case Expr.EMatch(_, _, _) => exprUsesPathEns(e, s, sTy, path, true, ens)
+    case Expr.EInterp(_, parts, _) => listStoredUses(parts, s, sTy, path, ens)
+    case Expr.EList(xs) => listStoredUses(xs, s, sTy, path, ens)
+    case Expr.ETuple(xs) => listStoredUses(xs, s, sTy, path, ens)
+    case Expr.ENamed(_, inner) => storedArgUses(inner, s, sTy, path, ens)
+    case Expr.EAscribe(inner, _, _) => storedArgUses(inner, s, sTy, path, ens)
+    case Expr.EFor(bs, body, _) => storedForUses(bs, body, s, sTy, path, ens)
+    case _ => false
+  }
+
+def storedCallUses(f: String, args: List[Expr], s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  if (f == "Property.check") List.len(args) >= 3 && storedArgUses(List.at(args, 2), s, sTy, path, ens) else if (isErasedPropertyCall(f)) false else callUsesPath(f, args, s, sTy, path, true, ens)
+
+def storedMethodUses(recv: Expr, name: String, args: List[Expr], s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  if (resultMethodCall(recv, s, sTy, ens)) callUsesPath(Str.concat(Type.appName(sTy), Str.concat(".", name)), recv :: args, s, sTy, path, true, ens) else storedArgUses(recv, s, sTy, path, ens) || name != "require" && listStoredUses(args, s, sTy, path, ens)
+
+def storedForUses(bs: List[Bind], body: Expr, s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  if (List.isEmpty(bs)) storedArgUses(body, s, sTy, path, ens) else storedForBind(List.at(bs, 0), List.tail(bs), body, s, sTy, path, ens)
+
+def storedForBind(b: Bind, rest: List[Bind], body: Expr, s: String, sTy: Ty, path: List[String], ens: List[En]): Bool =
+  b match {
+    case Bind(_, pat, value) => storedArgUses(value, s, sTy, path, ens) || !patternBindsName(pat, s) && storedForUses(rest, body, s, sTy, path, ens)
+  }
 
 def isErasedPropertyCall(f: String): Bool =
   f == "Property.assert" || f == "Property.assume" || f == "Property.sometimes" || f == "Property.classify"
@@ -1517,6 +1594,8 @@ def resultCarrierSeen(ty: Ty, ens: List[En], seen: List[String], fuel: Int): Boo
   case Ty.App("Result", _) => true
   case Ty.App("List", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
   case Ty.App("Option", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
+  case Ty.App("Map", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
+  case Ty.App("Ref", args) => List.exists(args, item => resultCarrierSeen(item, ens, seen, fuel - 1))
   case Ty.Tuple(parts) => List.exists(parts, item => resultCarrierSeen(item, ens, seen, fuel - 1))
   case Ty.Arrow(_, _) => false
   case _ => resultCarrierUser(ty, Type.show(ty), findUserEn(ens, Type.headName(ty)), ens, seen, fuel)
@@ -1571,7 +1650,7 @@ def recordPathSelected(ty: Ty, en: En, args: List[Ty], selected: List[Param], re
   if (List.isEmpty(selected)) ty else containerPathTy(substTySim(Type.parse(List.at(selected, 0).ty), en.tparams, args), rest, ens)
 
 def resultDiscardedMessage(ty: Ty): String =
-  if (Type.appName(ty) == "List") "Result list is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Option") "Result option is discarded in live code; match it, return it, or pass it to a function" else "Result value is discarded in live code; match it, return it, or pass it to a function"
+  if (Type.appName(ty) == "List") "Result list is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Option") "Result option is discarded in live code; match it, return it, or pass it to a function" else if (Type.appName(ty) == "Map") "Result map is discarded in live code; return it or pass it to a function" else if (Type.appName(ty) == "Ref") "Result reference is discarded in live code; return it or pass it to a function" else "Result value is discarded in live code; match it, return it, or pass it to a function"
 
 def resultAlternativeErr(pat: String, ty: String, checkLive: Bool, rest: List[Bind], body: Expr, ens: List[En], i: Int): String =
   resultAlternativeNext(resultBindErr(Str.take(pat, i), ty, checkLive, rest, body, ens), Str.drop(pat, i + 3), ty, checkLive, rest, body, ens)
@@ -2998,7 +3077,7 @@ def matchWildResultErr(ty: String, parsed: Ty, unguardedPriors: List[String], se
   if (!resultCarrierTy(parsed, ens)) "" else if (!List.isEmpty(unguardedPriors) && coverComplete(List.map(unguardedPriors, p => [p]), [ty], ens)) "" else if (List.isEmpty(seenPriors)) matchWildEmptyPriors(ty, parsed, ens, seen, fuel) else if (Type.appName(parsed) == "Result") if (!List.exists(seenPriors, p => !coverWild(coverClean(p), ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, unguardedPriors, seenPriors, ens, seen, fuel) else if (List.isEmpty(coverCases(ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, unguardedPriors, seenPriors, ens, seen, fuel)
 
 def matchWildEmptyPriors(ty: String, parsed: Ty, ens: List[En], seen: List[String], fuel: Int): String =
-  if (fuel <= 0 || List.contains(seen, ty)) "" else if (Type.appName(parsed) == "Result" || Type.appName(parsed) == "List" || Type.appName(parsed) == "Option") resultDiscardedMessage(parsed) else if (List.isEmpty(coverCases(ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, [], [], ens, ty :: seen, fuel - 1)
+  if (fuel <= 0 || List.contains(seen, ty)) "" else if (Type.appName(parsed) == "Result" || Type.appName(parsed) == "List" || Type.appName(parsed) == "Option" || Type.appName(parsed) == "Map" || Type.appName(parsed) == "Ref") resultDiscardedMessage(parsed) else if (List.isEmpty(coverCases(ty, ens))) resultDiscardedMessage(parsed) else matchWildCasesPriors(coverCases(ty, ens), ty, [], [], ens, ty :: seen, fuel - 1)
 
 def matchWildCasesPriors(cases: List[EnCase], ty: String, unguardedPriors: List[String], seenPriors: List[String], ens: List[En], seen: List[String], fuel: Int): String =
   if (List.isEmpty(cases)) "" else matchWildCaseStep(List.at(cases, 0), List.tail(cases), ty, unguardedPriors, seenPriors, ens, seen, fuel)
