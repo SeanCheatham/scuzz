@@ -227,6 +227,8 @@ def helpLsp(): String =
 
 Find-references reads the same project modules and binding data as rename.
 
+Signature help reads the same project modules and binding data as rename.
+
 Usage: scuzz lsp [OPTIONS] [PATH]
 
 Arguments:
