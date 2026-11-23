@@ -86,25 +86,28 @@ terminate_bundle() {
 }
 
 stop_console() {
-  local pid
+  local pid pids
   [ -n "$CONSOLE" ] || return 0
-  local pids
   pids="$(descendants "$CONSOLE" || true)"
+  # The console leads its process group. Kill that group before a slow wait.
+  # A leftover child keeps the session pipe open.
+  kill -KILL -- "-$CONSOLE" 2>/dev/null || true
   for pid in $pids "$CONSOLE"; do
     kill -KILL "$pid" 2>/dev/null || true
   done
-  # Word splitting is the pid list.
-  reap_all 100 $pids "$CONSOLE"
+  # Word splitting is the pid list. Two seconds is enough to reap a dead child.
+  reap_all 20 $pids "$CONSOLE"
   CONSOLE=""
 }
 
 stop_app() {
   local n
+  # Close the session pipe before simctl terminate. Terminate can take seconds.
   kill_app
+  stop_console
   if [ -n "$BUNDLE" ]; then
     terminate_bundle
   fi
-  stop_console
   kill_app
   n=0
   while app_alive && [ "$n" -lt 20 ]; do
@@ -113,14 +116,30 @@ stop_app() {
   done
 }
 
+exiting=0
+
 on_exit() {
   trap : INT TERM HUP
+  if [ "$exiting" -eq 1 ]; then
+    return 0
+  fi
+  exiting=1
   stop_app
 }
 
+on_int() {
+  trap : INT TERM HUP
+  exit 130
+}
+
+on_term() {
+  trap : INT TERM HUP
+  exit 143
+}
+
 trap on_exit EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM HUP
+trap on_int INT
+trap on_term TERM HUP
 
 launch() {
   local name next_bundle
@@ -143,7 +162,8 @@ launch() {
       export SIMCTL_CHILD_SCUZZ_UI_RELOAD_STAMP="$OUT/reload.stamp"
       export SIMCTL_CHILD_SCUZZ_UI_RELOAD_CODE="$OUT/reload.dylib"
     fi
-    exec xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE"
+    # Lead a new process group so stop can kill every child that inherits the pipe.
+    exec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE"
   ) &
   CONSOLE=$!
 }
