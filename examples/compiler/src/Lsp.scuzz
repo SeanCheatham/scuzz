@@ -96,6 +96,15 @@ def posCol(j: Json): Int =
 def newNameOf(j: Json): String =
   jStr(jGet(paramsOf(j), "newName"))
 
+def includeDeclOf(j: Json): Bool =
+  includeDeclVal(jGet(jGet(paramsOf(j), "context"), "includeDeclaration"))
+
+def includeDeclVal(j: Json): Bool =
+  j match {
+    case Json.Bool(b) => b
+    case _ => true
+  }
+
 def pathOfUri(uri: String): String =
   pctDecode(stripFileUri(uri))
 
@@ -925,6 +934,141 @@ def renameJson(uri: String, src: String, line: Int, col: Int, nu: String): Strin
     mods = [ModFile(stem, path, src)]
   } yield renameWorkspaceJson(mods, path, uri, [], [], stem, src, line, col, nu)
 
+def referencesJson(uri: String, src: String, line: Int, col: Int, includeDecl: Bool): String =
+  for {
+    path = pathOfUri(uri)
+    stem = stemOfPath(path)
+    mods = [ModFile(stem, path, src)]
+  } yield referencesWorkspaceJson(mods, path, uri, [], [], stem, src, line, col, includeDecl)
+
+def locsJoin(xs: List[String]): String =
+  if (List.isEmpty(xs)) "[]" else Str.concat("[", Str.concat(List.join(xs, ","), "]"))
+
+def locJson(uri: String, range: String): String =
+  Str.concat("{\"uri\":", Str.concat(Check.jsonStr(uri), Str.concat(",\"range\":", Str.concat(range, "}"))))
+
+def identRangeJson(starts: LineIndex, src: String, off: Int, len: Int): String =
+  identRangePair(Check.lineColIdx(starts, src, off), Check.lineColIdx(starts, src, off + len))
+
+def identRangePair(a: (Int, Int), b: (Int, Int)): String =
+  a match {
+    case (line, col) => b match {
+  case (eline, ecol) => rangeOfNums(line - 1, col - 1, eline - 1, ecol - 1)
+}
+  }
+
+def tokLocJson(uri: String, src: String, starts: LineIndex, toks: Toks, idx: Int): String =
+  for {
+    sp = Parse._sp(toks, idx)
+  } yield locJson(uri, identRangeJson(starts, src, sp.off, tokLen(sp.tok, src, sp.off)))
+
+def isSymbolDeclTok(toks: Toks, i: Int): Bool =
+  if (i < 1 || !isTopDeclKeyword(Parse._at(toks, i - 1))) false else symbolDeclKw(toks, i)
+
+def symbolDeclKw(toks: Toks, i: Int): Bool =
+  if (Parse._sp(toks, i - 1).column == 0) i < 2 || !Parse._is(toks, i - 2, Tok.Impl) else privateOrMainDef(toks, i)
+
+def privateOrMainDef(toks: Toks, i: Int): Bool =
+  Parse._is(toks, i - 1, Tok.Def) && i >= 2 && (Parse._is(toks, i - 2, Tok.Private) || Parse._is(toks, i - 2, Tok.AtMain))
+
+def isQualTok(toks: Toks, i: Int): Bool =
+  i + 1 < toks.n && Parse._is(toks, i + 1, Tok.Dot)
+
+def modIsActive(m: ModFile, activeNormPath: String, activeStem: String, activeSrc: String): Bool =
+  if (Str.nonEmpty(activeNormPath) && m.path == activeNormPath) true else m.stem == activeStem && m.src == activeSrc
+
+def moduleImports(p: Prog, owner: String, targetMod: String, sym: String): Bool =
+  List.exists(p.imps, imp => imp.owner == owner && imp.mod == targetMod && (imp.name == "*" || imp.name == sym && Str.isEmpty(imp.alias)))
+
+def localRefLocs(uri: String, src: String, toks: Toks, refs: List[(Int, Int)], declIdx: Int, includeDecl: Bool): List[String] =
+  for {
+    starts = Check.fastLineIndex(src)
+    indices = List.map(List.filter(refs, r => r._2 == declIdx && (includeDecl || r._1 != declIdx)), r => r._1)
+  } yield List.map(indices, i => tokLocJson(uri, src, starts, toks, i))
+
+def keptSymIndices(toks: Toks, indices: List[Int], includeDecl: Bool): List[Int] =
+  if (includeDecl) indices else List.filter(indices, i => !isSymbolDeclTok(toks, i))
+
+def symbolPart(m: ModFile, p: Prog, enumCases: List[String], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, activeSrc: String, targetMod: String, sym: String, includeDecl: Bool, cursorIdx: Int): (Bool, List[String]) =
+  for {
+    toks = Parse.indexToks(Lexer.lex(m.src))
+    bindRefs = localBindRefs(toks, enumCases)
+    selfMod = m.stem == targetMod
+    importsBare = !selfMod && !topSymbolExists(p, m.stem, sym) && moduleImports(p, m.stem, targetMod, sym)
+    indices = collectModuleSymIndices(toks, 0, bindRefs, selfMod, importsBare, targetMod, sym, [])
+    kept = keptSymIndices(toks, indices, includeDecl)
+    starts = Check.fastLineIndex(m.src)
+    uri = uriForModPath(m.path, activeNormPath, activeUri, open, openNorm)
+    hit = modIsActive(m, activeNormPath, activeStem, activeSrc) && List.contains(indices, cursorIdx)
+  } yield (hit, List.map(kept, i => tokLocJson(uri, m.src, starts, toks, i)))
+
+def symbolRefs(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, activeSrc: String, p: Prog, enumCases: List[String], targetMod: String, sym: String, includeDecl: Bool, cursorIdx: Int): String =
+  for {
+    parts = List.map(mods, m => symbolPart(m, p, enumCases, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, targetMod, sym, includeDecl, cursorIdx))
+    hit = List.exists(parts, part => part._1)
+    locs = List.flatten(List.map(parts, part => part._2))
+  } yield if (!hit) "null" else locsJoin(locs)
+
+def collectModQualIndices(toks: Toks, refs: List[(Int, Int)], stem: String, i: Int, acc: List[Int]): List[Int] =
+  if (i >= toks.n) List.reverse(acc) else Parse._at(toks, i) match {
+  case Tok.Ident(s) => if (s == stem && lookupLocalDecl(refs, i) < 0 && isQualTok(toks, i)) collectModQualIndices(toks, refs, stem, i + 1, i :: acc) else collectModQualIndices(toks, refs, stem, i + 1, acc)
+  case _ => collectModQualIndices(toks, refs, stem, i + 1, acc)
+}
+
+def modQualPart(m: ModFile, enumCases: List[String], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, activeSrc: String, stem: String, cursorIdx: Int): (Bool, List[String]) =
+  for {
+    toks = Parse.indexToks(Lexer.lex(m.src))
+    bindRefs = localBindRefs(toks, enumCases)
+    indices = collectModQualIndices(toks, bindRefs, stem, 0, [])
+    starts = Check.fastLineIndex(m.src)
+    uri = uriForModPath(m.path, activeNormPath, activeUri, open, openNorm)
+    hit = modIsActive(m, activeNormPath, activeStem, activeSrc) && List.contains(indices, cursorIdx)
+  } yield (hit, List.map(indices, i => tokLocJson(uri, m.src, starts, toks, i)))
+
+def moduleDeclLoc(m: ModFile, activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open]): String =
+  locJson(uriForModPath(m.path, activeNormPath, activeUri, open, openNorm), rangeOf(m.src, 0))
+
+def modNameRefs(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, activeSrc: String, enumCases: List[String], name: String, includeDecl: Bool, cursorIdx: Int): String =
+  findModByStem(mods, name) match {
+    case None => "null"
+    case Some(declMod) => for {
+  parts = List.map(mods, m => modQualPart(m, enumCases, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, name, cursorIdx))
+  hit = List.exists(parts, part => part._1)
+  uses = List.flatten(List.map(parts, part => part._2))
+  decl = if (includeDecl) [moduleDeclLoc(declMod, activeNormPath, activeUri, open, openNorm)] else []: List[String]
+} yield if (!hit) "null" else locsJoin(List.distinct(List.concat(decl, uses)))
+  }
+
+def referencesModName(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, activeSrc: String, toks: Toks, enumCases: List[String], idx: Int, name: String, includeDecl: Bool): String =
+  if (!hasModStem(mods, name) || !isQualTok(toks, idx)) "null" else modNameRefs(mods, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, enumCases, name, includeDecl, idx)
+
+def referencesBare(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, activeSrc: String, toks: Toks, p: Prog, enumCases: List[String], idx: Int, name: String, includeDecl: Bool): String =
+  if (topSymbolExists(p, activeStem, name) || List.len(mods) == 1) symbolRefs(mods, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, p, enumCases, activeStem, name, includeDecl, idx) else for {
+  imp = resolveImpMod(p.imps, activeStem, name)
+} yield if (Str.nonEmpty(imp._1) && imp._2 == name) symbolRefs(mods, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, p, enumCases, imp._1, imp._2, includeDecl, idx) else referencesModName(mods, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, toks, enumCases, idx, name, includeDecl)
+
+def referencesOuter(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, activeSrc: String, toks: Toks, p: Prog, enumCases: List[String], refs: List[(Int, Int)], idx: Int, name: String, includeDecl: Bool): String =
+  for {
+    afterDot = idx >= 1 && Parse._is(toks, idx - 1, Tok.Dot)
+    dotLhs = if (afterDot && idx >= 2) Parse._identOf(Parse._at(toks, idx - 2)) else ""
+  } yield if (afterDot) if (hasModStem(mods, dotLhs) && lookupLocalDecl(refs, idx - 2) < 0) symbolRefs(mods, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, p, enumCases, dotLhs, name, includeDecl, idx) else "null" else referencesBare(mods, activeNormPath, activeUri, open, openNorm, activeStem, activeSrc, toks, p, enumCases, idx, name, includeDecl)
+
+def referencesAt(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, src: String, toks: Toks, idx: Int, includeDecl: Bool): String =
+  for {
+    name = Parse._identOf(Parse._at(toks, idx))
+    p = Parse.parseFiles(modPairs(mods))
+    enumCases = enumCaseSet(p)
+    refs = localBindRefs(toks, enumCases)
+    declIdx = lookupLocalDecl(refs, idx)
+  } yield if (declIdx >= 0) locsJoin(localRefLocs(activeUri, src, toks, refs, declIdx, includeDecl)) else referencesOuter(mods, activeNormPath, activeUri, open, openNorm, activeStem, src, toks, p, enumCases, refs, idx, name, includeDecl)
+
+def referencesWorkspaceJson(mods: List[ModFile], activeNormPath: String, activeUri: String, open: List[Open], openNorm: List[Open], activeStem: String, src: String, line: Int, col: Int, includeDecl: Bool): String =
+  for {
+    toks = Parse.indexToks(Lexer.lex(src))
+    off = offsetOf(src, line, col)
+    idx = identTokAtOff(toks, off, 0)
+  } yield if (idx < 0) "null" else referencesAt(mods, activeNormPath, activeUri, open, openNorm, activeStem, src, toks, idx, includeDecl)
+
 def renameIdents(src: String, name: String, nu: String): String =
   if (!validIdent(name) || !validIdent(nu)) src else Builder.result(renameToks(Lexer.lex(src), src, name, nu, 0, Builder.empty()))
 
@@ -1309,7 +1453,7 @@ def tokensJoinHd(n: Int, rest: List[Int], b: Builder): String =
   if (List.isEmpty(rest)) Builder.result(Builder.append(b, Str.fromInt(n))) else tokensJoinGo(rest, Builder.append(Builder.append(b, Str.fromInt(n)), ","))
 
 def caps(): String =
-  "{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":true,\"definitionProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":true,\"inlayHintProvider\":true,\"foldingRangeProvider\":true,\"codeActionProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true}}}"
+  "{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":true,\"inlayHintProvider\":true,\"foldingRangeProvider\":true,\"codeActionProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true}}}"
 
 def errorMsg(id: String, code: Int, message: String): String =
   Str.concat("{\"jsonrpc\":\"2.0\",\"id\":", Str.concat(id, Str.concat(",\"error\":{\"code\":", Str.concat(Str.fromInt(code), Str.concat(",\"message\":", Str.concat(Check.jsonStr(message), "}}"))))))
@@ -1430,7 +1574,7 @@ def handleM2(root: String, open: List[Open], j: Json, method: String, id: String
   if (method == "textDocument/didOpen") didOpen(root, open, j) else if (method == "textDocument/didChange") didChange(root, open, j) else if (method == "textDocument/didClose") didClose(open, j) else handleM3(root, open, j, method, id)
 
 def handleM3(root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
-  if (method == "textDocument/hover") hover(root, open, j, id) else if (method == "textDocument/completion") complete(root, open, j, id) else if (method == "textDocument/definition") definition(root, open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(root, open, j, id) else if (method == "textDocument/semanticTokens/full") tokens(open, j, id) else if (method == "textDocument/inlayHint") inlayHint(root, open, j, id) else if (method == "textDocument/foldingRange") foldingRange(open, j, id) else if (method == "textDocument/codeAction") codeAction(open, j, id) else handleM4(open, id)
+  if (method == "textDocument/hover") hover(root, open, j, id) else if (method == "textDocument/completion") complete(root, open, j, id) else if (method == "textDocument/definition") definition(root, open, j, id) else if (method == "textDocument/references") references(root, open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(root, open, j, id) else if (method == "textDocument/semanticTokens/full") tokens(open, j, id) else if (method == "textDocument/inlayHint") inlayHint(root, open, j, id) else if (method == "textDocument/foldingRange") foldingRange(open, j, id) else if (method == "textDocument/codeAction") codeAction(open, j, id) else handleM4(open, id)
 
 def handleM4(open: List[Open], id: String): IO[List[Open]] =
   if (id == "null") IO.pure(open) else lspReplyErrKeep(open, id)
@@ -1531,6 +1675,17 @@ def definition(root: String, open: List[Open], j: Json, id: String): IO[List[Ope
     _ <- reply(id, defWorkspaceJson(mods, aPath, uri, open, openNorm, stemOfPath(path), src, posLine(j), posCol(j)))
   } yield open
 
+def references(root: String, open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    uri = uriOf(j)
+    path = pathOfUri(uri)
+    aPath <- normPath(path)
+    openNorm <- normOpen(open)
+    src <- srcOf(open, path)
+    mods <- workspaceMods(root, open, path, src)
+    _ <- reply(id, referencesWorkspaceJson(mods, aPath, uri, open, openNorm, stemOfPath(path), src, posLine(j), posCol(j), includeDeclOf(j)))
+  } yield open
+
 def tokens(open: List[Open], j: Json, id: String): IO[List[Open]] =
   srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, tokensJson(src)).flatMap(_ => IO.pure(open)))
 
@@ -1574,7 +1729,7 @@ def query(root: String, path: String, body: String, method: String, line: Int, c
     open = [Open(path, body)]
     openNorm = [Open(aPath, body)]
     stem = stemOfPath(path)
-    out <- if (method == "textDocument/semanticTokens/full") IO.pure(resultMsg("2", tokensJson(body))) else if (method == "textDocument/foldingRange") IO.pure(resultMsg("2", foldingRangesJson(body))) else if (method == "textDocument/formatting") IO.pure(resultMsg("2", formatJson(body))) else if (method == "textDocument/codeAction") IO.pure(resultMsg("2", codeActionsJson(uri, body))) else if (method == "textDocument/inlayHint") workspaceMods(root, open, path, body).map(mods => resultMsg("2", inlayHintsWorkspaceJson(mods, stem, body, Json.Null()))) else if (method == "textDocument/hover") workspaceMods(root, open, path, body).map(mods => resultMsg("2", hoverJson(hoverWorkspace(mods, stem, body, line, col)))) else if (method == "textDocument/completion") workspaceMods(root, open, path, body).map(mods => resultMsg("2", completeWorkspaceJson(mods, stem, body, qualPrefixAt(body, offsetOf(body, line, col))))) else if (method == "textDocument/definition") workspaceMods(root, open, path, body).map(mods => resultMsg("2", defWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col))) else if (method == "textDocument/rename") workspaceMods(root, open, path, body).map(mods => resultMsg("2", renameWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu))) else IO.pure(errorMsg("2", 0 - 32601, "MethodNotFound"))
+    out <- if (method == "textDocument/semanticTokens/full") IO.pure(resultMsg("2", tokensJson(body))) else if (method == "textDocument/foldingRange") IO.pure(resultMsg("2", foldingRangesJson(body))) else if (method == "textDocument/formatting") IO.pure(resultMsg("2", formatJson(body))) else if (method == "textDocument/codeAction") IO.pure(resultMsg("2", codeActionsJson(uri, body))) else if (method == "textDocument/inlayHint") workspaceMods(root, open, path, body).map(mods => resultMsg("2", inlayHintsWorkspaceJson(mods, stem, body, Json.Null()))) else if (method == "textDocument/hover") workspaceMods(root, open, path, body).map(mods => resultMsg("2", hoverJson(hoverWorkspace(mods, stem, body, line, col)))) else if (method == "textDocument/completion") workspaceMods(root, open, path, body).map(mods => resultMsg("2", completeWorkspaceJson(mods, stem, body, qualPrefixAt(body, offsetOf(body, line, col))))) else if (method == "textDocument/definition") workspaceMods(root, open, path, body).map(mods => resultMsg("2", defWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col))) else if (method == "textDocument/references") workspaceMods(root, open, path, body).map(mods => resultMsg("2", referencesWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu != "0"))) else if (method == "textDocument/rename") workspaceMods(root, open, path, body).map(mods => resultMsg("2", renameWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu))) else IO.pure(errorMsg("2", 0 - 32601, "MethodNotFound"))
   } yield out
 
 def headerBody(acc: String): Int =

@@ -223,7 +223,9 @@ See: scuzz docs start
 """
 
 def helpLsp(): String =
-  """Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
+  """Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP).
+
+Find-references reads the same project modules and binding data as rename.
 
 Usage: scuzz lsp [OPTIONS] [PATH]
 
