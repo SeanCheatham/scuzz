@@ -532,6 +532,12 @@ fields = [('{}', 'error:Json.field: missing field'),
           ('{"quantity":true}', 'ok:true'),
           ('{"quantity":"7"}', 'ok:"7"'),
           ('{"quantity":7}', 'ok:7')]
+paths = [('{"order":{}}', 'error:Json.path: missing field order.quantity'),
+         ('{"order":1}', 'error:Json.path: wrong case at order.quantity'),
+         ('[]', 'error:Json.path: wrong case at order'),
+         ('{"order":null}', 'error:Json.path: wrong case at order.quantity'),
+         ('{"order":{"quantity":null}}', 'ok:null'),
+         ('{"order":{"quantity":7}}', 'ok:7')]
 quantities = ['{}', '[]', 'null', '{', '{"quantity":null}', '{"quantity":"7"}',
               '{"quantity":true}', '{"quantity":1.0}', '{"quantity":-1}',
               '{"quantity":0}', '{"quantity":1}', '{"quantity":100}', '{"quantity":101}']
@@ -556,15 +562,28 @@ with tempfile.TemporaryDirectory(prefix='scuzz-input-') as directory:
     case Result.Err(error) => s"error:$error"
   }
 
+def nested(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => Json.path(json, ["order", "quantity"]) match {
+      case Result.Ok(value) => Json.stringify(value) match {
+        case Result.Ok(encoded) => s"ok:$encoded"
+        case Result.Err(error) => s"error:$error"
+      }
+      case Result.Err(error) => s"error:$error"
+    }
+    case Result.Err(error) => s"error:$error"
+  }
+
 @main def main: IO[Unit] =
   for {
     _ <- IO.foreachDiscard(INTEGERS, text => IO.println(Input.parsed(text)))
     _ <- IO.foreachDiscard(FIELDS, text => IO.println(field(text)))
+    _ <- IO.foreachDiscard(PATHS, text => IO.println(nested(text)))
     _ <- IO.foreachDiscard(QUANTITIES, text => IO.println(Str.fromBool(Input.accepted(Input.decodeQuantity(text)))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('QUANTITIES', array(quantities))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities))
     (root / 'src/Main.scuzz').write_text(source)
-    expected = [parsed(text) for text in integers] + [value for _, value in fields]
+    expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
     command('fmt', root)
     for engine in ['run', 'eval']:

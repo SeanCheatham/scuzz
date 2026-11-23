@@ -949,6 +949,10 @@ SzAdt *sz_json_parse(SzString *s);
 SzAdt *sz_json_stringify(SzAdt *j);
 /* A required object field returns Result[String, Json]. */
 SzAdt *sz_json_field(SzAdt *j, SzString *key);
+/* Read object fields along a path. Return Result[String, Json].
+ * A missing field names the path. A value that is not an object names
+ * the path and the wrong case. A present null at the last field is a value. */
+SzAdt *sz_json_path(SzAdt *j, SzList *path);
 SzList *sz_json_get(SzAdt *j, SzString *key); /* List[Json]; empty miss */
 SzList *sz_json_keys(SzAdt *j);               /* List[String]; empty if not Obj */
 SzList *sz_json_arr(SzAdt *j);                /* List[Json]; empty if not Arr */

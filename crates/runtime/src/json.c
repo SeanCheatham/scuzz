@@ -773,6 +773,68 @@ SzAdt *sz_json_field(SzAdt *j, SzString *key) {
   return result_err("Json.field: missing field");
 }
 
+static SzString *json_copy_key(const SzString *key) {
+  if (!key || !key->data)
+    return sz_string_from_cstr("");
+  return sz_string_from_bytes(key->data, key->len);
+}
+
+/* Consume `prev`. */
+static SzString *json_path_extend(SzString *prev, const SzString *key) {
+  SzString *part = json_copy_key(key);
+  SzString *dot;
+  SzString *tail;
+  SzString *out;
+  if (sz_string_is_empty(prev)) {
+    sz_release(prev);
+    return part;
+  }
+  dot = sz_string_from_cstr(".");
+  tail = sz_string_concat(dot, part);
+  sz_release(dot);
+  sz_release(part);
+  out = sz_string_concat_take(prev, tail);
+  sz_release(tail);
+  return out;
+}
+
+static SzAdt *json_path_err(const char *prefix, SzString *path) {
+  SzString *pre = sz_string_from_cstr(prefix);
+  SzString *msg = sz_string_concat_take(pre, path);
+  sz_release(path);
+  return json_mk(RESULT_ERR, msg);
+}
+
+static SzAdt *json_path_find(SzAdt *j, SzString *key) {
+  SzList *xs = json_obj_list(j);
+  while (xs && !sz_list_is_empty(xs)) {
+    SzPair *entry = (SzPair *)sz_list_head(xs);
+    if (json_key_eq(entry, key))
+      return (SzAdt *)sz_pair_right(entry);
+    xs = sz_list_tail(xs);
+  }
+  return NULL;
+}
+
+SzAdt *sz_json_path(SzAdt *j, SzList *path) {
+  SzString *seen = sz_string_from_cstr("");
+  while (path && !sz_list_is_empty(path)) {
+    SzString *key = (SzString *)sz_list_head(path);
+    SzString *name = json_path_extend(seen, key);
+    SzAdt *next;
+    path = sz_list_tail(path);
+    if (!j || sz_adt_tag(j) != JSON_OBJ)
+      return json_path_err("Json.path: wrong case at ", name);
+    next = json_path_find(j, key);
+    if (!next)
+      return json_path_err("Json.path: missing field ", name);
+    j = next;
+    seen = name;
+  }
+  sz_release(seen);
+  return sz_adt_new(RESULT_OK, j);
+}
+
 SzList *sz_json_keys(SzAdt *j) {
   SzList *xs = json_obj_list(j);
   SzList *acc = NULL;
