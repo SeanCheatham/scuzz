@@ -1,0 +1,303 @@
+record DecodeCtx(enums: List[En], aliases: List[Alias], off: Int)
+
+import Parse.Prog
+import Parse.En
+import Parse.EnCase
+import Parse.Alias
+import Parse.Fun
+import Parse.Param
+import Parse.Expr
+import Parse.Arm
+import Parse.Bind
+import Parse.Im
+import Type.Ty
+
+def prog(p: Prog): Prog =
+  rewrite(p, DecodeCtx(p.enums, p.aliases, 0))
+
+def rewrite(p: Prog, dec: DecodeCtx): Prog =
+  p.copy(impls = List.map(p.impls, im => rewriteImpl(im, dec)), defs = List.map(p.defs, fn => rewriteFun(fn, dec)), body = walk(p.body, "", dec))
+
+def rewriteImpl(im: Im, dec: DecodeCtx): Im =
+  im.copy(methods = List.map(im.methods, fn => rewriteFun(fn, dec)))
+
+def rewriteFun(fn: Fun, dec: DecodeCtx): Fun =
+  fn.copy(body = walk(fn.body, fn.ret, dec))
+
+def walk(e: Expr, expected: String, dec: DecodeCtx): Expr =
+  e match {
+    case Expr.EMethod(recv, name, args, off) => walkMethod(recv, name, args, off, expected, dec)
+    case Expr.ECall(name, args, off) => walkCall(name, args, off, expected, dec)
+    case Expr.EAscribe(value, ann, off) => Expr.EAscribe(walk(value, ann, dec), ann, off)
+    case Expr.EMatch(value, arms, off) => Expr.EMatch(walk(value, "", dec), List.map(arms, arm => walkArm(arm, expected, dec)), off)
+    case Expr.EIf(cond, yes, no, off) => Expr.EIf(walk(cond, "", dec), walk(yes, expected, dec), walk(no, expected, dec), off)
+    case Expr.EFor(binds, body, off) => Expr.EFor(List.map(binds, bind => walkBind(bind, dec)), walk(body, forBody(expected, binds), dec), off)
+    case Expr.EPrint(value, off) => Expr.EPrint(walk(value, "", dec), off)
+    case Expr.EBin(op, left, right, off) => Expr.EBin(op, walk(left, "", dec), walk(right, "", dec), off)
+    case Expr.EUn(op, value, off) => Expr.EUn(op, walk(value, "", dec), off)
+    case Expr.ELam(name, ann, body) => Expr.ELam(name, ann, walk(body, "", dec))
+    case Expr.EInterp(text, parts, off) => Expr.EInterp(text, walkExprs(parts, dec), off)
+    case Expr.EList(values) => Expr.EList(walkExprs(values, dec))
+    case Expr.ETuple(values) => Expr.ETuple(walkExprs(values, dec))
+    case Expr.ENamed(name, value) => Expr.ENamed(name, walk(value, "", dec))
+    case Expr.EField(recv, name, off) => Expr.EField(walk(recv, "", dec), name, off)
+    case _ => e
+  }
+
+def walkArm(arm: Arm, expected: String, dec: DecodeCtx): Arm =
+  arm.copy(body = walk(arm.body, expected, dec))
+
+def walkBind(bind: Bind, dec: DecodeCtx): Bind =
+  bind.copy(value = walk(bind.value, "", dec))
+
+def walkExprs(values: List[Expr], dec: DecodeCtx): List[Expr] =
+  List.map(values, value => walk(value, "", dec))
+
+def forBody(expected: String, binds: List[Bind]): String =
+  if (draws(binds)) ioSuccess(expected) else expected
+
+def draws(binds: List[Bind]): Bool =
+  if (List.isEmpty(binds)) false else if (List.at(binds, 0).draw) true else draws(List.tail(binds))
+
+def ioSuccess(expected: String): String =
+  if (Type.appName(Type.parse(expected)) == "IO") Type.show(Type.ioOk(Type.parse(expected))) else expected
+
+def walkMethod(recv: Expr, name: String, args: List[Expr], off: Int, expected: String, dec: DecodeCtx): Expr =
+  if (isDecode(recv, name, args)) decodeAt(List.at(args, 0), off, expected, dec) else Expr.EMethod(walk(recv, "", dec), name, walkExprs(args, dec), off)
+
+def walkCall(name: String, args: List[Expr], off: Int, expected: String, dec: DecodeCtx): Expr =
+  if (name == "Json.decode" && List.len(args) == 1) decodeAt(List.at(args, 0), off, expected, dec) else Expr.ECall(name, walkExprs(args, dec), off)
+
+def isDecode(recv: Expr, name: String, args: List[Expr]): Bool =
+  name == "decode" && isJsonRecv(recv) && List.len(args) == 1
+
+def isJsonRecv(recv: Expr): Bool =
+  recv match {
+    case Expr.EVar(name, _) => name == "Json"
+    case _ => false
+  }
+
+def decodeAt(arg: Expr, off: Int, expected: String, dec: DecodeCtx): Expr =
+  decodeUse(walk(arg, "", dec), resultPayload(expected, dec.aliases), dec.copy(off = off))
+
+def decodeUse(arg: Expr, payload: String, dec: DecodeCtx): Expr =
+  if (payload == "") keepDecode(arg, dec.off) else decodeReady(arg, payload, dec)
+
+def keepDecode(arg: Expr, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Json", off), "decode", arg :: [], off)
+
+def decodeReady(arg: Expr, payload: String, dec: DecodeCtx): Expr =
+  decodeChecked(arg, expandTy(payload, dec.aliases), dec)
+
+def decodeChecked(arg: Expr, ty: String, dec: DecodeCtx): Expr =
+  decodeReason(arg, ty, topReason(ty, dec), dec)
+
+def decodeReason(arg: Expr, ty: String, reason: String, dec: DecodeCtx): Expr =
+  if (reason != "") Expr.ECall("Json.decode", Expr.EStr(reason, dec.off) :: [], dec.off) else bindDecode(arg, recordName(ty), dec)
+
+def topReason(ty: String, dec: DecodeCtx): String =
+  if (isRecordTy(ty, dec)) fieldProblems(recordFields(recordName(ty), dec.enums), "", dec, 32) else "Json.decode needs a record result"
+
+def resultPayload(expected: String, aliases: List[Alias]): String =
+  payloadOf(Type.parse(expandTy(expected, aliases)))
+
+def payloadOf(ty: Ty): String =
+  ty match {
+    case Ty.App(name, args) => if (name == "Result" && List.len(args) == 2 && isStringTy(List.at(args, 0))) Type.show(List.at(args, 1)) else ""
+    case _ => ""
+  }
+
+def isStringTy(ty: Ty): Bool =
+  ty match {
+    case Ty.Named(name) => name == "String"
+    case Ty.TVar(name) => name == "String"
+    case _ => false
+  }
+
+def recordName(ty: String): String =
+  recordNameOf(Type.parse(ty))
+
+def recordNameOf(ty: Ty): String =
+  ty match {
+    case Ty.Named(name) => name
+    case _ => ""
+  }
+
+def isRecordTy(ty: String, dec: DecodeCtx): Bool =
+  isPlainRecord(recordName(expandTy(ty, dec.aliases)), dec.enums)
+
+def isPlainRecord(name: String, enums: List[En]): Bool =
+  if (name == "" || List.isEmpty(enums)) false else plainRecord(List.at(enums, 0), List.tail(enums), name)
+
+def plainRecord(en: En, rest: List[En], name: String): Bool =
+  if (en.isRec && en.name == name && List.isEmpty(en.tparams)) true else isPlainRecord(name, rest)
+
+def recordFields(name: String, enums: List[En]): List[Param] =
+  if (List.isEmpty(enums)) [] else recordFieldsEn(List.at(enums, 0), List.tail(enums), name)
+
+def recordFieldsEn(en: En, rest: List[En], name: String): List[Param] =
+  if (en.isRec && en.name == name) caseFields(en.cases) else recordFields(name, rest)
+
+def caseFields(cases: List[EnCase]): List[Param] =
+  if (List.isEmpty(cases)) [] else List.at(cases, 0).fields
+
+def fieldProblems(fields: List[Param], prefix: String, dec: DecodeCtx, fuel: Int): String =
+  if (List.isEmpty(fields)) "" else fieldProblem(List.at(fields, 0), List.tail(fields), prefix, dec, fuel)
+
+def fieldProblem(field: Param, rest: List[Param], prefix: String, dec: DecodeCtx, fuel: Int): String =
+  problemNext(typeProblem(expandTy(field.ty, dec.aliases), joinPath(prefix, field.name), dec, fuel - 1), rest, prefix, dec, fuel)
+
+def problemNext(reason: String, rest: List[Param], prefix: String, dec: DecodeCtx, fuel: Int): String =
+  if (reason != "") reason else fieldProblems(rest, prefix, dec, fuel)
+
+def typeProblem(ty: String, path: String, dec: DecodeCtx, fuel: Int): String =
+  if (fuel <= 0) badRead(path) else typeProblemOf(Type.parse(ty), path, dec, fuel)
+
+def typeProblemOf(ty: Ty, path: String, dec: DecodeCtx, fuel: Int): String =
+  ty match {
+    case Ty.Named(name) => nameProblem(name, path, dec, fuel)
+    case _ => badRead(path)
+  }
+
+def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int): String =
+  if (isScalar(name) || name == "Json") "" else if (isPlainRecord(name, dec.enums)) fieldProblems(recordFields(name, dec.enums), path, dec, fuel) else badRead(path)
+
+def isScalar(name: String): Bool =
+  name == "String" || name == "Int" || name == "Bool" || name == "Float"
+
+def bindDecode(arg: Expr, ctor: String, dec: DecodeCtx): Expr =
+  Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], genRecord(recvName(dec.off), ctor, "", dec, 32), dec.off)
+
+def genRecord(recv: String, ctor: String, prefix: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (fuel <= 0) errText(dec.off, badRead(prefix)) else readFields(recv, ctor, recordFields(ctor, dec.enums), [], prefix, dec, fuel)
+
+def readFields(recv: String, ctor: String, fields: List[Param], done: List[Expr], prefix: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (List.isEmpty(fields)) if (List.isEmpty(done)) emptyObj(recv, ctor, prefix, dec) else okRecord(ctor, done, dec.off) else readOne(recv, ctor, List.at(fields, 0), List.tail(fields), done, prefix, dec, fuel)
+
+def readOne(recv: String, ctor: String, field: Param, rest: List[Param], done: List[Expr], prefix: String, dec: DecodeCtx, fuel: Int): Expr =
+  readTyped(recv, ctor, field.name, expandTy(field.ty, dec.aliases), rest, done, joinPath(prefix, field.name), prefix, dec, fuel)
+
+def readTyped(recv: String, ctor: String, name: String, ty: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(jsonField(recv, name, dec.off), kindArms(Type.parse(ty), recv, ctor, rest, done, fieldPath, prefix, dec, fuel), dec.off)
+
+def kindArms(ty: Ty, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  ty match {
+    case Ty.Named(name) => namedArms(name, recv, ctor, rest, done, fieldPath, prefix, dec, fuel)
+    case _ => Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+  }
+
+def namedArms(name: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  if (name == "String") scalarArms("Str", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Int") scalarArms("Int", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Bool") scalarArms("Bool", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Float") scalarArms("Float", recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else if (name == "Json") jsonArms(recv, ctor, rest, done, fieldPath, prefix, dec, fuel) else recordArms(name, recv, ctor, rest, done, fieldPath, prefix, dec, fuel)
+
+def scalarArms(tag: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okTag(tag, dec.off, fieldPath), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, fieldPath), dec.off)), prefix, dec, fuel)) :: Arm("Result.Ok(_)", "", errText(dec.off, wrongMsg(fieldPath))) :: Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+
+def jsonArms(recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okBind(dec.off, fieldPath), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, fieldPath), dec.off)), prefix, dec, fuel)) :: Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+
+def recordArms(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okBind(dec.off, fieldPath), "", nestRecord(typeName, recv, ctor, rest, done, fieldPath, prefix, dec, fuel)) :: Arm(errPat(dec.off, fieldPath), "", errMap(fieldPath, dec.off)) :: []
+
+def nestRecord(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: String, prefix: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(genRecord(valName(dec.off, fieldPath), typeName, fieldPath, dec, fuel - 1), Arm(okRec(dec.off, fieldPath), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(recName(dec.off, fieldPath), dec.off)), prefix, dec, fuel)) :: Arm(errPat(dec.off, fieldPath), "", errPass(dec.off, fieldPath)) :: [], dec.off)
+
+def nextField(recv: String, ctor: String, rest: List[Param], done: List[Expr], prefix: String, dec: DecodeCtx, fuel: Int): Expr =
+  readFields(recv, ctor, rest, done, prefix, dec, fuel)
+
+def emptyObj(recv: String, ctor: String, path: String, dec: DecodeCtx): Expr =
+  Expr.EIf(Expr.EMethod(Expr.EVar("Json", dec.off), "isObj", Expr.EVar(recv, dec.off) :: [], dec.off), okRecord(ctor, [], dec.off), errText(dec.off, wrongMsg(path)), dec.off)
+
+def jsonField(recv: String, name: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Json", off), "field", Expr.EVar(recv, off) :: Expr.EStr(name, off) :: [], off)
+
+def okRecord(ctor: String, args: List[Expr], off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Ok", Expr.ECall(ctor, args, off) :: [], off)
+
+def errText(off: Int, message: String): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EStr(message, off) :: [], off)
+
+def errMap(path: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EIf(Expr.EBin("==", Expr.EVar(errName(off, path), off), Expr.EStr("Json.field: missing field", off), off), Expr.EStr(missingMsg(path), off), Expr.EStr(wrongMsg(path), off), off) :: [], off)
+
+def errPass(off: Int, path: String): Expr =
+  Expr.EMethod(Expr.EVar("Result", off), "Err", Expr.EVar(errName(off, path), off) :: [], off)
+
+def snoc(args: List[Expr], arg: Expr): List[Expr] =
+  List.concat(args, arg :: [])
+
+def okTag(tag: String, off: Int, path: String): String =
+  Str.concat("Result.Ok(Json.", Str.concat(tag, Str.concat("(", Str.concat(valName(off, path), "))"))))
+
+def okBind(off: Int, path: String): String =
+  Str.concat("Result.Ok(", Str.concat(valName(off, path), ")"))
+
+def okRec(off: Int, path: String): String =
+  Str.concat("Result.Ok(", Str.concat(recName(off, path), ")"))
+
+def errPat(off: Int, path: String): String =
+  Str.concat("Result.Err(", Str.concat(errName(off, path), ")"))
+
+def recvName(off: Int): String =
+  Str.concat("__ScuzzJson", Str.fromInt(off))
+
+def valName(off: Int, path: String): String =
+  Str.concat("__ScuzzV", Str.concat(Str.fromInt(off), Str.concat("_", pathId(path))))
+
+def errName(off: Int, path: String): String =
+  Str.concat("__ScuzzE", Str.concat(Str.fromInt(off), Str.concat("_", pathId(path))))
+
+def recName(off: Int, path: String): String =
+  Str.concat("__ScuzzR", Str.concat(Str.fromInt(off), Str.concat("_", pathId(path))))
+
+def pathId(path: String): String =
+  Str.replace(path, ".", "_")
+
+def joinPath(prefix: String, name: String): String =
+  if (prefix == "") name else Str.concat(prefix, Str.concat(".", name))
+
+def missingMsg(path: String): String =
+  Str.concat("Json.decode: missing field ", path)
+
+def wrongMsg(path: String): String =
+  if (path == "") "Json.decode: wrong case" else Str.concat("Json.decode: wrong case at ", path)
+
+def badRead(path: String): String =
+  if (path == "") "Json.decode: cannot read record" else Str.concat("Json.decode: cannot read ", path)
+
+def expandTy(ty: String, aliases: List[Alias]): String =
+  if (ty == "" || List.isEmpty(aliases)) ty else Type.show(expandFuel(Type.parse(ty), aliases, 8))
+
+def expandFuel(ty: Ty, aliases: List[Alias], fuel: Int): Ty =
+  if (fuel <= 0) ty else expandApply(expandKids(ty, aliases, fuel), aliases, fuel)
+
+def expandKids(ty: Ty, aliases: List[Alias], fuel: Int): Ty =
+  ty match {
+    case Ty.App(name, args) => Type.tApp(name, expandList(args, aliases, fuel))
+    case Ty.Tuple(parts) => Type.tTuple(expandList(parts, aliases, fuel))
+    case Ty.Arrow(arg, ret) => Type.tFun(expandFuel(arg, aliases, fuel), expandFuel(ret, aliases, fuel))
+    case _ => ty
+  }
+
+def expandList(types: List[Ty], aliases: List[Alias], fuel: Int): List[Ty] =
+  if (List.isEmpty(types)) types else expandFuel(List.at(types, 0), aliases, fuel) :: expandList(List.tail(types), aliases, fuel)
+
+def expandApply(ty: Ty, aliases: List[Alias], fuel: Int): Ty =
+  if (List.isEmpty(aliases)) ty else expandHit(ty, List.at(aliases, 0), List.tail(aliases), aliases, fuel)
+
+def expandHit(ty: Ty, alias: Alias, rest: List[Alias], aliases: List[Alias], fuel: Int): Ty =
+  if (aliasHits(ty, alias.name, alias.tparams)) expandFuel(aliasFill(ty, alias.tparams, alias.target), aliases, fuel - 1) else expandApply(ty, rest, fuel)
+
+def aliasHits(ty: Ty, name: String, params: List[String]): Bool =
+  ty match {
+    case Ty.Named(n) => n == name && List.isEmpty(params)
+    case Ty.TVar(n) => n == name && List.isEmpty(params)
+    case Ty.App(n, _) => n == name && !List.isEmpty(params)
+    case _ => false
+  }
+
+def aliasFill(ty: Ty, params: List[String], target: String): Ty =
+  Type.parse(substAll(target, params, Type.appArgs(ty)))
+
+def substAll(target: String, params: List[String], args: List[Ty]): String =
+  if (List.isEmpty(params) || List.isEmpty(args)) target else substAll(Type.substStr(target, List.at(params, 0), Type.show(List.at(args, 0))), List.tail(params), List.tail(args))
+

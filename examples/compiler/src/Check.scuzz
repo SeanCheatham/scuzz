@@ -501,7 +501,16 @@ def resolveCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab
   resolveCall2(f, args, env, funs, ens, span)
 
 def resolveCall2(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (isKit(f, funs)) resolveKit(f, args, env, funs, ens, span) else if (isInstMeth(f)) resolveInst(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferNamedCtor(f, f, args, env, funs, ens, span, ens) else if (enOfCase(ens, f) != "") inferNamedCtor(enOfCase(ens, f), f, args, env, funs, ens, span, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
+  if (f == "Json.decode") jsonDecodeBad(args, span) else if (isKit(f, funs)) resolveKit(f, args, env, funs, ens, span) else if (isInstMeth(f)) resolveInst(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferNamedCtor(f, f, args, env, funs, ens, span, ens) else if (enOfCase(ens, f) != "") inferNamedCtor(enOfCase(ens, f), f, args, env, funs, ens, span, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
+
+def jsonDecodeBad(args: List[Expr], span: (String, Int)): Out =
+  if (List.len(args) == 1) jsonDecodeMsg(List.at(args, 0), span) else bad("Json.decode needs a record result", span)
+
+def jsonDecodeMsg(arg: Expr, span: (String, Int)): Out =
+  arg match {
+    case Expr.EStr(msg, _) => bad(msg, span)
+    case _ => bad("Json.decode needs a record result", span)
+  }
 
 def resolveKit(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (isGenericKit(f)) resolveGenericKit(f, args, env, funs, ens, span) else resolveKitRest(f, args, env, funs, ens, span)

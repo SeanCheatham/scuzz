@@ -541,6 +541,13 @@ paths = [('{"order":{}}', 'error:Json.path: missing field order.quantity'),
 quantities = ['{}', '[]', 'null', '{', '{"quantity":null}', '{"quantity":"7"}',
               '{"quantity":true}', '{"quantity":1.0}', '{"quantity":-1}',
               '{"quantity":0}', '{"quantity":1}', '{"quantity":100}', '{"quantity":101}']
+orders = [('{"name":"bolt","item":{"quantity":2},"note":"ok"}', 'ok:bolt:2:"ok"'),
+          ('{"name":"bolt","item":{},"note":"ok"}', 'error:Json.decode: missing field item.quantity'),
+          ('{"name":"bolt","item":{"quantity":"2"},"note":"ok"}', 'error:Json.decode: wrong case at item.quantity'),
+          ('{"name":"bolt","item":{"quantity":2},"note":null}', 'ok:bolt:2:null'),
+          ('{"name":"bolt","item":null,"note":"ok"}', 'error:Json.decode: wrong case at item.quantity')]
+ranges = [('{"name":"bolt","item":{"quantity":2},"note":null}', 'true'),
+          ('{"name":"bolt","item":{"quantity":101},"note":null}', 'false')]
 
 def array(texts):
     return '[' + ', '.join(f'Hex.decode("{text.encode().hex()}")' for text in texts) + ']'
@@ -580,11 +587,14 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(FIELDS, text => IO.println(field(text)))
     _ <- IO.foreachDiscard(PATHS, text => IO.println(nested(text)))
     _ <- IO.foreachDiscard(QUANTITIES, text => IO.println(Str.fromBool(Input.accepted(Input.decodeQuantity(text)))))
+    _ <- IO.foreachDiscard(ORDERS, text => IO.println(Input.orderText(text)))
+    _ <- IO.foreachDiscard(RANGES, text => IO.println(Str.fromBool(Input.orderInRange(text))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('RANGES', array([text for text, _ in ranges]))
     (root / 'src/Main.scuzz').write_text(source)
     expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
+    expected += [value for _, value in orders] + [value for _, value in ranges]
     command('fmt', root)
     for engine in ['run', 'eval']:
         output = command(engine, root)
@@ -625,6 +635,15 @@ oracle boundaries(): Bool =
         diagnostic = '\n'.join(command('check', root, ok=False))
         assert 'non-exhaustive match' in diagnostic if 'match' in body else 'type error' in diagnostic, diagnostic
         (root / 'src/Bad.scuzz').unlink()
+    for body, needle in [
+        ('record Row(xs: List[Int])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('def badPos(json: Json): Json =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
+    ]:
+        (root / 'src/BadDecode.scuzz').write_text(body)
+        command('fmt', root)
+        diagnostic = '\n'.join(command('check', root, ok=False))
+        assert needle in diagnostic, diagnostic
+        (root / 'src/BadDecode.scuzz').unlink()
 print('input validation and native parity ok')
 PY_INPUT
 

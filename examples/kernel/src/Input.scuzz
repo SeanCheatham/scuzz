@@ -2,7 +2,14 @@ record Quantity private(value: Int)
 
 record Read[A](result: Result[String, A], count: Int)
 
+record Piece(quantity: Int)
+
+record Order(name: String, item: Piece, note: Json)
+
+record Mark(on: Bool, ratio: Float)
+
 type Effect[E, A] = IO[E, A]
+type Sale = Order
 def aliasEffect[E, A](effect: Effect[E, A]): Effect[E, A] =
   for {
     value <- effect
@@ -65,6 +72,72 @@ def batch(texts: List[String]): Result[String, List[Quantity]] =
     results = List.map(texts, text => parseQuantity(text))
   } yield collectQuantities(results)
 
+def decodeOrder(json: Json): Result[String, Order] =
+  Json.decode(json)
+
+def decodeText(text: String): Result[String, Order] =
+  Json.parse(text) match {
+    case Result.Ok(json) => Json.decode(json)
+    case Result.Err(error) => Result.Err(error)
+  }
+
+def decodeSale(json: Json): Result[String, Sale] =
+  Json.decode(json)
+
+def decodeFlag(json: Json): Result[String, Mark] =
+  Json.decode(json)
+
+def showOrder(result: Result[String, Order]): String =
+  result match {
+    case Result.Ok(Order(name, Piece(quantity), note)) => Json.stringify(note) match {
+  case Result.Ok(encoded) => s"ok:$name:$quantity:$encoded"
+  case Result.Err(error) => s"error:$error"
+}
+    case Result.Err(error) => s"error:$error"
+  }
+
+def orderText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showOrder(decodeOrder(json))
+    case Result.Err(error) => s"error:$error"
+  }
+
+def textOrder(text: String): String =
+  showOrder(decodeText(text))
+
+def saleText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => decodeSale(json) match {
+  case Result.Ok(Order(name, Piece(quantity), note)) => Json.stringify(note) match {
+  case Result.Ok(encoded) => s"ok:$name:$quantity:$encoded"
+  case Result.Err(error) => s"error:$error"
+}
+  case Result.Err(error) => s"error:$error"
+}
+    case Result.Err(error) => s"error:$error"
+  }
+
+def orderInRange(text: String): Bool =
+  Json.parse(text) match {
+    case Result.Ok(json) => decodeOrder(json) match {
+  case Result.Ok(Order(_, Piece(quantity), _)) => quantity >= 1 && quantity <= 100
+  case Result.Err(_) => false
+}
+    case Result.Err(_) => false
+  }
+
+def flagOk(text: String): Bool =
+  Json.parse(text) match {
+    case Result.Ok(json) => decodeFlag(json) match {
+  case Result.Ok(Mark(on, ratio)) => on && ratio == 1.5
+  case Result.Err(_) => false
+}
+    case Result.Err(_) => false
+  }
+
+def orderProof(): Bool =
+  orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "ok:bolt:2:\"ok\"" && textOrder("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "ok:bolt:2:\"ok\"" && saleText("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "ok:bolt:2:\"ok\"" && orderText("{\"name\":\"bolt\",\"item\":{},\"note\":\"ok\"}") == "error:Json.decode: missing field item.quantity" && orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":\"2\"},\"note\":\"ok\"}") == "error:Json.decode: wrong case at item.quantity" && orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":null}") == "ok:bolt:2:null" && orderText("{\"name\":\"bolt\",\"item\":null,\"note\":\"ok\"}") == "error:Json.decode: wrong case at item.quantity" && orderText("[]") == "error:Json.decode: wrong case at name" && orderText("{\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "error:Json.decode: missing field name" && orderText("{\"name\":null,\"item\":{\"quantity\":2},\"note\":\"ok\"}") == "error:Json.decode: wrong case at name" && orderText("{\"name\":\"bolt\",\"item\":{\"quantity\":101},\"note\":null}") == "ok:bolt:101:null" && orderInRange("{\"name\":\"bolt\",\"item\":{\"quantity\":2},\"note\":null}") && !orderInRange("{\"name\":\"bolt\",\"item\":{\"quantity\":101},\"note\":null}") && flagOk("{\"on\":true,\"ratio\":1.5}") && !flagOk("{\"on\":true,\"ratio\":1}")
+
 def decodeQuantity(text: String): Result[String, Quantity] =
   Json.parse(text) match {
     case Result.Ok(json) => Json.field(json, "quantity") match {
@@ -88,7 +161,7 @@ def accepted(result: Result[String, Quantity]): Bool =
   }
 
 def proof(): Bool =
-  parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100"))
+  parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100")) && orderProof()
 
 def forward(text: String): Result[String, Int] =
   for {

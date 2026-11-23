@@ -1965,7 +1965,7 @@ def vJsons(xs: List[Json]): Value =
   Value.VList(List.map(xs, x => fromJson(x)))
 
 def jsonKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Json.Null") jcon("Null", noVals()) else if (f == "Json.Bool" || f == "Json.Int" || f == "Json.Float" || f == "Json.Str" || f == "Json.Arr" || f == "Json.Obj") jcon(Str.drop(f, 5), List.at(vals, 0) :: noVals()) else if (f == "Json.parse") jsonParseKit(Json.parse(strAt(vals, 0))) else if (f == "Json.stringify") jsonStringifyKit(Json.stringify(toJson(List.at(vals, 0)))) else jsonKit2(f, toJson(List.at(vals, 0)), vals, env, p, off)
+  if (f == "Json.decode") Value.VErr("Json.decode needs a record result") else if (f == "Json.Null") jcon("Null", noVals()) else if (f == "Json.Bool" || f == "Json.Int" || f == "Json.Float" || f == "Json.Str" || f == "Json.Arr" || f == "Json.Obj") jcon(Str.drop(f, 5), List.at(vals, 0) :: noVals()) else if (f == "Json.parse") jsonParseKit(Json.parse(strAt(vals, 0))) else if (f == "Json.stringify") jsonStringifyKit(Json.stringify(toJson(List.at(vals, 0)))) else jsonKit2(f, toJson(List.at(vals, 0)), vals, env, p, off)
 
 def jsonParseKit(r: Result[String, Json]): Value =
   r match {
