@@ -165,13 +165,13 @@ def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: Lis
 
 def listProblem(elem: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   elem match {
-    case Ty.Named(name) => if (isScalar(name)) "" else recordProblem(name, path, dec, fuel, seen)
+    case Ty.Named(name) => if (isScalar(name) || isUnitEnum(name, dec)) "" else recordProblem(name, path, dec, fuel, seen)
     case _ => badRead(path)
   }
 
 def optionProblem(inner: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   inner match {
-    case Ty.Named(name) => if (isScalar(name)) "" else recordProblem(name, path, dec, fuel, seen)
+    case Ty.Named(name) => if (isScalar(name) || isUnitEnum(name, dec)) "" else recordProblem(name, path, dec, fuel, seen)
     case _ => badRead(path)
   }
 
@@ -234,7 +234,7 @@ def readOption(inner: Ty, recv: String, ctor: String, name: String, rest: List[P
 
 def optionDecoded(inner: Ty, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx, fuel: Int): Expr =
   inner match {
-    case Ty.Named(typeName) => if (isScalar(typeName)) scalarOption(if (typeName == "String") "Str" else typeName, typeName, recv, name, fieldPath, fieldSlot, dec) else recordOption(typeName, recv, name, fieldPath, fieldSlot, dec, fuel)
+    case Ty.Named(typeName) => if (isScalar(typeName)) scalarOption(if (typeName == "String") "Str" else typeName, typeName, recv, name, fieldPath, fieldSlot, dec) else if (isUnitEnum(typeName, dec)) enumOption(typeName, recv, name, fieldPath, fieldSlot, dec) else recordOption(typeName, recv, name, fieldPath, fieldSlot, dec, fuel)
     case _ => errExpr(dec.off, wrongExpr(fieldPath, dec.off))
   }
 
@@ -243,6 +243,12 @@ def scalarOption(tag: String, typeName: String, recv: String, name: String, fiel
 
 def recordOption(typeName: String, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx, fuel: Int): Expr =
   Expr.EMatch(jsonField(recv, name, dec.off), Arm(nullPat(), "", okValue(optionNone(typeName, dec.off), dec.off)) :: Arm(okBind(dec.off, fieldSlot), "", optionRecordValue(typeName, fieldPath, fieldSlot, dec, fuel)) :: Arm(errPat(dec.off, fieldSlot), "", missingOption(typeName, fieldPath, fieldSlot, dec)) :: [], dec.off)
+
+def enumOption(typeName: String, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(jsonField(recv, name, dec.off), Arm(nullPat(), "", okValue(optionNone(typeName, dec.off), dec.off)) :: Arm(okTag("Str", dec.off, fieldSlot), "", enumOptionText(typeName, fieldPath, fieldSlot, dec)) :: Arm(okBind(dec.off, joinSlot(fieldSlot, "b")), "", wrongEnum(fieldPath, joinSlot(fieldSlot, "b"), dec)) :: Arm(errPat(dec.off, fieldSlot), "", missingOption(typeName, fieldPath, fieldSlot, dec)) :: [], dec.off)
+
+def enumOptionText(typeName: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EAscribe(enumValue(typeName, valName(dec.off, fieldSlot), enumCasesOf(typeName, dec.enums), fieldPath, dec), enumResult(typeName), dec.off), Arm(okBind(dec.off, joinSlot(fieldSlot, "e")), "", okValue(optionSome(Expr.EVar(valName(dec.off, joinSlot(fieldSlot, "e")), dec.off), dec.off), dec.off)) :: Arm(errPat(dec.off, joinSlot(fieldSlot, "e")), "", errPass(joinSlot(fieldSlot, "e"), dec.off)) :: [], dec.off)
 
 def optionRecordValue(typeName: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx, fuel: Int): Expr =
   Expr.EMatch(genRecord(valName(dec.off, fieldSlot), typeName, fieldPath, fieldSlot, dec, fuel - 1), Arm(okRec(dec.off, fieldSlot), "", okValue(optionSome(Expr.EVar(recName(dec.off, fieldSlot), dec.off), dec.off), dec.off)) :: Arm(errPat(dec.off, fieldSlot), "", errPass(fieldSlot, dec.off)) :: [], dec.off)
@@ -351,13 +357,19 @@ def elemBody(elem: Ty, item: String, idx: String, xs: String, path: Expr, slot: 
   }
 
 def namedElem(name: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
-  if (name == "String") scalarElem("Str", item, idx, xs, path, slot, dec) else if (name == "Int") scalarElem("Int", item, idx, xs, path, slot, dec) else if (name == "Bool") scalarElem("Bool", item, idx, xs, path, slot, dec) else if (name == "Float") scalarElem("Float", item, idx, xs, path, slot, dec) else recordElem(name, item, idx, xs, path, slot, dec, fuel)
+  if (name == "String") scalarElem("Str", item, idx, xs, path, slot, dec) else if (name == "Int") scalarElem("Int", item, idx, xs, path, slot, dec) else if (name == "Bool") scalarElem("Bool", item, idx, xs, path, slot, dec) else if (name == "Float") scalarElem("Float", item, idx, xs, path, slot, dec) else if (isUnitEnum(name, dec)) enumElem(name, item, idx, xs, path, slot, dec) else recordElem(name, item, idx, xs, path, slot, dec, fuel)
 
 def scalarElem(tag: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
   Expr.EMatch(Expr.EVar(item, dec.off), Arm(jsonPat(tag, dec.off, joinSlot(slot, "v")), "", okCons(valName(dec.off, joinSlot(slot, "v")), xs, dec.off)) :: Arm("_", "", errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))) :: [], dec.off)
 
 def recordElem(typeName: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
   Expr.EMatch(genRecord(item, typeName, indexPath(path, idx, dec.off), joinSlot(slot, "e"), dec, fuel - 1), Arm(okRec(dec.off, joinSlot(slot, "e")), "", okCons(recName(dec.off, joinSlot(slot, "e")), xs, dec.off)) :: Arm(errPat(dec.off, joinSlot(slot, "e")), "", errPass(joinSlot(slot, "e"), dec.off)) :: [], dec.off)
+
+def enumElem(typeName: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(item, dec.off), Arm(jsonPat("Str", dec.off, joinSlot(slot, "v")), "", enumElemText(typeName, valName(dec.off, joinSlot(slot, "v")), idx, xs, path, slot, dec)) :: Arm(valName(dec.off, joinSlot(slot, "b")), "", wrongEnum(indexPath(path, idx, dec.off), joinSlot(slot, "b"), dec)) :: [], dec.off)
+
+def enumElemText(typeName: String, text: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EAscribe(enumValue(typeName, text, enumCasesOf(typeName, dec.enums), indexPath(path, idx, dec.off), dec), enumResult(typeName), dec.off), Arm(okBind(dec.off, joinSlot(slot, "e")), "", okCons(valName(dec.off, joinSlot(slot, "e")), xs, dec.off)) :: Arm(errPat(dec.off, joinSlot(slot, "e")), "", errPass(joinSlot(slot, "e"), dec.off)) :: [], dec.off)
 
 def nextField(recv: String, ctor: String, rest: List[Param], done: List[Expr], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
   readFields(recv, ctor, rest, done, path, slot, dec, fuel)
