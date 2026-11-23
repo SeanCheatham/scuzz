@@ -161,7 +161,7 @@ def typeProblemOf(ty: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[St
   }
 
 def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
-  if (isScalar(name) || name == "Json") "" else recordProblem(name, path, dec, fuel, seen)
+  if (isScalar(name) || name == "Json" || isUnitEnum(name, dec)) "" else recordProblem(name, path, dec, fuel, seen)
 
 def listProblem(elem: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   elem match {
@@ -180,6 +180,30 @@ def recordProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: L
 
 def isScalar(name: String): Bool =
   name == "String" || name == "Int" || name == "Bool" || name == "Float"
+
+def isUnitEnum(name: String, dec: DecodeCtx): Bool =
+  unitHit(name, dec.enums)
+
+def unitHit(name: String, enums: List[En]): Bool =
+  if (name == "" || List.isEmpty(enums)) false else unitHead(name, List.at(enums, 0), List.tail(enums))
+
+def unitHead(name: String, en: En, rest: List[En]): Bool =
+  if (en.name == name) unitEn(en) else unitHit(name, rest)
+
+def unitEn(en: En): Bool =
+  if (en.isRec || !List.isEmpty(en.tparams)) false else unitCases(en.cases)
+
+def unitCases(cases: List[EnCase]): Bool =
+  if (List.isEmpty(cases)) false else if (!List.isEmpty(List.at(cases, 0).fields)) false else unitTail(List.tail(cases))
+
+def unitTail(cases: List[EnCase]): Bool =
+  if (List.isEmpty(cases)) true else if (!List.isEmpty(List.at(cases, 0).fields)) false else unitTail(List.tail(cases))
+
+def enumCasesOf(name: String, enums: List[En]): List[EnCase] =
+  if (List.isEmpty(enums)) [] else enumCasesHead(name, List.at(enums, 0), List.tail(enums))
+
+def enumCasesHead(name: String, en: En, rest: List[En]): List[EnCase] =
+  if (en.name == name) en.cases else enumCasesOf(name, rest)
 
 def bindDecode(arg: Expr, ctor: String, dec: DecodeCtx): Expr =
   Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], genRecord(recvName(dec.off), ctor, strExpr("", dec.off), "", dec, 32), dec.off)
@@ -258,7 +282,34 @@ def kindArms(ty: Ty, recv: String, ctor: String, rest: List[Param], done: List[E
   }
 
 def namedArms(name: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
-  if (name == "String") scalarArms("Str", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Int") scalarArms("Int", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Bool") scalarArms("Bool", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Float") scalarArms("Float", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Json") jsonArms(recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else recordArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
+  if (name == "String") scalarArms("Str", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Int") scalarArms("Int", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Bool") scalarArms("Bool", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Float") scalarArms("Float", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Json") jsonArms(recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (isUnitEnum(name, dec)) enumArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else recordArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
+
+def enumArms(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okTag("Str", dec.off, fieldSlot), "", enumMatched(typeName, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)) :: Arm(okBind(dec.off, joinSlot(fieldSlot, "b")), "", wrongEnum(fieldPath, joinSlot(fieldSlot, "b"), dec)) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
+
+def enumMatched(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EAscribe(enumValue(typeName, valName(dec.off, fieldSlot), enumCasesOf(typeName, dec.enums), fieldPath, dec), enumResult(typeName), dec.off), Arm(okBind(dec.off, joinSlot(fieldSlot, "e")), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, joinSlot(fieldSlot, "e")), dec.off)), path, slot, dec, fuel)) :: Arm(errPat(dec.off, joinSlot(fieldSlot, "e")), "", errPass(joinSlot(fieldSlot, "e"), dec.off)) :: [], dec.off)
+
+def enumValue(typeName: String, text: String, cases: List[EnCase], path: Expr, dec: DecodeCtx): Expr =
+  if (List.isEmpty(cases)) unknownEnum(path, text, dec) else enumOne(typeName, text, List.at(cases, 0), List.tail(cases), path, dec)
+
+def enumOne(typeName: String, text: String, c: EnCase, rest: List[EnCase], path: Expr, dec: DecodeCtx): Expr =
+  Expr.EIf(Expr.EBin("==", Expr.EVar(text, dec.off), Expr.EStr(c.name, dec.off), dec.off), okValue(enumCtor(typeName, c.name, dec.off), dec.off), enumValue(typeName, text, rest, path, dec), dec.off)
+
+def enumCtor(typeName: String, caseName: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar(typeName, off), caseName, [], off)
+
+def enumResult(typeName: String): String =
+  Str.concat("Result[String, ", Str.concat(typeName, "]"))
+
+def unknownEnum(path: Expr, text: String, dec: DecodeCtx): Expr =
+  errExpr(dec.off, namedValue("Json.decode: unknown case at ", path, Expr.EVar(text, dec.off), dec.off))
+
+def wrongEnum(path: Expr, slot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(call1("Json.stringify", Expr.EVar(valName(dec.off, slot), dec.off), dec.off), Arm(okBind(dec.off, joinSlot(slot, "w")), "", errExpr(dec.off, namedValue("Json.decode: wrong case at ", path, Expr.EVar(valName(dec.off, joinSlot(slot, "w")), dec.off), dec.off))) :: Arm(errPat(dec.off, joinSlot(slot, "w")), "", errExpr(dec.off, wrongExpr(path, dec.off))) :: [], dec.off)
+
+def namedValue(prefix: String, path: Expr, value: Expr, off: Int): Expr =
+  call2("Str.concat", call2("Str.concat", call2("Str.concat", strExpr(prefix, off), path, off), strExpr(": ", off), off), value, off)
 
 def scalarArms(tag: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
   Arm(okTag(tag, dec.off, fieldSlot), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, fieldSlot), dec.off)), path, slot, dec, fuel)) :: Arm("Result.Ok(_)", "", errExpr(dec.off, wrongExpr(fieldPath, dec.off))) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
