@@ -553,6 +553,17 @@ lists = [('{"names":["a","b"],"lines":[{"qty":2},{"qty":3}],"flags":[true,false]
          ('{"names":[null],"lines":[],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: wrong case at names.0'),
          ('{"names":[],"lines":[{"qty":2},{"qty":true}],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: wrong case at lines.1.qty'),
          ('{"names":[],"flags":[],"ratios":[],"counts":[]}', 'error:Json.decode: missing field lines')]
+options = [('{"title":"a"}', 'ok:a:none:none:none:none:none'),
+           ('{"title":"a","label":null,"count":null,"flag":null,"ratio":null,"note":null}', 'ok:a:none:none:none:none:none'),
+           ('{"title":"a","label":"x","count":0,"flag":false,"ratio":1.5,"note":{"text":"hi"}}', 'ok:a:x:0:false:1.5:hi'),
+           ('{"title":"a","label":1}', 'error:Json.decode: wrong case at label'),
+           ('{"title":"a","note":{"text":true}}', 'error:Json.decode: wrong case at note.text'),
+           ('{"label":"x"}', 'error:Json.decode: missing field title'),
+           ('{"title":null}', 'error:Json.decode: wrong case at title'),
+           ('{"title":"a","note":{}}', 'error:Json.decode: missing field note.text'),
+           ('{"title":"a","ratio":1}', 'error:Json.decode: wrong case at ratio'),
+           ('{"title":"a","count":7}', 'ok:a:none:7:none:none:none'),
+           ('{"title":"a","note":1}', 'error:Json.decode: wrong case at note.text')]
 ranges = [('{"name":"bolt","item":{"quantity":2},"note":null}', 'true'),
           ('{"name":"bolt","item":{"quantity":101},"note":null}', 'false')]
 
@@ -596,13 +607,14 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(QUANTITIES, text => IO.println(Str.fromBool(Input.accepted(Input.decodeQuantity(text)))))
     _ <- IO.foreachDiscard(ORDERS, text => IO.println(Input.orderText(text)))
     _ <- IO.foreachDiscard(LISTS, text => IO.println(Input.listText(text)))
+    _ <- IO.foreachDiscard(OPTIONS, text => IO.println(Input.ticketText(text)))
     _ <- IO.foreachDiscard(RANGES, text => IO.println(Str.fromBool(Input.orderInRange(text))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('RANGES', array([text for text, _ in ranges]))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('RANGES', array([text for text, _ in ranges]))
     (root / 'src/Main.scuzz').write_text(source)
     expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
-    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in ranges]
+    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in ranges]
     command('fmt', root)
     for engine in ['run', 'eval']:
         output = command(engine, root)
@@ -647,6 +659,11 @@ oracle boundaries(): Bool =
         ('record Row(xs: Map[String, Int])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
         ('record Row(xs: List[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
         ('record Node(name: String, kids: List[Node])\ndef decodeNode(json: Json): Result[String, Node] =\n  Json.decode(json)\n', 'Json.decode: cannot read kids'),
+        ('record Row(label: Option[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
+        ('record Row(label: Option[Json])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
+        ('record Row(label: Option[Option[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
+        ('record Row(labels: List[Option[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read labels'),
+        ('record Node(name: String, child: Option[Node])\ndef decodeNode(json: Json): Result[String, Node] =\n  Json.decode(json)\n', 'Json.decode: cannot read child'),
         ('def badPos(json: Json): Json =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
     ]:
         (root / 'src/BadDecode.scuzz').write_text(body)
