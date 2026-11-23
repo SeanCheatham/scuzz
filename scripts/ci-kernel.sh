@@ -584,6 +584,17 @@ bands = [('{"tones":["Calm","Loud"],"pick":"Calm"}', 'ok:Calm,Loud:Calm'),
          ('{"tones":["Calm"],"pick":1}', 'error:Json.decode: wrong case at pick: 1'),
          ('{"tones":[null],"pick":null}', 'error:Json.decode: wrong case at tones.0: null'),
          ('{"pick":"Calm"}', 'error:Json.decode: missing field tones')]
+grids = [('{"items":[["a","b"],["c"]],"rows":[[{"qty":2}],[{"qty":3},{"qty":4}]],"tones":[["Calm"],["Loud","Calm"]]}', 'ok:a,b|c:2|3,4:Calm|Loud,Calm'),
+         ('{"items":[[],[]],"rows":[],"tones":[[]]}', 'ok:empty|empty:empty:empty'),
+         ('{"items":[["a"],[1]],"rows":[],"tones":[]}', 'error:Json.decode: wrong case at items.1.0'),
+         ('{"items":[[null]],"rows":[],"tones":[]}', 'error:Json.decode: wrong case at items.0.0'),
+         ('{"items":[["a"],"b"],"rows":[],"tones":[]}', 'error:Json.decode: wrong case at items.1'),
+         ('{"items":[],"rows":[[{"qty":1}],[{"qty":true}]],"tones":[]}', 'error:Json.decode: wrong case at rows.1.0.qty'),
+         ('{"items":[],"rows":[[{}]],"tones":[]}', 'error:Json.decode: missing field rows.0.0.qty'),
+         ('{"items":[],"rows":[],"tones":[["Calm"],["Gone"]]}', 'error:Json.decode: unknown case at tones.1.0: Gone'),
+         ('{"items":[],"rows":[],"tones":[[1]]}', 'error:Json.decode: wrong case at tones.0.0: 1'),
+         ('{"items":[],"rows":[],"tones":[[null]]}', 'error:Json.decode: wrong case at tones.0.0: null'),
+         ('{"rows":[],"tones":[]}', 'error:Json.decode: missing field items')]
 ranges = [('{"name":"bolt","item":{"quantity":2},"note":null}', 'true'),
           ('{"name":"bolt","item":{"quantity":101},"note":null}', 'false')]
 
@@ -630,13 +641,14 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(OPTIONS, text => IO.println(Input.ticketText(text)))
     _ <- IO.foreachDiscard(ENUMS, text => IO.println(Input.jobText(text)))
     _ <- IO.foreachDiscard(BANDS, text => IO.println(Input.choirText(text)))
+    _ <- IO.foreachDiscard(GRIDS, text => IO.println(Input.gridText(text)))
     _ <- IO.foreachDiscard(RANGES, text => IO.println(Str.fromBool(Input.orderInRange(text))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('RANGES', array([text for text, _ in ranges]))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('GRIDS', array([text for text, _ in grids])).replace('RANGES', array([text for text, _ in ranges]))
     (root / 'src/Main.scuzz').write_text(source)
     expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
-    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in ranges]
+    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in grids] + [value for _, value in ranges]
     command('fmt', root)
     for engine in ['run', 'eval']:
         output = command(engine, root)
@@ -679,7 +691,8 @@ oracle boundaries(): Bool =
         (root / 'src/Bad.scuzz').unlink()
     for body, needle in [
         ('record Row(xs: Map[String, Int])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
-        ('record Row(xs: List[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('record Row(xs: List[Json])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('record Row(xs: List[List[Option[String]]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
         ('record Node(name: String, kids: List[Node])\ndef decodeNode(json: Json): Result[String, Node] =\n  Json.decode(json)\n', 'Json.decode: cannot read kids'),
         ('record Row(label: Option[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
         ('record Row(label: Option[Json])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
