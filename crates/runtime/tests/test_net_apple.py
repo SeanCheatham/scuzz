@@ -24,7 +24,9 @@ class Service(http.server.BaseHTTPRequestHandler):
             message = self.path.startswith("/message")
             if message:
                 attempts += 1
-                threading.Event().wait(0.5)
+                # Stay on Loading long enough for one dump to show the tap.
+                # The client timeout is 2 seconds.
+                threading.Event().wait(1.2 if attempts == 1 else 0.5)
             if self.path == "/slow":
                 threading.Event().wait(1)
             length = int(self.headers.get("Content-Length", "0"))
@@ -86,7 +88,7 @@ def proof_ui(command, env, directory):
             tmp = inject.with_suffix(".tmp")
             tmp.write_text(payload)
             os.replace(tmp, inject)
-        def wait(text, retry=None, retry_when=None, also=None):
+        def wait(text, retry=None, retry_when=None, also=None, need=None):
             deadline = time.monotonic() + 30
             nudge = time.monotonic() + 0.25
             while time.monotonic() < deadline:
@@ -95,7 +97,7 @@ def proof_ui(command, env, directory):
                     body = debug.read_text() if debug.exists() else ""
                 except OSError:
                     body = ""
-                if text in body or (also and also in body): return
+                if (text in body or (also and also in body)) and (not need or need in body): return
                 if retry and time.monotonic() >= nudge and (retry_when is None or retry_when in body):
                     tap(retry)
                     nudge = time.monotonic() + 0.25
@@ -104,14 +106,14 @@ def proof_ui(command, env, directory):
             if debug.exists():
                 try: shown = debug.read_text()[:800]
                 except OSError: shown = ""
-            raise AssertionError("screen does not show " + text + "\n" + (directory / "ui.log").read_text() + shown)
+            label = text if not need else text + " with " + need
+            raise AssertionError("screen does not show " + label + "\n" + (directory / "ui.log").read_text() + shown)
         try:
             wait("Ready")
             tap("Load")
             wait("Loading", "Load", "Ready")
             tap("Tap")
-            wait("Taps: 1", "Tap")
-            assert "Loading" in debug.read_text(), "input waits for the response"
+            wait("Taps: 1", "Tap", "Loading", need="Loading")
             wait("Failed. Try again.")
             attempts = max(attempts, 1)
             tap("Load")
