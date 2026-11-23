@@ -23,7 +23,7 @@ SSL_LINK := -lssl -lcrypto
 endif
 INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include -I$(MOBILE)/include $(SSL_INCLUDES)
 SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/stream.c \
-	src/theme.c src/signal.c src/image.c src/text.c src/text_layout.c src/view.c src/ui.c \
+	src/theme.c src/signal.c src/image.c src/text.c src/text_layout.c src/casefold.c src/view.c src/ui.c \
 	src/ui_script.c src/lang_ui.c \
 	src/list.c src/map.c src/fs.c src/sys.c src/clock.c src/hash.c src/hex.c src/base64.c src/bytes.c src/random.c src/uuid.c src/net.c \
 	src/net_http.c src/net_request.c src/net_sock.c src/json.c src/testrt.c src/impurity.c
@@ -48,6 +48,7 @@ $(BUILDDIR)/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILDDIR)/text.o $(BUILDDIR)/text_layout.o $(BUILDDIR)/view.o $(BUILDDIR)/test_ui: src/text.h $(FFI_SKIA)/include/sk_text.h
+$(BUILDDIR)/casefold.o $(BUILDDIR)/view.o: src/casefold.h
 
 $(BUILDDIR)/image_dec.o: $(FFI_SKIA)/src/image_dec.c $(FFI_SKIA)/src/image_dec.h $(FFI_SKIA)/src/stb_image.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(FFI_SKIA)/src -c $< -o $@

@@ -1660,11 +1660,14 @@ static void drain_mobile_events(SzUiSession *session) {
 
 static void drain_desktop_events(SzUiSession *session) {
   SzInputEvent ev;
+  int left;
   if (!session || session->cfg.kind != SZ_UI_RUNTIME_DESKTOP)
     return;
   if (!sz_embedder_available() && !sz_embedder_accessibility_available())
     return;
-  while (sz_embedder_poll_event(&ev))
+  /* One pump takes a bounded batch. A live event storm must not skip inject.
+   * Quit has to run. */
+  for (left = 32; left > 0 && sz_embedder_poll_event(&ev); left--)
     inject_native_event(session, &ev);
 }
 
