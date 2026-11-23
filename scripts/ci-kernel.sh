@@ -337,6 +337,14 @@ with tempfile.TemporaryDirectory(prefix='scuzz-lsp-editor-') as directory:
         '  x * 2\n\n'
         'def shadowCheck(x: Int, y: Int): Int =\n'
         '  x + y\n\n'
+        'def joinNums(a: Int, b: Int): Int =\n'
+        '  a + b\n\n'
+        'def shifted(p: Pair): Pair =\n'
+        '  p.copy(b = p.a)\n\n'
+        'def pickedNum(): Int =\n'
+        '  joinNums(b = 2, a = 1)\n\n'
+        'def cutWord(s: String): String =\n'
+        '  s.slice(0, 1)\n\n'
         '@main def main: IO[Unit] =\n'
         '  IO.println(Help.word(calc(1)))\n'
     )
@@ -354,6 +362,15 @@ with tempfile.TemporaryDirectory(prefix='scuzz-lsp-editor-') as directory:
     x_param_col = unformatted_main.splitlines()[x_param_line].index('x: Int')
     shadow_line = unformatted_main.splitlines().index('def shadowCheck(x: Int, y: Int): Int =')
     shadow_col = unformatted_main.splitlines()[shadow_line].index('x: Int')
+    sig_lines = unformatted_main.splitlines()
+    word_arg_line = next(i for i, line in enumerate(sig_lines) if 'Help.word(x)' in line)
+    word_arg_col = sig_lines[word_arg_line].index('Help.word(x)') + len('Help.word(')
+    named_line = next(i for i, line in enumerate(sig_lines) if 'joinNums(b = 2, a = 1)' in line)
+    named_col = sig_lines[named_line].index('joinNums(b = 2, a = 1)') + len('joinNums(b = ')
+    copy_line = next(i for i, line in enumerate(sig_lines) if 'p.copy(b = p.a)' in line)
+    copy_col = sig_lines[copy_line].index('p.a') + 2
+    slice_line = next(i for i, line in enumerate(sig_lines) if 's.slice(0, 1)' in line)
+    slice_col = sig_lines[slice_line].index('s.slice(0, 1)') + len('s.slice(0, ')
 
     diag_msgs = lsp_session(ws, [
         {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': ws.as_uri()}},
@@ -386,12 +403,17 @@ with tempfile.TemporaryDirectory(prefix='scuzz-lsp-editor-') as directory:
         {'jsonrpc': '2.0', 'id': 14, 'method': 'textDocument/references', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': calc_line, 'character': word_col}, 'context': {'includeDeclaration': False}}},
         {'jsonrpc': '2.0', 'id': 15, 'method': 'textDocument/references', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': x_param_line, 'character': x_param_col}, 'context': {'includeDeclaration': False}}},
         {'jsonrpc': '2.0', 'id': 16, 'method': 'textDocument/references', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': 0, 'character': 0}}},
+        {'jsonrpc': '2.0', 'id': 17, 'method': 'textDocument/signatureHelp', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': word_arg_line, 'character': word_arg_col}}},
+        {'jsonrpc': '2.0', 'id': 18, 'method': 'textDocument/signatureHelp', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': named_line, 'character': named_col}}},
+        {'jsonrpc': '2.0', 'id': 19, 'method': 'textDocument/signatureHelp', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': copy_line, 'character': copy_col}}},
+        {'jsonrpc': '2.0', 'id': 20, 'method': 'textDocument/signatureHelp', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': slice_line, 'character': slice_col}}},
+        {'jsonrpc': '2.0', 'id': 21, 'method': 'textDocument/signatureHelp', 'params': {'textDocument': {'uri': main_uri}, 'position': {'line': 0, 'character': 0}}},
         {'jsonrpc': '2.0', 'id': 12, 'method': 'shutdown', 'params': None},
         {'jsonrpc': '2.0', 'method': 'exit', 'params': None},
     ])
     by_id = {m['id']: m['result'] for m in msgs if 'id' in m}
     caps = by_id[1]['capabilities']
-    assert caps.get('inlayHintProvider') is True and caps.get('foldingRangeProvider') is True and caps.get('codeActionProvider') is True and caps.get('referencesProvider') is True, caps
+    assert caps.get('inlayHintProvider') is True and caps.get('foldingRangeProvider') is True and caps.get('codeActionProvider') is True and caps.get('referencesProvider') is True and caps.get('signatureHelpProvider') is True, caps
 
     inlays = [(h['position']['line'], h['label']) for h in by_id[2]]
     y_line = next(i for i, l in enumerate(unformatted_main.splitlines()) if 'y = x + 1' in l)
@@ -435,6 +457,21 @@ with tempfile.TemporaryDirectory(prefix='scuzz-lsp-editor-') as directory:
     assert x_uses and not at_pos(x_uses, main_uri, x_param_line, x_param_col), x_uses
     assert all(unformatted_main.splitlines()[loc['range']['start']['line']][loc['range']['start']['character']:].startswith('x') for loc in x_uses), x_uses
     assert by_id[16] is None, by_id[16]
+
+    def active_text(result):
+        sig = result['signatures'][0]
+        span = sig['parameters'][result['activeParameter']]['label']
+        return sig['label'][span[0]:span[1]]
+
+    sig_word = by_id[17]
+    assert sig_word['activeSignature'] == 0 and sig_word['activeParameter'] == 0 and 'def Help.word(n: Int): String' in sig_word['signatures'][0]['label'] and active_text(sig_word).startswith('n:'), sig_word
+    sig_named = by_id[18]
+    assert sig_named['activeParameter'] == 1 and 'def joinNums(a: Int, b: Int): Int' in sig_named['signatures'][0]['label'] and active_text(sig_named).startswith('b:'), sig_named
+    sig_copy = by_id[19]
+    assert sig_copy['activeParameter'] == 1 and sig_copy['signatures'][0]['label'].startswith('copy(') and active_text(sig_copy).startswith('b:'), sig_copy
+    sig_slice = by_id[20]
+    assert sig_slice['activeParameter'] == 1 and sig_slice['signatures'][0]['label'] == 'slice(Int, Int): String' and active_text(sig_slice) == 'Int' and sig_slice['signatures'][0]['parameters'][1]['label'][0] > sig_slice['signatures'][0]['parameters'][0]['label'][0], sig_slice
+    assert by_id[21] is None, by_id[21]
 
     clean_msgs = lsp_session(ws, [
         {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'rootUri': ws.as_uri()}},

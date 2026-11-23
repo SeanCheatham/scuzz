@@ -2,6 +2,10 @@ record Open(path: String, src: String)
 
 record ModFile(stem: String, path: String, src: String)
 
+record CallSite(openIdx: Int, closeIdx: Int, qual: String, name: String)
+
+record Sig(label: String, spans: List[(Int, Int)])
+
 import Parse.Fun
 import Parse.Param
 import Parse.Prog
@@ -941,6 +945,13 @@ def referencesJson(uri: String, src: String, line: Int, col: Int, includeDecl: B
     mods = [ModFile(stem, path, src)]
   } yield referencesWorkspaceJson(mods, path, uri, [], [], stem, src, line, col, includeDecl)
 
+def signatureHelpJson(uri: String, src: String, line: Int, col: Int): String =
+  for {
+    path = pathOfUri(uri)
+    stem = stemOfPath(path)
+    mods = [ModFile(stem, path, src)]
+  } yield signatureHelpWorkspaceJson(mods, stem, src, line, col)
+
 def locsJoin(xs: List[String]): String =
   if (List.isEmpty(xs)) "[]" else Str.concat("[", Str.concat(List.join(xs, ","), "]"))
 
@@ -1068,6 +1079,435 @@ def referencesWorkspaceJson(mods: List[ModFile], activeNormPath: String, activeU
     off = offsetOf(src, line, col)
     idx = identTokAtOff(toks, off, 0)
   } yield if (idx < 0) "null" else referencesAt(mods, activeNormPath, activeUri, open, openNorm, activeStem, src, toks, idx, includeDecl)
+
+def signatureHelpWorkspaceJson(mods: List[ModFile], stem: String, src: String, line: Int, col: Int): String =
+  for {
+    toks = Parse.indexToks(Lexer.lex(src))
+    off = offsetOf(src, line, col)
+    site = pickCall(callsIn(toks), toks, off)
+  } yield if (site.openIdx < 0) "null" else signatureOf(mods, stem, toks, site, off)
+
+def signatureOf(mods: List[ModFile], stem: String, toks: Toks, site: CallSite, off: Int): String =
+  for {
+    p = Parse.parseFiles(modPairs(mods))
+    s = resolveSite(p, stem, site, toks, off)
+  } yield sigJson(s, activeOf(toks, site, off, s))
+
+def resolveSite(p: Prog, stem: String, site: CallSite, toks: Toks, off: Int): Sig =
+  for {
+    full = if (site.qual == "") site.name else Str.concat(site.qual, Str.concat(".", site.name))
+  } yield if (Kits.kitName(Kits.find(full)) != "") kitSig(full, full, false) else directFun(p, stem, full) match {
+  case Some(d) => funSig(d, stem, Str.indexOf(full, ".") >= 0)
+  case None => if (site.qual == "") bareRecord(p, stem, site.name) else if (Str.indexOf(site.qual, ".") >= 0) Sig("", []) else dottedSite(p, stem, site.qual, site.name, toks, off)
+}
+
+def directFun(p: Prog, stem: String, full: String): Option[Fun] =
+  for {
+    dot = Str.indexOf(full, ".")
+  } yield if (dot >= 0) findFunInMod(p.defs, Str.take(full, dot), Str.drop(full, dot + 1), Str.take(full, dot) == stem) else findFunInMod(p.defs, stem, full, true) match {
+  case Some(d) => Some(d)
+  case None => for {
+  imp = resolveImpMod(p.imps, stem, full)
+} yield if (Str.nonEmpty(imp._1) && Str.nonEmpty(imp._2)) findFunInMod(p.defs, imp._1, imp._2, false) else None
+}
+
+def funSig(d: Fun, activeStem: String, dotted: Bool): Sig =
+  d match {
+    case Fun(_, ora, name, ts, ps, ret, _, mod, _) => for {
+  shown = if (!dotted || Str.isEmpty(mod) || mod == activeStem) name else Str.concat(mod, Str.concat(".", name))
+  tp = if (dotted) showTParams(ts) else ""
+  head = Str.concat(if (ora) "oracle " else "def ", Str.concat(shown, Str.concat(tp, "(")))
+} yield makeSig(head, paramParts(ps), Str.concat("): ", ret))
+  }
+
+def kitSig(full: String, shown: String, dropRecv: Bool): Sig =
+  if (Kits.kitName(Kits.find(full)) == "") Sig("", []) else for {
+  parts0 = kitParts(full)
+  parts = if (dropRecv) dropHead(parts0) else parts0
+} yield makeSig(Str.concat(shown, "("), parts, Str.concat("): ", Kits.kitRetOf(Kits.find(full))))
+
+def kitParts(full: String): List[String] =
+  for {
+    k = Kits.find(full)
+    ps = Kits.kitParamsOf(k)
+    r = Kits.kitRestOf(k)
+  } yield if (r == "") ps else List.append(ps, Str.concat(r, "*"))
+
+def dropHead(xs: List[String]): List[String] =
+  xs match {
+    case [] => []
+    case _ :: rest => rest
+  }
+
+def bareRecord(p: Prog, stem: String, name: String): Sig =
+  findShape(p.enums, stem, name, true) match {
+    case Some(en) => ctorSig(name, enFields(en), name)
+    case None => Sig("", [])
+  }
+
+def dottedSite(p: Prog, stem: String, qual: String, name: String, toks: Toks, off: Int): Sig =
+  findShape(p.enums, stem, qual, false) match {
+    case Some(en) => caseParams(en.cases, name) match {
+  case Some(fs) => ctorSig(Str.concat(qual, Str.concat(".", name)), fs, qual)
+  case None => methodSite(p, stem, qual, name, toks, off)
+}
+    case None => methodSite(p, stem, qual, name, toks, off)
+  }
+
+def methodSite(p: Prog, stem: String, recv: String, name: String, toks: Toks, off: Int): Sig =
+  for {
+    ty = recvTy(p, stem, recv, toks, off)
+  } yield if (ty == "") Sig("", []) else methodOn(p, stem, ty, name)
+
+def methodOn(p: Prog, stem: String, ty: String, name: String): Sig =
+  for {
+    head = tyHeadStr(ty)
+  } yield implMethod(p.impls, head, name) match {
+  case Some(d) => methodFunSig(d)
+  case None => for {
+  q = Str.concat(kitNsName(head), Str.concat(".", name))
+} yield if (Kits.kitName(Kits.find(q)) != "") kitSig(q, name, true) else if (name == "copy") copySite(p, stem, head, ty) else Sig("", [])
+}
+
+def methodFunSig(d: Fun): Sig =
+  d match {
+    case Fun(_, _, name, _, ps, ret, _, _, _) => makeSig(Str.concat(name, "("), paramParts(dropSelf(ps)), Str.concat("): ", ret))
+  }
+
+def dropSelf(ps: List[Param]): List[Param] =
+  ps match {
+    case [] => []
+    case h :: rest => h match {
+  case Param(n, _, _, _) => if (n == "self") rest else ps
+}
+  }
+
+def copySite(p: Prog, stem: String, head: String, ty: String): Sig =
+  findShape(p.enums, stem, head, true) match {
+    case Some(en) => makeSig("copy(", paramParts(enFields(en)), Str.concat("): ", ty))
+    case None => Sig("", [])
+  }
+
+def ctorSig(shown: String, fs: List[Param], ret: String): Sig =
+  makeSig(Str.concat(shown, "("), paramParts(fs), Str.concat("): ", ret))
+
+def paramParts(ps: List[Param]): List[String] =
+  List.map(ps, paramPart)
+
+def paramPart(p: Param): String =
+  p match {
+    case Param(name, ty, _, _) => Str.concat(name, Str.concat(": ", ty))
+  }
+
+def findShape(ens: List[En], stem: String, name: String, rec: Bool): Option[En] =
+  List.head(List.filter(ens, en => en.isRec == rec && en.name == name && (en.mod == stem || Str.isEmpty(en.mod)))) match {
+    case Some(en) => Some(en)
+    case None => List.head(List.filter(ens, en => en.isRec == rec && en.name == name))
+  }
+
+def enFields(en: En): List[Param] =
+  en.cases match {
+    case [] => []
+    case c :: _ => c match {
+  case EnCase(_, fs) => fs
+}
+  }
+
+def caseParams(cs: List[EnCase], name: String): Option[List[Param]] =
+  cs match {
+    case [] => None
+    case h :: rest => h match {
+  case EnCase(n, fs) => if (n == name) Some(fs) else caseParams(rest, name)
+}
+  }
+
+def implMethod(ims: List[Im], head: String, name: String): Option[Fun] =
+  ims match {
+    case [] => None
+    case h :: rest => if (tyHeadStr(h.forTy) == head) findMethodName(h.methods, name) match {
+  case Some(d) => Some(d)
+  case None => implMethod(rest, head, name)
+} else implMethod(rest, head, name)
+  }
+
+def findMethodName(ds: List[Fun], name: String): Option[Fun] =
+  List.head(List.filter(ds, d => d.name == name))
+
+def kitNsName(h: String): String =
+  if (h == "String") "Str" else h
+
+def tyHeadStr(ty: String): String =
+  for {
+    cut = Str.indexOf(ty, "[")
+    base = if (cut >= 0) Str.take(ty, cut) else ty
+    dot = lastDot(base)
+  } yield if (dot >= 0) Str.drop(base, dot + 1) else base
+
+def lastDot(s: String): Int =
+  lastDotGo(s, 0, 0 - 1)
+
+def lastDotGo(s: String, i: Int, best: Int): Int =
+  for {
+    n = Str.indexOf(Str.drop(s, i), ".")
+  } yield if (n < 0) best else lastDotGo(s, i + n + 1, i + n)
+
+def recvTy(p: Prog, stem: String, recv: String, toks: Toks, off: Int): String =
+  ownerFun(moduleFuns(p, stem), toks, off) match {
+    case Some(d) => paramTyNamed(d.params, recv)
+    case None => ""
+  }
+
+def moduleFuns(p: Prog, stem: String): List[Fun] =
+  List.concat(List.filter(p.defs, d => d.mod == stem || Str.isEmpty(d.mod)), List.flatten(List.map(List.filter(p.impls, im => im.mod == stem || Str.isEmpty(im.mod)), im => im.methods)))
+
+def paramTyNamed(ps: List[Param], name: String): String =
+  ps match {
+    case [] => ""
+    case h :: rest => h match {
+  case Param(n, ty, _, _) => if (n == name) ty else paramTyNamed(rest, name)
+}
+  }
+
+def ownerFun(ds: List[Fun], toks: Toks, off: Int): Option[Fun] =
+  ownerFunGo(ds, toks, off, None)
+
+def ownerFunGo(ds: List[Fun], toks: Toks, off: Int, best: Option[Fun]): Option[Fun] =
+  ds match {
+    case [] => best
+    case h :: rest => ownerFunGo(rest, toks, off, if (ownsCall(toks, h, off) && laterFun(best, h)) Some(h) else best)
+  }
+
+def laterFun(best: Option[Fun], h: Fun): Bool =
+  best match {
+    case None => true
+    case Some(b) => h.off >= b.off
+  }
+
+def ownsCall(toks: Toks, d: Fun, off: Int): Bool =
+  d.off <= off && (for {
+  nxt = nextTopOff(toks, 0, d.off)
+} yield nxt < 0 || off < nxt)
+
+def nextTopOff(toks: Toks, i: Int, fromOff: Int): Int =
+  if (i >= toks.n) 0 - 1 else for {
+  sp = Parse._sp(toks, i)
+} yield if (sp.off > fromOff && sp.column == 0 && isTopKw(sp.tok)) sp.off else nextTopOff(toks, i + 1, fromOff)
+
+def isTopKw(t: Tok): Bool =
+  t match {
+    case Tok.Def => true
+    case Tok.Oracle => true
+    case Tok.Enum => true
+    case Tok.Record => true
+    case Tok.Trait => true
+    case Tok.Impl => true
+    case Tok.TypeKw => true
+    case Tok.Import => true
+    case Tok.AtMain => true
+    case Tok.Private => true
+    case _ => false
+  }
+
+def activeOf(toks: Toks, site: CallSite, off: Int, s: Sig): Int =
+  for {
+    hit = activeArg(toks, site.openIdx + 1, site.closeIdx, off, 0, 0, 0 - 1)
+    name = argNameAt(toks, hit._2, site.closeIdx)
+    named = namedAt(s, name)
+  } yield if (named >= 0) named else hit._1
+
+def activeArg(toks: Toks, i: Int, stop: Int, cursor: Int, depth: Int, arg: Int, start: Int): (Int, Int) =
+  if (i >= stop || Parse._off(toks, i) > cursor) (arg, start) else if (isNestOpen(toks, i)) activeArg(toks, i + 1, stop, cursor, depth + 1, arg, if (start < 0) i else start) else if (isNestClose(toks, i)) activeArg(toks, i + 1, stop, cursor, depth - 1, arg, if (start < 0) i else start) else if (Parse._is(toks, i, Tok.Comma)) if (depth == 0) activeArg(toks, i + 1, stop, cursor, depth, arg + 1, 0 - 1) else activeArg(toks, i + 1, stop, cursor, depth, arg, start) else activeArg(toks, i + 1, stop, cursor, depth, arg, if (start < 0) i else start)
+
+def isNestOpen(toks: Toks, i: Int): Bool =
+  Parse._is(toks, i, Tok.LParen) || Parse._is(toks, i, Tok.LBrace) || Parse._is(toks, i, Tok.LBracket)
+
+def isNestClose(toks: Toks, i: Int): Bool =
+  Parse._is(toks, i, Tok.RParen) || Parse._is(toks, i, Tok.RBrace) || Parse._is(toks, i, Tok.RBracket)
+
+def argNameAt(toks: Toks, start: Int, stop: Int): String =
+  if (start < 0 || start + 1 >= stop) "" else if (Parse._is(toks, start + 1, Tok.Eq)) Parse._identOf(Parse._at(toks, start)) else ""
+
+def namedAt(s: Sig, name: String): Int =
+  if (name == "") 0 - 1 else namedSpan(s.label, s.spans, name, 0)
+
+def namedSpan(label: String, spans: List[(Int, Int)], name: String, i: Int): Int =
+  spans match {
+    case [] => 0 - 1
+    case h :: rest => h match {
+  case (a, b) => if (Str.startsWith(Str.slice(label, a, b), Str.concat(name, ": "))) i else namedSpan(label, rest, name, i + 1)
+}
+  }
+
+def sigJson(s: Sig, active: Int): String =
+  if (s.label == "") "null" else Str.concat("{\"signatures\":[{\"label\":", Str.concat(Check.jsonStr(s.label), Str.concat(",\"parameters\":[", Str.concat(spansJson(s.spans), Str.concat("],\"activeParameter\":", Str.concat(Str.fromInt(active), Str.concat("}],\"activeSignature\":0,\"activeParameter\":", Str.concat(Str.fromInt(active), "}"))))))))
+
+def spansJson(xs: List[(Int, Int)]): String =
+  xs match {
+    case [] => ""
+    case h :: rest => if (List.isEmpty(rest)) spanOne(h) else Str.concat(spanOne(h), Str.concat(",", spansJson(rest)))
+  }
+
+def spanOne(sp: (Int, Int)): String =
+  sp match {
+    case (a, b) => Str.concat("{\"label\":[", Str.concat(Str.fromInt(a), Str.concat(",", Str.concat(Str.fromInt(b), "]}"))))
+  }
+
+def makeSig(prefix: String, parts: List[String], suffix: String): Sig =
+  Sig(Str.concat(prefix, Str.concat(List.join(parts, ", "), suffix)), partSpans(parts, Str.len(prefix), []))
+
+def partSpans(ps: List[String], at: Int, acc: List[(Int, Int)]): List[(Int, Int)] =
+  ps match {
+    case [] => List.reverse(acc)
+    case h :: rest => partSpans(rest, if (List.isEmpty(rest)) at + Str.len(h) else at + Str.len(h) + 2, (at, at + Str.len(h)) :: acc)
+  }
+
+def pickCall(xs: List[CallSite], toks: Toks, off: Int): CallSite =
+  pickCallGo(xs, toks, off, CallSite(0 - 1, 0 - 1, "", ""))
+
+def pickCallGo(xs: List[CallSite], toks: Toks, off: Int, best: CallSite): CallSite =
+  xs match {
+    case [] => best
+    case h :: rest => pickCallGo(rest, toks, off, if (callHolds(toks, h, off) && (best.openIdx < 0 || Parse._off(toks, h.openIdx) >= Parse._off(toks, best.openIdx))) h else best)
+  }
+
+def callHolds(toks: Toks, c: CallSite, off: Int): Bool =
+  Parse._off(toks, c.openIdx) <= off && off <= Parse._off(toks, c.closeIdx)
+
+def callsIn(toks: Toks): List[CallSite] =
+  if (Parse._is(toks, 0, Tok.Package)) for {
+  (_, afterPkg) = Parse.parsePkg(toks, 1)
+} yield callTop(toks, if (afterPkg > 0) afterPkg else 1, []) else callTop(toks, 0, [])
+
+def callTop(toks: Toks, i: Int, acc: List[CallSite]): List[CallSite] =
+  if (i >= toks.n || Parse._is(toks, i, Tok.Eof)) List.reverse(acc) else if (Parse._is(toks, i, Tok.Private) && Parse._is(toks, i + 1, Tok.Def)) for {
+  (_, j) = Parse.parseDef(toks, i + 2, true, false)
+  nextI = if (j > i + 2) j else i + 2
+} yield callTop(toks, nextI, callDefItem(toks, i + 2, nextI, acc)) else if (Parse._is(toks, i, Tok.Oracle)) for {
+  (_, j) = Parse.parseDef(toks, i + 1, false, true)
+  nextI = if (j > i + 1) j else i + 1
+} yield callTop(toks, nextI, callDefItem(toks, i + 1, nextI, acc)) else if (Parse._is(toks, i, Tok.Def)) for {
+  (_, j) = Parse.parseDef(toks, i + 1, false, false)
+  nextI = if (j > i + 1) j else i + 1
+} yield callTop(toks, nextI, callDefItem(toks, i + 1, nextI, acc)) else if (Parse._is(toks, i, Tok.AtMain) && Parse._is(toks, i + 1, Tok.Def)) for {
+  (_, _, j) = Parse.parseMain(toks, i + 2)
+  nextI = if (j > i + 2) j else i + 2
+  eqIdx = findTopDefEq(toks, i + 2, nextI)
+  acc1 = if (eqIdx >= 0 && eqIdx + 1 < nextI) callExpr(toks, eqIdx + 1, nextI, acc) else acc
+} yield callTop(toks, nextI, acc1) else if (Parse._is(toks, i, Tok.Impl)) for {
+  (_, j) = Parse.parseImpl(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+} yield callTop(toks, nextI, callImpl(toks, i + 1, nextI, acc)) else if (Parse._is(toks, i, Tok.Record)) for {
+  (_, j) = Parse.parseRec(toks, i + 1)
+  nextI = if (j > i + 1) j else i + 1
+  lp = findDefHeaderOpenParen(toks, i + 1, nextI)
+  closeP = if (lp >= 0) matchCloseParen(toks, lp + 1, 1, nextI) else 0 - 1
+  acc1 = if (lp >= 0 && closeP > lp) callDefaults(toks, lp + 1, closeP, acc) else acc
+} yield callTop(toks, nextI, acc1) else if (Parse._is(toks, i, Tok.Enum)) for {
+  (_, j) = Parse.parseEnum(toks, i + 1)
+} yield callTop(toks, if (j > i + 1) j else i + 1, acc) else if (Parse._is(toks, i, Tok.Trait)) for {
+  (_, j) = Parse.parseTrait(toks, i + 1)
+} yield callTop(toks, if (j > i + 1) j else i + 1, acc) else if (Parse._is(toks, i, Tok.TypeKw)) for {
+  (_, j) = Parse.parseAlias(toks, i + 1)
+} yield callTop(toks, if (j > i + 1) j else i + 1, acc) else if (Parse._is(toks, i, Tok.Import)) for {
+  (_, j) = Parse.parseImport(toks, i + 1)
+} yield callTop(toks, if (j > i + 1) j else i + 1, acc) else callTop(toks, i + 1, acc)
+
+def callDefItem(toks: Toks, nameAt: Int, endAt: Int, acc: List[CallSite]): List[CallSite] =
+  for {
+    lp = findDefHeaderOpenParen(toks, nameAt, endAt)
+    closeP = if (lp >= 0) matchCloseParen(toks, lp + 1, 1, endAt) else 0 - 1
+    acc1 = if (lp >= 0 && closeP > lp) callDefaults(toks, lp + 1, closeP, acc) else acc
+    eqIdx = findTopDefEq(toks, if (closeP > 0) closeP + 1 else nameAt, endAt)
+  } yield if (eqIdx >= 0 && eqIdx + 1 < endAt) callExpr(toks, eqIdx + 1, endAt, acc1) else acc1
+
+def callImpl(toks: Toks, i: Int, stop: Int, acc: List[CallSite]): List[CallSite] =
+  if (i >= stop) acc else if (Parse._is(toks, i, Tok.Def) && Parse._sp(toks, i).column > 0) for {
+  (_, j) = Parse.parseDef(toks, i + 1, false, false)
+  endM = clampIdx(if (j > i + 1) j else i + 1, i + 1, stop)
+  acc1 = callDefItem(toks, i + 1, endM, acc)
+} yield callImpl(toks, endM, stop, acc1) else callImpl(toks, i + 1, stop, acc)
+
+def callDefaults(toks: Toks, i: Int, stop: Int, acc: List[CallSite]): List[CallSite] =
+  if (i >= stop) acc else if (Parse._is(toks, i, Tok.Colon)) for {
+  (_, afterTy) = Parse.parseType(toks, i + 1)
+  nextI = if (afterTy > i + 1) afterTy else i + 1
+} yield callDefaults(toks, nextI, stop, acc) else if (Parse._is(toks, i, Tok.Where) || Parse._is(toks, i, Tok.Eq)) for {
+  (_, afterE) = Parse.parseExpr(toks, i + 1)
+  endE = if (afterE > stop) stop else afterE
+  acc1 = if (endE > i + 1) callExpr(toks, i + 1, endE, acc) else acc
+} yield callDefaults(toks, if (endE > i + 1) endE else i + 1, stop, acc1) else callDefaults(toks, i + 1, stop, acc)
+
+def callExpr(toks: Toks, i: Int, stop: Int, acc: List[CallSite]): List[CallSite] =
+  if (i >= stop) acc else if (Parse._is(toks, i, Tok.For) && i + 1 < stop && Parse._is(toks, i + 1, Tok.LBrace)) for {
+  (nextI, acc1) = callFor(toks, i + 2, stop, acc)
+} yield callExpr(toks, if (nextI > i) nextI else i + 2, stop, acc1) else if (Parse._is(toks, i, Tok.Match) && i + 1 < stop && Parse._is(toks, i + 1, Tok.LBrace)) for {
+  (nextI, acc1) = callMatch(toks, i + 2, stop, acc)
+} yield callExpr(toks, if (nextI > i) nextI else i + 2, stop, acc1) else if (Parse._is(toks, i, Tok.Colon)) for {
+  (_, afterTy) = Parse.parseType(toks, i + 1)
+  nextI = clampIdx(if (afterTy > i + 1) afterTy else i + 1, i + 1, stop)
+} yield callExpr(toks, nextI, stop, acc) else if (Parse._is(toks, i, Tok.LParen)) callParen(toks, i, stop, acc) else Parse._at(toks, i) match {
+  case Tok.Ident(_) => callIdent(toks, i, stop, acc)
+  case _ => callExpr(toks, i + 1, stop, acc)
+}
+
+def callParen(toks: Toks, i: Int, stop: Int, acc: List[CallSite]): List[CallSite] =
+  for {
+    closeP = matchCloseParen(toks, i + 1, 1, stop)
+  } yield if (closeP > i && closeP + 1 < stop && Parse._is(toks, closeP + 1, Tok.Arrow)) for {
+  (_, after0) = Parse.parseExpr(toks, closeP + 2)
+  after = clampIdx(after0, closeP + 2, stop)
+  acc1 = callExpr(toks, closeP + 2, after, acc)
+} yield callExpr(toks, if (after > closeP + 1) after else closeP + 2, stop, acc1) else callExpr(toks, i + 1, stop, acc)
+
+def callIdent(toks: Toks, i: Int, stop: Int, acc: List[CallSite]): List[CallSite] =
+  if (i + 1 < stop && Parse._is(toks, i + 1, Tok.Eq)) callExpr(toks, i + 2, stop, acc) else if (i + 1 < stop && Parse._is(toks, i + 1, Tok.LParen) && !Parse.forBindAfter(toks, i + 1)) callExpr(toks, i + 1, stop, noteCall(toks, i, stop, acc)) else callExpr(toks, i + 1, stop, acc)
+
+def noteCall(toks: Toks, i: Int, stop: Int, acc: List[CallSite]): List[CallSite] =
+  for {
+    name = Parse._identOf(Parse._at(toks, i))
+    close = matchCloseParen(toks, i + 2, 1, stop)
+  } yield if (name == "" || close < 0) acc else CallSite(i + 1, close, qualChain(toks, i), name) :: acc
+
+def qualChain(toks: Toks, i: Int): String =
+  if (i < 2 || !Parse._is(toks, i - 1, Tok.Dot)) "" else qualJoin(qualChain(toks, i - 2), Parse._identOf(Parse._at(toks, i - 2)))
+
+def qualJoin(prev: String, name: String): String =
+  if (name == "") "" else if (prev == "") name else Str.concat(prev, Str.concat(".", name))
+
+def callFor(toks: Toks, cur: Int, stop: Int, acc: List[CallSite]): (Int, List[CallSite]) =
+  if (cur >= stop) (stop, acc) else if (Parse._is(toks, cur, Tok.RBrace)) if (cur + 1 < stop && Parse._is(toks, cur + 1, Tok.Yield)) for {
+  (_, after0) = Parse.parseExpr(toks, cur + 2)
+  after = clampIdx(after0, cur + 2, stop)
+} yield (after, callExpr(toks, cur + 2, after, acc)) else (cur + 1, acc) else if (Parse._is(toks, cur, Tok.If)) for {
+  (_, afterG0) = Parse.parseExpr(toks, cur + 1)
+  afterG = clampIdx(afterG0, cur + 1, stop)
+  acc1 = callExpr(toks, cur + 1, afterG, acc)
+} yield callFor(toks, if (afterG > cur) afterG else cur + 1, stop, acc1) else for {
+  (_, eqIdx) = Parse.parsePat(toks, cur)
+} yield if (eqIdx <= cur || eqIdx >= stop || !Parse._is(toks, eqIdx, Tok.LeftArrow) && !Parse._is(toks, eqIdx, Tok.Eq)) (cur + 1, acc) else for {
+  (rhsE, after0) = Parse.parseExpr(toks, eqIdx + 1)
+  (_, next0) = Parse.parseArgAsc(rhsE, toks, after0)
+  rhsEnd = clampIdx(after0, eqIdx + 1, stop)
+  nextCur = clampIdx(next0, rhsEnd, stop)
+  acc1 = callExpr(toks, eqIdx + 1, rhsEnd, acc)
+} yield callFor(toks, if (nextCur > cur) nextCur else cur + 1, stop, acc1)
+
+def callMatch(toks: Toks, cur: Int, stop: Int, acc: List[CallSite]): (Int, List[CallSite]) =
+  if (cur >= stop) (stop, acc) else if (Parse._is(toks, cur, Tok.RBrace)) (cur + 1, acc) else if (!Parse._is(toks, cur, Tok.Case)) (cur + 1, acc) else for {
+  (_, afterPat) = Parse.parsePat(toks, cur + 1)
+} yield if (afterPat <= cur + 1 || afterPat >= stop) (cur + 1, acc) else if (Parse._is(toks, afterPat, Tok.If)) for {
+  (_, afterG0) = Parse.parseExpr(toks, afterPat + 1)
+  afterG = clampIdx(afterG0, afterPat + 1, stop)
+  acc1 = callExpr(toks, afterPat + 1, afterG, acc)
+} yield if (afterG < stop && Parse._is(toks, afterG, Tok.Arrow)) for {
+  (_, afterB0) = Parse.parseExpr(toks, afterG + 1)
+  afterB = clampIdx(afterB0, afterG + 1, stop)
+  acc2 = callExpr(toks, afterG + 1, afterB, acc1)
+} yield callMatch(toks, if (afterB > cur) afterB else cur + 1, stop, acc2) else (afterG, acc1) else if (Parse._is(toks, afterPat, Tok.Arrow)) for {
+  (_, afterB0) = Parse.parseExpr(toks, afterPat + 1)
+  afterB = clampIdx(afterB0, afterPat + 1, stop)
+  acc1 = callExpr(toks, afterPat + 1, afterB, acc)
+} yield callMatch(toks, if (afterB > cur) afterB else cur + 1, stop, acc1) else (afterPat, acc)
 
 def renameIdents(src: String, name: String, nu: String): String =
   if (!validIdent(name) || !validIdent(nu)) src else Builder.result(renameToks(Lexer.lex(src), src, name, nu, 0, Builder.empty()))
@@ -1453,7 +1893,7 @@ def tokensJoinHd(n: Int, rest: List[Int], b: Builder): String =
   if (List.isEmpty(rest)) Builder.result(Builder.append(b, Str.fromInt(n))) else tokensJoinGo(rest, Builder.append(Builder.append(b, Str.fromInt(n)), ","))
 
 def caps(): String =
-  "{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":true,\"inlayHintProvider\":true,\"foldingRangeProvider\":true,\"codeActionProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true}}}"
+  "{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true,\"signatureHelpProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":true,\"inlayHintProvider\":true,\"foldingRangeProvider\":true,\"codeActionProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true}}}"
 
 def errorMsg(id: String, code: Int, message: String): String =
   Str.concat("{\"jsonrpc\":\"2.0\",\"id\":", Str.concat(id, Str.concat(",\"error\":{\"code\":", Str.concat(Str.fromInt(code), Str.concat(",\"message\":", Str.concat(Check.jsonStr(message), "}}"))))))
@@ -1574,7 +2014,7 @@ def handleM2(root: String, open: List[Open], j: Json, method: String, id: String
   if (method == "textDocument/didOpen") didOpen(root, open, j) else if (method == "textDocument/didChange") didChange(root, open, j) else if (method == "textDocument/didClose") didClose(open, j) else handleM3(root, open, j, method, id)
 
 def handleM3(root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
-  if (method == "textDocument/hover") hover(root, open, j, id) else if (method == "textDocument/completion") complete(root, open, j, id) else if (method == "textDocument/definition") definition(root, open, j, id) else if (method == "textDocument/references") references(root, open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(root, open, j, id) else if (method == "textDocument/semanticTokens/full") tokens(open, j, id) else if (method == "textDocument/inlayHint") inlayHint(root, open, j, id) else if (method == "textDocument/foldingRange") foldingRange(open, j, id) else if (method == "textDocument/codeAction") codeAction(open, j, id) else handleM4(open, id)
+  if (method == "textDocument/hover") hover(root, open, j, id) else if (method == "textDocument/completion") complete(root, open, j, id) else if (method == "textDocument/definition") definition(root, open, j, id) else if (method == "textDocument/references") references(root, open, j, id) else if (method == "textDocument/signatureHelp") signatureHelp(root, open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(root, open, j, id) else if (method == "textDocument/semanticTokens/full") tokens(open, j, id) else if (method == "textDocument/inlayHint") inlayHint(root, open, j, id) else if (method == "textDocument/foldingRange") foldingRange(open, j, id) else if (method == "textDocument/codeAction") codeAction(open, j, id) else handleM4(open, id)
 
 def handleM4(open: List[Open], id: String): IO[List[Open]] =
   if (id == "null") IO.pure(open) else lspReplyErrKeep(open, id)
@@ -1686,6 +2126,14 @@ def references(root: String, open: List[Open], j: Json, id: String): IO[List[Ope
     _ <- reply(id, referencesWorkspaceJson(mods, aPath, uri, open, openNorm, stemOfPath(path), src, posLine(j), posCol(j), includeDeclOf(j)))
   } yield open
 
+def signatureHelp(root: String, open: List[Open], j: Json, id: String): IO[List[Open]] =
+  for {
+    path = pathOfUri(uriOf(j))
+    src <- srcOf(open, path)
+    mods <- workspaceMods(root, open, path, src)
+    _ <- reply(id, signatureHelpWorkspaceJson(mods, stemOfPath(path), src, posLine(j), posCol(j)))
+  } yield open
+
 def tokens(open: List[Open], j: Json, id: String): IO[List[Open]] =
   srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, tokensJson(src)).flatMap(_ => IO.pure(open)))
 
@@ -1729,7 +2177,7 @@ def query(root: String, path: String, body: String, method: String, line: Int, c
     open = [Open(path, body)]
     openNorm = [Open(aPath, body)]
     stem = stemOfPath(path)
-    out <- if (method == "textDocument/semanticTokens/full") IO.pure(resultMsg("2", tokensJson(body))) else if (method == "textDocument/foldingRange") IO.pure(resultMsg("2", foldingRangesJson(body))) else if (method == "textDocument/formatting") IO.pure(resultMsg("2", formatJson(body))) else if (method == "textDocument/codeAction") IO.pure(resultMsg("2", codeActionsJson(uri, body))) else if (method == "textDocument/inlayHint") workspaceMods(root, open, path, body).map(mods => resultMsg("2", inlayHintsWorkspaceJson(mods, stem, body, Json.Null()))) else if (method == "textDocument/hover") workspaceMods(root, open, path, body).map(mods => resultMsg("2", hoverJson(hoverWorkspace(mods, stem, body, line, col)))) else if (method == "textDocument/completion") workspaceMods(root, open, path, body).map(mods => resultMsg("2", completeWorkspaceJson(mods, stem, body, qualPrefixAt(body, offsetOf(body, line, col))))) else if (method == "textDocument/definition") workspaceMods(root, open, path, body).map(mods => resultMsg("2", defWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col))) else if (method == "textDocument/references") workspaceMods(root, open, path, body).map(mods => resultMsg("2", referencesWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu != "0"))) else if (method == "textDocument/rename") workspaceMods(root, open, path, body).map(mods => resultMsg("2", renameWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu))) else IO.pure(errorMsg("2", 0 - 32601, "MethodNotFound"))
+    out <- if (method == "textDocument/semanticTokens/full") IO.pure(resultMsg("2", tokensJson(body))) else if (method == "textDocument/foldingRange") IO.pure(resultMsg("2", foldingRangesJson(body))) else if (method == "textDocument/formatting") IO.pure(resultMsg("2", formatJson(body))) else if (method == "textDocument/codeAction") IO.pure(resultMsg("2", codeActionsJson(uri, body))) else if (method == "textDocument/inlayHint") workspaceMods(root, open, path, body).map(mods => resultMsg("2", inlayHintsWorkspaceJson(mods, stem, body, Json.Null()))) else if (method == "textDocument/hover") workspaceMods(root, open, path, body).map(mods => resultMsg("2", hoverJson(hoverWorkspace(mods, stem, body, line, col)))) else if (method == "textDocument/completion") workspaceMods(root, open, path, body).map(mods => resultMsg("2", completeWorkspaceJson(mods, stem, body, qualPrefixAt(body, offsetOf(body, line, col))))) else if (method == "textDocument/definition") workspaceMods(root, open, path, body).map(mods => resultMsg("2", defWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col))) else if (method == "textDocument/references") workspaceMods(root, open, path, body).map(mods => resultMsg("2", referencesWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu != "0"))) else if (method == "textDocument/signatureHelp") workspaceMods(root, open, path, body).map(mods => resultMsg("2", signatureHelpWorkspaceJson(mods, stem, body, line, col))) else if (method == "textDocument/rename") workspaceMods(root, open, path, body).map(mods => resultMsg("2", renameWorkspaceJson(mods, aPath, uri, open, openNorm, stem, body, line, col, nu))) else IO.pure(errorMsg("2", 0 - 32601, "MethodNotFound"))
   } yield out
 
 def headerBody(acc: String): Int =

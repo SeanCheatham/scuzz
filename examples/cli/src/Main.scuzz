@@ -648,7 +648,7 @@ def lspWireOver(): Bool =
   Lsp.overlayHas(Lsp.overlayPut([], "/x", ""), "/x") && Lsp.overlayGet(Lsp.overlayPut([], "/x", ""), "/x") == "" && !Lsp.overlayHas([], "/x")
 
 def lspWireCaps(): Bool =
-  Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "\"file://x\"") && Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "bar") && !Str.contains(Lsp.caps(), "prepareProvider") && !Str.contains(Lsp.caps(), "documentSymbol") && Str.contains(Lsp.caps(), "\"referencesProvider\":true") && Str.contains(Lsp.caps(), "\"inlayHintProvider\":true") && Str.contains(Lsp.caps(), "\"foldingRangeProvider\":true") && Str.contains(Lsp.caps(), "\"codeActionProvider\":true") && !Str.contains(Lsp.caps(), "declarationProvider") && !Str.contains(Lsp.caps(), "triggerCharacters") && Str.contains(Lsp.caps(), "utf-8") && lspRefsOk() && lspEditorSliceOk()
+  Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "\"file://x\"") && Str.contains(Lsp.renameJson("file://x", lspRenameSrc(), 0, 4, "bar"), "bar") && !Str.contains(Lsp.caps(), "prepareProvider") && !Str.contains(Lsp.caps(), "documentSymbol") && Str.contains(Lsp.caps(), "\"referencesProvider\":true") && Str.contains(Lsp.caps(), "\"signatureHelpProvider\":true") && Str.contains(Lsp.caps(), "\"inlayHintProvider\":true") && Str.contains(Lsp.caps(), "\"foldingRangeProvider\":true") && Str.contains(Lsp.caps(), "\"codeActionProvider\":true") && !Str.contains(Lsp.caps(), "declarationProvider") && !Str.contains(Lsp.caps(), "triggerCharacters") && Str.contains(Lsp.caps(), "utf-8") && lspRefsOk() && lspSigOk() && lspEditorSliceOk()
 
 def lspRefsOk(): Bool =
   for {
@@ -692,6 +692,51 @@ def run(): String =
     impMods = [Lsp.ModFile("Main", "/ws/src/Main.scuzz", impSrc), Lsp.ModFile("Help", "/ws/dep/src/Help.scuzz", "def word(): String =\n  \"ok\"\n")]
     refImp = Lsp.referencesWorkspaceJson(impMods, "/ws/src/Main.scuzz", "file:///ws/src/Main.scuzz", [], [], "Main", impSrc, 3, 2, true)
   } yield Str.contains(refParam, "\"line\":0,\"character\":10") && Str.contains(refParam, "\"line\":1,\"character\":2") && !Str.contains(refParam, "\"line\":3") && !Str.contains(refParamUse, "\"line\":0") && Str.contains(refParamUse, "\"line\":1,\"character\":2") && Str.contains(refOuter, "\"line\":3,\"character\":11") && Str.contains(refOuter, "\"line\":5,\"character\":8") && !Str.contains(refOuter, "\"line\":5,\"character\":4") && !Str.contains(refOuter, "\"line\":6") && Str.contains(refInner, "\"line\":5,\"character\":4") && Str.contains(refInner, "\"line\":6,\"character\":8") && Str.contains(refInner, "\"line\":8,\"character\":14") && !Str.contains(refInner, "\"line\":5,\"character\":8") && !Str.contains(refInner, "\"line\":0") && Str.contains(refName, "\"line\":0,\"character\":4") && refNameUse == "[]" && refKw == "null" && refArg == "null" && Str.contains(refArgUse, "\"line\":0,\"character\":6") && Str.contains(refArgUse, "\"line\":1,\"character\":8") && !Str.contains(refArgUse, "\"character\":4") && Str.contains(refCross, "file:///ws/dep/src/Help.scuzz") && Str.contains(refCross, "\"line\":0,\"character\":4") && Str.contains(refCross, "file:///ws/src/Main.scuzz") && Str.contains(refCross, "\"line\":1,\"character\":7") && !Str.contains(refCrossUse, "Help.scuzz") && Str.contains(refCrossUse, "\"line\":1,\"character\":7") && Str.contains(refMod, "file:///ws/dep/src/Help.scuzz") && Str.contains(refMod, "\"line\":1,\"character\":2") && Str.contains(refMod, "\"character\":6") && !Str.contains(refMod, "\"character\":7") && !Str.contains(refModUse, "Help.scuzz") && Str.contains(refModUse, "\"line\":1,\"character\":2") && Str.contains(refImp, "\"line\":0,\"character\":12") && Str.contains(refImp, "\"line\":3,\"character\":2") && Str.contains(refImp, "file:///ws/dep/src/Help.scuzz")
+
+def lspJsonOk(s: String): Bool =
+  Json.parse(s) match {
+    case Result.Ok(_) => true
+    case Result.Err(_) => false
+  }
+
+def lspSigOk(): Bool =
+  for {
+    src = """def add(a: Int, b: Int): Int =
+  add(1, 2)
+
+def cut(s: String): String =
+  s.slice(0, 1)
+
+record Pair(left: Int, right: Int)
+
+def shifted(p: Pair): Pair =
+  p.copy(right = 1)
+
+def picked(): Int =
+  add(b = 2, a = 1)
+
+def wrapped(n: Int): Int =
+  (n)
+
+def nest(): Int =
+  add(1, add(2, 3))
+"""
+    direct = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 1, 9)
+    method = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 4, 13)
+    copy = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 9, 17)
+    named = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 12, 10)
+    namedA = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 12, 17)
+    plain = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 0, 0)
+    callee = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 1, 2)
+    group = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 15, 3)
+    nest = Lsp.signatureHelpJson("file:///ws/src/Main.scuzz", src, 18, 13)
+    mainSrc = """def run(): String =
+  Help.word(1)
+"""
+    mods = [Lsp.ModFile("Main", "/ws/src/Main.scuzz", mainSrc), Lsp.ModFile("Help", "/ws/dep/src/Help.scuzz", "def word(n: Int): String =\n  \"ok\"\n")]
+    cross = Lsp.signatureHelpWorkspaceJson(mods, "Main", mainSrc, 1, 12)
+    outside = Lsp.signatureHelpWorkspaceJson(mods, "Main", mainSrc, 1, 7)
+  } yield Str.contains(direct, "def add(a: Int, b: Int): Int") && Str.contains(direct, "\"label\":[8,14]") && Str.contains(direct, "\"label\":[16,22]") && Str.contains(direct, "\"activeParameter\":1") && !Str.contains(direct, "\"activeParameter\":0") && Str.contains(direct, "\"activeSignature\":0") && Str.contains(method, "slice(Int, Int): String") && Str.contains(method, "\"label\":[6,9]") && Str.contains(method, "\"label\":[11,14]") && Str.contains(method, "\"activeParameter\":1") && !Str.contains(method, "\"activeParameter\":0") && Str.contains(copy, "copy(left: Int, right: Int): Pair") && Str.contains(copy, "\"label\":[16,26]") && Str.contains(copy, "\"activeParameter\":1") && !Str.contains(copy, "\"activeParameter\":0") && Str.contains(named, "def add(a: Int, b: Int): Int") && Str.contains(named, "\"activeParameter\":1") && !Str.contains(named, "\"activeParameter\":0") && Str.contains(namedA, "def add(a: Int, b: Int): Int") && Str.contains(namedA, "\"activeParameter\":0") && !Str.contains(namedA, "\"activeParameter\":1") && plain == "null" && callee == "null" && group == "null" && Str.contains(nest, "def add(a: Int, b: Int): Int") && Str.contains(nest, "\"activeParameter\":0") && !Str.contains(nest, "\"activeParameter\":1") && Str.contains(cross, "def Help.word(n: Int): String") && Str.contains(cross, "\"label\":[14,20]") && Str.contains(cross, "\"activeParameter\":0") && !Str.contains(cross, "\"activeParameter\":1") && outside == "null" && lspJsonOk(direct) && lspJsonOk(method) && lspJsonOk(copy) && lspJsonOk(named) && lspJsonOk(namedA) && lspJsonOk(plain) && lspJsonOk(callee) && lspJsonOk(group) && lspJsonOk(nest) && lspJsonOk(cross) && lspJsonOk(outside)
 
 private def lspEditorSliceOk(): Bool =
   for {
