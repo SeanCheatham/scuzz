@@ -15764,7 +15764,7 @@ static void test_scale_popup_input(void) {
   const char *labels[] = {"First", "Second", "Third"};
   SzSignalList *options = select_test_options(labels, 3);
   SzSignalInt *selected = sz_signal_int(0);
-  SzView *select = sz_view_select(selected, "Scaled select", options);
+  SzView *select = sz_view_select(selected, "Scaled select", options, NULL);
   root = scale_scene(sz_view_scale(200, sz_view_sized(80, 40, select)));
   sz_view_layout(root, 320, 240, &theme);
   assert(sz_view_handle_tap(root, 210, 100));
@@ -16137,7 +16137,7 @@ static void test_rotation_controls_and_limits(void) {
   const char *labels[] = {"First", "Second", "Third"};
   SzSignalList *options = select_test_options(labels, 3);
   SzSignalInt *selected = sz_signal_int(0);
-  SzView *select = sz_view_select(selected, "Rotated select", options);
+  SzView *select = sz_view_select(selected, "Rotated select", options, NULL);
   root = scale_scene(sz_view_rotate(90, sz_view_sized(80, 40, select)));
   sz_view_layout(root, 320, 240, &theme);
   assert(sz_view_handle_tap(root, 140, 65));
@@ -21947,12 +21947,81 @@ static SzSignalList *select_test_options(const char *const *labels, int count) {
   return options;
 }
 
+static void test_select_editable(void) {
+  size_t before_bytes, before_count, end_bytes, end_count;
+  const char *labels[] = {"Alpha", "Alpine", "Beta", "Bravo", "中文"};
+  SzSignalInt *selected, *empty_index;
+  SzSignalStr *text, *empty_text;
+  SzSignalList *options, *none;
+  SzView *select, *empty;
+  sz_alloc_stats(&before_bytes, &before_count);
+  selected = sz_signal_int(-1);
+  text = sz_signal_str("");
+  options = select_test_options(labels, 5);
+  select = sz_view_select(selected, "Custom", options, text);
+  sz_view_layout(select, 280, 720, sz_theme_default());
+  assert(sz_view_is_tap_target(select) && sz_view_tab_stop(select));
+  assert(sz_view_activate(select, select, 10, 20));
+  sz_view_handle_key(select, "Z", "", 0);
+  sz_view_handle_key(select, "e", "", 0);
+  sz_view_handle_key(select, "d", "", 0);
+  assert(!strcmp(sz_view_select_text(select), "Zed"));
+  sz_view_handle_key(select, "Enter", "", 0);
+  assert(sz_signal_int_get(selected) == -1);
+  assert(!strcmp(sz_signal_str_get(text), "Zed"));
+  assert(!sz_view_select_open(select));
+  assert(!strcmp(sz_view_select_text(select), "Zed"));
+  assert(sz_view_activate(select, select, 10, 20));
+  sz_view_handle_key(select, "B", "", 0);
+  sz_view_handle_key(select, "e", "", 0);
+  sz_view_handle_key(select, "Enter", "", 0);
+  assert(sz_signal_int_get(selected) == 2);
+  assert(!strcmp(sz_signal_str_get(text), "Beta"));
+  assert(!strcmp(sz_view_select_text(select), "Beta"));
+  assert(sz_view_activate(select, select, 10, 20));
+  sz_view_handle_key(select, "Z", "", 0);
+  sz_view_handle_key(select, "e", "", 0);
+  sz_view_handle_key(select, "d", "", 0);
+  sz_view_handle_key(select, "Escape", "", 0);
+  assert(sz_signal_int_get(selected) == 2);
+  assert(!strcmp(sz_signal_str_get(text), "Beta"));
+  assert(!strcmp(sz_view_select_text(select), "Beta"));
+  assert(!sz_view_select_open(select));
+  assert(sz_view_activate(select, select, 10, 20));
+  sz_view_handle_key(select, "Z", "", 0);
+  sz_view_handle_key(select, "ArrowDown", "", 0);
+  sz_view_handle_key(select, "Enter", "", 0);
+  assert(sz_signal_int_get(selected) == 0);
+  assert(!strcmp(sz_signal_str_get(text), "Alpha"));
+  sz_view_free(select);
+  sz_signal_list_free(options);
+  sz_signal_int_free(selected);
+  sz_signal_str_free(text);
+  none = sz_signal_list(NULL);
+  empty_index = sz_signal_int(-1);
+  empty_text = sz_signal_str("");
+  empty = sz_view_select(empty_index, "Empty text", none, empty_text);
+  sz_view_layout(empty, 280, 720, sz_theme_default());
+  assert(sz_view_is_tap_target(empty) && sz_view_tab_stop(empty));
+  assert(sz_view_activate(empty, empty, 10, 10));
+  sz_view_handle_key(empty, "A", "", 0);
+  sz_view_handle_key(empty, "Enter", "", 0);
+  assert(sz_signal_int_get(empty_index) == -1);
+  assert(!strcmp(sz_signal_str_get(empty_text), "A"));
+  sz_view_free(empty);
+  sz_signal_list_free(none);
+  sz_signal_int_free(empty_index);
+  sz_signal_str_free(empty_text);
+  sz_alloc_stats(&end_bytes, &end_count);
+  assert(end_bytes == before_bytes && end_count == before_count);
+}
+
 static void test_select_keyboard_window(void) {
   size_t before_bytes, before_count, end_bytes, end_count;
   sz_alloc_stats(&before_bytes, &before_count);
   SzSignalInt *selected = sz_signal_int(0);
   SzSignalList *options = sz_signal_list(NULL);
-  SzView *empty = sz_view_select(selected, "Empty", options);
+  SzView *empty = sz_view_select(selected, "Empty", options, NULL);
   sz_view_layout(empty, 280, 720, sz_theme_default());
   assert(!sz_view_is_tap_target(empty) && !sz_view_tab_stop(empty));
   assert(!sz_view_activate(empty, empty, 10, 10));
@@ -21966,7 +22035,7 @@ static void test_select_keyboard_window(void) {
     choices[i] = i < 3 ? "Same" : labels[i];
   }
   options = select_test_options(choices, 1000);
-  SzView *select = sz_view_select(selected, "Language", options);
+  SzView *select = sz_view_select(selected, "Language", options, NULL);
   sz_alloc_stats(&end_bytes, &end_count);
   assert(end_bytes - before_bytes < 200000);
   sz_view_layout(select, 280, 720, sz_theme_default());
@@ -22064,7 +22133,7 @@ static void test_select_keyboard_window(void) {
 static int casefold_active(const char *const *labels, int count, const char *const *keys, int key_count) {
   SzSignalInt *selected = sz_signal_int(-1);
   SzSignalList *options = select_test_options(labels, count);
-  SzView *select = sz_view_select(selected, "Fold", options);
+  SzView *select = sz_view_select(selected, "Fold", options, NULL);
   sz_view_layout(select, 280, 720, sz_theme_default());
   sz_view_focus(select, select);
   sz_view_input_time(select, 0);
@@ -22150,7 +22219,7 @@ static void test_select_reactive_options(void) {
   SzSignalList *options = select_test_options(initial, 3);
   SzSignalInt *value = sz_signal_int(1);
   SzSignalStr *name = sz_signal_str("Retained");
-  SzView *select = sz_view_select(value, "Language", options);
+  SzView *select = sz_view_select(value, "Language", options, NULL);
   SzView *field = sz_view_text_field(name, "Name");
   SzView *root = sz_view_column();
   sz_view_add_child(root, select); sz_view_add_child(root, field);
@@ -22219,7 +22288,7 @@ static void test_select_pointer_identity(void) {
   for (int i = 0; i < 100; i++) labels[i] = "Same";
   SzSignalInt *value = sz_signal_int(0);
   SzSignalList *options = select_test_options(labels, 100);
-  SzView *root = sz_view_select(value, "Items", options);
+  SzView *root = sz_view_select(value, "Items", options, NULL);
   SzUiConfig cfg = {.kind = SZ_UI_RUNTIME_HEADLESS, .width = 280, .height = 360, .scale = 1.f};
   SzUiSession *session = sz_ui_mount(&cfg, root);
   assert(session && sz_ui_pump_sync(session));
@@ -22253,11 +22322,11 @@ static void test_select_scope_and_journal(void) {
   SzSignalInt *value = sz_signal_int(0), *dialog = sz_signal_int(0);
   SzSignalStr *text = sz_signal_str("Keep this text");
   SzSignalList *options = select_test_options(choices, 5);
-  SzView *select = sz_view_select(value, "Language", options);
+  SzView *select = sz_view_select(value, "Language", options, NULL);
   SzView *field = sz_view_text_field(text, "Name");
   SzView *column = sz_view_column();
   sz_view_add_child(column, select); sz_view_add_child(column, field);
-  SzView *dialog_select = sz_view_select(value, "Dialog choice", options);
+  SzView *dialog_select = sz_view_select(value, "Dialog choice", options, NULL);
   SzView *card = sz_view_card(dialog_select);
   SzView *overlay = sz_view_overlay(dialog, "Settings", card);
   SzView *root = sz_view_stack();
@@ -22311,7 +22380,7 @@ static void test_select_scope_and_journal(void) {
   sz_ui_unmount(session);
   sz_signal_int_free(dialog); sz_signal_str_free(text); sz_signal_int_free(value);
   value = sz_signal_int(4);
-  root = sz_view_select(value, "Language", options);
+  root = sz_view_select(value, "Language", options, NULL);
   session = sz_ui_mount(&cfg, root);
   assert(session); sz_ui_session_take_root(session);
   assert(sz_ui_pump_sync(session));
@@ -23100,6 +23169,7 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && !strcmp(argv[1], "--select")) {
     test_select_keyboard_window();
+    test_select_editable();
     test_select_casefold();
     test_select_reactive_options();
     test_select_pointer_identity();
@@ -23945,6 +24015,7 @@ int main(int argc, char **argv) {
   test_opacity_utf8_labels();
   test_inline_text_actions();
   test_select_keyboard_window();
+  test_select_editable();
   test_select_casefold();
   test_select_reactive_options();
   test_select_pointer_identity();

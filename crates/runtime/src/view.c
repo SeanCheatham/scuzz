@@ -191,6 +191,10 @@ struct SzView {
   char select_search[128];
   int select_search_bytes;
   int64_t select_search_time;
+  char *select_query;
+  char *select_seen_text;
+  int select_editing;
+  int select_typed;
   int64_t input_time;
 
   /* Pump-counted motion. 0 is quiet. The step is motion_left. */
@@ -562,7 +566,7 @@ SzViewKind sz_view_kind(const SzView *view) {
 
 int sz_view_is_tap_target(const SzView *view) {
   return view &&
-         ((view->kind == SZ_VIEW_SELECT && view->select_count > 0) ||
+         ((view->kind == SZ_VIEW_SELECT && (view->select_count > 0 || view->sig_str)) ||
           view->kind == SZ_VIEW_SELECT_OPTION || view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX ||
           view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_SPLIT || view->kind == SZ_VIEW_RADIO ||
           view->kind == SZ_VIEW_CHOICE_CHIP ||
@@ -1139,6 +1143,54 @@ SzView *sz_view_segmented(SzSignalInt *sig, const char *label,
   return view;
 }
 
+static int select_editable(const SzView *v) {
+  return v && v->sig_str;
+}
+
+static void select_remember_text(SzView *v) {
+  const char *s;
+  if (!select_editable(v)) return;
+  s = sz_signal_str_get(v->sig_str);
+  sz_free(v->select_seen_text);
+  v->select_seen_text = sz_strdup(s ? s : "");
+}
+
+static int select_text_current(const SzView *v) {
+  const char *s;
+  if (!select_editable(v) || !v->select_seen_text) return 1;
+  s = sz_signal_str_get(v->sig_str);
+  return !strcmp(s ? s : "", v->select_seen_text);
+}
+
+static void select_drop_query(SzView *v) {
+  if (!v) return;
+  sz_free(v->select_query);
+  v->select_query = NULL;
+  sz_free(v->select_seen_text);
+  v->select_seen_text = NULL;
+  v->select_editing = 0;
+  v->select_typed = 0;
+}
+
+static void select_set_query(SzView *v, const char *text) {
+  sz_free(v->select_query);
+  v->select_query = sz_strdup(text ? text : "");
+  v->select_editing = 1;
+}
+
+static void select_append_query(SzView *v, const char *text) {
+  const char *cur = v->select_query ? v->select_query : "";
+  size_t a = strlen(cur), b = strlen(text ? text : "");
+  char *next = sz_alloc(a + b + 1);
+  memcpy(next, cur, a);
+  if (b) memcpy(next + a, text, b);
+  next[a + b] = 0;
+  sz_free(v->select_query);
+  v->select_query = next;
+  v->select_editing = 1;
+  v->select_typed = 1;
+}
+
 static void select_sync_options(SzView *view) {
   SzList *items = sz_signal_list_get(view->each_sig);
   if (items == view->each_seen) return;
@@ -1155,11 +1207,12 @@ static void select_sync_options(SzView *view) {
   sz_free(view->select_labels);
   view->select_labels = labels;
   view->select_count = (int)count;
-  view->interactive = count > 0;
+  view->interactive = count > 0 || view->sig_str != NULL;
   view->select_open = 0;
   view->select_active = -1;
   view->select_first = -1;
   view->select_search_bytes = 0;
+  select_drop_query(view);
   view->select_observed = sz_signal_int_get(view->sig_int);
   if ((uintptr_t)count > UINTPTR_MAX - g_view_next_id) sz_panic("Select identity space is full");
   view->select_option_base = g_view_next_id;
@@ -1178,10 +1231,11 @@ static void select_sync_options(SzView *view) {
   each_seen_set(view, items);
 }
 
-SzView *sz_view_select(SzSignalInt *sig, const char *label, SzSignalList *choices) {
+SzView *sz_view_select(SzSignalInt *sig, const char *label, SzSignalList *choices, SzSignalStr *text) {
   if (!sig || !label || !label[0] || !choices) sz_panic("Select needs Signals and a name");
   SzView *view = view_new(SZ_VIEW_SELECT);
   view->sig_int = sig;
+  view->sig_str = text;
   view->each_sig = choices;
   view->each_seen = (SzList *)(uintptr_t)1;
   view->a11y_role = SZ_A11Y_COMBOBOX;
@@ -1221,8 +1275,15 @@ int64_t sz_view_select_value(const SzView *view) {
   return view && view->kind == SZ_VIEW_SELECT ? sz_signal_int_get(view->sig_int) : -1;
 }
 const char *sz_view_select_text(const SzView *view) {
-  int64_t selected = sz_view_select_value(view);
-  return selected >= 0 && selected < sz_view_select_count(view) ? view->select_labels[selected] : "";
+  int64_t selected;
+  const char *text;
+  if (!view || view->kind != SZ_VIEW_SELECT) return "";
+  if (view->select_editing && view->select_typed) return view->select_query ? view->select_query : "";
+  selected = sz_view_select_value(view);
+  if (selected >= 0 && selected < view->select_count) return view->select_labels[selected];
+  if (!view->sig_str) return "";
+  text = sz_signal_str_get(view->sig_str);
+  return text ? text : "";
 }
 SzView *sz_view_select_popup(SzView *view) {
   return view && view->kind == SZ_VIEW_SELECT && view->child_count ? view->children[0] : NULL;
@@ -3186,6 +3247,8 @@ static void view_drop(void *ptr) {
     return;
   for (int j = 0; j < view->select_count; j++) sz_free(view->select_labels[j]);
   sz_free(view->select_labels);
+  sz_free(view->select_query);
+  sz_free(view->select_seen_text);
   n = view->child_count;
   kids = view->children;
   view->child_count = 0;
@@ -5848,6 +5911,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
 }
 
 static void sync_modal_focus(SzView *root);
+static SzView *focused_node(SzView *root);
 static SzView *find_open_overlay(SzView *v);
 static void sync_tooltips(SzView *root);
 static int rects_intersect(SzRect a, SzRect b, SzRect *out);
@@ -5872,6 +5936,7 @@ static void close_selects(SzView *v, SzView *except) {
   if (v->kind == SZ_VIEW_SELECT && v != except) {
     v->select_open = 0;
     v->select_search_bytes = 0;
+    select_drop_query(v);
   }
   for (int i = 0; i < v->child_count; i++) close_selects(v->children[i], except);
 }
@@ -5899,12 +5964,45 @@ static void select_begin(SzView *root, SzView *v) {
   select_reveal(v);
 }
 
+static void select_finish(SzView *v) {
+  v->select_open = 0;
+  v->select_search_bytes = 0;
+  select_drop_query(v);
+}
+
+static int select_typed_option(const SzView *v);
+
 static void select_commit(SzView *v) {
-  if (v) select_sync_options(v);
-  if (v && v->select_open && v->select_active >= 0 && v->select_active < v->select_count &&
-      sz_signal_int_get(v->sig_int) == v->select_observed)
+  int64_t current;
+  int index_ok;
+  if (!v) return;
+  select_sync_options(v);
+  if (select_editable(v) && v->select_editing && !select_text_current(v)) {
+    select_finish(v);
+    return;
+  }
+  current = sz_signal_int_get(v->sig_int);
+  index_ok = current == v->select_observed;
+  if (index_ok && select_editable(v) && v->select_editing && select_text_current(v)) {
+    if (v->select_typed) {
+      int option = select_typed_option(v);
+      if (option >= 0) {
+        sz_signal_int_set(v->sig_int, option);
+        sz_signal_str_set(v->sig_str, v->select_labels[option]);
+      } else {
+        sz_signal_str_set(v->sig_str, v->select_query ? v->select_query : "");
+        sz_signal_int_set(v->sig_int, -1);
+      }
+    } else if (v->select_active >= 0 && v->select_active < v->select_count) {
+      sz_signal_int_set(v->sig_int, v->select_active);
+      sz_signal_str_set(v->sig_str, v->select_labels[v->select_active]);
+    }
+    select_finish(v);
+    return;
+  }
+  if (v->select_open && v->select_active >= 0 && v->select_active < v->select_count && index_ok)
     sz_signal_int_set(v->sig_int, v->select_active);
-  if (v) { v->select_open = 0; v->select_search_bytes = 0; }
+  select_finish(v);
 }
 
 void sz_view_input_time(SzView *root, int64_t milliseconds) {
@@ -5947,27 +6045,79 @@ static int select_search(SzView *root, SzView *v, const char *text) {
   return 1;
 }
 
+static int select_typed_option(const SzView *v) {
+  const char *q = v->select_query ? v->select_query : "";
+  int n = (int)strlen(q);
+  if (!v->select_typed || n <= 0) return -1;
+  for (int i = 0; i < v->select_count; i++)
+    if (select_prefix(v->select_labels[i], q, n)) return i;
+  return -1;
+}
+
+static void select_highlight(SzView *v) {
+  int option = select_typed_option(v);
+  v->select_active = option;
+  if (option >= 0) select_reveal(v);
+}
+
+static int select_type_text(SzView *root, SzView *v, const char *text) {
+  if (!text || !text[0]) return 0;
+  if (!select_editable(v)) return select_search(root, v, text);
+  if (!v->select_typed) {
+    if (!v->select_seen_text) select_remember_text(v);
+    select_set_query(v, "");
+  }
+  if (v->select_count && !v->select_open) select_begin(root, v);
+  select_append_query(v, text);
+  select_highlight(v);
+  return 1;
+}
+
 static int select_key(SzView *root, SzView *v, const char *key, const char *text, int mods) {
-  if (!v->select_count) return 0;
+  if (!v->select_count && !select_editable(v)) return 0;
   if (mods & (SZ_KEY_CTRL | SZ_KEY_CMD)) return 0;
   if (!strcmp(key, "Escape")) {
-    if (!v->select_open) return 0;
+    if (!v->select_open && !v->select_editing) return 0;
     close_selects(root, NULL);
     return 1;
   }
   if (!strcmp(key, "Tab")) { select_commit(v); return 0; }
-  if (!strcmp(key, "Backspace")) { v->select_search_bytes = 0; return 1; }
+  if (!strcmp(key, "Backspace")) {
+    if (!select_editable(v)) { v->select_search_bytes = 0; return 1; }
+    if (!v->select_typed) {
+      if (!v->select_seen_text) select_remember_text(v);
+      select_set_query(v, sz_view_select_text(v));
+    }
+    {
+      const char *q = v->select_query ? v->select_query : "";
+      int n = (int)strlen(q);
+      int prev = utf8_prev(q, n);
+      char *next = sz_alloc((size_t)prev + 1);
+      memcpy(next, q, (size_t)prev);
+      next[prev] = 0;
+      sz_free(v->select_query);
+      v->select_query = next;
+    }
+    v->select_editing = 1;
+    v->select_typed = 1;
+    if (v->select_count && !v->select_open) select_begin(root, v);
+    select_highlight(v);
+    return 1;
+  }
   if ((mods & SZ_KEY_ALT) && strcmp(key, "ArrowUp") && strcmp(key, "ArrowDown")) return 0;
   int was_open = v->select_open;
   if (!was_open && (mods & SZ_KEY_ALT) && !strcmp(key, "ArrowUp")) return 0;
+  if (select_editable(v) && (!strcmp(key, "Space") || !strcmp(key, " ")))
+    return select_type_text(root, v, " ");
   if (!strcmp(key, "Enter") || !strcmp(key, "Space") || !strcmp(key, " ") ||
       ((mods & SZ_KEY_ALT) && !strcmp(key, "ArrowUp"))) {
-    if (was_open) select_commit(v); else select_begin(root, v);
+    if (was_open || (select_editable(v) && v->select_editing)) select_commit(v);
+    else select_begin(root, v);
     return 1;
   }
   int64_t next = v->select_active;
-  if (!strcmp(key, "ArrowDown") || !strcmp(key, "ArrowUp") || !strcmp(key, "Home") ||
-      !strcmp(key, "End") || !strcmp(key, "PageDown") || !strcmp(key, "PageUp")) {
+  if (v->select_count && (!strcmp(key, "ArrowDown") || !strcmp(key, "ArrowUp") || !strcmp(key, "Home") ||
+      !strcmp(key, "End") || !strcmp(key, "PageDown") || !strcmp(key, "PageUp"))) {
     if (!was_open) select_begin(root, v);
     next = v->select_active;
     if (!strcmp(key, "Home") || (!was_open && !strcmp(key, "ArrowUp"))) next = 0;
@@ -5979,14 +6129,19 @@ static int select_key(SzView *root, SzView *v, const char *key, const char *text
     if (next >= v->select_count) next = v->select_count - 1;
     v->select_active = (int)next;
     v->select_search_bytes = 0;
+    if (select_editable(v)) {
+      if (!v->select_seen_text) select_remember_text(v);
+      v->select_editing = 1;
+      v->select_typed = 0;
+    }
     select_reveal(v);
     return 1;
   }
   if (mods & SZ_KEY_ALT) return 0;
-  if (text && text[0]) return select_search(root, v, text);
+  if (text && text[0]) return select_type_text(root, v, text);
   size_t length = strlen(key);
   if (length && (unsigned char)key[0] >= 32 && (size_t)utf8_clen(key, 0) == length)
-    return select_search(root, v, key);
+    return select_type_text(root, v, key);
   return 0;
 }
 
@@ -6020,8 +6175,8 @@ static void layout_select_popup(SzView *root, SzView *v) {
   if (visible_first >= v->select_count) visible_first = v->select_count - 1;
   if (visible_last < visible_first) visible_last = visible_first;
   if (visible_last >= v->select_count) visible_last = v->select_count - 1;
-  if (v->select_active < visible_first) { v->select_active = visible_first; v->select_search_bytes = 0; }
-  if (v->select_active > visible_last) { v->select_active = visible_last; v->select_search_bytes = 0; }
+  if (v->select_active >= 0 && v->select_active < visible_first) { v->select_active = visible_first; v->select_search_bytes = 0; }
+  if (v->select_active >= 0 && v->select_active > visible_last) { v->select_active = visible_last; v->select_search_bytes = 0; }
   v->select_first = first;
   for (int i = 0; i < rows->child_count; i++) {
     SzView *option = rows->children[i];
@@ -6043,15 +6198,27 @@ static void sync_selects(SzView *root) {
   SzView *modal = find_open_overlay(root);
   SzView *scope = modal ? modal : root;
   SzView *v = open_select_node(scope);
+  SzView *keep;
   if (v && (!popup_owner_in_scope(v, scope) || !v->focused)) v = NULL;
-  close_selects(root, v);
+  keep = v;
+  if (!keep) {
+    SzView *focused = focused_node(scope);
+    if (focused && focused->kind == SZ_VIEW_SELECT && focused->select_editing) keep = focused;
+  }
+  close_selects(root, keep);
   if (!v) return;
   int64_t value = sz_signal_int_get(v->sig_int);
   if (value != v->select_observed) {
     v->select_observed = value;
     v->select_active = value >= 0 && value < v->select_count ? (int)value : 0;
     v->select_search_bytes = 0;
+    select_drop_query(v);
     select_reveal(v);
+  }
+  if (select_editable(v) && v->select_editing && !select_text_current(v)) {
+    v->select_open = 0;
+    select_drop_query(v);
+    return;
   }
   layout_select_popup(root, v);
 }
@@ -6353,6 +6520,7 @@ int sz_view_set_hover_at(SzView *root, float x, float y) {
       int changed = select->select_active != hit->radio_value;
       select->select_active = (int)hit->radio_value;
       select->select_search_bytes = 0;
+      select->select_typed = 0;
       return changed;
     }
     return 0;
@@ -7313,7 +7481,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_rect(c, frame.x, frame.y, frame.w, frame.h, theme->surface);
     paint_border(c, frame, (int)fmaxf(1.f, theme_px_scale(theme)), theme->border);
     const char *value = sz_view_select_text(v);
-    uint32_t color = v->select_count ? theme->foreground : theme->muted;
+    uint32_t color = v->interactive ? theme->foreground : theme->muted;
     paint_select_label(c, value[0] ? value : v->a11y_label, frame, theme->control_h * .5f, theme, color);
     float size = scale_px(theme, 4.f);
     float cx = frame.x + frame.w - theme->pad - size;
@@ -7328,7 +7496,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         sz_view_select_popup(v), v->select_open, frame.x, frame.y, frame.w, frame.h,
         g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h,
         color, theme->selection, theme->font_px, text_line_h(theme, theme->font_px), 0, 0);
-      sz_web_select_state(v, sz_view_select_popup(v), sz_view_select_active_option(v), v->select_count);
+      sz_web_select_state(v, sz_view_select_popup(v), sz_view_select_active_option(v), v->select_count, v->sig_str != NULL);
     }
 #endif
     break;
@@ -9285,15 +9453,20 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
     if (!owner || !owner->select_open) return 0;
     owner->select_active = (int)hit->radio_value;
     owner->select_observed = sz_signal_int_get(owner->sig_int);
+    if (select_editable(owner)) {
+      if (!owner->select_seen_text) select_remember_text(owner);
+      owner->select_editing = 1;
+      owner->select_typed = 0;
+    }
     select_commit(owner);
     return 1;
   }
   if (hit->kind == SZ_VIEW_SELECT) {
     if (hit->select_open) { close_selects(root, NULL); return 1; }
-    if (!hit->select_count) return 0;
+    if (!hit->select_count && !hit->sig_str) return 0;
     clear_focus(root);
     hit->focused = 1;
-    select_begin(root, hit);
+    if (hit->select_count) select_begin(root, hit);
     return 1;
   }
   if (hit->kind == SZ_VIEW_TOOLTIP || (modal && hit->kind == SZ_VIEW_CARD)) return 1;
@@ -9975,7 +10148,7 @@ int sz_view_focus_edit_target(SzView *root) {
 int sz_view_handle_text(SzView *root, const char *text) {
   sync_selects(root);
   SzView *select = sz_view_focused(root);
-  if (select && select->kind == SZ_VIEW_SELECT) return select_search(root, select, text);
+  if (select && select->kind == SZ_VIEW_SELECT) return select_type_text(root, select, text);
   SzView *target = sz_view_edit_target(root);
   const char *s;
   if (!target || !target->sig_str)
