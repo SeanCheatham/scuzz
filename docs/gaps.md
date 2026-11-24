@@ -365,15 +365,19 @@ One host sample does not establish a general cost bound or method advantage.
 It uses the same replacement rules as `Fs.write`.
 `Fs.read` returns `String`.
 `Fs.write` accepts `String`.
-HTTP, TCP, and UDP bodies are `String`.
-`Net.httpGet` keeps the 1 MiB body limit.
+`Net.httpGetBytes` reads one GET response body into `Bytes`.
+`Net.httpGet` returns `String`.
+`Net.httpGet` and `Net.httpGetBytes` keep the 1 MiB body limit.
+TCP and UDP bodies are `String`.
 Read a file from `Net.httpGetToFile` with `Fs.readBytes`.
 
 ### Browser HTTP
 
 `Net.httpGet` on the web target returns the status, the headers, and the body.
+`Net.httpGetBytes` returns that body as `Bytes`.
+Both calls run on one browser thread.
+Both calls keep the 1 MiB body limit.
 The response body reaches the program.
-The call runs on one browser thread.
 Simulation rejects a live external host.
 Other Net calls fail on web.
 A file in the browser working directory remains after a page reload.

@@ -1,0 +1,26 @@
+def bodyHex(): String =
+  "fffe80"
+
+def responseBody(): String =
+  Hex.decode(bodyHex())
+
+def expected(): Bytes =
+  Bytes.fromStr(responseBody())
+
+def handle(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (path, _, _, _) => if (path == "/bin") IO.pure((200, Map.empty(), responseBody())) else IO.pure((404, Map.empty(), ""))
+  }
+
+def report(status: Int, body: Bytes): String =
+  if (status == 200 && Bytes.len(body) == 3 && body == expected()) "http:bin:ok:3:match" else "http:bin:bad"
+
+def reportLine(pair: (Unit, (Int, Map[String, String], Bytes))): String =
+  report(pair._2._1, pair._2._3)
+
+@main def main: IO[Unit] =
+  for {
+    pair <- IO.both(Net.serveOnce(18081, handle), Net.httpGetBytes("http://127.0.0.1:18081/bin", Map.empty()))
+    line = reportLine(pair)
+    _ <- if (line == "http:bin:ok:3:match") IO.println(line) else IO.fail(line)
+  } yield ()
