@@ -1517,6 +1517,27 @@ diff <(grep -vx ok /tmp/bytes.out) /tmp/bytes-eval.out
 grep -Fxq 'image:bin:ok:2:2:match' /tmp/bytes-fuzz.out
 "$SCUZZ" check examples/hello
 "$SCUZZ" check examples/bytes
+python3 - <<'PY'
+from pathlib import Path
+text = Path("examples/http-bytes/src/Main.scuzz").read_text()
+if "fffe80" not in text or "Net.httpGetBytes" not in text:
+    raise SystemExit("http byte proof missing")
+raw = bytes.fromhex("fffe80")
+try:
+    raw.decode("utf-8")
+except UnicodeDecodeError:
+    pass
+else:
+    raise SystemExit("http body is valid UTF-8")
+print("http body", len(raw))
+PY
+"$SCUZZ" run examples/http-bytes | tee /tmp/http-bytes.out
+grep -Fxq 'http:bin:ok:3:match' /tmp/http-bytes.out
+"$SCUZZ" eval examples/http-bytes | tee /tmp/http-bytes-eval.out
+diff <(grep -vx ok /tmp/http-bytes.out) /tmp/http-bytes-eval.out
+"$SCUZZ" fuzz --iterations 0 examples/http-bytes | tee /tmp/http-bytes-fuzz.out
+grep -Fxq 'http:bin:ok:3:match' /tmp/http-bytes-fuzz.out
+"$SCUZZ" check examples/http-bytes
 "$SCUZZ" check examples/kernel
 "$SCUZZ" check examples/scale
 ./examples/jump/gen.sh

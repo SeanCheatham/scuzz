@@ -1,0 +1,4 @@
+[package]
+name = "http-bytes"
+version = "0.1.0"
+description = "Read one HTTP response body as bytes"
