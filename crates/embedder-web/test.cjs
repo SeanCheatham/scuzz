@@ -3333,6 +3333,42 @@ async function checkWebGet(browserType, url, mobile) {
   } finally { await browser.close(); }
 }
 
+async function checkWebPost(browserType, url, mobile) {
+  const browser = await browserType.launch({headless: true});
+  try {
+    const context = await browser.newContext({viewport: mobile ? {width: 390, height: 720} : {width: 1000, height: 720},
+      hasTouch: mobile, isMobile: mobile, deviceScaleFactor: 2});
+    await context.addInitScript(() => {
+      window.workerStarts = 0;
+      const wrap = name => {
+        const start = window[name];
+        if (!start) return;
+        window[name] = function (...args) {
+          window.workerStarts += 1;
+          return new start(...args);
+        };
+      };
+      wrap('Worker');
+      wrap('SharedWorker');
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.stack || String(error)));
+    await page.goto(url);
+    try {
+      await page.waitForFunction(() => Module.ready && Module.ccall('sz_web_snapshot', 'string', [], []).includes('text:web-post:200:pong'),
+        null, {timeout: 60000});
+    } catch (error) {
+      console.error({url: page.url(), errors,
+        state: await page.evaluate(() => Module.ready ? Module.ccall('sz_web_snapshot', 'string', [], []) : 'not-ready').catch(() => 'snapshot-failed')});
+      throw error;
+    }
+    assert.equal(await page.evaluate(() => window.workerStarts), 0);
+    assert.deepEqual(errors, []);
+    console.log(`web post: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
+  } finally { await browser.close(); }
+}
+
 async function checkWebBytes(browserType, url, mobile) {
   const browser = await browserType.launch({headless: true});
   try {
@@ -3434,6 +3470,26 @@ async function main() {
       response.end('web-get:pong');
       return;
     }
+    if (pathname === '/scuzz/post') {
+      const chunks = [];
+      let settled = false;
+      const finish = (status, text) => {
+        if (settled) return;
+        settled = true;
+        response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        response.setHeader('Cache-Control', 'no-store');
+        response.writeHead(status);
+        response.end(text);
+      };
+      request.on('data', chunk => chunks.push(chunk));
+      request.on('end', () => {
+        const posted = Buffer.concat(chunks);
+        if (request.method === 'POST' && posted.equals(Buffer.from('pong'))) finish(200, 'pong');
+        else finish(400, 'web-post:bad');
+      });
+      request.on('error', () => finish(400, 'web-post:bad'));
+      return;
+    }
     if (pathname === '/scuzz/bin') {
       response.setHeader('Content-Type', 'application/octet-stream');
       response.setHeader('Cache-Control', 'no-store');
@@ -3450,7 +3506,7 @@ async function main() {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
-      const run = process.argv[4] === 'web-file' ? checkWebFile : process.argv[4] === 'web-bytes' ? checkWebBytes : process.argv[4] === 'web-get' ? checkWebGet : process.argv[4] === 'scale-glyph' ? checkScaleGlyph : process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'rotation-motion' ? checkRotationMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
+      const run = process.argv[4] === 'web-post' ? checkWebPost : process.argv[4] === 'web-file' ? checkWebFile : process.argv[4] === 'web-bytes' ? checkWebBytes : process.argv[4] === 'web-get' ? checkWebGet : process.argv[4] === 'scale-glyph' ? checkScaleGlyph : process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'rotation-motion' ? checkRotationMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;
       await run(type, url, false);
       if (type !== firefox) await run(type, url, true);
     }

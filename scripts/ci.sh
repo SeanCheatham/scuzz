@@ -4956,6 +4956,19 @@ slice_web() (
   fi
   "$SCUZZ" package --target web --out-dir "$web_tmp/web-get output" examples/web-get
   node crates/embedder-web/test.cjs "$web_tmp/web-get output/package/web" '' web-get
+  "$SCUZZ" check examples/web-post
+  env -u SCUZZ_WEB_POST -u SCUZZ_TESTRT SCUZZ_SKIA=sk_sw "$SCUZZ" run examples/web-post > "$web_tmp/web-post-run.out"
+  if [ "$(tail -n 1 "$web_tmp/web-post-run.out")" != "web-post:missing" ]; then
+    echo "empty URL must not call a live host: $(cat "$web_tmp/web-post-run.out")" >&2
+    exit 1
+  fi
+  post_sim="$(env -u SCUZZ_WEB_POST -u SCUZZ_NET_LIVE -u SCUZZ_UI_SERVE SCUZZ_TESTRT=1 examples/web-post/build/web-post)"
+  if [ "$post_sim" != "sim:rejected" ]; then
+    echo "simulation must reject a live external host: $post_sim" >&2
+    exit 1
+  fi
+  "$SCUZZ" package --target web --out-dir "$web_tmp/web-post output" examples/web-post
+  node crates/embedder-web/test.cjs "$web_tmp/web-post output/package/web" '' web-post
   "$SCUZZ" check examples/web-bytes
   env -u SCUZZ_WEB_BYTES -u SCUZZ_TESTRT SCUZZ_SKIA=sk_sw "$SCUZZ" run examples/web-bytes > "$web_tmp/web-bytes-run.out"
   if [ "$(tail -n 1 "$web_tmp/web-bytes-run.out")" != "web-bytes:missing" ]; then

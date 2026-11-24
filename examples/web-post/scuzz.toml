@@ -1,0 +1,9 @@
+[package]
+name = "web-post"
+version = "0.1.0"
+description = "One browser HTTP POST"
+
+[ui]
+default_runtime = "headless"
+headless_size = [400, 200]
+headless_scale = 1.0
