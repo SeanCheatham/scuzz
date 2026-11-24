@@ -564,6 +564,18 @@ options = [('{"title":"a"}', 'ok:a:none:none:none:none:none'),
            ('{"title":"a","ratio":1}', 'error:Json.decode: wrong case at ratio'),
            ('{"title":"a","count":7}', 'ok:a:none:7:none:none:none'),
            ('{"title":"a","note":1}', 'error:Json.decode: wrong case at note.text')]
+lanes = [('{"labels":["a",null,"b"],"counts":[1,null,0],"flags":[true,null,false],"ratios":[1.5,null]}', 'ok:a,none,b:1,none,0:true,none,false:1.5,none'),
+         ('{"labels":["null"],"counts":[],"flags":[],"ratios":[]}', 'ok:null:empty:empty:empty'),
+         ('{"labels":[null],"counts":[],"flags":[],"ratios":[]}', 'ok:none:empty:empty:empty'),
+         ('{"labels":[],"counts":[],"flags":[],"ratios":[]}', 'ok:empty:empty:empty:empty'),
+         ('{"counts":[],"flags":[],"ratios":[]}', 'error:Json.decode: missing field labels'),
+         ('{"labels":["a",1],"counts":[],"flags":[],"ratios":[]}', 'error:Json.decode: wrong case at labels.1'),
+         ('{"labels":null,"counts":[],"flags":[],"ratios":[]}', 'error:Json.decode: wrong case at labels'),
+         ('{"labels":"a","counts":[],"flags":[],"ratios":[]}', 'error:Json.decode: wrong case at labels'),
+         ('{"labels":[],"counts":["1"],"flags":[],"ratios":[]}', 'error:Json.decode: wrong case at counts.0'),
+         ('{"labels":[],"counts":[],"flags":[1],"ratios":[]}', 'error:Json.decode: wrong case at flags.0'),
+         ('{"labels":[],"counts":[],"flags":[],"ratios":[1]}', 'error:Json.decode: wrong case at ratios.0'),
+         ('{"labels":["a"],"counts":[],"flags":[],"ratios":[],"extra":true}', 'ok:a:empty:empty:empty')]
 enums = [('{"title":"a","tone":"Calm","mood":{"tone":"Loud"}}', 'ok:a:Calm:Loud'),
          ('{"title":"a","tone":"Loud","mood":{"tone":"Calm"}}', 'ok:a:Loud:Calm'),
          ('{"title":"a","tone":"Gone","mood":{"tone":"Calm"}}', 'error:Json.decode: unknown case at tone: Gone'),
@@ -670,6 +682,7 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(ORDERS, text => IO.println(Input.orderText(text)))
     _ <- IO.foreachDiscard(LISTS, text => IO.println(Input.listText(text)))
     _ <- IO.foreachDiscard(OPTIONS, text => IO.println(Input.ticketText(text)))
+    _ <- IO.foreachDiscard(LANES, text => IO.println(Input.laneText(text)))
     _ <- IO.foreachDiscard(ENUMS, text => IO.println(Input.jobText(text)))
     _ <- IO.foreachDiscard(BANDS, text => IO.println(Input.choirText(text)))
     _ <- IO.foreachDiscard(GRIDS, text => IO.println(Input.gridText(text)))
@@ -677,11 +690,11 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(RANGES, text => IO.println(Str.fromBool(Input.orderInRange(text))))
     _ <- IO.foreachDiscard(REPLIES, text => IO.println(Str.fromBool(Input.replyInRange(text))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('GRIDS', array([text for text, _ in grids])).replace('PAYLOADS', array([text for text, _ in payloads])).replace('REPLIES', array([text for text, _ in reply_ranges])).replace('RANGES', array([text for text, _ in ranges]))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('LANES', array([text for text, _ in lanes])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('GRIDS', array([text for text, _ in grids])).replace('PAYLOADS', array([text for text, _ in payloads])).replace('REPLIES', array([text for text, _ in reply_ranges])).replace('RANGES', array([text for text, _ in ranges]))
     (root / 'src/Main.scuzz').write_text(source)
     expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
-    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in grids] + [value for _, value in payloads] + [value for _, value in ranges] + [value for _, value in reply_ranges]
+    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in lanes] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in grids] + [value for _, value in payloads] + [value for _, value in ranges] + [value for _, value in reply_ranges]
     command('fmt', root)
     for engine in ['run', 'eval']:
         output = command(engine, root)
@@ -730,7 +743,7 @@ oracle boundaries(): Bool =
         ('record Row(label: Option[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
         ('record Row(label: Option[Json])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
         ('record Row(label: Option[Option[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
-        ('record Row(labels: List[Option[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read labels'),
+        ('record Row(labels: List[Option[Json]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read labels'),
         ('record Node(name: String, child: Option[Node])\ndef decodeNode(json: Json): Result[String, Node] =\n  Json.decode(json)\n', 'Json.decode: cannot read child'),
         ('enum Mode:\n  case On(n: Int)\n  case Off\nrecord Row(mode: Mode)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read mode'),
         ('enum Mode:\n  case On(n: Int)\n  case Off\nrecord Row(modes: List[Mode])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read modes'),
