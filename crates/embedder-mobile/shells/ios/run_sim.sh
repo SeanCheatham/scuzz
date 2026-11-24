@@ -85,19 +85,40 @@ terminate_bundle() {
   reap_all 20 "$term_pid"
 }
 
+# Kill one console group. Bash 3.2 rejects "--" before a negative id.
+kill_group() {
+  local leader="$1"
+  [ -n "$leader" ] || return 0
+  perl -e 'my $p = $ARGV[0]; exit 0 unless $p =~ /^[0-9]+$/; kill 9, -$p; kill 9, $p; exit 0' -- "$leader" || true
+  kill -KILL -- "-$leader" 2>/dev/null || true
+  kill -KILL -- "$leader" 2>/dev/null || true
+}
+
 stop_console() {
-  local pid pids
-  [ -n "$CONSOLE" ] || return 0
-  pids="$(descendants "$CONSOLE" || true)"
-  # The console leads its process group. Kill that group before a slow wait.
-  # A leftover child keeps the session pipe open.
-  kill -KILL -- "-$CONSOLE" 2>/dev/null || true
-  for pid in $pids "$CONSOLE"; do
-    kill -KILL "$pid" 2>/dev/null || true
-  done
-  # Word splitting is the pid list. Two seconds is enough to reap a dead child.
-  reap_all 20 $pids "$CONSOLE"
+  local leader pid pids
+  leader="${CONSOLE:-}"
   CONSOLE=""
+  pids=""
+  if [ -n "$leader" ]; then
+    # Record children first. A killed leader reparents them.
+    pids="$(descendants "$leader" || true)"
+    # The console leads its process group. Kill that group before a slow wait.
+    # A leftover child keeps the session pipe open.
+    kill_group "$leader"
+    for pid in $pids "$leader"; do
+      kill -KILL "$pid" 2>/dev/null || true
+    done
+  fi
+  # This shell still holds the session pipe. Close that copy before a slow wait.
+  # A later terminate or process listing must not keep the reader alive.
+  if [ "$exiting" -eq 1 ]; then
+    exec 1>/dev/null
+    exec 2>/dev/null
+  fi
+  if [ -n "$leader" ]; then
+    # Word splitting is the pid list. Two seconds is enough to reap a dead child.
+    reap_all 20 $pids "$leader"
+  fi
 }
 
 stop_app() {
@@ -124,6 +145,8 @@ on_exit() {
     return 0
   fi
   exiting=1
+  # Drop the console and this shell's pipe before process listings and terminate.
+  stop_console
   stop_app
 }
 
