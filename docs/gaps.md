@@ -388,7 +388,13 @@ Both calls run on one browser thread.
 Both calls keep the 1 MiB body limit.
 The text response body reaches the program.
 Simulation rejects a live external host.
-`Net.httpPost` fails on web with `Net: not available on web`.
+`Net.httpPost` sends one string body to a same-origin URL.
+A cross-origin POST does not leave the page.
+It returns the status and the string body.
+One browser package calls `Net.httpPost`.
+The call runs on one browser thread.
+The call keeps the 1 MiB body limit.
+The call does not follow a redirect.
 Other Net calls fail on web.
 A file in the browser working directory remains after a page reload.
 One browser package writes three bytes that are not valid UTF-8.

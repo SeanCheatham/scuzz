@@ -118,8 +118,10 @@ cross-origin isolation headers.
 
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
 and resize events. Wheel and canvas touch listeners that cancel the event
-register as non-passive. `Net.httpGet` runs on the browser thread and returns the response body to the program.
-The call keeps the 1 MiB body limit and does not follow a redirect.
+register as non-passive. `Net.httpGet` and `Net.httpPost` run on the browser thread and return the response body to the program.
+`Net.httpPost` sends one string body to a same-origin URL.
+A cross-origin POST does not leave the page.
+Each call keeps the 1 MiB body limit and does not follow a redirect.
 Simulation rejects a live external host.
 Other Net calls fail at the call (`Net: not available on web`).
 A process effect fails at `fork` (`Sys.exec: fork failed`). The web build links every def in the package and its path

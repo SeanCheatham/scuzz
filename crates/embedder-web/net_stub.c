@@ -1,4 +1,4 @@
-/* Browser Net. HTTP GET uses fetch on this thread. Other Net calls fail. */
+/* Browser Net. HTTP GET and HTTP POST use fetch on this thread. Other Net calls fail. */
 #include "scuzz_rt.h"
 
 #include <emscripten.h>
@@ -30,7 +30,8 @@ static int web_loopback(const char *host) {
 }
 
 /* status_out receives the HTTP status. A negative return is an error. */
-EM_ASYNC_JS(int, web_http_get, (const char *url, const char *req_headers, char *body, int body_cap, char *hdr, int hdr_cap, int *status_out), {
+EM_ASYNC_JS(int, web_http_fetch, (const char *method, const char *url, const char *req_headers, const char *req_body, int req_len, char *body, int body_cap, char *hdr, int hdr_cap, int *status_out), {
+  const verb = UTF8ToString(Number(method));
   const target = UTF8ToString(Number(url));
   const raw = UTF8ToString(Number(req_headers));
   const headers = new Headers();
@@ -41,9 +42,16 @@ EM_ASYNC_JS(int, web_http_get, (const char *url, const char *req_headers, char *
       headers.append(line.slice(0, cut), line.slice(cut + 1));
     }
   }
+  const init = {method: verb, headers, redirect: 'error', cache: 'no-store'};
+  if (verb === 'POST') {
+    const len = Number(req_len) >>> 0;
+    const start = Number(req_body);
+    init.mode = 'same-origin';
+    init.body = len ? HEAPU8.slice(start, start + len) : new Uint8Array(0);
+  }
   let response;
   try {
-    response = await fetch(target, {method: 'GET', headers, redirect: 'error', cache: 'no-store'});
+    response = await fetch(target, init);
   } catch (error) {
     return -1;
   }
@@ -66,8 +74,10 @@ EM_ASYNC_JS(int, web_http_get, (const char *url, const char *req_headers, char *
 });
 
 typedef struct {
+  const char *method;
   SzString *url;
   SzMap *headers;
+  SzString *body;
 } WebReq;
 
 static SzEither *web_err(const char *msg) {
@@ -130,7 +140,11 @@ static SzMap *headers_from_blob(const char *blob) {
   return map;
 }
 
-static void *web_get_thunk(void *env) {
+static int web_is_post(const WebReq *req) {
+  return req && req->method && strcmp(req->method, "POST") == 0;
+}
+
+static void *web_fetch_thunk(void *env) {
   WebReq *req = env;
   char host[256];
   char path[1024];
@@ -142,25 +156,38 @@ static void *web_get_thunk(void *env) {
   int tls = 0;
   int status = 0;
   int n;
+  int post = web_is_post(req);
+  int64_t blen = 0;
+  const char *raw = "";
   const char *url = req && req->url ? sz_string_cstr(req->url) : "";
+  const char *method = post ? "POST" : "GET";
   if (sz_net_parse_http_url(url, host, sizeof host, path, sizeof path, &port, &v6, &tls) != 1)
-    return web_err("Net.httpGet: invalid URL");
+    return web_err(post ? "Net.httpPost: invalid URL" : "Net.httpGet: invalid URL");
   if (web_live_replay() && !web_loopback(host))
-    return web_err("Net.httpGet: live replay rejects non-loopback");
+    return web_err(post ? "Net.httpPost: live replay rejects non-loopback"
+                        : "Net.httpGet: live replay rejects non-loopback");
+  if (post && req->body) {
+    blen = sz_string_len(req->body);
+    if (blen < 0 || blen > 2147483647)
+      return web_err("Net.httpPost: request failed");
+    raw = sz_string_cstr(req->body);
+    if (!raw)
+      raw = "";
+  }
   blob = request_headers(req->headers);
   body = sz_alloc(WEB_BODY_MAX);
   hdr = sz_alloc(WEB_HDR_MAX);
   hdr[0] = '\0';
-  n = web_http_get(url, blob, body, WEB_BODY_MAX, hdr, WEB_HDR_MAX, &status);
+  n = web_http_fetch(method, url, blob, raw, (int)blen, body, WEB_BODY_MAX, hdr, WEB_HDR_MAX, &status);
   sz_free(blob);
   if (n < 0) {
     sz_free(body);
     sz_free(hdr);
     if (n == -2)
-      return web_err("Net.httpGet: response too large");
+      return web_err(post ? "Net.httpPost: response too large" : "Net.httpGet: response too large");
     if (n == -3)
-      return web_err("Net.httpGet: response headers too large");
-    return web_err("Net.httpGet: request failed");
+      return web_err(post ? "Net.httpPost: response headers too large" : "Net.httpGet: response headers too large");
+    return web_err(post ? "Net.httpPost: request failed" : "Net.httpGet: request failed");
   }
   {
     SzString *text = sz_string_from_bytes(body, (size_t)n);
@@ -206,6 +233,8 @@ static void *web_cleanup(void *env) {
   req->url = NULL;
   sz_release(req->headers);
   req->headers = NULL;
+  sz_release(req->body);
+  req->body = NULL;
   return NULL;
 }
 
@@ -214,19 +243,27 @@ SzIo *sz_net_live_http_req(const char *method, SzString *url, SzMap *headers, Sz
   SzIo *io;
   SzIo *fin;
   SzIo *ens;
-  (void)body;
-  if (!method || strcmp(method, "GET") != 0)
+  int post;
+  if (!method || (strcmp(method, "GET") != 0 && strcmp(method, "POST") != 0))
     return no_net();
   if (!url)
     sz_panic("sz_net_live_http_req(null)");
+  post = strcmp(method, "POST") == 0;
+  if (post && !body)
+    sz_panic("sz_net_live_http_req(null)");
   req = sz_rc_alloc(sizeof *req, SZ_RC_BOX);
   memset(req, 0, sizeof *req);
+  req->method = post ? "POST" : "GET";
   sz_retain(url);
   req->url = url;
   if (headers)
     sz_retain(headers);
   req->headers = headers;
-  io = fm_drop(sz_io_delay(web_get_thunk, req), web_after, NULL);
+  if (body) {
+    sz_retain(body);
+    req->body = body;
+  }
+  io = fm_drop(sz_io_delay(web_fetch_thunk, req), web_after, NULL);
   fin = sz_io_delay(web_cleanup, req);
   ens = sz_io_ensure(io, fin);
   sz_release(io);
