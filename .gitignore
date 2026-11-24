@@ -8,6 +8,7 @@ build/
 __pycache__/
 **/.scuzz/
 *.png
+!examples/bytes/pixel.png
 .DS_Store
 *.a
 *.so

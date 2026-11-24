@@ -305,13 +305,13 @@ Keep pure kits small. Signatures come from `scuzz docs kits`.
 | Hex | Encode UTF-8 bytes as lowercase hex. Decode reverses this. An odd length or invalid digit returns an empty string |
 | Base64 | Use RFC 4648 on UTF-8 bytes. Decode rejects invalid length, digits, or padding with an empty string. No URL-safe alphabet |
 | UUID | `v4` returns an RFC 4122 UUID with lowercase hex and hyphens. Use built-in Random. No parser or other UUID version |
-| Bytes | `fromStr` copies UTF-8 bytes. `len` returns the byte count. Fs and Net do not take Bytes |
+| Bytes | `fromStr` copies UTF-8 bytes. `len` returns the byte count. `Fs.readBytes` reads one regular file into `Bytes`. `Fs.writeBytes` writes `Bytes` with the same replacement rules as `Fs.write`. `Fs.read` returns `String`. `Fs.write` accepts `String`. HTTP, TCP, and UDP bodies stay `String` |
 
 SIGINT and SIGTERM cancel the live program through its IO scheduler. The scheduler runs finalizers before exit. Owned process groups stop through their existing cancellation finalizers. The exit status is 130 for SIGINT and 143 for SIGTERM. Simulation keeps its scheduler limits and signal behavior. Forced termination cannot run finalizers.
 
-`Fs.write` replaces a regular file in one operation. The live runtime writes a temporary file in the same directory. It checks write and close errors. It syncs the file. It renames the file over the destination. It syncs the destination directory. Power-loss behavior remains unproven. An error before replacement preserves the destination. New files use mode 0600. Replacement keeps the access permission bits. It keeps the owner, the group, and the extended attributes when the process can set them. Replacement updates the timestamps. On the live runtime, a symbolic link destination replaces the regular file that the link names. The link stays. A special file destination fails. An error after replacement can retain the new file. Read the file state before recovery. Simulation applies the same complete-content replacement. A partial-write fault builds the new bytes, discards them, and keeps the previous file. A fault after replacement retains the complete new bytes and returns an error.
+`Fs.write` replaces a regular file in one operation. The live runtime writes a temporary file in the same directory. It checks write and close errors. It syncs the file. It renames the file over the destination. It syncs the destination directory. Power-loss behavior remains unproven. An error before replacement preserves the destination. New files use mode 0600. Replacement keeps the access permission bits. It keeps the owner, the group, and the extended attributes when the process can set them. Replacement updates the timestamps. On the live runtime, a symbolic link destination replaces the regular file that the link names. The link stays. A special file destination fails. An error after replacement can retain the new file. Read the file state before recovery. Simulation applies the same complete-content replacement. A partial-write fault builds the new bytes, discards them, and keeps the previous file. A fault after replacement retains the complete new bytes and returns an error. `Fs.writeBytes` writes `Bytes` with these replacement rules.
 
-Live and simulated HTTP clients share one URL parser. A URL with no path uses `/`. The request target keeps the query and excludes the fragment. Raw spaces and control bytes fail before dispatch. Each HTTP client call takes a request header map after the URL. Body methods take the body last. `Net.httpGetToFile` streams a response body to a caller path with bounded memory. It returns status, headers, and byte count. It supports Content-Length, chunked transfer encoding, and close-delimited bodies. It removes an incomplete file after an error or cancellation. The caller uses a temporary path and renames it after validation. `Net.httpGet` keeps its 1 MiB body limit. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log. A request with `Prefer: wait=N` can wait N seconds for its response. The supported range is 1 through 900 seconds. Other values keep the transport default. `IO.timeout` can set a shorter bound. DNS, connection, and write limits stay fixed.
+Live and simulated HTTP clients share one URL parser. A URL with no path uses `/`. The request target keeps the query and excludes the fragment. Raw spaces and control bytes fail before dispatch. Each HTTP client call takes a request header map after the URL. Body methods take the body last. `Net.httpGetToFile` streams a response body to a caller path with bounded memory. It returns status, headers, and byte count. It supports Content-Length, chunked transfer encoding, and close-delimited bodies. It removes an incomplete file after an error or cancellation. The caller uses a temporary path and renames it after validation. `Net.httpGet` keeps its 1 MiB body limit. Read a file written by `Net.httpGetToFile` with `Fs.readBytes`. The HTTP response body stays `String`. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log. A request with `Prefer: wait=N` can wait N seconds for its response. The supported range is 1 through 900 seconds. Other values keep the transport default. `IO.timeout` can set a shorter bound. DNS, connection, and write limits stay fixed.
 
 `Stream` is one finite pull interpreter. Bind a Stream with `=`. `<-` needs `IO`. Do not add backpressure, publishers, or a second stream kit.
 
@@ -436,7 +436,7 @@ Missing `[ui]` => Skia omitted from the link. IO-only is **not** a fourth runtim
 
 ### Kernel dialect
 
-The language `scuzz` implements. Proof is examples (`examples/hello`, `kernel`, `io`, `counter`, `studio`, `scale`).
+The language `scuzz` implements. Proof is examples (`examples/hello`, `kernel`, `io`, `bytes`, `counter`, `studio`, `scale`).
 
 Locks (not an API catalog - run `scuzz docs language` and `scuzz docs kits`):
 
@@ -911,9 +911,10 @@ Values below one use a weight of one.
 `View.stretch` preserves an expanded child's weight.
 Use intrinsic layout when the main axis has no bound or fixed children exceed its space.
 
-Decode image bytes with `Image.decode`.
+Read image file bytes with `Fs.readBytes`.
+Decode those bytes with `Image.decode`.
 Return `Result[String, Image]` for invalid data and decode limits.
-Keep image file and network reads in IO.
+A network body stays `String`.
 Keep decoded image pixels immutable.
 The IO compiler decodes images without a UI renderer.
 `View.image` retains the image and shares its paint cache across Views.

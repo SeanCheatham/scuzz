@@ -1488,7 +1488,35 @@ grep -q "uuid:ok" /tmp/io-test.out
 grep -q "bytes:2" /tmp/io-test.out
 grep -q "impurity-ok" /tmp/io-test.out
 grep -q "net:" /tmp/io-test.out
+python3 - <<'PY'
+import re
+from pathlib import Path
+text = Path("examples/bytes/src/Main.scuzz").read_text()
+found = re.search(r'"([0-9a-f]{80,})"', text)
+if found is None:
+    raise SystemExit("image hex missing")
+raw = bytes.fromhex(found.group(1))
+png = Path("examples/bytes/pixel.png").read_bytes()
+if png != raw:
+    raise SystemExit("pixel.png does not match image hex")
+try:
+    png.decode("utf-8")
+except UnicodeDecodeError:
+    pass
+else:
+    raise SystemExit("pixel.png is valid UTF-8")
+if b"\x00" not in png or png[0] != 0x89:
+    raise SystemExit("pixel.png is not the binary image")
+print("byte file", len(png))
+PY
+"$SCUZZ" run examples/bytes | tee /tmp/bytes.out
+grep -Fxq 'image:bin:ok:2:2:match' /tmp/bytes.out
+"$SCUZZ" eval examples/bytes | tee /tmp/bytes-eval.out
+diff <(grep -vx ok /tmp/bytes.out) /tmp/bytes-eval.out
+"$SCUZZ" fuzz --iterations 0 examples/bytes | tee /tmp/bytes-fuzz.out
+grep -Fxq 'image:bin:ok:2:2:match' /tmp/bytes-fuzz.out
 "$SCUZZ" check examples/hello
+"$SCUZZ" check examples/bytes
 "$SCUZZ" check examples/kernel
 "$SCUZZ" check examples/scale
 ./examples/jump/gen.sh

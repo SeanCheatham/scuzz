@@ -2064,7 +2064,7 @@ def isProcessOrNetCall(f: String): Bool =
   f == "Sys.args" || f == "Sys.getenv" || f == "Sys.read" || f == "Sys.readLine" || f == "Sys.childRead" || f == "Sys.exec" || Str.startsWith(f, "Net.http") || f == "Net.tcpRead" || f == "Net.udpRecv"
 
 def isExternalInputCall(f: String): Bool =
-  f == "Fs.read" || isProcessOrNetCall(f)
+  f == "Fs.read" || f == "Fs.readBytes" || isProcessOrNetCall(f)
 
 def isProcessOrNetExpr(e: Expr): Bool =
   e match {

@@ -1,0 +1,6 @@
+def setup(): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs("examples/bytes")
+    _ <- Fs.writeBytes(Main.sourcePath(), Bytes.fromStr(Hex.decode(Main.imageHex())))
+  } yield ()
+
