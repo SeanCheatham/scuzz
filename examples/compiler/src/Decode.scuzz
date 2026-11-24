@@ -93,10 +93,67 @@ def decodeChecked(arg: Expr, ty: String, dec: DecodeCtx): Expr =
   decodeReason(arg, ty, topReason(ty, dec), dec)
 
 def decodeReason(arg: Expr, ty: String, reason: String, dec: DecodeCtx): Expr =
-  if (reason != "") Expr.ECall("Json.decode", Expr.EStr(reason, dec.off) :: [], dec.off) else bindDecode(arg, recordName(ty), dec)
+  if (reason != "") Expr.ECall("Json.decode", Expr.EStr(reason, dec.off) :: [], dec.off) else decodeTarget(arg, ty, dec)
+
+def decodeTarget(arg: Expr, ty: String, dec: DecodeCtx): Expr =
+  if (isStringMapTy(ty)) bindStringMap(arg, dec) else bindDecode(arg, recordName(ty), dec)
 
 def topReason(ty: String, dec: DecodeCtx): String =
-  if (isRecordTy(ty, dec)) fieldProblems(recordFields(recordName(ty), dec.enums), "", dec, 32, recordName(ty) :: []) else "Json.decode needs a record result"
+  if (isStringMapTy(ty)) "" else if (isRecordTy(ty, dec)) fieldProblems(recordFields(recordName(ty), dec.enums), "", dec, 32, recordName(ty) :: []) else "Json.decode needs a record result"
+
+def isStringMapTy(ty: String): Bool =
+  isStringMap(Type.parse(ty))
+
+def isStringMap(ty: Ty): Bool =
+  ty match {
+    case Ty.App(name, args) => name == "Map" && List.len(args) == 2 && isStringTy(List.at(args, 0)) && isStringTy(List.at(args, 1))
+    case _ => false
+  }
+
+def bindStringMap(arg: Expr, dec: DecodeCtx): Expr =
+  Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], stringMapBody(recvName(dec.off), dec), dec.off)
+
+def stringMapBody(recv: String, dec: DecodeCtx): Expr =
+  Expr.EAscribe(Expr.EIf(jsonIsObj(recv, dec.off), stringMapFold(recv, dec), errText(dec.off, "Json.decode: wrong case"), dec.off), "Result[String, Map[String, String]]", dec.off)
+
+def stringMapFold(recv: String, dec: DecodeCtx): Expr =
+  call3("List.foldLeft", jsonPairs(recv, dec.off), mapSeed(dec.off), mapLam(dec), dec.off)
+
+def jsonPairs(name: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Json", off), "pairs", Expr.EVar(name, off) :: [], off)
+
+def mapSeed(off: Int): Expr =
+  Expr.EAscribe(okValue(Expr.EAscribe(Expr.EMethod(Expr.EVar("Map", off), "empty", [], off), "Map[String, String]", off), off), "Result[String, Map[String, String]]", off)
+
+def mapLam(dec: DecodeCtx): Expr =
+  Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", dec.off), Arm(pairPat(mapAccName(dec), mapPairName(dec)), "", mapOnPair(dec)) :: [], dec.off))
+
+def mapOnPair(dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(mapPairName(dec), dec.off), Arm(pairPat(mapKeyName(dec), mapValName(dec)), "", mapOnAcc(dec)) :: [], dec.off)
+
+def mapOnAcc(dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(mapAccName(dec), dec.off), Arm(okBind(dec.off, "m"), "", mapOnValue(dec)) :: Arm(errPat(dec.off, "m"), "", errPass("m", dec.off)) :: [], dec.off)
+
+def mapOnValue(dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(mapValName(dec), dec.off), Arm(jsonPat("Str", dec.off, "s"), "", mapPut(dec)) :: Arm("_", "", mapKeyErr(dec)) :: [], dec.off)
+
+def mapPut(dec: DecodeCtx): Expr =
+  okValue(Expr.EMethod(Expr.EVar("Map", dec.off), "set", Expr.EVar(valName(dec.off, "m"), dec.off) :: Expr.EVar(mapKeyName(dec), dec.off) :: Expr.EVar(valName(dec.off, "s"), dec.off) :: [], dec.off), dec.off)
+
+def mapKeyErr(dec: DecodeCtx): Expr =
+  errExpr(dec.off, call2("Str.concat", strExpr("Json.decode: wrong case at ", dec.off), Expr.EVar(mapKeyName(dec), dec.off), dec.off))
+
+def mapAccName(dec: DecodeCtx): String =
+  accName(dec.off, "m")
+
+def mapPairName(dec: DecodeCtx): String =
+  pairName(dec.off, "m")
+
+def mapKeyName(dec: DecodeCtx): String =
+  idxName(dec.off, "m")
+
+def mapValName(dec: DecodeCtx): String =
+  itemName(dec.off, "m")
 
 def resultPayload(expected: String, aliases: List[Alias]): String =
   payloadOf(Type.parse(expandTy(expected, aliases)))

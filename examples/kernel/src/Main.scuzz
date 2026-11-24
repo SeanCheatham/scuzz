@@ -1502,6 +1502,7 @@ def copiedCallback(s: String): PatternFields =
     _ <- IO.println(s"nestedNamedItem:${nestedNamedItem(ItemBox.Wrap(SecondItem.Item(7, "ok")))}")
     _ <- IO.println(s"jsonNested:${jsonNestedString()}")
     _ <- IO.println(s"jsonNestedInt:${jsonNestedInt()}")
+    _ <- IO.println(Str.concat("jsonMap:", Input.mapText("{\"b\":\"two\",\"a\":\"one\"}")))
     flipped = flip(c)
     desc = describe(o)
     xs = Color.Blue :: List.empty()
