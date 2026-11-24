@@ -635,6 +635,23 @@ payloads = [('{"reply":{"Count":7}}', 'ok:count:7'),
             ('{"reply":{"Ratio":1}}', 'error:Json.decode: wrong case at reply.ratio')]
 ranges = [('{"name":"bolt","item":{"quantity":2},"note":null}', 'true'),
           ('{"name":"bolt","item":{"quantity":101},"note":null}', 'false')]
+maps = [('{"b":"two","a":"one"}', 'ok:a=one,b=two|one'),
+        ('{}', 'ok:empty|none'),
+        ('{"a":""}', 'ok:a=|'),
+        ('{"a":"1","a":"2"}', 'ok:a=2|2'),
+        ('{"z":"ok","m":"5","a":"x"}', 'ok:a=x,m=5,z=ok|x'),
+        ('{"a" : "x"}', 'ok:a=x|x'),
+        ('{"z":"ok","a":1}', 'error:Json.decode: wrong case at a'),
+        ('{"m":1,"a":"x"}', 'error:Json.decode: wrong case at m'),
+        ('{"a":{"b":"c"}}', 'error:Json.decode: wrong case at a'),
+        ('{"a":["x"]}', 'error:Json.decode: wrong case at a'),
+        ('{"a":null}', 'error:Json.decode: wrong case at a'),
+        ('{"a":true}', 'error:Json.decode: wrong case at a'),
+        ('{"a":1.5}', 'error:Json.decode: wrong case at a'),
+        ('[]', 'error:Json.decode: wrong case'),
+        ('null', 'error:Json.decode: wrong case'),
+        ('"a"', 'error:Json.decode: wrong case'),
+        ('1', 'error:Json.decode: wrong case')]
 reply_ranges = [('{"reply":{"Count":7}}', 'true'),
                 ('{"reply":{"Count":1}}', 'true'),
                 ('{"reply":{"Count":100}}', 'true'),
@@ -687,14 +704,16 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(BANDS, text => IO.println(Input.choirText(text)))
     _ <- IO.foreachDiscard(GRIDS, text => IO.println(Input.gridText(text)))
     _ <- IO.foreachDiscard(PAYLOADS, text => IO.println(Input.packetText(text)))
+    _ <- IO.foreachDiscard(MAPS, text => IO.println(Input.mapText(text)))
+    _ <- IO.foreachDiscard(MAPS, text => IO.println(Input.aliasText(text)))
     _ <- IO.foreachDiscard(RANGES, text => IO.println(Str.fromBool(Input.orderInRange(text))))
     _ <- IO.foreachDiscard(REPLIES, text => IO.println(Str.fromBool(Input.replyInRange(text))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('LANES', array([text for text, _ in lanes])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('GRIDS', array([text for text, _ in grids])).replace('PAYLOADS', array([text for text, _ in payloads])).replace('REPLIES', array([text for text, _ in reply_ranges])).replace('RANGES', array([text for text, _ in ranges]))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('LANES', array([text for text, _ in lanes])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('GRIDS', array([text for text, _ in grids])).replace('PAYLOADS', array([text for text, _ in payloads])).replace('MAPS', array([text for text, _ in maps])).replace('REPLIES', array([text for text, _ in reply_ranges])).replace('RANGES', array([text for text, _ in ranges]))
     (root / 'src/Main.scuzz').write_text(source)
     expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
-    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in lanes] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in grids] + [value for _, value in payloads] + [value for _, value in ranges] + [value for _, value in reply_ranges]
+    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in lanes] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in grids] + [value for _, value in payloads] + [value for _, value in maps] + [value for _, value in maps] + [value for _, value in ranges] + [value for _, value in reply_ranges]
     command('fmt', root)
     for engine in ['run', 'eval']:
         output = command(engine, root)
@@ -758,6 +777,11 @@ oracle boundaries(): Bool =
         ('enum Reply:\n  case Count(n: Int)\nrecord Row(item: Option[Reply])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item'),
         ('enum Loop:\n  case Box(inner: Loop)\nrecord Row(item: Loop)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item.inner'),
         ('def badPos(json: Json): Json =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
+        ('def badMap(json: Json): Result[String, Map[String, Int]] =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
+        ('def badMap(json: Json): Result[String, Map[Int, String]] =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
+        ('def badMap(json: Json): Result[String, Map[String, Map[String, String]]] =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
+        ('record Row(xs: Map[String, String])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('record Row(xs: Map[String, List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
     ]:
         (root / 'src/BadDecode.scuzz').write_text(body)
         command('fmt', root)
@@ -1379,6 +1403,7 @@ grep -Fxq 'nestedUnqualifiedItem:8' /tmp/kernel.out
 grep -Fxq 'nestedNamedItem:9' /tmp/kernel.out
 grep -Fxq 'jsonNested:ok' /tmp/kernel.out
 grep -Fxq 'jsonNestedInt:7' /tmp/kernel.out
+grep -Fxq 'jsonMap:ok:a=one,b=two|one' /tmp/kernel.out
 grep -Fxq 'qualifiedRecord:4' /tmp/kernel.out
 grep -Fxq 'remoteRecord:4' /tmp/kernel.out
 grep -Fxq 'remoteMarker:ok' /tmp/kernel.out
