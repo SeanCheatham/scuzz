@@ -4956,6 +4956,19 @@ slice_web() (
   fi
   "$SCUZZ" package --target web --out-dir "$web_tmp/web-get output" examples/web-get
   node crates/embedder-web/test.cjs "$web_tmp/web-get output/package/web" '' web-get
+  "$SCUZZ" check examples/web-file
+  env -u SCUZZ_WEB_FILE -u SCUZZ_TESTRT SCUZZ_SKIA=sk_sw "$SCUZZ" run examples/web-file > "$web_tmp/web-file-run.out"
+  if [ "$(tail -n 1 "$web_tmp/web-file-run.out")" != "web-file:fffe80" ]; then
+    echo "native run must not use the browser store: $(cat "$web_tmp/web-file-run.out")" >&2
+    exit 1
+  fi
+  file_sim="$(env -u SCUZZ_WEB_FILE -u SCUZZ_NET_LIVE -u SCUZZ_UI_SERVE SCUZZ_TESTRT=1 examples/web-file/build/web-file)"
+  if [ "$file_sim" != "wrote:fffe80" ]; then
+    echo "simulation must keep the same file bytes: $file_sim" >&2
+    exit 1
+  fi
+  "$SCUZZ" package --target web --out-dir "$web_tmp/web-file output" examples/web-file
+  node crates/embedder-web/test.cjs "$web_tmp/web-file output/package/web" '' web-file
   "$SCUZZ" check examples/docs
   "$SCUZZ" package --target web --out-dir "$web_tmp/docs output" examples/docs
   mkdir -p "$web_tmp/sdk/crates/embedder-web"

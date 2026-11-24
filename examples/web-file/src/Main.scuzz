@@ -1,0 +1,35 @@
+def mark(): String =
+  "fffe80"
+
+def body(): Bytes =
+  Bytes.fromStr(Hex.decode(mark()))
+
+def same(raw: Bytes, text: String): Bool =
+  raw == body() && Bytes.len(raw) == 3 && Hex.encode(text) == mark()
+
+def label(web: String, hit: Int): String =
+  if (web == "1" && hit != 0) "kept:" else "wrote:"
+
+def report(web: String, hit: Int, raw: Bytes, text: String): String =
+  if (same(raw, text)) Str.concat(label(web, hit), mark()) else "web-file:bad"
+
+def session(web: String): IO[String] =
+  for {
+    hit <- Fs.exists("web-file.bin")
+    _ <- if (hit != 0) IO.pure(()) else Fs.writeBytes("web-file.bin", body())
+    raw <- Fs.readBytes("web-file.bin")
+    text <- Fs.read("web-file.bin")
+    _ <- if (web == "1") IO.pure(()) else Fs.delete("web-file.bin")
+  } yield report(web, hit, raw, text)
+
+def lineFor(web: String, sim: String): IO[String] =
+  if (sim == "1" || web == "1") session(web) else IO.pure(Str.concat("web-file:", mark()))
+
+@main def main: IO[Unit] =
+  for {
+    web <- Sys.getenv("SCUZZ_WEB_FILE")
+    sim <- Sys.getenv("SCUZZ_TESTRT")
+    line <- lineFor(web, sim)
+    _ <- IO.println(line)
+    _ <- if (web == "1") Ui.run(_ => View.column([View.text("Web file"), View.text(line)])) else IO.pure(())
+  } yield ()

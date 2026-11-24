@@ -123,7 +123,7 @@ The call keeps the 1 MiB body limit and does not follow a redirect.
 Simulation rejects a live external host.
 Other Net calls fail at the call (`Net: not available on web`).
 A process effect fails at `fork` (`Sys.exec: fork failed`). The web build links every def in the package and its path
-dependencies; the linker drops the defs `@main` does not reach. Files use Emscripten memory storage. They do not persist across page reloads.
+dependencies; the linker drops the defs `@main` does not reach. The browser working directory keeps a file across a page reload. A file outside that directory does not remain. The save uses one browser thread.
 Static text supports browser selection and copying through a DOM text layer.
 A removed focused control moves focus to the text layer.
 Walkthrough tabs and Index Book sections use URL fragments for links and
