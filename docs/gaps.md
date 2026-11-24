@@ -368,6 +368,11 @@ It uses the same replacement rules as `Fs.write`.
 `Net.httpGetBytes` reads one GET response body into `Bytes`.
 `Net.httpGet` returns `String`.
 `Net.httpGet` and `Net.httpGetBytes` keep the 1 MiB body limit.
+`Net.httpPost` sends one string body.
+It returns the status, the headers, and a string body.
+It uses the same client as `Net.httpGet`.
+It keeps the 1 MiB body limit.
+It does not follow a redirect.
 TCP and UDP bodies are `String`.
 Read a file from `Net.httpGetToFile` with `Fs.readBytes`.
 
@@ -383,6 +388,7 @@ Both calls run on one browser thread.
 Both calls keep the 1 MiB body limit.
 The text response body reaches the program.
 Simulation rejects a live external host.
+`Net.httpPost` fails on web with `Net: not available on web`.
 Other Net calls fail on web.
 A file in the browser working directory remains after a page reload.
 One browser package writes three bytes that are not valid UTF-8.

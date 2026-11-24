@@ -1,0 +1,20 @@
+def sent(): String =
+  "pong"
+
+def handle(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (path, method, _, body) => if (path == "/echo" && method == "POST") IO.pure((200, Map.empty(), body)) else IO.pure((404, Map.empty(), ""))
+  }
+
+def lineOf(status: Int, body: String): String =
+  s"http:post:${Str.fromInt(status)}:$body"
+
+def reportLine(pair: (Unit, (Int, Map[String, String], String))): String =
+  lineOf(pair._2._1, pair._2._3)
+
+@main def main: IO[Unit] =
+  for {
+    pair <- IO.both(Net.serveOnce(18082, handle), Net.httpPost("http://127.0.0.1:18082/echo", Map.empty(), sent()))
+    line = reportLine(pair)
+    _ <- if (line == "http:post:200:pong") IO.println(line) else IO.fail(line)
+  } yield ()

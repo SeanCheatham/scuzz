@@ -1576,6 +1576,22 @@ diff <(grep -vx ok /tmp/http-bytes.out) /tmp/http-bytes-eval.out
 "$SCUZZ" fuzz --iterations 0 examples/http-bytes | tee /tmp/http-bytes-fuzz.out
 grep -Fxq 'http:bin:ok:3:match' /tmp/http-bytes-fuzz.out
 "$SCUZZ" check examples/http-bytes
+python3 - <<'PY'
+from pathlib import Path
+text = Path("examples/http-post/src/Main.scuzz").read_text()
+if "Net.httpPost" not in text or "IO.pure((200, Map.empty(), body))" not in text:
+    raise SystemExit("http post proof missing")
+if "127.0.0.1" not in text or "example.com" in text or "https://" in text:
+    raise SystemExit("http post host is not loopback")
+print("http post echo")
+PY
+"$SCUZZ" run examples/http-post | tee /tmp/http-post.out
+grep -Fxq 'http:post:200:pong' /tmp/http-post.out
+"$SCUZZ" eval examples/http-post | tee /tmp/http-post-eval.out
+diff <(grep -vx ok /tmp/http-post.out) /tmp/http-post-eval.out
+"$SCUZZ" fuzz --iterations 0 examples/http-post | tee /tmp/http-post-fuzz.out
+grep -Fxq 'http:post:200:pong' /tmp/http-post-fuzz.out
+"$SCUZZ" check examples/http-post
 "$SCUZZ" check examples/kernel
 "$SCUZZ" check examples/scale
 ./examples/jump/gen.sh
