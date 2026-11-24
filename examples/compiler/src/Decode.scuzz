@@ -161,7 +161,7 @@ def typeProblemOf(ty: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[St
   }
 
 def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
-  if (isScalar(name) || name == "Json" || isUnitEnum(name, dec)) "" else recordProblem(name, path, dec, fuel, seen)
+  if (isScalar(name) || name == "Json" || isUnitEnum(name, dec)) "" else if (isPayloadEnum(name, dec)) payloadProblem(name, path, dec, fuel, seen) else recordProblem(name, path, dec, fuel, seen)
 
 def listProblem(elem: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   elem match {
@@ -199,6 +199,42 @@ def unitCases(cases: List[EnCase]): Bool =
 
 def unitTail(cases: List[EnCase]): Bool =
   if (List.isEmpty(cases)) true else if (!List.isEmpty(List.at(cases, 0).fields)) false else unitTail(List.tail(cases))
+
+def isPayloadEnum(name: String, dec: DecodeCtx): Bool =
+  payloadFound(name, dec.enums)
+
+def payloadFound(name: String, enums: List[En]): Bool =
+  if (name == "" || List.isEmpty(enums)) false else payloadHead(name, List.at(enums, 0), List.tail(enums))
+
+def payloadHead(name: String, en: En, rest: List[En]): Bool =
+  if (en.name == name) payloadEn(en) else payloadFound(name, rest)
+
+def payloadEn(en: En): Bool =
+  if (en.isRec || !List.isEmpty(en.tparams) || List.isEmpty(en.cases)) false else oneFieldCases(en.cases)
+
+def oneFieldCases(cases: List[EnCase]): Bool =
+  if (List.isEmpty(cases)) true else if (List.len(List.at(cases, 0).fields) == 1) oneFieldCases(List.tail(cases)) else false
+
+def payloadProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (fuel <= 0 || List.contains(seen, name)) badRead(path) else payloadCaseProblems(enumCasesOf(name, dec.enums), path, dec, fuel, name :: seen)
+
+def payloadCaseProblems(cases: List[EnCase], path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (List.isEmpty(cases)) "" else payloadCaseProblem(List.at(cases, 0), List.tail(cases), path, dec, fuel, seen)
+
+def payloadCaseProblem(c: EnCase, rest: List[EnCase], path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (List.isEmpty(c.fields)) badRead(path) else payloadNext(payloadTypeProblem(expandTy(List.at(c.fields, 0).ty, dec.aliases), joinPath(path, List.at(c.fields, 0).name), dec, fuel - 1, seen), rest, path, dec, fuel, seen)
+
+def payloadNext(reason: String, rest: List[EnCase], path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (reason != "") reason else payloadCaseProblems(rest, path, dec, fuel, seen)
+
+def payloadTypeProblem(ty: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  if (fuel <= 0) badRead(path) else payloadTypeOf(Type.parse(ty), path, dec, fuel, seen)
+
+def payloadTypeOf(ty: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
+  ty match {
+    case Ty.Named(name) => if (isScalar(name) || name == "Json" || isUnitEnum(name, dec)) "" else if (isPayloadEnum(name, dec)) payloadProblem(name, path, dec, fuel, seen) else if (isPlainRecord(name, dec.enums)) recordProblem(name, path, dec, fuel, seen) else badRead(path)
+    case _ => badRead(path)
+  }
 
 def enumCasesOf(name: String, enums: List[En]): List[EnCase] =
   if (List.isEmpty(enums)) [] else enumCasesHead(name, List.at(enums, 0), List.tail(enums))
@@ -289,7 +325,7 @@ def kindArms(ty: Ty, recv: String, ctor: String, rest: List[Param], done: List[E
   }
 
 def namedArms(name: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
-  if (name == "String") scalarArms("Str", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Int") scalarArms("Int", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Bool") scalarArms("Bool", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Float") scalarArms("Float", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Json") jsonArms(recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (isUnitEnum(name, dec)) enumArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else recordArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
+  if (name == "String") scalarArms("Str", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Int") scalarArms("Int", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Bool") scalarArms("Bool", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Float") scalarArms("Float", recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (name == "Json") jsonArms(recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (isUnitEnum(name, dec)) enumArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else if (isPayloadEnum(name, dec)) payloadArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel) else recordArms(name, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)
 
 def enumArms(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
   Arm(okTag("Str", dec.off, fieldSlot), "", enumMatched(typeName, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)) :: Arm(okBind(dec.off, joinSlot(fieldSlot, "b")), "", wrongEnum(fieldPath, joinSlot(fieldSlot, "b"), dec)) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
@@ -314,6 +350,72 @@ def unknownEnum(path: Expr, text: String, dec: DecodeCtx): Expr =
 
 def wrongEnum(path: Expr, slot: String, dec: DecodeCtx): Expr =
   Expr.EMatch(call1("Json.stringify", Expr.EVar(valName(dec.off, slot), dec.off), dec.off), Arm(okBind(dec.off, joinSlot(slot, "w")), "", errExpr(dec.off, namedValue("Json.decode: wrong case at ", path, Expr.EVar(valName(dec.off, joinSlot(slot, "w")), dec.off), dec.off))) :: Arm(errPat(dec.off, joinSlot(slot, "w")), "", errExpr(dec.off, wrongExpr(path, dec.off))) :: [], dec.off)
+
+def payloadArms(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
+  Arm(okBind(dec.off, fieldSlot), "", payloadMatched(typeName, recv, ctor, rest, done, fieldPath, fieldSlot, path, slot, dec, fuel)) :: Arm(errPat(dec.off, fieldSlot), "", errMap(fieldPath, fieldSlot, dec.off)) :: []
+
+def payloadMatched(typeName: String, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EAscribe(payloadRead(typeName, valName(dec.off, fieldSlot), fieldPath, fieldSlot, dec, fuel), enumResult(typeName), dec.off), Arm(okBind(dec.off, joinSlot(fieldSlot, "e")), "", nextField(recv, ctor, rest, snoc(done, Expr.EVar(valName(dec.off, joinSlot(fieldSlot, "e")), dec.off)), path, slot, dec, fuel)) :: Arm(errPat(dec.off, joinSlot(fieldSlot, "e")), "", errPass(joinSlot(fieldSlot, "e"), dec.off)) :: [], dec.off)
+
+def payloadRead(typeName: String, recv: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (fuel <= 0) errText(dec.off, badRead(pathText(path))) else payloadObj(typeName, recv, enumCasesOf(typeName, dec.enums), path, slot, dec, fuel)
+
+def payloadObj(typeName: String, recv: String, cases: List[EnCase], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EIf(jsonIsObj(recv, dec.off), payloadKeyed(typeName, recv, cases, path, slot, dec, fuel), valueCase("Json.decode: wrong case at ", path, recv, slot, dec), dec.off)
+
+def payloadKeyed(typeName: String, recv: String, cases: List[EnCase], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EIf(Expr.EBin(">", caseKeyCount(recv, cases, dec.off), intExpr(1, dec.off), dec.off), valueCase("Json.decode: wrong case at ", path, recv, slot, dec), payloadPick(typeName, recv, cases, path, slot, dec, fuel), dec.off)
+
+def payloadPick(typeName: String, recv: String, cases: List[EnCase], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (List.isEmpty(cases)) valueCase("Json.decode: unknown case at ", path, recv, slot, dec) else payloadHit(typeName, recv, List.at(cases, 0), List.tail(cases), path, slot, dec, fuel)
+
+def payloadHit(typeName: String, recv: String, c: EnCase, rest: List[EnCase], path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EIf(jsonHas(recv, c.name, dec.off), payloadTake(typeName, recv, c, path, slot, dec, fuel), payloadPick(typeName, recv, rest, path, slot, dec, fuel), dec.off)
+
+def payloadTake(typeName: String, recv: String, c: EnCase, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (List.isEmpty(c.fields)) valueCase("Json.decode: wrong case at ", path, recv, slot, dec) else payloadWrap(typeName, recv, c.name, List.at(c.fields, 0), path, slot, dec, fuel)
+
+def payloadWrap(typeName: String, recv: String, caseName: String, field: Param, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(jsonField(recv, caseName, dec.off), Arm(okBind(dec.off, joinSlot(slot, caseName)), "", payloadField(typeName, caseName, field, joinPathExpr(path, field.name, dec.off), joinSlot(slot, caseName), dec, fuel)) :: Arm(errPat(dec.off, joinSlot(slot, caseName)), "", errMap(joinPathExpr(path, field.name, dec.off), joinSlot(slot, caseName), dec.off)) :: [], dec.off)
+
+def payloadField(typeName: String, caseName: String, field: Param, fieldPath: Expr, caseSlot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EAscribe(decodeHeld(Type.parse(expandTy(field.ty, dec.aliases)), valName(dec.off, caseSlot), fieldPath, joinSlot(caseSlot, "h"), dec, fuel), resultOf(expandTy(field.ty, dec.aliases)), dec.off), Arm(okBind(dec.off, joinSlot(caseSlot, "v")), "", okValue(payloadCtor(typeName, caseName, Expr.EVar(valName(dec.off, joinSlot(caseSlot, "v")), dec.off), dec.off), dec.off)) :: Arm(errPat(dec.off, joinSlot(caseSlot, "v")), "", errPass(joinSlot(caseSlot, "v"), dec.off)) :: [], dec.off)
+
+def payloadCtor(typeName: String, caseName: String, arg: Expr, off: Int): Expr =
+  Expr.EMethod(Expr.EVar(typeName, off), caseName, arg :: [], off)
+
+def decodeHeld(ty: Ty, recv: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  ty match {
+    case Ty.Named(name) => heldName(name, recv, path, slot, dec, fuel)
+    case _ => errExpr(dec.off, wrongExpr(path, dec.off))
+  }
+
+def heldName(name: String, recv: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (name == "String") heldScalar("Str", recv, path, slot, dec) else if (name == "Int") heldScalar("Int", recv, path, slot, dec) else if (name == "Bool") heldScalar("Bool", recv, path, slot, dec) else if (name == "Float") heldScalar("Float", recv, path, slot, dec) else if (name == "Json") okValue(Expr.EVar(recv, dec.off), dec.off) else if (isUnitEnum(name, dec)) heldUnit(name, recv, path, slot, dec) else if (isPayloadEnum(name, dec)) payloadRead(name, recv, path, slot, dec, fuel - 1) else if (isPlainRecord(name, dec.enums)) genRecord(recv, name, path, slot, dec, fuel - 1) else errExpr(dec.off, wrongExpr(path, dec.off))
+
+def heldScalar(tag: String, recv: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(recv, dec.off), Arm(jsonPat(tag, dec.off, slot), "", okValue(Expr.EVar(valName(dec.off, slot), dec.off), dec.off)) :: Arm("_", "", errExpr(dec.off, wrongExpr(path, dec.off))) :: [], dec.off)
+
+def heldUnit(typeName: String, recv: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(recv, dec.off), Arm(jsonPat("Str", dec.off, slot), "", enumValue(typeName, valName(dec.off, slot), enumCasesOf(typeName, dec.enums), path, dec)) :: Arm(valName(dec.off, joinSlot(slot, "b")), "", wrongEnum(path, joinSlot(slot, "b"), dec)) :: [], dec.off)
+
+def valueCase(prefix: String, path: Expr, recv: String, slot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(call1("Json.stringify", Expr.EVar(recv, dec.off), dec.off), Arm(okBind(dec.off, joinSlot(slot, "w")), "", errExpr(dec.off, namedValue(prefix, path, Expr.EVar(valName(dec.off, joinSlot(slot, "w")), dec.off), dec.off))) :: Arm(errPat(dec.off, joinSlot(slot, "w")), "", errExpr(dec.off, wrongExpr(path, dec.off))) :: [], dec.off)
+
+def caseKeyCount(recv: String, cases: List[EnCase], off: Int): Expr =
+  if (List.isEmpty(cases)) intExpr(0, off) else Expr.EBin("+", Expr.EIf(jsonHas(recv, List.at(cases, 0).name, off), intExpr(1, off), intExpr(0, off), off), caseKeyCount(recv, List.tail(cases), off), off)
+
+def intExpr(n: Int, off: Int): Expr =
+  Expr.EInt(n, off)
+
+def jsonHas(recv: String, name: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Json", off), "has", Expr.EVar(recv, off) :: Expr.EStr(name, off) :: [], off)
+
+def jsonIsObj(name: String, off: Int): Expr =
+  Expr.EMethod(Expr.EVar("Json", off), "isObj", Expr.EVar(name, off) :: [], off)
+
+def resultOf(ty: String): String =
+  Str.concat("Result[String, ", Str.concat(ty, "]"))
 
 def namedValue(prefix: String, path: Expr, value: Expr, off: Int): Expr =
   call2("Str.concat", call2("Str.concat", call2("Str.concat", strExpr(prefix, off), path, off), strExpr(": ", off), off), value, off)
