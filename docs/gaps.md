@@ -104,7 +104,7 @@ Physical-device and real screen-reader checks for sliders remain open.
 Named progress checks cover live values, range limits, hidden indicators, dialogs, and input exclusion.
 Native checks cover signed 64-bit limits and escaped names.
 Physical-device and real screen-reader checks for progress indicators remain open.
-Indeterminate progress remains open.
+Busy progress checks cover a named indicator with no numeric value, a hidden indicator, and replacement by a clamped percentage or by removal.
 Split-pane checks cover keys, collapse, restore, retained state, and named browser separators.
 Physical-device and real screen-reader checks for split panes remain open.
 Dialog checks cover initial focus, focus return, removed openers, and empty dialogs.

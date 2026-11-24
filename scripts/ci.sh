@@ -3455,6 +3455,10 @@ cases = {
         {'op': 'tap', 'id': 'checkbox:Updates'},
         {'op': 'tap', 'id': 'button:Open'},
         {'op': 'key', 'key': 'Escape'}]),
+        ('busy', [
+        {'op': 'tap', 'id': 'button:Hide task'},
+        {'op': 'tap', 'id': 'button:Show value'},
+        {'op': 'tap', 'id': 'button:Remove task'}]),
         ('form', [
         {'op': 'key', 'key': 'Tab'},
         {'op': 'key', 'key': 'a', 'text': 'Ada'},
@@ -4009,15 +4013,41 @@ for label, events in cases:
         expected = max(0, min(100, values['volume'] * 2 - 50))
         names = {'Linear completion', 'Circular completion'}
         if values['updates']: names.add('Optional completion')
-        assert set(progress) == names, progress
-        for node in progress.values():
-            assert (node['value'], node['minimum'], node['maximum']) == (expected, 0, 100), node
+        task_present = values['taskShown'] != 0 and values['taskKeep'] != 0
+        busy_names = {'Task'} if task_present and values['taskMode'] != 0 else set()
+        if task_present and values['taskMode'] == 0: names.add('Task')
+        valued = {label_name: node for label_name, node in progress.items() if 'value' in node}
+        busy_nodes = {label_name: node for label_name, node in progress.items() if node.get('busy') is True}
+        assert set(valued) == names, progress
+        assert set(busy_nodes) == busy_names, progress
+        for node in valued.values():
+            shown = values['taskValue'] if node['label'] == 'Task' else expected
+            assert (node['value'], node['minimum'], node['maximum']) == (shown, 0, 100), node
+            assert 'busy' not in node, node
+        for node in busy_nodes.values():
+            assert 'value' not in node and 'minimum' not in node and 'maximum' not in node, node
         if label == 'progress':
             assert values['volume'] == 0 and values['updates'] == 1, values
             assert native['session']['focus'] == 'button:Open', native
         elif label == 'form':
             assert all(values[k] == v for k, v in dict(name='Ada', nameText='Name: Ada', updates=1, volume=51,
                 plan=2, notes='notes  ', submitted=1).items()), values
+        elif label == 'busy':
+            def task_states(text):
+                states = []
+                for part in text.split('a11y:\n')[1:]:
+                    section = part.split('\neffects:\n', 1)[0]
+                    if 'progress:Linear completion=' not in section:
+                        continue
+                    busy = 'progress:Task=busy' in section
+                    value = 'progress:Task=35' in section
+                    state = 'both' if busy and value else 'busy' if busy else 'value' if value else 'absent'
+                    if not states or states[-1] != state:
+                        states.append(state)
+                return states
+            assert task_states((output / 'native.timeline').read_text()) == ['busy', 'absent', 'value', 'absent']
+            assert values['taskShown'] == 1 and values['taskKeep'] == 0 and values['taskMode'] == 0 and values['taskValue'] == 35, values
+            assert native['session']['focus'] == 'button:Remove task', native
         elif label == 'ranges':
             assert values['temperature'] == 117 and values['precise'] == 9223372036854775798, values
             assert native['session']['focus'] == 'slider:Precise count', native

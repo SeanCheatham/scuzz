@@ -399,7 +399,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   private static final int INCREMENT = 16, DECREMENT = 32, SET_VALUE = 64, CLEAR_FOCUS = 128;
 
   private static final class SemanticNode {
-    final long id, parent, number, minimum, maximum;
+    final long id, parent, number, minimum, maximum, step;
     final int role, actions, checked, selected, expanded, start, end;
     final boolean focused, editable, multiline;
     final String label, value, description;
@@ -422,6 +422,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
       number = data.getLong("number");
       minimum = data.getLong("minimum");
       maximum = data.getLong("maximum");
+      step = data.getLong("step");
       label = data.getString("label");
       value = data.getString("value");
       description = data.getString("description");
@@ -435,7 +436,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
     boolean has(int action) { return (actions & action) != 0; }
     boolean focusable() { return actions != 0 || (!label.isEmpty() && role != 44); }
-    boolean range() { return role == 8 || role == 42 || role == 10 || role == 20; }
+    boolean range() {
+      if (role == 10 || role == 20) return step >= 0;
+      return role == 8 || role == 42;
+    }
   }
 
   private static int utf16Offset(String text, int bytes) {

@@ -896,9 +896,12 @@ static int a11y_parse_path(const char *path, uintptr_t *out_id) {
 }
 
 static int a11y_has_value(const SzA11yNode *node) {
-  return node &&
-         (node->role == SZ_A11Y_SLIDER || node->role == SZ_A11Y_SPLIT ||
-          node->role == SZ_A11Y_PROGRESS || node->role == SZ_A11Y_CIRCULAR);
+  if (!node)
+    return 0;
+  if ((node->role == SZ_A11Y_PROGRESS || node->role == SZ_A11Y_CIRCULAR) && node->step < 0)
+    return 0;
+  return node->role == SZ_A11Y_SLIDER || node->role == SZ_A11Y_SPLIT ||
+         node->role == SZ_A11Y_PROGRESS || node->role == SZ_A11Y_CIRCULAR;
 }
 
 static int a11y_has_text(const SzA11yNode *node) {

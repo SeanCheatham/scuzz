@@ -1,0 +1,2 @@
+[fuzz]
+events = ["tap button:Hide task", "tap button:Show value", "tap button:Remove task"]

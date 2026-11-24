@@ -16593,6 +16593,140 @@ static void test_progress_not_in_taps_dump(void) {
   remove(path);
 }
 
+static char *progress_json(SzView *view) {
+  const char *path = "/tmp/scuzz_ui_progress_busy.json";
+  FILE *file = fopen(path, "w");
+  char *text;
+  assert(file);
+  sz_view_a11y_dump_json(view, file);
+  assert(fclose(file) == 0);
+  text = slurp_cstr(path);
+  remove(path);
+  return text;
+}
+
+static void test_progress_busy(void) {
+  SzSignalInt *value = sz_signal_int(35);
+  SzSignalInt *mode = sz_signal_int(1);
+  SzSignalInt *shown = sz_signal_int(0);
+  SzSignalInt *keep = sz_signal_int(0);
+  SzView *plain = sz_view_progress(value, "Plain");
+  SzView *named = sz_view_busy(value, mode, "Copy \"data\"");
+  SzView *view;
+  SzView *root;
+  SzString *dump;
+  char *json;
+  const SzTheme *theme = sz_theme_default();
+  SzRect frame;
+  SzA11ySnapshot *snapshot;
+  const SzA11yNode *node;
+
+  assert(sz_view_progress_busy(NULL) == 0);
+  assert(sz_view_progress_busy(plain) == 0);
+  assert(sz_view_progress_busy(named) == 1);
+  json = progress_json(named);
+  assert(strstr(json, "\"busy\":true") != NULL);
+  assert(strstr(json, "Copy \\\"data\\\"") != NULL);
+  assert(strstr(json, "\"value\":") == NULL);
+  assert(strstr(json, "\"minimum\":") == NULL);
+  assert(strstr(json, "\"maximum\":") == NULL);
+  free(json);
+  sz_view_free(named);
+  sz_view_free(plain);
+
+  view = sz_view_busy(value, mode, "Task");
+  assert(sz_view_progress_value(view) == 0);
+  dump = sz_view_a11y_dump(view);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=busy") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=35") == NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(value, 80);
+  dump = sz_view_a11y_dump(view);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=busy") != NULL);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=80") == NULL);
+  sz_string_free(dump);
+  assert(sz_signal_int_get(value) == 80);
+  assert(sz_signal_int_get(mode) == 1);
+
+  sz_signal_int_set(mode, 0);
+  sz_signal_int_set(value, 35);
+  assert(sz_view_progress_busy(view) == 0);
+  assert(sz_view_progress_value(view) == 35);
+  dump = sz_view_a11y_dump(view);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=35") != NULL);
+  assert(strstr(sz_string_cstr(dump), "=busy") == NULL);
+  sz_string_free(dump);
+  json = progress_json(view);
+  assert(strstr(json, "\"value\":35") != NULL);
+  assert(strstr(json, "\"minimum\":0") != NULL);
+  assert(strstr(json, "\"maximum\":100") != NULL);
+  assert(strstr(json, "\"busy\"") == NULL);
+  free(json);
+  sz_signal_int_set(value, 150);
+  assert(sz_view_progress_value(view) == 100);
+  assert(sz_signal_int_get(value) == 150);
+  dump = sz_view_a11y_dump(view);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=100") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(mode, -1);
+  sz_signal_int_set(value, 35);
+  assert(sz_view_progress_busy(view) == 1);
+  assert(sz_view_progress_value(view) == 0);
+  assert(sz_signal_int_get(value) == 35);
+  assert(sz_signal_int_get(mode) == -1);
+  dump = sz_view_a11y_dump(view);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=busy") != NULL);
+  sz_string_free(dump);
+
+  sz_view_layout(view, 200.f, 80.f, theme);
+  frame = sz_view_frame(view);
+  assert(!sz_view_is_tap_target(view));
+  assert(sz_view_hit_test(view, frame.x + frame.w * 0.5f, frame.y + frame.h * 0.5f) == NULL);
+  snapshot = sz_view_a11y_snapshot(view, (SzRect){0.f, 0.f, 200.f, 80.f});
+  assert(sz_a11y_snapshot_count(snapshot) == 1);
+  node = sz_a11y_snapshot_node(snapshot, 0);
+  assert(node->step < 0);
+  assert(node->maximum == 0);
+  assert(node->value && node->value[0] == '\0');
+  sz_a11y_snapshot_free(snapshot);
+  sz_signal_int_set(mode, 0);
+  snapshot = sz_view_a11y_snapshot(view, (SzRect){0.f, 0.f, 200.f, 80.f});
+  node = sz_a11y_snapshot_node(snapshot, 0);
+  assert(node->step == 1);
+  assert(node->maximum == 100);
+  assert(strcmp(node->value, "35") == 0);
+  sz_a11y_snapshot_free(snapshot);
+
+  sz_signal_int_set(mode, 1);
+  sz_view_show_when(keep, 1, view);
+  root = sz_view_visibility(shown, view);
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "Task") == NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(shown, 1);
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "Task") == NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(keep, 1);
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=busy") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(mode, 0);
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "progress:Task=35") != NULL);
+  assert(strstr(sz_string_cstr(dump), "=busy") == NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(keep, 0);
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "Task") == NULL);
+  sz_string_free(dump);
+  sz_view_free(root);
+  sz_signal_int_free(value);
+  sz_signal_int_free(mode);
+  sz_signal_int_free(shown);
+  sz_signal_int_free(keep);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -22932,6 +23066,7 @@ int main(int argc, char **argv) {
     test_progress_clamps_a11y();
     test_progress_not_tap_target();
     test_progress_amount_without_accent();
+    test_progress_busy();
     test_circular_progress_a11y();
     test_circular_progress_clamps_a11y();
     test_circular_progress_not_tap_target();
@@ -23727,6 +23862,7 @@ int main(int argc, char **argv) {
   test_progress_paint_fill();
   test_progress_amount_without_accent();
   test_progress_not_in_taps_dump();
+  test_progress_busy();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

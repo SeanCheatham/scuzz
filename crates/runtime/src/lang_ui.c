@@ -101,6 +101,10 @@ SzView *sz_lang_view_circular_progress(SzSignalInt *sig, SzString *label) {
   return sz_view_circular_progress(sig, sz_string_cstr(label));
 }
 
+SzView *sz_lang_view_busy(SzSignalInt *value, SzSignalInt *mode, SzString *label) {
+  return sz_view_busy(value, mode, label ? sz_string_cstr(label) : "");
+}
+
 SzView *sz_lang_view_avatar(SzString *label) {
   return sz_view_avatar(label ? sz_string_cstr(label) : "");
 }

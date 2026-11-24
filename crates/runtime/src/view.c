@@ -78,6 +78,8 @@ struct SzView {
   int copy_pending;
   int heading_level;
   SzSignalInt *sig_int;
+  /* Nonzero mode means this progress indicator has no numeric value. */
+  SzSignalInt *progress_mode;
   SzSignalStr *sig_str;
   SzViewTapFn on_tap;
   void *tap_env;
@@ -993,20 +995,26 @@ int sz_view_split_frac(const SzView *view) {
   return (int)n;
 }
 
-SzView *sz_view_progress(SzSignalInt *sig, const char *label) {
-  SzView *v = view_new(SZ_VIEW_PROGRESS);
-  v->sig_int = sig;
-  v->a11y_role = SZ_A11Y_PROGRESS;
+static SzView *progress_new(SzViewKind kind, SzA11yRole role, SzSignalInt *value,
+                            SzSignalInt *mode, const char *label) {
+  SzView *v = view_new(kind);
+  v->sig_int = value;
+  v->progress_mode = mode;
+  v->a11y_role = role;
   v->a11y_label = sz_strdup(label ? label : "");
   return v;
 }
 
+SzView *sz_view_progress(SzSignalInt *sig, const char *label) {
+  return progress_new(SZ_VIEW_PROGRESS, SZ_A11Y_PROGRESS, sig, NULL, label);
+}
+
 SzView *sz_view_circular_progress(SzSignalInt *sig, const char *label) {
-  SzView *v = view_new(SZ_VIEW_CIRCULAR_PROGRESS);
-  v->sig_int = sig;
-  v->a11y_role = SZ_A11Y_CIRCULAR;
-  v->a11y_label = sz_strdup(label ? label : "");
-  return v;
+  return progress_new(SZ_VIEW_CIRCULAR_PROGRESS, SZ_A11Y_CIRCULAR, sig, NULL, label);
+}
+
+SzView *sz_view_busy(SzSignalInt *value, SzSignalInt *mode, const char *label) {
+  return progress_new(SZ_VIEW_PROGRESS, SZ_A11Y_PROGRESS, value, mode, label);
 }
 
 SzView *sz_view_avatar(const char *label) {
@@ -1476,8 +1484,16 @@ static int64_t percent_clamp(int64_t n) {
   return n;
 }
 
+int sz_view_progress_busy(const SzView *view) {
+  if (!view || (view->kind != SZ_VIEW_PROGRESS && view->kind != SZ_VIEW_CIRCULAR_PROGRESS))
+    return 0;
+  return view->progress_mode && sz_signal_int_get(view->progress_mode) != 0;
+}
+
 int sz_view_progress_value(const SzView *view) {
   if (!view || (view->kind != SZ_VIEW_PROGRESS && view->kind != SZ_VIEW_CIRCULAR_PROGRESS))
+    return 0;
+  if (sz_view_progress_busy(view))
     return 0;
   return (int)percent_clamp(view->sig_int ? sz_signal_int_get(view->sig_int) : 0);
 }
@@ -2157,6 +2173,7 @@ typedef struct SzA11yInfo {
   const char *label;
   char *live;
   int cls;
+  int busy;
   int64_t num;
 } SzA11yInfo;
 
@@ -2166,6 +2183,7 @@ static SzA11yInfo a11y_node_info(SzView *v) {
   info.label = v->a11y_label ? v->a11y_label : "";
   info.live = NULL;
   info.cls = 0;
+  info.busy = 0;
   info.num = 0;
   if (v->kind == SZ_VIEW_TEXT && (v->sig_int || v->sig_str)) {
     size_t live_len = 0, live_cap = 0;
@@ -2206,8 +2224,12 @@ static SzA11yInfo a11y_node_info(SzView *v) {
     info.num = v->kind == SZ_VIEW_SLIDER ? sz_view_slider_value(v) : sz_view_split_frac(v);
   } else if (v->kind == SZ_VIEW_PROGRESS ||
              v->kind == SZ_VIEW_CIRCULAR_PROGRESS) {
-    info.cls = 2;
-    info.num = sz_view_progress_value(v);
+    if (sz_view_progress_busy(v))
+      info.busy = 1;
+    else {
+      info.cls = 2;
+      info.num = sz_view_progress_value(v);
+    }
   } else if (v->kind == SZ_VIEW_BADGE) {
     info.cls = 2;
     info.num = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
@@ -2320,9 +2342,16 @@ static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
     return;
   if (v->a11y_role != SZ_A11Y_NONE) {
     SzA11yInfo info = a11y_node_info(v);
-    a11y_dump_line(buf, len, cap, v->a11y_role, info.label, info.cls == 1 || v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_SPLIT ||
-                   v->kind == SZ_VIEW_PROGRESS || v->kind == SZ_VIEW_CIRCULAR_PROGRESS,
-                   info.num);
+    if (info.busy) {
+      sz_dump_append(buf, len, cap, a11y_role_name(v->a11y_role));
+      sz_dump_append(buf, len, cap, ":");
+      if (info.label)
+        sz_dump_append(buf, len, cap, info.label);
+      sz_dump_append(buf, len, cap, "=busy\n");
+    } else
+      a11y_dump_line(buf, len, cap, v->a11y_role, info.label, info.cls == 1 || v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_SPLIT ||
+                     v->kind == SZ_VIEW_PROGRESS || v->kind == SZ_VIEW_CIRCULAR_PROGRESS,
+                     info.num);
     sz_free(info.live);
   }
   a11y_dump_motion(v, buf, len, cap);
@@ -2387,7 +2416,11 @@ static void a11y_json_node(SzView *v, FILE *f, int *first) {
   else
     fputs(a11y_role_name(v->a11y_role), f);
   fputc('"', f);
-  if (v->a11y_role != SZ_A11Y_NONE && info.cls == 2) {
+  if (v->a11y_role != SZ_A11Y_NONE && info.busy) {
+    fputs(",\"label\":\"", f);
+    sz_json_fputs_escaped(f, info.label);
+    fputs("\",\"busy\":true", f);
+  } else if (v->a11y_role != SZ_A11Y_NONE && info.cls == 2) {
     fprintf(f, ",\"value\":%lld", (long long)info.num);
     if (v->kind == SZ_VIEW_SELECT) {
       fputs(",\"label\":\"", f); sz_json_fputs_escaped(f, info.label);
@@ -7808,13 +7841,17 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_PROGRESS: {
-    float n = (float)sz_view_progress_value(v);
+    int busy = sz_view_progress_busy(v);
+    float n = busy ? 0.f : (float)sz_view_progress_value(v);
     SzRect fill = v->frame;
     int edge = (int)(scale_px(theme, 1.f) + 0.5f);
+    float mark = v->frame.w / 3.f;
     fill.w *= n / 100.f;
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_border(c, v->frame, edge, theme->border);
-    if (fill.w > 0.f) {
+    if (busy && mark > 0.f)
+      paint_rect(c, v->frame.x + (v->frame.w - mark) * 0.5f, v->frame.y, mark, v->frame.h, theme->primary);
+    else if (fill.w > 0.f) {
       paint_rect(c, fill.x, fill.y, fill.w, fill.h, theme->primary);
       paint_border(c, fill, edge * 2, theme->border);
     }
@@ -10939,11 +10976,13 @@ static void a11y_snapshot_walk(SzView *view, uintptr_t parent, SzRect viewport,
       node->minimum = view->range_minimum;
       node->maximum = view->range_maximum;
       node->step = view->range_step;
-    } else if (view->kind == SZ_VIEW_SPLIT || view->kind == SZ_VIEW_PROGRESS ||
-               view->kind == SZ_VIEW_CIRCULAR_PROGRESS) {
+    } else if (view->kind == SZ_VIEW_SPLIT ||
+               ((view->kind == SZ_VIEW_PROGRESS || view->kind == SZ_VIEW_CIRCULAR_PROGRESS) && !info.busy)) {
       node->maximum = 100;
       node->step = 1;
     }
+    if (info.busy)
+      node->step = -1;
     parent = node->id;
     sz_free(info.live);
   }

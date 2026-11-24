@@ -335,7 +335,11 @@ int64_t sz_view_slider_value(const SzView *view);
 SzView *sz_view_progress(SzSignalInt *sig, const char *label);
 /* Paint a named 0-100 square ring from `sig`. Keep it outside pointer input. */
 SzView *sz_view_circular_progress(SzSignalInt *sig, const char *label);
-/* Current percentage, clamped to 0-100. Other View kinds return 0. */
+/* Same bar as sz_view_progress. A nonzero mode Signal has no numeric value. */
+SzView *sz_view_busy(SzSignalInt *value, SzSignalInt *mode, const char *label);
+/* 1 when a progress indicator has no numeric value. Other views return 0. */
+int sz_view_progress_busy(const SzView *view);
+/* Current percentage, clamped to 0-100. A busy indicator returns 0. */
 int sz_view_progress_value(const SzView *view);
 /* `control_h` disc with `label`. Not a tap target. */
 SzView *sz_view_avatar(const char *label);
@@ -953,6 +957,7 @@ SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label);
 SzView *sz_lang_view_slider(SzSignalInt *sig, SzString *label, int64_t minimum, int64_t maximum, int64_t step);
 SzView *sz_lang_view_progress(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_circular_progress(SzSignalInt *sig, SzString *label);
+SzView *sz_lang_view_busy(SzSignalInt *value, SzSignalInt *mode, SzString *label);
 SzView *sz_lang_view_avatar(SzString *label);
 SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);

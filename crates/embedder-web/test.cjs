@@ -3013,7 +3013,13 @@ async function checkProgress(browserType, url, mobile) {
       }
     };
     await expectValue('50');
-    assert.equal(await page.getByRole('progressbar').count(), 2);
+    const task = page.getByRole('progressbar', {name: 'Task', exact: true});
+    await task.waitFor();
+    assert.equal(await task.getAttribute('aria-busy'), 'true');
+    assert.equal(await task.getAttribute('aria-valuenow'), null);
+    assert.equal(await task.getAttribute('aria-valuemin'), null);
+    assert.equal(await task.getAttribute('aria-valuemax'), null);
+    assert.equal(await page.getByRole('progressbar').count(), 3);
     const volume = page.getByRole('slider', {name: 'Volume', exact: true});
     await volume.focus();
     for (const [key, value] of [['Home', '0'], ['PageUp', '0'], ['End', '100'],
@@ -3031,7 +3037,7 @@ async function checkProgress(browserType, url, mobile) {
     await expectValue('0');
     await page.getByRole('checkbox', {name: 'Updates', exact: true}).click();
     await page.getByRole('progressbar', {name: 'Optional completion', exact: true}).waitFor();
-    assert.equal(await page.getByRole('progressbar').count(), 3);
+    assert.equal(await page.getByRole('progressbar').count(), 4);
     assert.equal(await page.locator('[aria-label="Private completion"]').count(), 0);
     await page.getByRole('button', {name: 'Open', exact: true}).click();
     await page.getByRole('dialog', {name: 'Edit details', exact: true}).waitFor();
@@ -3039,6 +3045,19 @@ async function checkProgress(browserType, url, mobile) {
     await page.keyboard.press('Escape');
     await linear.waitFor();
     await expectValue('0');
+    assert.equal(await task.getAttribute('aria-busy'), 'true');
+    await page.getByRole('button', {name: 'Hide task', exact: true}).click();
+    await page.waitForFunction(() => document.querySelector('[role="progressbar"][aria-label="Task"]') === null);
+    assert.equal(await page.getByRole('progressbar').count(), 3);
+    await page.getByRole('button', {name: 'Show value', exact: true}).click();
+    await page.waitForFunction(() => {
+      const node = document.querySelector('[role="progressbar"][aria-label="Task"]');
+      return node && node.getAttribute('aria-valuenow') === '35' && node.getAttribute('aria-busy') === null;
+    });
+    assert.equal(await task.getAttribute('aria-valuemin'), '0');
+    assert.equal(await task.getAttribute('aria-valuemax'), '100');
+    await page.getByRole('button', {name: 'Remove task', exact: true}).click();
+    await page.waitForFunction(() => document.querySelector('[role="progressbar"][aria-label="Task"]') === null);
     await page.evaluate(() => {
       const outside = document.createElement('button');
       outside.textContent = 'Outside';
@@ -3047,6 +3066,12 @@ async function checkProgress(browserType, url, mobile) {
     await page.getByRole('slider', {name: 'Precise count', exact: true}).focus();
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Mute');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Hide task');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Show value');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Remove task');
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Outside');
     assert.deepEqual(errors, []);
@@ -3177,7 +3202,19 @@ async function checkControls(browserType, url, mobile) {
     await page.keyboard.press('Tab');
     assert.equal(await activeLabel(), 'Mute');
     await page.keyboard.press('Tab');
+    assert.equal(await activeLabel(), 'Hide task');
+    await page.keyboard.press('Tab');
+    assert.equal(await activeLabel(), 'Show value');
+    await page.keyboard.press('Tab');
+    assert.equal(await activeLabel(), 'Remove task');
+    await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.getElementById('app').contains(document.activeElement)), false);
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await activeLabel(), 'Remove task');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await activeLabel(), 'Show value');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await activeLabel(), 'Hide task');
     await page.keyboard.press('Shift+Tab');
     assert.equal(await activeLabel(), 'Mute');
     await page.keyboard.press('Shift+Tab');
