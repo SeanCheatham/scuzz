@@ -44,6 +44,10 @@ const status = document.getElementById('status');
 const layer = document.getElementById('text-layer');
 const encoder = new TextEncoder();
 var Module = {
+  // One GET target for a package that reads SCUZZ_WEB_GET. The proof host serves it.
+  preRun: [function () {
+    if (typeof ENV !== 'undefined') ENV.SCUZZ_WEB_GET = location.origin + '/scuzz/body';
+  }],
   canvas: document.getElementById('canvas'),
   nodes: new Map(),
   scuzzFontStack: '"Scuzz arabic", "Scuzz devanagari", "Scuzz thai", "Scuzz sc", monospace',

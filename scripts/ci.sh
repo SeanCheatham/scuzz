@@ -4943,6 +4943,19 @@ slice_web() (
   need_cmd node 'Install Node.js and Playwright 1.63.0 with Chromium'
   web_tmp="$(mktemp -d)"
   trap 'rm -rf "$web_tmp"' EXIT
+  "$SCUZZ" check examples/web-get
+  SCUZZ_SKIA=sk_sw "$SCUZZ" run examples/web-get > "$web_tmp/web-get-run.out"
+  if [ "$(tail -n 1 "$web_tmp/web-get-run.out")" != "web-get:missing" ]; then
+    echo "empty URL must not call a live host: $(cat "$web_tmp/web-get-run.out")" >&2
+    exit 1
+  fi
+  sim_out="$(env -u SCUZZ_WEB_GET -u SCUZZ_NET_LIVE -u SCUZZ_UI_SERVE SCUZZ_TESTRT=1 examples/web-get/build/web-get)"
+  if [ "$sim_out" != "sim:rejected" ]; then
+    echo "simulation must reject a live external host: $sim_out" >&2
+    exit 1
+  fi
+  "$SCUZZ" package --target web --out-dir "$web_tmp/web-get output" examples/web-get
+  node crates/embedder-web/test.cjs "$web_tmp/web-get output/package/web" '' web-get
   "$SCUZZ" check examples/docs
   "$SCUZZ" package --target web --out-dir "$web_tmp/docs output" examples/docs
   mkdir -p "$web_tmp/sdk/crates/embedder-web"

@@ -53,7 +53,7 @@ copy_crate() {
 
 copy_crate runtime include src Makefile
 copy_crate ffi-skia include src Makefile
-copy_crate embedder-web build.sh sdk.py web.c web.h index.html
+copy_crate embedder-web build.sh sdk.py web.c web.h index.html net_stub.c
 copy_crate embedder-desktop include src Makefile package_macos.py run_watch.sh
 copy_crate embedder-mobile include src Makefile shells
 

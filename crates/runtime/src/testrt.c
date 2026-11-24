@@ -2778,10 +2778,10 @@ SzIo *sz_testrt_sys_read(int64_t n) {
   return io;
 }
 
-/* Drive.testEnv sets these on the process. Copy them into the sealed
- * map so Sys.getenv can arm kit gates without reading the host map. */
+/* Copy these process keys into the sealed map. Sys.getenv can read them.
+ * SCUZZ_TESTRT tells a program that simulation is on. */
 static void env_seed_drive(void) {
-  static const char *const keys[] = {"SCUZZ_SERVE", "SCUZZ_KIT"};
+  static const char *const keys[] = {"SCUZZ_SERVE", "SCUZZ_KIT", "SCUZZ_TESTRT"};
   size_t i;
   const char *v;
   for (i = 0; i < sizeof keys / sizeof keys[0]; i++) {

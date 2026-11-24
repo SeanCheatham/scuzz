@@ -288,7 +288,17 @@ iOS and macOS GUI clients use URLSession and platform certificate trust.
 Android GUI clients use HttpURLConnection and platform certificate trust without NDK OpenSSL.
 GUI clients verify loopback certificates, preserve status responses, and do not follow redirects.
 Mobile shells permit local-network HTTP and require HTTPS for remote services.
-Requests park fibers. IO finalizers cancel them.
+The web GUI client uses fetch for `Net.httpGet` on the browser thread.
+The call waits on that thread.
+It does not park on a socket.
+A timeout cannot interrupt that call.
+The response body reaches the program.
+The call keeps the 1 MiB body limit.
+The call does not follow a redirect.
+Simulation rejects a live external host.
+Other Net calls fail on web.
+The page uses one browser thread.
+Socket requests park fibers. IO finalizers cancel them.
 Responses contain status, headers, and body: `(Int, Map[String, String], String)`.
 Servers bind `0.0.0.0` and `::`.
 `Net.serveTls` and `Net.serveOnceTls` use a process certificate.
@@ -927,5 +937,8 @@ Return measured sizes to parents.
 Use nested constructors and one layout model.
 Diagnose behavior through structural dumps, `*.scuzz_verify`, and `.require`.
 Widget and GUI instructions: run `scuzz docs kits` and `scuzz docs gui`.
+`Net.httpGet` on the web target returns the response body on the browser thread.
+Other Net calls fail on web.
+A web file does not survive a reload.
 Full web accessibility remains open.
 Browser limits: [`compatibility.md`](compatibility.md#browser-target).
