@@ -358,6 +358,17 @@ One host sample does not establish a general cost bound or method advantage.
 
 **Limits.** Refinement types, static effect protocols, inductive proofs, and compilation validation remain proposals. Existing finite campaigns do not establish these guarantees. A proof establishes a stated property under its assumptions. It does not establish that the specification matches all product needs.
 
+### File bytes
+
+`Fs.readBytes` reads one regular file into `Bytes`.
+`Fs.writeBytes` writes `Bytes`.
+It uses the same replacement rules as `Fs.write`.
+`Fs.read` returns `String`.
+`Fs.write` accepts `String`.
+HTTP, TCP, and UDP bodies are `String`.
+`Net.httpGet` keeps the 1 MiB body limit.
+Read a file from `Net.httpGetToFile` with `Fs.readBytes`.
+
 ### Supporting compiler and editor work
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.

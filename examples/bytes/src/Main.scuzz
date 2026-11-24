@@ -1,0 +1,32 @@
+def imageHex(): String =
+  "89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d240000001449444154789c63f8cfc0f01f081b1820e0ff7f0032e4057c296d13bb0000000049454e44ae426082"
+
+def sourcePath(): String =
+  "examples/bytes/pixel.png"
+
+def copyPath(): String =
+  "examples/bytes/build/copy.png"
+
+def plantSource(): IO[Unit] =
+  Fs.mkdirs("examples/bytes").flatMap(_ => Fs.writeBytes(sourcePath(), Bytes.fromStr(Hex.decode(imageHex()))))
+
+def ensureSource(): IO[Unit] =
+  Fs.exists(sourcePath()).flatMap(hit => if (hit != 0) IO.pure(()) else plantSource())
+
+def report(raw: Bytes, text: String, again: Bytes, decoded: Result[String, Image]): String =
+  decoded match {
+    case Result.Ok(image) => if (raw == again && Bytes.len(raw) == Str.byteLen(text) && Str.charAt(text, 0) == 137 && Image.width(image) == 2 && Image.height(image) == 2) "image:bin:ok:2:2:match" else "image:bin:bad"
+    case Result.Err(_) => "image:bin:err"
+  }
+
+@main def main: IO[Unit] =
+  for {
+    _ <- ensureSource()
+    raw <- Fs.readBytes(sourcePath())
+    text <- Fs.read(sourcePath())
+    _ <- Fs.mkdirs("examples/bytes/build")
+    _ <- Fs.writeBytes(copyPath(), raw)
+    again <- Fs.readBytes(copyPath())
+    line = report(raw, text, again, Image.decode(raw))
+    _ <- if (line == "image:bin:ok:2:2:match") IO.println(line) else IO.fail(line)
+  } yield ()

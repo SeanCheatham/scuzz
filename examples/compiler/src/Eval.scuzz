@@ -14,7 +14,7 @@ enum Value:
   case VMap(tree: EvMap)
   case VSet(xs: List[Value])
   case VBuilder(b: Builder)
-  case VBytes(b: Bytes)
+  case VBytes(s: String)
   case VText(text: Text)
   case VImage(image: Image)
   case VRef(r: Ref[Value])
@@ -1086,6 +1086,7 @@ def valEq(a: Value, b: Value): Bool =
     case Value.VInt(x) => eqInt(x, b)
     case Value.VBool(x) => eqBool(x, b)
     case Value.VStr(x) => eqStr(x, b)
+    case Value.VBytes(x) => eqBytes(x, b)
     case Value.VList(xs) => eqList(xs, b)
     case Value.VTuple(xs) => eqTuple(xs, b)
     case Value.VCon(en, tag, fields) => eqCon(en, tag, fields, b)
@@ -1140,6 +1141,12 @@ def eqBool(x: Bool, b: Value): Bool =
 def eqStr(x: String, b: Value): Bool =
   b match {
     case Value.VStr(y) => x == y
+    case _ => false
+  }
+
+def eqBytes(x: String, b: Value): Bool =
+  b match {
+    case Value.VBytes(y) => x == y
     case _ => false
   }
 
@@ -2240,11 +2247,11 @@ def clockParsed(s: String): Value =
   }
 
 def miscKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Builder.empty") Value.VBuilder(Builder.empty()) else if (f == "Builder.append") Value.VBuilder(Builder.append(builderOf(List.at(vals, 0)), strAt(vals, 1))) else if (f == "Builder.result") Value.VStr(Builder.result(builderOf(List.at(vals, 0)))) else if (f == "Hash.hmacSha256") Value.VStr(Hash.hmacSha256(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.constantTimeEqual") Value.VBool(Hash.constantTimeEqual(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.sha256") Value.VStr(Hash.sha256(strAt(vals, 0))) else if (f == "Hex.encode") Value.VStr(Hex.encode(strAt(vals, 0))) else if (f == "Hex.decode") Value.VStr(Hex.decode(strAt(vals, 0))) else if (f == "Base64.encode") Value.VStr(Base64.encode(strAt(vals, 0))) else if (f == "Base64.decode") Value.VStr(Base64.decode(strAt(vals, 0))) else if (f == "Float.fromInt") Value.VFloat(Float.fromInt(intAt(vals, 0))) else if (f == "Float.toInt") Value.VInt(Float.toInt(floatOf(List.at(vals, 0)))) else if (f == "Oracle.sumTo") Value.VInt(Oracle.sumTo(intAt(vals, 0))) else if (f == "Clock.monotonic") Value.VIo(intIo(Clock.monotonic())) else if (f == "Clock.realTime") Value.VIo(intIo(Clock.realTime())) else if (f == "Clock.iso8601") Value.VStr(Clock.iso8601(intAt(vals, 0))) else if (f == "Clock.parse") clockParsed(strAt(vals, 0)) else if (f == "Clock.zone") Value.VStr(ClockParse.zone(intAt(vals, 0), intAt(vals, 1))) else if (f == "Random.nextInt") Value.VIo(intIo(Random.nextInt(intAt(vals, 0)))) else if (f == "Uuid.v4") Value.VIo(strIo(Uuid.v4())) else if (f == "Bytes.fromStr") Value.VBytes(Bytes.fromStr(strAt(vals, 0))) else if (f == "Bytes.len") Value.VInt(Bytes.len(bytesOf(List.at(vals, 0)))) else if (f == "Impurity.runKit") Value.VIo(unitIo(Impurity.runKit())) else if (f == "Scenario.context") scenarioCtx(p, env, off) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (f == "Builder.empty") Value.VBuilder(Builder.empty()) else if (f == "Builder.append") Value.VBuilder(Builder.append(builderOf(List.at(vals, 0)), strAt(vals, 1))) else if (f == "Builder.result") Value.VStr(Builder.result(builderOf(List.at(vals, 0)))) else if (f == "Hash.hmacSha256") Value.VStr(Hash.hmacSha256(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.constantTimeEqual") Value.VBool(Hash.constantTimeEqual(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.sha256") Value.VStr(Hash.sha256(strAt(vals, 0))) else if (f == "Hex.encode") Value.VStr(Hex.encode(strAt(vals, 0))) else if (f == "Hex.decode") Value.VStr(Hex.decode(strAt(vals, 0))) else if (f == "Base64.encode") Value.VStr(Base64.encode(strAt(vals, 0))) else if (f == "Base64.decode") Value.VStr(Base64.decode(strAt(vals, 0))) else if (f == "Float.fromInt") Value.VFloat(Float.fromInt(intAt(vals, 0))) else if (f == "Float.toInt") Value.VInt(Float.toInt(floatOf(List.at(vals, 0)))) else if (f == "Oracle.sumTo") Value.VInt(Oracle.sumTo(intAt(vals, 0))) else if (f == "Clock.monotonic") Value.VIo(intIo(Clock.monotonic())) else if (f == "Clock.realTime") Value.VIo(intIo(Clock.realTime())) else if (f == "Clock.iso8601") Value.VStr(Clock.iso8601(intAt(vals, 0))) else if (f == "Clock.parse") clockParsed(strAt(vals, 0)) else if (f == "Clock.zone") Value.VStr(ClockParse.zone(intAt(vals, 0), intAt(vals, 1))) else if (f == "Random.nextInt") Value.VIo(intIo(Random.nextInt(intAt(vals, 0)))) else if (f == "Uuid.v4") Value.VIo(strIo(Uuid.v4())) else if (f == "Bytes.fromStr") Value.VBytes(strAt(vals, 0)) else if (f == "Bytes.len") Value.VInt(Bytes.len(bytesOf(List.at(vals, 0)))) else if (f == "Impurity.runKit") Value.VIo(unitIo(Impurity.runKit())) else if (f == "Scenario.context") scenarioCtx(p, env, off) else unsupported(Str.concat("kit ", f), env, p, off)
 
 def bytesOf(v: Value): Bytes =
   v match {
-    case Value.VBytes(b) => b
+    case Value.VBytes(s) => Bytes.fromStr(s)
     case _ => Bytes.fromStr("")
   }
 
@@ -2259,6 +2266,18 @@ def intIo(io: IO[Int]): IO[Value, Value] =
 
 def strIo(io: IO[String]): IO[Value, Value] =
   liftIo(io.map(s => Value.VStr(s)))
+
+def bytesText(v: Value): String =
+  v match {
+    case Value.VBytes(s) => s
+    case _ => ""
+  }
+
+def bytesReadIo(path: String): IO[Value, Value] =
+  liftIo(Fs.read(path).map(s => Value.VBytes(s)))
+
+def bytesWriteIo(path: String, v: Value): IO[Value, Value] =
+  unitIo(Fs.write(path, bytesText(v)))
 
 def boolIo(io: IO[Bool]): IO[Value, Value] =
   liftIo(io.map(b => Value.VBool(b)))
@@ -2361,7 +2380,7 @@ def execVal(t: (Int, String, String)): Value =
   }
 
 def fsKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Fs.read") Value.VIo(strIo(Fs.read(strAt(vals, 0)))) else if (f == "Fs.write") Value.VIo(unitIo(Fs.write(strAt(vals, 0), strAt(vals, 1)))) else if (f == "Fs.list") Value.VIo(entriesIo(Fs.list(strAt(vals, 0)))) else if (f == "Fs.mkdirs") Value.VIo(unitIo(Fs.mkdirs(strAt(vals, 0)))) else if (f == "Fs.exists") Value.VIo(intIo(Fs.exists(strAt(vals, 0)))) else if (f == "Fs.delete") Value.VIo(unitIo(Fs.delete(strAt(vals, 0)))) else if (f == "Fs.walk") Value.VIo(entriesIo(Fs.walk(strAt(vals, 0)))) else if (f == "Fs.canonicalize") Value.VIo(strIo(Fs.canonicalize(strAt(vals, 0)))) else if (f == "Fs.rename") Value.VIo(unitIo(Fs.rename(strAt(vals, 0), strAt(vals, 1)))) else if (f == "Fs.join") Value.VStr(Fs.join(strAt(vals, 0), strAt(vals, 1))) else if (f == "Fs.dirname") Value.VStr(Fs.dirname(strAt(vals, 0))) else if (f == "Fs.basename") Value.VStr(Fs.basename(strAt(vals, 0))) else sysKit(f, vals, env, p, off)
+  if (f == "Fs.read") Value.VIo(strIo(Fs.read(strAt(vals, 0)))) else if (f == "Fs.write") Value.VIo(unitIo(Fs.write(strAt(vals, 0), strAt(vals, 1)))) else if (f == "Fs.readBytes") Value.VIo(bytesReadIo(strAt(vals, 0))) else if (f == "Fs.writeBytes") Value.VIo(bytesWriteIo(strAt(vals, 0), List.at(vals, 1))) else if (f == "Fs.list") Value.VIo(entriesIo(Fs.list(strAt(vals, 0)))) else if (f == "Fs.mkdirs") Value.VIo(unitIo(Fs.mkdirs(strAt(vals, 0)))) else if (f == "Fs.exists") Value.VIo(intIo(Fs.exists(strAt(vals, 0)))) else if (f == "Fs.delete") Value.VIo(unitIo(Fs.delete(strAt(vals, 0)))) else if (f == "Fs.walk") Value.VIo(entriesIo(Fs.walk(strAt(vals, 0)))) else if (f == "Fs.canonicalize") Value.VIo(strIo(Fs.canonicalize(strAt(vals, 0)))) else if (f == "Fs.rename") Value.VIo(unitIo(Fs.rename(strAt(vals, 0), strAt(vals, 1)))) else if (f == "Fs.join") Value.VStr(Fs.join(strAt(vals, 0), strAt(vals, 1))) else if (f == "Fs.dirname") Value.VStr(Fs.dirname(strAt(vals, 0))) else if (f == "Fs.basename") Value.VStr(Fs.basename(strAt(vals, 0))) else sysKit(f, vals, env, p, off)
 
 def sysKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Sys.args") Value.VIo(liftIo(Sys.args().map(xs => vStrs(xs)))) else if (f == "Sys.getenv") Value.VIo(strIo(Sys.getenv(strAt(vals, 0)))) else if (f == "Sys.write") Value.VIo(unitIo(Sys.write(strAt(vals, 0)))) else if (f == "Sys.read") Value.VIo(strIo(Sys.read(intAt(vals, 0)))) else if (f == "Sys.readLine") Value.VIo(strIo(Sys.readLine())) else if (f == "Sys.spawn") Value.VIo(intIo(Sys.spawn(strAt(vals, 0)))) else if (f == "Sys.exec") Value.VIo(liftIo(Sys.exec(strAt(vals, 0)).map(t => execVal(t)))) else if (f == "Sys.alive") Value.VIo(intIo(Sys.alive(intAt(vals, 0)))) else if (f == "Sys.kill") Value.VIo(unitIo(Sys.kill(intAt(vals, 0)))) else if (f == "Sys.childWrite") Value.VIo(unitIo(Sys.childWrite(intAt(vals, 0), strAt(vals, 1)))) else if (f == "Sys.childRead") Value.VIo(strIo(Sys.childRead(intAt(vals, 0), intAt(vals, 1)))) else if (f == "Sys.childClose") Value.VIo(unitIo(Sys.childClose(intAt(vals, 0)))) else unsupported(Str.concat("kit ", f), env, p, off)

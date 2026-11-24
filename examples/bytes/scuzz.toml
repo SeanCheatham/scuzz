@@ -1,0 +1,4 @@
+[package]
+name = "bytes"
+version = "0.1.0"
+description = "Read and write one image file as bytes"
