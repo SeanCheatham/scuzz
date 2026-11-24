@@ -1,0 +1,31 @@
+def externalUrl(): String =
+  "https://example.com/live"
+
+def mark(): String =
+  "fffe80"
+
+def expected(): Bytes =
+  Bytes.fromStr(Hex.decode(mark()))
+
+def rejected(message: String): Bool =
+  Str.contains(message, "no stub for URL") || Str.contains(message, "non-loopback")
+
+def loaded(response: (Int, Map[String, String], Bytes)): String =
+  response match {
+    case (status, _, body) => if (status == 200 && Bytes.len(body) == 3 && body == expected()) Str.concat("web-bytes:", mark()) else "web-bytes:bad"
+  }
+
+def lineFor(sim: String, url: String): IO[String] =
+  if (sim == "1" && url == "") IO.attempt(Net.httpGetBytes(externalUrl(), Map.empty())).map(result => result match {
+  case Result.Ok(_) => "web-bytes:live"
+  case Result.Err(message) => if (rejected(message)) "sim:rejected" else message
+}) else if (url == "") IO.pure("web-bytes:missing") else Net.httpGetBytes(url, Map.empty()).map(response => loaded(response))
+
+@main def main: IO[Unit] =
+  for {
+    sim <- Sys.getenv("SCUZZ_TESTRT")
+    url <- Sys.getenv("SCUZZ_WEB_BYTES")
+    line <- lineFor(sim, url)
+    _ <- IO.println(line)
+    _ <- if (url == "") IO.pure(()) else Ui.run(_ => View.column([View.text("Web bytes"), View.text(line)]))
+  } yield ()

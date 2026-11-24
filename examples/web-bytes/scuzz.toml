@@ -1,0 +1,9 @@
+[package]
+name = "web-bytes"
+version = "0.1.0"
+description = "One browser HTTP GET body as bytes"
+
+[ui]
+default_runtime = "headless"
+headless_size = [400, 200]
+headless_scale = 1.0
