@@ -1592,6 +1592,22 @@ diff <(grep -vx ok /tmp/http-post.out) /tmp/http-post-eval.out
 "$SCUZZ" fuzz --iterations 0 examples/http-post | tee /tmp/http-post-fuzz.out
 grep -Fxq 'http:post:200:pong' /tmp/http-post-fuzz.out
 "$SCUZZ" check examples/http-post
+python3 - <<'PY'
+from pathlib import Path
+text = Path("examples/http-get-timeout/src/Main.scuzz").read_text()
+if "Net.httpGet" not in text or "IO.timeout(2000" not in text:
+    raise SystemExit("http get timeout proof missing")
+if "127.0.0.1" not in text or "example.com" in text or "https://" in text:
+    raise SystemExit("http get timeout host is not loopback")
+print("http get timeout")
+PY
+"$SCUZZ" run examples/http-get-timeout | tee /tmp/http-get-timeout.out
+grep -Fxq 'http:get:timeout' /tmp/http-get-timeout.out
+"$SCUZZ" eval examples/http-get-timeout | tee /tmp/http-get-timeout-eval.out
+diff <(grep -vx ok /tmp/http-get-timeout.out) /tmp/http-get-timeout-eval.out
+"$SCUZZ" fuzz --iterations 0 examples/http-get-timeout | tee /tmp/http-get-timeout-fuzz.out
+grep -Fxq 'http:get:timeout' /tmp/http-get-timeout-fuzz.out
+"$SCUZZ" check examples/http-get-timeout
 "$SCUZZ" check examples/kernel
 "$SCUZZ" check examples/scale
 ./examples/jump/gen.sh

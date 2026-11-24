@@ -86,6 +86,8 @@ The app stops when its CLI session ends.
 iOS stops the console launch process before the selected simulator app.
 
 CLI and server HTTPS use OpenSSL.
+A native GET to a peer that accepts and sends no response fails within one second.
+`Net.httpGet` closes its socket before it returns.
 iOS and macOS GUI clients use URLSession with platform certificate trust.
 Android clients use HttpURLConnection with platform certificate trust.
 Platform HTTP clients verify loopback certificates.
@@ -119,6 +121,8 @@ cross-origin isolation headers.
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
 and resize events. Wheel and canvas touch listeners that cancel the event
 register as non-passive. `Net.httpGet` and `Net.httpPost` run on the browser thread and return the response body to the program.
+A timeout cannot interrupt those calls.
+Each call waits until the body finishes or the host gives up.
 `Net.httpPost` sends one string body to a same-origin URL.
 A cross-origin POST does not leave the page.
 Each call keeps the 1 MiB body limit and does not follow a redirect.
