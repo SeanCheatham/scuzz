@@ -28,6 +28,8 @@ record Choir(tones: List[Tone], pick: Option[Tone])
 
 record Grid(items: List[List[String]], rows: List[List[Line]], tones: List[List[Tone]])
 
+record Lane(labels: List[Option[String]], counts: List[Option[Int]], flags: List[Option[Bool]], ratios: List[Option[Float]])
+
 enum Inner:
   case Count(n: Int)
 
@@ -318,6 +320,36 @@ def gridText(text: String): String =
 def gridProof(): Bool =
   gridText("{\"items\":[[\"a\",\"b\"],[\"c\"]],\"rows\":[[{\"qty\":2}],[{\"qty\":3},{\"qty\":4}]],\"tones\":[[\"Calm\"],[\"Loud\",\"Calm\"]]}") == "ok:a,b|c:2|3,4:Calm|Loud,Calm" && gridText("{\"items\":[[],[]],\"rows\":[],\"tones\":[[]]}") == "ok:empty|empty:empty:empty" && gridText("{\"items\":[[\"a\"],[1]],\"rows\":[],\"tones\":[]}") == "error:Json.decode: wrong case at items.1.0" && gridText("{\"items\":[[null]],\"rows\":[],\"tones\":[]}") == "error:Json.decode: wrong case at items.0.0" && gridText("{\"items\":[[\"a\"],\"b\"],\"rows\":[],\"tones\":[]}") == "error:Json.decode: wrong case at items.1" && gridText("{\"items\":[],\"rows\":[[{\"qty\":1}],[{\"qty\":true}]],\"tones\":[]}") == "error:Json.decode: wrong case at rows.1.0.qty" && gridText("{\"items\":[],\"rows\":[[{}]],\"tones\":[]}") == "error:Json.decode: missing field rows.0.0.qty" && gridText("{\"items\":[],\"rows\":[],\"tones\":[[\"Calm\"],[\"Gone\"]]}") == "error:Json.decode: unknown case at tones.1.0: Gone" && gridText("{\"items\":[],\"rows\":[],\"tones\":[[1]]}") == "error:Json.decode: wrong case at tones.0.0: 1" && gridText("{\"items\":[],\"rows\":[],\"tones\":[[null]]}") == "error:Json.decode: wrong case at tones.0.0: null" && gridText("{\"rows\":[],\"tones\":[]}") == "error:Json.decode: missing field items"
 
+def optTexts(xs: List[Option[String]]): String =
+  if (List.isEmpty(xs)) "empty" else List.join(List.map(xs, item => optText(item)), ",")
+
+def optCounts(xs: List[Option[Int]]): String =
+  if (List.isEmpty(xs)) "empty" else List.join(List.map(xs, item => optCount(item)), ",")
+
+def optFlags(xs: List[Option[Bool]]): String =
+  if (List.isEmpty(xs)) "empty" else List.join(List.map(xs, item => optFlag(item)), ",")
+
+def optRatios(xs: List[Option[Float]]): String =
+  if (List.isEmpty(xs)) "empty" else List.join(List.map(xs, item => optRatio(item)), ",")
+
+def showLane(result: Result[String, Lane]): String =
+  result match {
+    case Result.Ok(Lane(labels, counts, flags, ratios)) => s"ok:${optTexts(labels)}:${optCounts(counts)}:${optFlags(flags)}:${optRatios(ratios)}"
+    case Result.Err(error) => s"error:$error"
+  }
+
+def decodeLane(json: Json): Result[String, Lane] =
+  Json.decode(json)
+
+def laneText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showLane(decodeLane(json))
+    case Result.Err(error) => s"error:$error"
+  }
+
+def laneProof(): Bool =
+  laneText("{\"labels\":[\"a\",null,\"b\"],\"counts\":[1,null,0],\"flags\":[true,null,false],\"ratios\":[1.5,null]}") == "ok:a,none,b:1,none,0:true,none,false:1.5,none" && laneText("{\"labels\":[\"null\"],\"counts\":[],\"flags\":[],\"ratios\":[]}") == "ok:null:empty:empty:empty" && laneText("{\"labels\":[null],\"counts\":[],\"flags\":[],\"ratios\":[]}") == "ok:none:empty:empty:empty" && laneText("{\"labels\":[],\"counts\":[],\"flags\":[],\"ratios\":[]}") == "ok:empty:empty:empty:empty" && laneText("{\"counts\":[],\"flags\":[],\"ratios\":[]}") == "error:Json.decode: missing field labels" && laneText("{\"labels\":[\"a\",1],\"counts\":[],\"flags\":[],\"ratios\":[]}") == "error:Json.decode: wrong case at labels.1" && laneText("{\"labels\":null,\"counts\":[],\"flags\":[],\"ratios\":[]}") == "error:Json.decode: wrong case at labels" && laneText("{\"labels\":\"a\",\"counts\":[],\"flags\":[],\"ratios\":[]}") == "error:Json.decode: wrong case at labels" && laneText("{\"labels\":[],\"counts\":[\"1\"],\"flags\":[],\"ratios\":[]}") == "error:Json.decode: wrong case at counts.0" && laneText("{\"labels\":[],\"counts\":[],\"flags\":[1],\"ratios\":[]}") == "error:Json.decode: wrong case at flags.0" && laneText("{\"labels\":[],\"counts\":[],\"flags\":[],\"ratios\":[1]}") == "error:Json.decode: wrong case at ratios.0" && laneText("{\"labels\":[\"a\"],\"counts\":[],\"flags\":[],\"ratios\":[],\"extra\":true}") == "ok:a:empty:empty:empty"
+
 def showReply(reply: Reply): String =
   reply match {
     case Reply.Count(n) => s"count:${Str.fromInt(n)}"
@@ -387,7 +419,7 @@ def accepted(result: Result[String, Quantity]): Bool =
   }
 
 def proof(): Bool =
-  parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100")) && orderProof() && listProof() && optionProof() && enumProof() && choirProof() && gridProof() && payloadProof()
+  parsed("9223372036854775807") == "ok:9223372036854775807" && parsed("-9223372036854775808") == "ok:-9223372036854775808" && parsed("+0007") == "ok:7" && parsed(Hex.decode("370078")) == "error:Str.parseInt: invalid integer" && parsed("9223372036854775808") == "error:Str.parseInt: out of range" && parsed("-9223372036854775809") == "error:Str.parseInt: out of range" && !accepted(parseQuantity("0")) && !accepted(parseQuantity("101")) && !accepted(parseQuantity(" 1")) && !accepted(decodeQuantity("{}")) && !accepted(decodeQuantity("[]")) && !accepted(decodeQuantity("{\"quantity\":null}")) && !accepted(decodeQuantity("{\"quantity\":\"1\"}")) && !accepted(decodeQuantity("{\"quantity\":1.0}")) && !accepted(decodeQuantity("{\"quantity\":101}")) && accepted(decodeQuantity("{\"quantity\":1}")) && accepted(parseQuantity("100")) && orderProof() && listProof() && optionProof() && enumProof() && choirProof() && gridProof() && laneProof() && payloadProof()
 
 def forward(text: String): Result[String, Int] =
   for {
