@@ -505,7 +505,9 @@ var Module = {
           node.setAttribute('aria-haspopup', 'listbox');
           node.setAttribute('aria-controls', 'view-' + item.related);
           node.setAttribute('aria-expanded', Boolean(item.checked));
-          node.setAttribute('aria-disabled', item.optionCount === 0);
+          node.setAttribute('aria-disabled', item.optionCount === 0 && !item.editable);
+          if (item.editable) node.setAttribute('aria-autocomplete', 'list');
+          else node.removeAttribute('aria-autocomplete');
           if (item.checked && item.active) node.setAttribute('aria-activedescendant', 'view-' + item.active);
           else node.removeAttribute('aria-activedescendant');
           node.textContent = item.value;

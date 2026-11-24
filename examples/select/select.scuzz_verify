@@ -23,7 +23,7 @@ def lastKeepsIndex(t: Timeline): Verdict =
 })
 
 def beginsUnset(t: Timeline): Verdict =
-  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "choice") == -1 && Timeline.signalInt(t, i, "item") == 0 && Timeline.signalInt(t, i, "count") == 0 && Timeline.signalInt(t, i, "empty") == -1 && Timeline.signalInt(t, i, "dialog") == 0 && Timeline.signalListLen(t, i, "options") == 5 && Timeline.signalListLen(t, i, "items") == 130 && Timeline.signalListLen(t, i, "noOptions") == 0)
+  Verdict.every(t, i => i != 0 || Timeline.signalInt(t, i, "choice") == -1 && Timeline.signalInt(t, i, "item") == 0 && Timeline.signalInt(t, i, "count") == 0 && Timeline.signalInt(t, i, "empty") == -1 && Timeline.signalInt(t, i, "dialog") == 0 && Timeline.signalInt(t, i, "customIndex") == -1 && Timeline.signalStrHas(t, i, "custom", "") && Timeline.signalListLen(t, i, "options") == 5 && Timeline.signalListLen(t, i, "items") == 130 && Timeline.signalListLen(t, i, "noOptions") == 0)
 
 def settingsOpensDialog(t: Timeline): Verdict =
   Verdict.onHit(t, "button:Settings", pair => pair match {

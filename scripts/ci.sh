@@ -3228,7 +3228,18 @@ cases = {
             {'op': 'tap', 'id': 'button:Settings'}, {'op': 'key', 'key': 'End'},
             {'op': 'resize', 'width': 300, 'height': 400, 'scale': 2},
             {'op': 'key', 'key': 'Escape'}, {'op': 'key', 'key': 'Home'},
-            {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Escape'}])],
+            {'op': 'key', 'key': 'Enter'}, {'op': 'key', 'key': 'Escape'}]),
+        ('custom', [
+            {'op': 'tap', 'id': 'combobox:Custom'}, {'op': 'key', 'key': 'Z'},
+            {'op': 'key', 'key': 'e'}, {'op': 'key', 'key': 'd'},
+            {'op': 'key', 'key': 'Enter'}]),
+        ('match', [
+            {'op': 'tap', 'id': 'combobox:Custom'}, {'op': 'key', 'key': 'B'},
+            {'op': 'key', 'key': 'e'}, {'op': 'key', 'key': 'Enter'}]),
+        ('custom-cancel', [
+            {'op': 'tap', 'id': 'combobox:Custom'}, {'op': 'key', 'key': 'Z'},
+            {'op': 'key', 'key': 'e'}, {'op': 'key', 'key': 'd'},
+            {'op': 'key', 'key': 'Escape'}])],
     'text': [('source', [{'op': 'drive', 'name': 'sourceText', 'args': []},
                          {'op': 'drive', 'name': 'emptyText', 'args': []},
                          {'op': 'drive', 'name': 'manySpans', 'args': []},
@@ -3858,9 +3869,15 @@ for label, events in cases:
         for field in ('selects', 'fields', 'taps', 'scrolls'):
             assert native[field] == evaluated[field], (label, field, native[field], evaluated[field])
         values = {s.get('name'): s.get('value') for s in native['signals']}
-        expected = {'cancel': (-1, 0), 'keys': (4, 119), 'timeout': (2, 0), 'dialog': (0, 0), 'pending': (-1, 0), 'options': (3, 0), 'empty': (2, 0), 'restore': (4, 0)}[label]
+        expected = {'cancel': (-1, 0), 'keys': (4, 119), 'timeout': (2, 0), 'dialog': (0, 0), 'pending': (-1, 0), 'options': (3, 0), 'empty': (2, 0), 'restore': (4, 0), 'custom': (-1, 0), 'match': (-1, 0), 'custom-cancel': (-1, 0)}[label]
         assert (values['choice'], values['item']) == expected, values
         assert values['name'] == 'Keep this text' and values['count'] == 0, values
+        if label == 'custom':
+            assert values['custom'] == 'Zed' and values['customIndex'] == -1, values
+        elif label == 'match':
+            assert values['custom'] == 'Beta' and values['customIndex'] == 2, values
+        else:
+            assert values['custom'] == '' and values['customIndex'] == -1, values
         if label == 'pending':
             opened = [item for item in native['selects'] if item['open']]
             assert len(opened) == 1 and opened[0]['active'] == 129, opened

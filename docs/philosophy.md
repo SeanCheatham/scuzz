@@ -803,15 +803,18 @@ Keyboard behavior uses the [W3C disclosure pattern](https://www.w3.org/WAI/ARIA/
 Use `View.select(selected, label, options)` for compact single selection.
 Options use `Signal[List[String]]`. Give the control and each option a nonempty label.
 The selected Signal holds a zero-based index. Construction preserves the Signal.
-An invalid index displays no selected text. An empty list has no input or Tab stop.
+An invalid index on a three-argument select displays no selected text.
+An empty three-argument list has no input or Tab stop.
 The control has one focus stop. Popup options use stable index identities within one list.
-A new list cancels pending input and closes the popup. It resets type-ahead and scroll.
+A new list cancels pending input and pending text. It closes the popup.
+It resets type-ahead and scroll.
 The control keeps its identity, focus, and selected Signal. The application owns index changes.
 A new list uses new option identities. An old pointer press cannot select a replacement option.
 The popup keeps at most nine row Views, including partially visible rows.
 Arrows open the popup and move a pending index. Home and End use the endpoints.
 PageUp and PageDown move ten options. Navigation stops at each endpoint.
-Enter, Space, Tab, and explicit focus transfer commit the pending index.
+Enter, Tab, and explicit focus transfer commit the pending index.
+Space commits the pending index on a three-argument select.
 Escape, a second control activation, and outside pointer input cancel it.
 Outside pointer input closes the popup and consumes that input.
 A newer external Signal value replaces pending input. Stale focus transfer cannot overwrite it.
@@ -825,7 +828,20 @@ Wheel and touch input scroll the popup. Scrolling keeps the pending option visib
 Popup input stays inside the active dialog. Escape closes the popup before the dialog.
 Browser semantics use a named combobox, a linked listbox, and indexed options.
 The browser keeps focus on the combobox and reports the pending active option.
-Editable selection remains open.
+Pass `text` to `View.select(selected, label, options, text)` to accept typed text.
+`text` is a `Signal[String]`.
+The three-argument call keeps index selection and type-ahead.
+An editable select shows the pending text.
+A case-fold prefix of an option commits that option.
+Commit writes the option index and the option label.
+Typed text that matches no option commits that text and clears the selected index.
+Arrow keys, Home, End, PageUp, PageDown, and pointer input commit the active option.
+Space in an editable select inserts a space.
+Escape, a second control activation, and outside pointer input drop the pending text.
+They keep the selected index and the text Signal.
+Tab and explicit focus transfer commit the pending text or the matching option.
+An editable select keeps a Tab stop when the list is empty.
+The browser marks an editable combobox for list completion.
 
 Use `View.segmented(selected, label, choices)` for equal-width choices.
 Choices use `List[String]`. The selected Signal holds an index that starts at zero.

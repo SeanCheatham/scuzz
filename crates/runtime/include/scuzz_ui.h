@@ -373,7 +373,7 @@ SzView *sz_view_app_shell(SzView *bar, SzView *body);
 SzView *sz_view_app_bar(SzView *title, SzView *actions);
 /* Fixed local panels. The selection is a zero-based section index. */
 SzView *sz_view_tabs(SzSignalInt *selected, SzView *sections);
-SzView *sz_view_select(SzSignalInt *sig, const char *label, SzSignalList *choices);
+SzView *sz_view_select(SzSignalInt *sig, const char *label, SzSignalList *choices, SzSignalStr *text);
 void sz_view_prepare_input(SzView *root);
 void sz_view_input_time(SzView *root, int64_t milliseconds);
 void sz_view_selects_dump_json(SzView *root, FILE *file);
@@ -970,7 +970,7 @@ SzView *sz_lang_view_checkbox_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_switch_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
                                     SzString *title);
-SzView *sz_lang_view_select(SzSignalInt *sig, SzString *label, SzSignalList *choices);
+SzView *sz_lang_view_select(SzSignalInt *sig, SzString *label, SzSignalList *choices, SzSignalStr *text);
 SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *label, SzList *choices);
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child);
 SzView *sz_lang_view_section(SzString *id, SzString *title, SzView *child);

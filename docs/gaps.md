@@ -120,7 +120,9 @@ Native checks cover empty, invalid, repeated, and 1000-option lists.
 Browser checks cover combobox relations, active options, keys, wheel input, touch input, and viewport changes.
 Physical-device and real screen-reader checks for select controls remain open.
 Reactive option checks cover replacement, empty lists, recovery, retained fields, and stale pointer input.
-Editable options remain open.
+An editable select commits typed text that matches no option.
+A matching option commits that option.
+Cancel drops the pending text.
 Compiled UI corpus replay under ASan covers Headless with portable software paint.
 Prebuilt Skia and GPU backends remain uninstrumented.
 Expansion checks cover header input, body conditions, nested fields, focus return, and linked browser regions.

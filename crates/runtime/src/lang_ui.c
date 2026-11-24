@@ -151,8 +151,8 @@ SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
   return sz_view_radio_list_tile(sig, value, title ? sz_string_cstr(title) : "");
 }
 
-SzView *sz_lang_view_select(SzSignalInt *sig, SzString *label, SzSignalList *choices) {
-  return sz_view_select(sig, sz_string_cstr(label), choices);
+SzView *sz_lang_view_select(SzSignalInt *sig, SzString *label, SzSignalList *choices, SzSignalStr *text) {
+  return sz_view_select(sig, sz_string_cstr(label), choices, text);
 }
 
 SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *label, SzList *choices) {

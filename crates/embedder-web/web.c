@@ -122,9 +122,9 @@ void sz_web_position_transition(SzView *view, int x, int y, int target_x, int ta
   web_position_transition(sz_view_id(view), x, y, target_x, target_y, remaining, suppressed);
 }
 
-EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t active, int count), {
+EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t active, int count, int editable), {
   const item = Module.webFrame.items.at(-1);
-  item.active = Number(active); item.optionCount = count;
+  item.active = Number(active); item.optionCount = count; item.editable = Boolean(editable);
   let parent = item.parent;
   for (let id = parent; id;) {
     const ancestor = Module.webFrame.items.find(item => item.id === id);
@@ -134,8 +134,8 @@ EM_JS(void, web_select_state, (uintptr_t owner, uintptr_t popup, uintptr_t activ
   Module.webFrame.items.push({id: Number(popup), group: true, role: 56, label: item.label,
     parent, related: Number(owner), hidden: !item.checked, x: 0, y: 0, w: 0, h: 0});
 });
-void sz_web_select_state(SzView *view, SzView *popup, SzView *active, int count) {
-  web_select_state(sz_view_id(view), sz_view_id(popup), sz_view_id(active), count);
+void sz_web_select_state(SzView *view, SzView *popup, SzView *active, int count, int editable) {
+  web_select_state(sz_view_id(view), sz_view_id(popup), sz_view_id(active), count, editable);
 }
 EM_JS(void, web_select_list, (uintptr_t popup, float x, float y, float w, float h), {
   const item = Module.webFrame.items.find(item => item.id === Number(popup));

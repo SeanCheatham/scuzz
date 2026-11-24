@@ -31,7 +31,7 @@ void sz_web_scale_transition(SzView *view, int value, int target, int remaining,
 void sz_web_rotate_begin(SzView *view, float degrees, float x, float y, int clipped, SzRect clip);
 void sz_web_rotation_transition(SzView *view, int value, int target, int remaining, int suppressed);
 void sz_web_position_transition(SzView *view, int x, int y, int target_x, int target_y, int remaining, int suppressed);
-void sz_web_select_state(SzView *view, SzView *popup, SzView *active, int count);
+void sz_web_select_state(SzView *view, SzView *popup, SzView *active, int count, int editable);
 void sz_web_select_list(SzView *view, SzView *popup, SzRect frame);
 void sz_web_select_option(SzView *option, SzView *view, int index, int count);
 
