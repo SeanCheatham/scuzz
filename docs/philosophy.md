@@ -293,6 +293,10 @@ The call waits on that thread.
 It does not park on a socket.
 A timeout cannot interrupt that call.
 The response body reaches the program.
+One browser package calls `Net.httpGetBytes`.
+The response body is three bytes that are not valid UTF-8.
+Those bytes are `ff fe 80`.
+Those bytes reach the program.
 Each call keeps the 1 MiB body limit.
 The call does not follow a redirect.
 Simulation rejects a live external host.
@@ -949,6 +953,10 @@ Diagnose behavior through structural dumps, `*.scuzz_verify`, and `.require`.
 Widget and GUI instructions: run `scuzz docs kits` and `scuzz docs gui`.
 `Net.httpGet` and `Net.httpGetBytes` on the web target return the response body on the browser thread.
 `Net.httpGetBytes` returns that body as `Bytes`.
+One browser package calls `Net.httpGetBytes`.
+The response body is three bytes that are not valid UTF-8.
+Those bytes are `ff fe 80`.
+Those bytes reach the program.
 Other Net calls fail on web.
 A web file does not survive a reload.
 Full web accessibility remains open.

@@ -375,9 +375,13 @@ Read a file from `Net.httpGetToFile` with `Fs.readBytes`.
 
 `Net.httpGet` on the web target returns the status, the headers, and the body.
 `Net.httpGetBytes` returns that body as `Bytes`.
+One browser package calls `Net.httpGetBytes`.
+The response body is three bytes that are not valid UTF-8.
+Those bytes are `ff fe 80`.
+Those bytes reach the program.
 Both calls run on one browser thread.
 Both calls keep the 1 MiB body limit.
-The response body reaches the program.
+The text response body reaches the program.
 Simulation rejects a live external host.
 Other Net calls fail on web.
 A file in the browser working directory remains after a page reload.
