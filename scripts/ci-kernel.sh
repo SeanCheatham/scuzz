@@ -595,8 +595,39 @@ grids = [('{"items":[["a","b"],["c"]],"rows":[[{"qty":2}],[{"qty":3},{"qty":4}]]
          ('{"items":[],"rows":[],"tones":[[1]]}', 'error:Json.decode: wrong case at tones.0.0: 1'),
          ('{"items":[],"rows":[],"tones":[[null]]}', 'error:Json.decode: wrong case at tones.0.0: null'),
          ('{"rows":[],"tones":[]}', 'error:Json.decode: missing field items')]
+payloads = [('{"reply":{"Count":7}}', 'ok:count:7'),
+            ('{"reply":{"Count":101}}', 'ok:count:101'),
+            ('{"reply":{"Label":"a"}}', 'ok:label:a'),
+            ('{"reply":{"Item":{"quantity":2}}}', 'ok:item:2'),
+            ('{"reply":{"Tone":"Loud"}}', 'ok:tone:Loud'),
+            ('{"reply":{"Box":{"Count":4}}}', 'ok:box:4'),
+            ('{"reply":{"Keep":null}}', 'ok:keep:null'),
+            ('{"reply":{"Keep":{"a":1}}}', 'ok:keep:{"a":1}'),
+            ('{"reply":{"Flag":false}}', 'ok:flag:false'),
+            ('{"reply":{"Ratio":1.5}}', 'ok:ratio:1.5'),
+            ('{"reply":{"Count":7,"extra":true}}', 'ok:count:7'),
+            ('{"reply":{"Count":"x"}}', 'error:Json.decode: wrong case at reply.n'),
+            ('{"reply":1}', 'error:Json.decode: wrong case at reply: 1'),
+            ('{"reply":"Count"}', 'error:Json.decode: wrong case at reply: "Count"'),
+            ('{"reply":null}', 'error:Json.decode: wrong case at reply: null'),
+            ('{"reply":{"Gone":1}}', 'error:Json.decode: unknown case at reply: {"Gone":1}'),
+            ('{"reply":{}}', 'error:Json.decode: unknown case at reply: {}'),
+            ('{"reply":{"Count":1,"Label":"a"}}', 'error:Json.decode: wrong case at reply: {"Count":1,"Label":"a"}'),
+            ('{}', 'error:Json.decode: missing field reply'),
+            ('{"reply":{"Item":{}}}', 'error:Json.decode: missing field reply.piece.quantity'),
+            ('{"reply":{"Item":{"quantity":true}}}', 'error:Json.decode: wrong case at reply.piece.quantity'),
+            ('{"reply":{"Tone":"Gone"}}', 'error:Json.decode: unknown case at reply.tone: Gone'),
+            ('{"reply":{"Tone":1}}', 'error:Json.decode: wrong case at reply.tone: 1'),
+            ('{"reply":{"Box":1}}', 'error:Json.decode: wrong case at reply.inner: 1'),
+            ('{"reply":{"Box":{"Count":"x"}}}', 'error:Json.decode: wrong case at reply.inner.n'),
+            ('{"reply":{"Ratio":1}}', 'error:Json.decode: wrong case at reply.ratio')]
 ranges = [('{"name":"bolt","item":{"quantity":2},"note":null}', 'true'),
           ('{"name":"bolt","item":{"quantity":101},"note":null}', 'false')]
+reply_ranges = [('{"reply":{"Count":7}}', 'true'),
+                ('{"reply":{"Count":1}}', 'true'),
+                ('{"reply":{"Count":100}}', 'true'),
+                ('{"reply":{"Count":101}}', 'false'),
+                ('{"reply":{"Count":0}}', 'false')]
 
 def array(texts):
     return '[' + ', '.join(f'Hex.decode("{text.encode().hex()}")' for text in texts) + ']'
@@ -642,13 +673,15 @@ def nested(text: String): String =
     _ <- IO.foreachDiscard(ENUMS, text => IO.println(Input.jobText(text)))
     _ <- IO.foreachDiscard(BANDS, text => IO.println(Input.choirText(text)))
     _ <- IO.foreachDiscard(GRIDS, text => IO.println(Input.gridText(text)))
+    _ <- IO.foreachDiscard(PAYLOADS, text => IO.println(Input.packetText(text)))
     _ <- IO.foreachDiscard(RANGES, text => IO.println(Str.fromBool(Input.orderInRange(text))))
+    _ <- IO.foreachDiscard(REPLIES, text => IO.println(Str.fromBool(Input.replyInRange(text))))
   } yield ()
-'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('GRIDS', array([text for text, _ in grids])).replace('RANGES', array([text for text, _ in ranges]))
+'''.replace('INTEGERS', array(integers)).replace('FIELDS', array([text for text, _ in fields])).replace('PATHS', array([text for text, _ in paths])).replace('QUANTITIES', array(quantities)).replace('ORDERS', array([text for text, _ in orders])).replace('LISTS', array([text for text, _ in lists])).replace('OPTIONS', array([text for text, _ in options])).replace('ENUMS', array([text for text, _ in enums])).replace('BANDS', array([text for text, _ in bands])).replace('GRIDS', array([text for text, _ in grids])).replace('PAYLOADS', array([text for text, _ in payloads])).replace('REPLIES', array([text for text, _ in reply_ranges])).replace('RANGES', array([text for text, _ in ranges]))
     (root / 'src/Main.scuzz').write_text(source)
     expected = [parsed(text) for text in integers] + [value for _, value in fields] + [value for _, value in paths]
     expected += ['false'] * 10 + ['true', 'true', 'false']
-    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in grids] + [value for _, value in ranges]
+    expected += [value for _, value in orders] + [value for _, value in lists] + [value for _, value in options] + [value for _, value in enums] + [value for _, value in bands] + [value for _, value in grids] + [value for _, value in payloads] + [value for _, value in ranges] + [value for _, value in reply_ranges]
     command('fmt', root)
     for engine in ['run', 'eval']:
         output = command(engine, root)
@@ -705,6 +738,12 @@ oracle boundaries(): Bool =
         ('enum Wrap[A]:\n  case Empty\nrecord Row(items: List[Wrap[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read items'),
         ('enum Wrap[A]:\n  case Empty\nrecord Row(item: Option[Wrap[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item'),
         ('enum Wrap[A]:\n  case Empty\nrecord Row(item: Wrap[String])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item'),
+        ('enum Pair:\n  case Both(n: Int, text: String)\nrecord Row(item: Pair)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item'),
+        ('enum Bag:\n  case Items(xs: List[String])\nrecord Row(item: Bag)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item.xs'),
+        ('enum Maybe:\n  case Num(n: Option[Int])\nrecord Row(item: Maybe)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item.n'),
+        ('enum Reply:\n  case Count(n: Int)\nrecord Row(items: List[Reply])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read items'),
+        ('enum Reply:\n  case Count(n: Int)\nrecord Row(item: Option[Reply])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item'),
+        ('enum Loop:\n  case Box(inner: Loop)\nrecord Row(item: Loop)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item.inner'),
         ('def badPos(json: Json): Json =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
     ]:
         (root / 'src/BadDecode.scuzz').write_text(body)
