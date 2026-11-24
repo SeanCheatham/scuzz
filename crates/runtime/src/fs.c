@@ -129,11 +129,124 @@ static void *fs_dispatch(void *env) {
   return (void *)(intptr_t)(sz_testrt_fs_is_fake() ? 1 : 0);
 }
 
+static void *fs_write_result(void *env);
+static void *fs_list_result(void *env);
+static void *fs_mkdirs_result(void *env);
+static void *fs_canonicalize_result(void *env);
+static void *fs_exists_result(void *env);
+static void *fs_delete_result(void *env);
+static void *fs_rename_result(void *env);
+static void *fs_walk_result(void *env);
+
+#ifdef __EMSCRIPTEN__
+int sz_web_fs_prepare(void);
+int sz_web_fs_flush(void);
+
+/* Load the browser working directory before a live file call.
+ * Save it after a change that succeeds. Stay on this thread. */
+static void *fs_store_fail(const char *msg) {
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
+  r->is_err = 1;
+  r->as.err = sz_error_new(2, msg);
+  return r;
+}
+
+static void *fs_with_store(void *(*op)(void *), void *env, int save) {
+  FsResult *r;
+  if (sz_web_fs_prepare() != 0)
+    return fs_store_fail("Fs: browser store is not ready");
+  r = op(env);
+  if (!save || !r || r->is_err)
+    return r;
+  if (sz_web_fs_flush() == 0)
+    return r;
+  if (r->as.ok) {
+    sz_release(r->as.ok);
+    r->as.ok = NULL;
+  }
+  r->is_err = 1;
+  r->as.err = sz_error_new(2, "Fs: browser store did not save");
+  return r;
+}
+#endif
+
+static void *fs_read_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_read_result, env, 0);
+#else
+  return fs_read_result(env);
+#endif
+}
+
+static void *fs_write_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_write_result, env, 1);
+#else
+  return fs_write_result(env);
+#endif
+}
+
+static void *fs_list_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_list_result, env, 0);
+#else
+  return fs_list_result(env);
+#endif
+}
+
+static void *fs_mkdirs_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_mkdirs_result, env, 1);
+#else
+  return fs_mkdirs_result(env);
+#endif
+}
+
+static void *fs_canonicalize_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_canonicalize_result, env, 0);
+#else
+  return fs_canonicalize_result(env);
+#endif
+}
+
+static void *fs_exists_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_exists_result, env, 0);
+#else
+  return fs_exists_result(env);
+#endif
+}
+
+static void *fs_delete_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_delete_result, env, 1);
+#else
+  return fs_delete_result(env);
+#endif
+}
+
+static void *fs_rename_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_rename_result, env, 1);
+#else
+  return fs_rename_result(env);
+#endif
+}
+
+static void *fs_walk_go(void *env) {
+#ifdef __EMSCRIPTEN__
+  return fs_with_store(fs_walk_result, env, 0);
+#else
+  return fs_walk_result(env);
+#endif
+}
+
 static SzIo *fs_after_read(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_read(pack_path(pack));
-  return fm_drop(sz_io_delay(fs_read_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_read_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_read(SzString *path) { return fs_bind(path, fs_after_read); }
@@ -470,7 +583,7 @@ static SzIo *fs_after_write(void *value, void *env) {
     return sz_io_fail_cstr("Fs.write: invalid file path");
   if ((intptr_t)value)
     return sz_testrt_fs_write((SzString *)pack->left, (SzString *)pack->right);
-  return fm_drop(sz_io_delay(fs_write_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_write_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_write(SzString *path, SzString *contents) {
@@ -563,7 +676,7 @@ static SzIo *fs_after_list(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_list(pack_path(pack));
-  return fm_drop(sz_io_delay(fs_list_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_list_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_list(SzString *path) { return fs_bind(path, fs_after_list); }
@@ -627,7 +740,7 @@ static SzIo *fs_after_mkdirs(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_mkdirs(pack_path(pack));
-  return fm_drop(sz_io_delay(fs_mkdirs_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_mkdirs_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_mkdirs(SzString *path) { return fs_bind(path, fs_after_mkdirs); }
@@ -658,7 +771,7 @@ static SzIo *fs_after_canonicalize(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_canonicalize(pack_path(pack));
-  return fm_drop(sz_io_delay(fs_canonicalize_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_canonicalize_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_canonicalize(SzString *path) {
@@ -681,7 +794,7 @@ static SzIo *fs_after_exists(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_exists(pack_path(pack));
-  return fm_drop(sz_io_delay(fs_exists_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_exists_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_exists(SzString *path) { return fs_bind(path, fs_after_exists); }
@@ -857,7 +970,7 @@ static SzIo *fs_after_delete(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_delete(pack_path(pack));
-  return fm_drop(sz_io_delay(fs_delete_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_delete_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_delete(SzString *path) { return fs_bind(path, fs_after_delete); }
@@ -910,7 +1023,7 @@ static SzIo *fs_after_rename(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_rename((SzString *)pack->left, (SzString *)pack->right);
-  return fm_drop(sz_io_delay(fs_rename_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_rename_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_rename(SzString *from, SzString *to) {
@@ -1036,7 +1149,7 @@ static SzIo *fs_after_walk(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
     return sz_testrt_fs_walk(pack_path(pack));
-  return fm_drop(sz_io_delay(fs_walk_result, pack), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_walk_go, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_walk(SzString *path) { return fs_bind(path, fs_after_walk); }

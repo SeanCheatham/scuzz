@@ -376,7 +376,12 @@ The response body reaches the program.
 The call runs on one browser thread.
 Simulation rejects a live external host.
 Other Net calls fail on web.
-A web file does not survive a reload.
+A file in the browser working directory remains after a page reload.
+One browser package writes three bytes that are not valid UTF-8.
+A reload reads the same bytes.
+Simulation stores the same bytes.
+The page uses one browser thread.
+A file outside the working directory does not remain.
 Hot reload on web stays open.
 Full web accessibility stays open.
 Worker threads stay out.

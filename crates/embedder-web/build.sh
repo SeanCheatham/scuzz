@@ -31,7 +31,7 @@ for name in image image_dec sk_sw png_enc sk_gpu_none sk_mono sk_color; do
   "${EMCC[@]}" "${FLAGS[@]}" -std=c11 -I"$ROOT/crates/ffi-skia/include" \
     -I"$ROOT/crates/ffi-skia/src" -I"$ROOT/crates/ffi-skia/build/harfbuzz" -I"$BIDI/Headers" -c "$ROOT/crates/ffi-skia/src/$name.c" -o "$OBJ/$name.o"
 done
-for name in web net_stub; do
+for name in web net_stub fs_web; do
   "${EMCC[@]}" "${FLAGS[@]}" "${INCLUDES[@]}" -c "$ROOT/crates/embedder-web/$name.c" -o "$OBJ/$name.o"
 done
 python3 "$ROOT/scripts/fetch_fonts.py" "$ROOT/crates/ffi-skia/build/fonts" --web "$OUT/fonts"
@@ -40,7 +40,7 @@ cp "$ROOT/third_party/skia/SheenBidi-LICENSE" "$OUT/SheenBidi-LICENSE"
 cp "$ROOT/crates/ffi-skia/build/harfbuzz/HarfBuzz-LICENSE" "$OUT/HarfBuzz-LICENSE"
 "${EMCC[@]}" "${FLAGS[@]}" "$OBJ"/*.o -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=8388608 \
   -sEXPORTED_RUNTIME_METHODS=ccall -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576 -sENVIRONMENT=web \
-  -o "$OUT/app.js"
+  -lidbfs.js -o "$OUT/app.js"
 # EM_ASM addresses live in the glue. A host can cache that glue longer than the module.
 # A new module then calls an address the cached glue does not list. One content version
 # loads the pair together.
