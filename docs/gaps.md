@@ -369,6 +369,19 @@ HTTP, TCP, and UDP bodies are `String`.
 `Net.httpGet` keeps the 1 MiB body limit.
 Read a file from `Net.httpGetToFile` with `Fs.readBytes`.
 
+### Browser HTTP
+
+`Net.httpGet` on the web target returns the status, the headers, and the body.
+The response body reaches the program.
+The call runs on one browser thread.
+Simulation rejects a live external host.
+Other Net calls fail on web.
+A web file does not survive a reload.
+Hot reload on web stays open.
+Full web accessibility stays open.
+Worker threads stay out.
+A second UI runtime stays out.
+
 ### Supporting compiler and editor work
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.

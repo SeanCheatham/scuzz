@@ -24,7 +24,7 @@ make -C "$ROOT/crates/ffi-skia" build/sheenbidi/.stamp build/harfbuzz/arabic_joi
 "${EMCC[@]}" "${FLAGS[@]}" -Wno-override-module -c "$IR" -o "$OBJ/app.o"
 for src in "$ROOT"/crates/runtime/src/*.c; do
   name="$(basename "$src" .c)"
-  case "$name" in net|net_request) continue ;; esac
+  case "$name" in net) continue ;; esac
   "${EMCC[@]}" "${FLAGS[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" -o "$OBJ/rt_$name.o"
 done
 for name in image image_dec sk_sw png_enc sk_gpu_none sk_mono sk_color; do
