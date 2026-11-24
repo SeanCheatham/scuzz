@@ -353,7 +353,7 @@ Headless is a **peer** of Desktop/Mobile. Frame boundary is `pump`. A live loop 
 
 Desktop windows are resizable. A window resize sends the shared resize event. The session lays out and paints at the new size. The live record includes the resize. Headless replays it.
 
-A `View.button` press, a button that becomes shown, a `View.tabs` change, and a `View.each` insert each paint for four pumps. The new tab panel uses the same appear step as a button that becomes shown. The next pump paints the settled tree. A static tree paints one frame and waits. The clock is `pump`. Do not read wall-clock time. Headless and Desktop paint the same frames. The structural dump records the step. The timeline records the hit on the pump that took the input. The session dump keeps that hit. Do not add a spring, a motion language, blur, or a gradient.
+A `View.button` press, a button that becomes shown, a `View.tabs` change, and a `View.each` insert each paint for four pumps. The new tab panel uses the same appear step as a button that becomes shown. The next pump paints the settled tree. On a mobile session, an input pump publishes the live dump and yields before the raster. Later pumps paint the press. A tap can change the screen while a request is still in flight. A static tree paints one frame and waits. The clock is `pump`. Do not read wall-clock time. Headless and Desktop paint the same frames. The structural dump records the step. The timeline records the hit on the pump that took the input. The session dump keeps that hit. Do not add a spring, a motion language, blur, or a gradient.
 
 Use `View.animatedOpacity(value, pumps, child)` for an opacity transition.
 The value is a `Signal[Int]`. Display clamps it to 0 through 100.
