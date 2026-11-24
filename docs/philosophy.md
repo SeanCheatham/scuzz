@@ -300,10 +300,11 @@ Those bytes reach the program.
 Each call keeps the 1 MiB body limit.
 The call does not follow a redirect.
 Simulation rejects a live external host.
+`Net.httpPost` fails on web with `Net: not available on web`.
 Other Net calls fail on web.
 The page uses one browser thread.
 Socket requests park fibers. IO finalizers cancel them.
-Responses contain status, headers, and body. `Net.httpGet` returns `(Int, Map[String, String], String)`. `Net.httpGetBytes` returns `(Int, Map[String, String], Bytes)`. TCP and UDP bodies stay `String`.
+Responses contain status, headers, and body. `Net.httpGet` returns `(Int, Map[String, String], String)`. `Net.httpPost` sends one string body and returns `(Int, Map[String, String], String)`. `Net.httpGetBytes` returns `(Int, Map[String, String], Bytes)`. TCP and UDP bodies stay `String`.
 Servers bind `0.0.0.0` and `::`.
 `Net.serveTls` and `Net.serveOnceTls` use a process certificate.
 The CLI and server loopback HTTPS client does not verify that certificate.
@@ -319,7 +320,7 @@ Keep pure kits small. Signatures come from `scuzz docs kits`.
 | Hex | Encode UTF-8 bytes as lowercase hex. Decode reverses this. An odd length or invalid digit returns an empty string |
 | Base64 | Use RFC 4648 on UTF-8 bytes. Decode rejects invalid length, digits, or padding with an empty string. No URL-safe alphabet |
 | UUID | `v4` returns an RFC 4122 UUID with lowercase hex and hyphens. Use built-in Random. No parser or other UUID version |
-| Bytes | `fromStr` copies UTF-8 bytes. `len` returns the byte count. `Fs.readBytes` reads one regular file into `Bytes`. `Fs.writeBytes` writes `Bytes` with the same replacement rules as `Fs.write`. `Fs.read` returns `String`. `Fs.write` accepts `String`. `Net.httpGetBytes` reads one GET response body into `Bytes`. `Net.httpGet` returns `String`. Both calls keep the 1 MiB body limit. TCP and UDP bodies stay `String` |
+| Bytes | `fromStr` copies UTF-8 bytes. `len` returns the byte count. `Fs.readBytes` reads one regular file into `Bytes`. `Fs.writeBytes` writes `Bytes` with the same replacement rules as `Fs.write`. `Fs.read` returns `String`. `Fs.write` accepts `String`. `Net.httpGetBytes` reads one GET response body into `Bytes`. `Net.httpGet` returns `String`. `Net.httpPost` sends one string body and returns `String`. All three calls keep the 1 MiB body limit. TCP and UDP bodies stay `String` |
 
 SIGINT and SIGTERM cancel the live program through its IO scheduler. The scheduler runs finalizers before exit. Owned process groups stop through their existing cancellation finalizers. The exit status is 130 for SIGINT and 143 for SIGTERM. Simulation keeps its scheduler limits and signal behavior. Forced termination cannot run finalizers.
 
@@ -334,7 +335,7 @@ Simulation stores the same bytes.
 A file outside the working directory does not remain.
 Hot reload on web stays open.
 
-Live and simulated HTTP clients share one URL parser. A URL with no path uses `/`. The request target keeps the query and excludes the fragment. Raw spaces and control bytes fail before dispatch. Each HTTP client call takes a request header map after the URL. Body methods take the body last. `Net.httpGetToFile` streams a response body to a caller path with bounded memory. It returns status, headers, and byte count. It supports Content-Length, chunked transfer encoding, and close-delimited bodies. It removes an incomplete file after an error or cancellation. The caller uses a temporary path and renames it after validation. `Net.httpGet` and `Net.httpGetBytes` keep the 1 MiB body limit. `Net.httpGet` returns the body as `String`. `Net.httpGetBytes` returns the body as `Bytes`. Read a file written by `Net.httpGetToFile` with `Fs.readBytes`. TCP and UDP bodies stay `String`. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log. A request with `Prefer: wait=N` can wait N seconds for its response. The supported range is 1 through 900 seconds. Other values keep the transport default. `IO.timeout` can set a shorter bound. DNS, connection, and write limits stay fixed.
+Live and simulated HTTP clients share one URL parser. A URL with no path uses `/`. The request target keeps the query and excludes the fragment. Raw spaces and control bytes fail before dispatch. Each HTTP client call takes a request header map after the URL. Body methods take the body last. `Net.httpGetToFile` streams a response body to a caller path with bounded memory. It returns status, headers, and byte count. It supports Content-Length, chunked transfer encoding, and close-delimited bodies. It removes an incomplete file after an error or cancellation. The caller uses a temporary path and renames it after validation. `Net.httpGet`, `Net.httpGetBytes`, and `Net.httpPost` keep the 1 MiB body limit. `Net.httpGet` returns the body as `String`. `Net.httpPost` sends one string body and returns the body as `String`. It does not follow a redirect. `Net.httpGetBytes` returns the body as `Bytes`. Read a file written by `Net.httpGetToFile` with `Fs.readBytes`. TCP and UDP bodies stay `String`. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log. A request with `Prefer: wait=N` can wait N seconds for its response. The supported range is 1 through 900 seconds. Other values keep the transport default. `IO.timeout` can set a shorter bound. DNS, connection, and write limits stay fixed.
 
 `Stream` is one finite pull interpreter. Bind a Stream with `=`. `<-` needs `IO`. Do not add backpressure, publishers, or a second stream kit.
 
@@ -957,6 +958,7 @@ One browser package calls `Net.httpGetBytes`.
 The response body is three bytes that are not valid UTF-8.
 Those bytes are `ff fe 80`.
 Those bytes reach the program.
+`Net.httpPost` fails on web with `Net: not available on web`.
 Other Net calls fail on web.
 A web file does not survive a reload.
 Full web accessibility remains open.
