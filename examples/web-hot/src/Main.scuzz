@@ -1,0 +1,8 @@
+def line(): String =
+  "hot:before"
+
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(line())
+    _ <- Ui.run(_ => View.text(line()))
+  } yield ()

@@ -744,6 +744,27 @@ document.addEventListener('copy', event => {
   }
   event.clipboardData.setData('text/plain', pieces.join('\n')); event.preventDefault();
 });
+// Read reload.stamp from this server. A new stamp loads the new build.
+// Stay on this thread. Do not start a worker.
+(function watchReload() {
+  let seen = null;
+  const tick = async () => {
+    let body = '';
+    try {
+      const response = await fetch('./reload.stamp?t=' + Date.now(), {cache: 'no-store'});
+      if (response.ok) body = (await response.text()).trim();
+    } catch (_) {}
+    if (seen === null) seen = body;
+    else if (body && body !== seen) {
+      const next = new URL(location.href);
+      next.searchParams.set('hot', body);
+      location.replace(next.href);
+      return;
+    }
+    setTimeout(tick, 400);
+  };
+  tick();
+})();
 </script>
 <script src="./app.js" onerror="Module.onAbort()"></script>
 </html>

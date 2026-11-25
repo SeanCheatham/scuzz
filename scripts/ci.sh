@@ -4936,6 +4936,51 @@ slice_oracles() {
   slice_fixedpoint
 }
 
+prove_web_hot() {
+  local src out served ready next pid deadline
+  src="$web_tmp/web-hot-src"
+  out="$web_tmp/web-hot output"
+  next="$web_tmp/web-hot-next output"
+  served="$out/package/web"
+  ready="$web_tmp/web-hot-ready"
+  rm -rf "$src"
+  mkdir -p "$src"
+  cp -a examples/web-hot/. "$src/"
+  "$SCUZZ" check "$src"
+  "$SCUZZ" package --target web --out-dir "$out" "$src"
+  SCUZZ_WEB_HOT_READY="$ready" node crates/embedder-web/test.cjs "$served" '' web-hot &
+  pid=$!
+  deadline=$((SECONDS + 300))
+  while [ ! -f "$ready" ]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" || true
+      echo 'web hot reload: page failed before the first line' >&2
+      exit 1
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      echo 'web hot reload: first line was not stable' >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+  python3 - "$src/src/Main.scuzz" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+old = '"hot:before"'
+new = '"hot:after"'
+if text.count(old) != 1:
+    raise SystemExit('web hot reload: source line missing')
+path.write_text(text.replace(old, new, 1))
+PY
+  "$SCUZZ" package --target web --out-dir "$next" "$src"
+  cp -a "$next/package/web/." "$served/"
+  printf '1\n' > "$served/reload.stamp"
+  wait "$pid"
+}
+
 slice_web() (
   need_scuzz
   need_cmd python3 'Install Python 3 to build for the web'
@@ -5002,8 +5047,8 @@ slice_web() (
     exit 1
   fi
   file_sim="$(env -u SCUZZ_WEB_FILE -u SCUZZ_NET_LIVE -u SCUZZ_UI_SERVE SCUZZ_TESTRT=1 examples/web-file/build/web-file)"
-  if [ "$file_sim" != "wrote:fffe80" ]; then
-    echo "simulation must keep the same file bytes: $file_sim" >&2
+  if [ "$file_sim" != "sim:fffe80" ]; then
+    echo "simulation must rename and delete the same file bytes: $file_sim" >&2
     exit 1
   fi
   "$SCUZZ" package --target web --out-dir "$web_tmp/web-file output" examples/web-file
@@ -5206,6 +5251,8 @@ PY_MOTION_UTF8
     echo 'web must reject a package without [ui]' >&2
     exit 1
   fi
+  "$SCUZZ" check examples/web-hot
+  prove_web_hot
 )
 
 slice_pr() {

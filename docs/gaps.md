@@ -413,11 +413,17 @@ Neither call follows a redirect.
 Other Net calls fail on web.
 A file in the browser working directory remains after a page reload.
 One browser package writes three bytes that are not valid UTF-8.
-A reload reads the same bytes.
+The program renames that file and deletes it.
+A reload after the rename reads the new name.
+A reload after the delete does not read the old name.
+Those bytes still round-trip.
 Simulation stores the same bytes.
 The page uses one browser thread.
-A file outside the working directory does not remain.
-Hot reload on web stays open.
+A path outside the working directory fails.
+The open page reads `reload.stamp` from the server that serves the package.
+A new stamp loads the new build.
+One browser package prints `hot:before` and then `hot:after`.
+The browser stays open.
 Full web accessibility stays open.
 Worker threads stay out.
 A second UI runtime stays out.
@@ -440,4 +446,4 @@ The pinned Qwen3.5 9B model runs on macOS ARM64 Metal. It produces a message inp
 
 Do not add user FFI, `extern`, plugins, library publishing, git or registry dependencies, or `scuzz add`. Do not start a provider framework, remote generator service, telemetry, or model training. Limits and exclusions for the current arc live in `vision.md`.
 
-Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. General model browsing. Metal and Vulkan performance measurements. Gated-model login. Model conversion. Automatic oracle mining. Semantic timeline alignment. Divergence attribution to source defs. Pixel previews. Emit scalar fallbacks. Project IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
+Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Multiple UI factories in host hot reload. General model browsing. Metal and Vulkan performance measurements. Gated-model login. Model conversion. Automatic oracle mining. Semantic timeline alignment. Divergence attribution to source defs. Pixel previews. Emit scalar fallbacks. Project IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
