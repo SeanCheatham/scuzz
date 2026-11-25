@@ -45,7 +45,8 @@ class Service(http.server.BaseHTTPRequestHandler):
             if self.path == "/stream-large":
                 self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()
-                for _ in range(17): self.wfile.write(b"10000\r\n" + b"a" * 65536 + b"\r\n")
+                # 33 chunks of 64 KiB. The body is larger than the 2 MiB in-memory cap.
+                for _ in range(33): self.wfile.write(b"10000\r\n" + b"a" * 65536 + b"\r\n")
                 self.wfile.write(b"0\r\n\r\n")
                 return
             if self.path == "/large": body = b"a" * (1024 * 1024 + 1)

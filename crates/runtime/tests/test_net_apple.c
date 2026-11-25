@@ -93,7 +93,7 @@ int scuzz_net_apple_proof(void) {
   check(output_fd >= 0, "create stream output path");
   if (output_fd >= 0) close(output_fd);
   const char *stream_paths[] = {"/large", "/stream-large"};
-  const int64_t stream_sizes[] = {1024 * 1024 + 1, 17 * 65536};
+  const int64_t stream_sizes[] = {1024 * 1024 + 1, 33 * 65536};
   for (size_t i = 0; i < 2; i++) {
     r = run(stream_request(base, stream_paths[i], output));
     check_http(r, 200, stream_paths[i]);
