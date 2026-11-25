@@ -367,13 +367,18 @@ It uses the same replacement rules as `Fs.write`.
 `Fs.write` accepts `String`.
 `Net.httpGetBytes` reads one GET response body into `Bytes`.
 `Net.httpGet` returns `String`.
-`Net.httpGet` and `Net.httpGetBytes` keep the 1 MiB body limit.
+`Net.httpGet` and `Net.httpGetBytes` keep the 2 MiB body cap.
+A larger body fails.
+The calls do not stream.
 `Net.httpPost` sends one string body.
 It returns the status, the headers, and a string body.
 It uses the same client as `Net.httpGet`.
-It keeps the 1 MiB body limit.
+It keeps the 2 MiB body cap.
 It does not follow a redirect.
 TCP and UDP bodies are `String`.
+A native TCP client connects to a local host and port, sends bytes, reads until the peer closes, and closes the socket.
+The bytes can include a value that is not valid UTF-8.
+The existing read timeout still applies.
 Read a file from `Net.httpGetToFile` with `Fs.readBytes`.
 A native `Net.httpGet` to a local peer that accepts and sends no response returns a timeout.
 The default wait is one second.
@@ -389,7 +394,7 @@ The response body is three bytes that are not valid UTF-8.
 Those bytes are `ff fe 80`.
 Those bytes reach the program.
 Both calls run on one browser thread.
-Both calls keep the 1 MiB body limit.
+Both calls keep the 2 MiB body cap.
 The text response body reaches the program.
 Simulation rejects a live external host.
 `Net.httpPost` sends one string body to a same-origin URL.
@@ -403,7 +408,7 @@ The call aborts the request before it returns.
 The page continues.
 A timeout cannot interrupt `Net.httpPost` on this target.
 That call waits until the body finishes or the host gives up.
-`Net.httpGet` and `Net.httpPost` keep the 1 MiB body limit.
+`Net.httpGet` and `Net.httpPost` keep the 2 MiB body cap.
 Neither call follows a redirect.
 Other Net calls fail on web.
 A file in the browser working directory remains after a page reload.

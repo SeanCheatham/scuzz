@@ -1,0 +1,24 @@
+def payload(): String =
+  Str.concat(Str.repeat("a", 1048576), "b")
+
+def handle(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (path, method, _, _) => if (path == "/get" && method == "GET" || path == "/post" && method == "POST") IO.pure((200, Map.empty(), payload())) else IO.pure((404, Map.empty(), ""))
+  }
+
+def lineOf(tag: String, status: Int, body: String): String =
+  s"$tag:${Str.fromInt(status)}:${Str.fromInt(Str.byteLen(body))}"
+
+def runGet(): IO[String] =
+  IO.both(Net.serveOnce(18084, handle), Net.httpGet("http://127.0.0.1:18084/get", Map.empty())).map(pair => lineOf("get", pair._2._1, pair._2._3))
+
+def runPost(): IO[String] =
+  IO.both(Net.serveOnce(18084, handle), Net.httpPost("http://127.0.0.1:18084/post", Map.empty(), "ping")).map(pair => lineOf("post", pair._2._1, pair._2._3))
+
+@main def main: IO[Unit] =
+  for {
+    get <- runGet()
+    post <- runPost()
+    line = s"http:large:$get:$post"
+    _ <- if (line == "http:large:get:200:1048577:post:200:1048577") IO.println(line) else IO.fail(line)
+  } yield ()

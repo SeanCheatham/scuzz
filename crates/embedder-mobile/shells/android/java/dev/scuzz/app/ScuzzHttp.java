@@ -28,7 +28,8 @@ import java.util.concurrent.TimeUnit;
 
 /** Platform HTTP client transport for Android Net calls using HttpURLConnection. */
 public final class ScuzzHttp {
-  private static final int HTTP_BODY_MAX = 1024 * 1024;
+  /* Keep this equal to SZ_HTTP_BODY_MAX. */
+  private static final int HTTP_BODY_MAX = 2 * 1024 * 1024;
   private static final int HTTP_HEADERS_MAX = 16384;
 
   private static final ExecutorService EXECUTOR =

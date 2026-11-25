@@ -67,12 +67,15 @@ class Service(http.server.BaseHTTPRequestHandler):
                     assert self.headers["Authorization"] == "Bearer sync-tok"
                 self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()
-                for _ in range(17):
+                # 33 chunks of 64 KiB. The body is larger than the 2 MiB in-memory cap.
+                for _ in range(33):
                     self.wfile.write(b"10000\r\n" + b"a" * 65536 + b"\r\n")
                 self.wfile.write(b"0\r\n\r\n")
                 return
             if self.path == "/large":
                 body = b"a" * (1024 * 1024 + 1)
+            if self.path == "/over-cap":
+                body = b"a" * (2 * 1024 * 1024 + 1)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if self.command != "HEAD":

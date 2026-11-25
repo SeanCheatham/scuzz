@@ -88,6 +88,9 @@ iOS stops the console launch process before the selected simulator app.
 CLI and server HTTPS use OpenSSL.
 A native GET to a peer that accepts and sends no response fails within one second.
 `Net.httpGet` closes its socket before it returns.
+In-memory HTTP responses keep a 2 MiB body cap.
+A native TCP client reads until the peer closes.
+The bytes can include a value that is not valid UTF-8.
 iOS and macOS GUI clients use URLSession with platform certificate trust.
 Android clients use HttpURLConnection with platform certificate trust.
 Platform HTTP clients verify loopback certificates.
@@ -128,7 +131,7 @@ A timeout cannot interrupt `Net.httpPost`.
 That call waits until the body finishes or the host gives up.
 `Net.httpPost` sends one string body to a same-origin URL.
 A cross-origin POST does not leave the page.
-Each call keeps the 1 MiB body limit and does not follow a redirect.
+Each call keeps the 2 MiB body cap and does not follow a redirect.
 Simulation rejects a live external host.
 Other Net calls fail at the call (`Net: not available on web`).
 A process effect fails at `fork` (`Sys.exec: fork failed`). The web build links every def in the package and its path

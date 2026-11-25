@@ -1,0 +1,4 @@
+[package]
+name = "http-body"
+version = "0.1.0"
+description = "Read an HTTP body larger than 1 MiB"

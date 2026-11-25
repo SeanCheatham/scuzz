@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
+enum { HTTP_BODY_MAX = SZ_HTTP_BODY_MAX, HTTP_HEADERS_MAX = 16384 };
 
 /* Delegate callbacks own only Foundation values. The fiber owns runtime values. */
 @interface ScuzzHttpRequest : NSObject <NSURLSessionDataDelegate, NSURLSessionDownloadDelegate>

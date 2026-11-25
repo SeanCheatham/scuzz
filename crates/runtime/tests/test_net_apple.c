@@ -77,7 +77,14 @@ int scuzz_net_apple_proof(void) {
   SzIoResult r = run(request(base, "/redirect", "GET", NULL));
   check(status(r, 302), "redirect stays visible"); drop(r);
   r = run(request(base, "/status", "GET", NULL)); check(status(r, 503), "HTTP error is a response"); drop(r);
-  const char *invalid[] = {"/large", "/stream-large", "/headers-large"};
+  r = run(request(base, "/large", "GET", NULL));
+  check_http(r, 200, "/large");
+  if (r.ok) {
+    SzString *payload = (SzString *)((SzPair *)((SzPair *)r.value)->right)->right;
+    check(sz_string_len(payload) == 1024 * 1024 + 1, "large body bytes");
+  }
+  drop(r);
+  const char *invalid[] = {"/over-cap", "/stream-large", "/headers-large"};
   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++) {
     r = run(request(base, invalid[i], "GET", NULL)); check(!r.ok, invalid[i]); drop(r);
   }
@@ -86,7 +93,7 @@ int scuzz_net_apple_proof(void) {
   check(output_fd >= 0, "create stream output path");
   if (output_fd >= 0) close(output_fd);
   const char *stream_paths[] = {"/large", "/stream-large"};
-  const int64_t stream_sizes[] = {1024 * 1024 + 1, 17 * 65536};
+  const int64_t stream_sizes[] = {1024 * 1024 + 1, 33 * 65536};
   for (size_t i = 0; i < 2; i++) {
     r = run(stream_request(base, stream_paths[i], output));
     check_http(r, 200, stream_paths[i]);

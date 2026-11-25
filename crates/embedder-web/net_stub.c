@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define WEB_BODY_MAX (1024 * 1024)
+#define WEB_BODY_MAX SZ_HTTP_BODY_MAX
 #define WEB_HDR_MAX 16384
 
 int sz_net_host_equal(const char *a, const char *b);

@@ -246,7 +246,15 @@ static int run_proof(JNIEnv *jenv) {
   check(status(r, 503), "HTTP 503 is a response");
   drop(r);
 
-  const char *oversized[] = {"/large", "/stream-large", "/headers-large"};
+  r = run(request(base, "/large", "GET", NULL));
+  check_http(r, 200, "/large");
+  if (r.ok) {
+    SzString *payload = (SzString *)((SzPair *)((SzPair *)r.value)->right)->right;
+    check(sz_string_len(payload) == 1024 * 1024 + 1, "large body bytes");
+  }
+  drop(r);
+
+  const char *oversized[] = {"/over-cap", "/stream-large", "/headers-large"};
   for (size_t i = 0; i < sizeof oversized / sizeof *oversized; i++) {
     r = run(request(base, oversized[i], "GET", NULL));
     check(!r.ok && r.error && r.error->code == 6, oversized[i]);
@@ -258,7 +266,7 @@ static int run_proof(JNIEnv *jenv) {
   check(output_fd >= 0, "create stream output path");
   if (output_fd >= 0) close(output_fd);
   const char *stream_paths[] = {"/large", "/stream-large"};
-  const int64_t stream_sizes[] = {1024 * 1024 + 1, 17 * 65536};
+  const int64_t stream_sizes[] = {1024 * 1024 + 1, 33 * 65536};
   for (size_t i = 0; i < 2; i++) {
     r = run(stream_request(base, stream_paths[i], headers, output));
     check_http(r, 200, stream_paths[i]);
