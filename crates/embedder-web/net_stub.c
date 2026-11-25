@@ -1,4 +1,6 @@
-/* Browser Net. HTTP GET and HTTP POST use fetch on this thread. Other Net calls fail. */
+/* Browser Net. HTTP GET and HTTP POST use fetch on this thread.
+ * A GET aborts when its read wait ends. POST keeps the host wait.
+ * Other Net calls fail. */
 #include "scuzz_rt.h"
 
 #include <emscripten.h>
@@ -9,6 +11,7 @@
 #define WEB_HDR_MAX 16384
 
 int sz_net_host_equal(const char *a, const char *b);
+int64_t sz_net_http_wait_ms(SzMap *headers, int64_t fallback);
 
 static SzIo *no_net(void) { return sz_io_fail_cstr("Net: not available on web"); }
 
@@ -29,8 +32,9 @@ static int web_loopback(const char *host) {
          sz_net_host_equal(host, "localhost");
 }
 
-/* status_out receives the HTTP status. A negative return is an error. */
-EM_ASYNC_JS(int, web_http_fetch, (const char *method, const char *url, const char *req_headers, const char *req_body, int req_len, char *body, int body_cap, char *hdr, int hdr_cap, int *status_out), {
+/* status_out receives the HTTP status. A negative return is an error.
+ * wait_ms > 0 aborts the request when that wait ends. Zero keeps the host wait. */
+EM_ASYNC_JS(int, web_http_fetch, (const char *method, const char *url, const char *req_headers, const char *req_body, int req_len, char *body, int body_cap, char *hdr, int hdr_cap, int *status_out, int wait_ms), {
   const verb = UTF8ToString(Number(method));
   const target = UTF8ToString(Number(url));
   const raw = UTF8ToString(Number(req_headers));
@@ -49,28 +53,44 @@ EM_ASYNC_JS(int, web_http_fetch, (const char *method, const char *url, const cha
     init.mode = 'same-origin';
     init.body = len ? HEAPU8.slice(start, start + len) : new Uint8Array(0);
   }
+  const wait = Number(wait_ms) >>> 0;
+  let timer = 0;
+  let controller = null;
+  if (wait > 0) {
+    controller = new AbortController();
+    init.signal = controller.signal;
+    timer = setTimeout(() => controller.abort(), wait);
+  }
+  const stop = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = 0;
+  };
   let response;
   try {
     response = await fetch(target, init);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    stop();
+    if (bytes.length > body_cap) return -2;
+    if (bytes.length) HEAPU8.set(bytes, Number(body));
+    const lines = [];
+    response.headers.forEach((value, name) => lines.push(name + ':' + value));
+    const encoded = new TextEncoder().encode(lines.join('\n'));
+    if (encoded.length + 1 > hdr_cap) return -3;
+    if (encoded.length) HEAPU8.set(encoded, Number(hdr));
+    HEAPU8[Number(hdr) + encoded.length] = 0;
+    const status = response.status >>> 0;
+    const slot = Number(status_out);
+    HEAPU8[slot] = status & 255;
+    HEAPU8[slot + 1] = (status >>> 8) & 255;
+    HEAPU8[slot + 2] = (status >>> 16) & 255;
+    HEAPU8[slot + 3] = (status >>> 24) & 255;
+    return bytes.length;
   } catch (error) {
+    stop();
+    if (wait > 0 && error && (error.name === 'AbortError' || error.code === 20)) return -4;
     return -1;
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > body_cap) return -2;
-  if (bytes.length) HEAPU8.set(bytes, Number(body));
-  const lines = [];
-  response.headers.forEach((value, name) => lines.push(name + ':' + value));
-  const encoded = new TextEncoder().encode(lines.join('\n'));
-  if (encoded.length + 1 > hdr_cap) return -3;
-  if (encoded.length) HEAPU8.set(encoded, Number(hdr));
-  HEAPU8[Number(hdr) + encoded.length] = 0;
-  const status = response.status >>> 0;
-  const slot = Number(status_out);
-  HEAPU8[slot] = status & 255;
-  HEAPU8[slot + 1] = (status >>> 8) & 255;
-  HEAPU8[slot + 2] = (status >>> 16) & 255;
-  HEAPU8[slot + 3] = (status >>> 24) & 255;
-  return bytes.length;
 });
 
 typedef struct {
@@ -178,11 +198,24 @@ static void *web_fetch_thunk(void *env) {
   body = sz_alloc(WEB_BODY_MAX);
   hdr = sz_alloc(WEB_HDR_MAX);
   hdr[0] = '\0';
-  n = web_http_fetch(method, url, blob, raw, (int)blen, body, WEB_BODY_MAX, hdr, WEB_HDR_MAX, &status);
+  {
+    int wait_ms = 0;
+    if (!post) {
+      int64_t wait64 = sz_net_http_wait_ms(req->headers, 1000);
+      if (wait64 < 1)
+        wait64 = 1000;
+      if (wait64 > 2147483647)
+        wait64 = 2147483647;
+      wait_ms = (int)wait64;
+    }
+    n = web_http_fetch(method, url, blob, raw, (int)blen, body, WEB_BODY_MAX, hdr, WEB_HDR_MAX, &status, wait_ms);
+  }
   sz_free(blob);
   if (n < 0) {
     sz_free(body);
     sz_free(hdr);
+    if (n == -4)
+      return web_err("Net.httpGet: read timed out");
     if (n == -2)
       return web_err(post ? "Net.httpPost: response too large" : "Net.httpGet: response too large");
     if (n == -3)

@@ -47,6 +47,8 @@ var Module = {
   // One GET target for a package that reads SCUZZ_WEB_GET. The proof host serves it.
   preRun: [function () {
     if (typeof ENV !== 'undefined') ENV.SCUZZ_WEB_GET = location.origin + '/scuzz/body';
+    // One GET target for a package that reads SCUZZ_WEB_GET_TIMEOUT. The proof host accepts it and sends no body.
+    if (typeof ENV !== 'undefined') ENV.SCUZZ_WEB_GET_TIMEOUT = location.origin + '/scuzz/hang';
     // One POST target for a package that reads SCUZZ_WEB_POST. The proof host serves it.
     if (typeof ENV !== 'undefined') ENV.SCUZZ_WEB_POST = location.origin + '/scuzz/post';
     // One byte GET target for a package that reads SCUZZ_WEB_BYTES. The proof host serves it.

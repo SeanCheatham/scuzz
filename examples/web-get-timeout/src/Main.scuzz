@@ -1,0 +1,26 @@
+def externalUrl(): String =
+  "https://example.com/live"
+
+def rejected(message: String): Bool =
+  Str.contains(message, "no stub for URL") || Str.contains(message, "non-loopback")
+
+def timedOut(message: String): Bool =
+  Str.contains(message, "timed out")
+
+def lineFor(sim: String, url: String): IO[String] =
+  if (sim == "1" && url == "") IO.attempt(Net.httpGet(externalUrl(), Map.empty())).map(result => result match {
+  case Result.Ok(_) => "web-get:live"
+  case Result.Err(message) => if (rejected(message)) "sim:rejected" else message
+}) else if (url == "") IO.pure("web-get-timeout:missing") else IO.attempt(Net.httpGet(url, Map.empty())).map(result => result match {
+  case Result.Ok(_) => "web-get:answered"
+  case Result.Err(message) => if (timedOut(message)) "web-get:timeout" else message
+})
+
+@main def main: IO[Unit] =
+  for {
+    sim <- Sys.getenv("SCUZZ_TESTRT")
+    url <- Sys.getenv("SCUZZ_WEB_GET_TIMEOUT")
+    line <- lineFor(sim, url)
+    _ <- IO.println(line)
+    _ <- if (url == "") IO.pure(()) else Ui.run(_ => View.column([View.text("Web get timeout"), View.text(line)]))
+  } yield ()

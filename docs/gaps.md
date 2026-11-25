@@ -397,10 +397,14 @@ A cross-origin POST does not leave the page.
 It returns the status and the string body.
 One browser package calls `Net.httpPost`.
 The call runs on one browser thread.
-A timeout cannot interrupt `Net.httpGet` or `Net.httpPost` on this target.
-The call waits until the body finishes or the host gives up.
-The call keeps the 1 MiB body limit.
-The call does not follow a redirect.
+A read timeout aborts `Net.httpGet` on this target when the peer accepts and sends no body.
+The default wait is one second.
+The call aborts the request before it returns.
+The page continues.
+A timeout cannot interrupt `Net.httpPost` on this target.
+That call waits until the body finishes or the host gives up.
+`Net.httpGet` and `Net.httpPost` keep the 1 MiB body limit.
+Neither call follows a redirect.
 Other Net calls fail on web.
 A file in the browser working directory remains after a page reload.
 One browser package writes three bytes that are not valid UTF-8.

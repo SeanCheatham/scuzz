@@ -121,8 +121,11 @@ cross-origin isolation headers.
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
 and resize events. Wheel and canvas touch listeners that cancel the event
 register as non-passive. `Net.httpGet` and `Net.httpPost` run on the browser thread and return the response body to the program.
-A timeout cannot interrupt those calls.
-Each call waits until the body finishes or the host gives up.
+A read timeout aborts `Net.httpGet`.
+The default wait is one second.
+The page continues after that error.
+A timeout cannot interrupt `Net.httpPost`.
+That call waits until the body finishes or the host gives up.
 `Net.httpPost` sends one string body to a same-origin URL.
 A cross-origin POST does not leave the page.
 Each call keeps the 1 MiB body limit and does not follow a redirect.

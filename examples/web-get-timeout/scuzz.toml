@@ -1,0 +1,9 @@
+[package]
+name = "web-get-timeout"
+version = "0.1.0"
+description = "Time out one browser HTTP GET"
+
+[ui]
+default_runtime = "headless"
+headless_size = [400, 200]
+headless_scale = 1.0
