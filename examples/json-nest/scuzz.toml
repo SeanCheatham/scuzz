@@ -1,0 +1,4 @@
+[package]
+name = "json-nest"
+version = "0.1.0"
+description = "Option list, record map, and optional record list JSON decode"

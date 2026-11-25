@@ -101,10 +101,10 @@ def decodeReason(arg: Expr, ty: String, reason: String, dec: DecodeCtx): Expr =
   if (reason != "") Expr.ECall("Json.decode", Expr.EStr(reason, dec.off) :: [], dec.off) else decodeTarget(arg, ty, dec)
 
 def decodeTarget(arg: Expr, ty: String, dec: DecodeCtx): Expr =
-  if (isStringMapTy(ty)) bindStringMap(arg, dec) else if (isStringSetTy(ty)) bindStringSet(arg, dec) else bindDecode(arg, recordName(ty), dec)
+  if (isStringMapTy(ty)) bindStringMap(arg, dec) else if (isRecordMapTy(ty, dec)) bindRecordMap(arg, recordMapName(ty), dec) else if (isStringSetTy(ty)) bindStringSet(arg, dec) else bindDecode(arg, recordName(ty), dec)
 
 def topReason(ty: String, dec: DecodeCtx): String =
-  if (isStringMapTy(ty) || isStringSetTy(ty)) "" else if (isRecordTy(ty, dec)) fieldProblems(recordFields(recordName(ty), dec.enums), "", dec, 32, recordName(ty) :: []) else "Json.decode needs a record result"
+  if (isStringMapTy(ty) || isStringSetTy(ty)) "" else if (isRecordMapTy(ty, dec)) fieldProblems(recordFields(recordMapName(ty), dec.enums), "", dec, 32, recordMapName(ty) :: []) else if (isRecordTy(ty, dec)) fieldProblems(recordFields(recordName(ty), dec.enums), "", dec, 32, recordName(ty) :: []) else "Json.decode needs a record result"
 
 def isStringMapTy(ty: String): Bool =
   isStringMap(Type.parse(ty))
@@ -123,6 +123,18 @@ def isStringSet(ty: Ty): Bool =
     case Ty.App(name, args) => name == "Set" && List.len(args) == 1 && isStringTy(List.at(args, 0))
     case _ => false
   }
+
+def isRecordMapTy(ty: String, dec: DecodeCtx): Bool =
+  isRecordMap(Type.parse(ty), dec)
+
+def isRecordMap(ty: Ty, dec: DecodeCtx): Bool =
+  ty match {
+    case Ty.App(name, args) => name == "Map" && List.len(args) == 2 && isStringTy(List.at(args, 0)) && isPlainRecord(recordNameOf(List.at(args, 1)), dec.enums)
+    case _ => false
+  }
+
+def recordMapName(ty: String): String =
+  recordNameOf(List.at(Type.appArgs(Type.parse(ty)), 1))
 
 def bindStringMap(arg: Expr, dec: DecodeCtx): Expr =
   Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], stringMapBody(recvName(dec.off), dec), dec.off)
@@ -168,6 +180,42 @@ def mapKeyName(dec: DecodeCtx): String =
 
 def mapValName(dec: DecodeCtx): String =
   itemName(dec.off, "m")
+
+def bindRecordMap(arg: Expr, typeName: String, dec: DecodeCtx): Expr =
+  Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], recordMapBody(recvName(dec.off), typeName, dec), dec.off)
+
+def recordMapBody(recv: String, typeName: String, dec: DecodeCtx): Expr =
+  Expr.EAscribe(Expr.EIf(jsonIsObj(recv, dec.off), recordMapFold(recv, typeName, dec), errText(dec.off, "Json.decode: wrong case"), dec.off), resultOf(mapTy(typeName)), dec.off)
+
+def mapTy(typeName: String): String =
+  Str.concat("Map[String, ", Str.concat(typeName, "]"))
+
+def recordMapFold(recv: String, typeName: String, dec: DecodeCtx): Expr =
+  call3("List.foldLeft", jsonPairs(recv, dec.off), recordMapSeed(typeName, dec.off), recordMapLam(typeName, dec), dec.off)
+
+def recordMapSeed(typeName: String, off: Int): Expr =
+  Expr.EAscribe(okValue(Expr.EAscribe(Expr.EMethod(Expr.EVar("Map", off), "empty", [], off), mapTy(typeName), off), off), resultOf(mapTy(typeName)), off)
+
+def recordMapLam(typeName: String, dec: DecodeCtx): Expr =
+  Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", dec.off), Arm(pairPat(mapAccName(dec), mapPairName(dec)), "", recordMapOnPair(typeName, dec)) :: [], dec.off))
+
+def recordMapOnPair(typeName: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(mapPairName(dec), dec.off), Arm(pairPat(mapKeyName(dec), mapValName(dec)), "", recordMapOnAcc(typeName, dec)) :: [], dec.off)
+
+def recordMapOnAcc(typeName: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EVar(mapAccName(dec), dec.off), Arm(okBind(dec.off, "m"), "", recordMapOnValue(typeName, dec)) :: Arm(errPat(dec.off, "m"), "", errPass("m", dec.off)) :: [], dec.off)
+
+def recordMapOnValue(typeName: String, dec: DecodeCtx): Expr =
+  Expr.EIf(jsonIsObj(mapValName(dec), dec.off), recordMapPut(typeName, dec), mapKeyErr(dec), dec.off)
+
+def recordMapPut(typeName: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(Expr.EAscribe(recordMapRead(typeName, dec), resultOf(typeName), dec.off), Arm(okBind(dec.off, "mv"), "", recordMapSet(dec)) :: Arm(errPat(dec.off, "mv"), "", errPass("mv", dec.off)) :: [], dec.off)
+
+def recordMapRead(typeName: String, dec: DecodeCtx): Expr =
+  if (List.contains(dec.recs, typeName)) callDec(recFun(typeName), Expr.EVar(mapValName(dec), dec.off), Expr.EVar(mapKeyName(dec), dec.off), dec.off) else genRecord(mapValName(dec), typeName, Expr.EVar(mapKeyName(dec), dec.off), "mv", dec, 32)
+
+def recordMapSet(dec: DecodeCtx): Expr =
+  okValue(Expr.EMethod(Expr.EVar("Map", dec.off), "set", Expr.EVar(valName(dec.off, "m"), dec.off) :: Expr.EVar(mapKeyName(dec), dec.off) :: Expr.EVar(valName(dec.off, "mv"), dec.off) :: [], dec.off), dec.off)
 
 def bindStringSet(arg: Expr, dec: DecodeCtx): Expr =
   Expr.EFor(Bind(false, recvName(dec.off), arg) :: [], stringSetBody(recvName(dec.off), dec), dec.off)
@@ -279,22 +327,23 @@ def nameProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: Lis
 def listProblem(elem: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String], optOk: Bool): String =
   elem match {
     case Ty.Named(name) => namedListProblem(name, path, dec, fuel, seen)
-    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1 && fuel > 0) listProblem(List.at(args, 0), path, dec, fuel - 1, seen, false) else if (optOk && name == "Option" && List.len(args) == 1) optionElemProblem(List.at(args, 0), path) else badRead(path)
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1 && fuel > 0) listProblem(List.at(args, 0), path, dec, fuel - 1, seen, false) else if (optOk && name == "Option" && List.len(args) == 1) optionElemProblem(List.at(args, 0), path, dec, fuel, seen) else badRead(path)
     case _ => badRead(path)
   }
 
 def namedListProblem(name: String, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   if (isScalar(name) || isUnitEnum(name, dec)) "" else if (isPlainRecord(name, dec.enums) && List.contains(seen, name)) "" else recordProblem(name, path, dec, fuel, seen)
 
-def optionElemProblem(inner: Ty, path: String): String =
+def optionElemProblem(inner: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   inner match {
-    case Ty.Named(name) => if (isScalar(name)) "" else badRead(path)
+    case Ty.Named(name) => if (isScalar(name)) "" else if (isPlainRecord(name, dec.enums)) recordProblem(name, path, dec, fuel, seen) else badRead(path)
     case _ => badRead(path)
   }
 
 def optionProblem(inner: Ty, path: String, dec: DecodeCtx, fuel: Int, seen: List[String]): String =
   inner match {
     case Ty.Named(name) => if (isScalar(name) || isUnitEnum(name, dec)) "" else recordProblem(name, path, dec, fuel, seen)
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1 && isStringTy(List.at(args, 0))) "" else badRead(path)
     case _ => badRead(path)
   }
 
@@ -401,8 +450,18 @@ def readOption(inner: Ty, recv: String, ctor: String, name: String, rest: List[P
 def optionDecoded(inner: Ty, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx, fuel: Int): Expr =
   inner match {
     case Ty.Named(typeName) => if (isScalar(typeName)) scalarOption(if (typeName == "String") "Str" else typeName, typeName, recv, name, fieldPath, fieldSlot, dec) else if (isUnitEnum(typeName, dec)) enumOption(typeName, recv, name, fieldPath, fieldSlot, dec) else recordOption(typeName, recv, name, fieldPath, fieldSlot, dec, fuel)
+    case Ty.App(typeName, args) => if (typeName == "List" && List.len(args) == 1 && isStringTy(List.at(args, 0))) stringListOption(recv, name, fieldPath, fieldSlot, dec) else errExpr(dec.off, wrongExpr(fieldPath, dec.off))
     case _ => errExpr(dec.off, wrongExpr(fieldPath, dec.off))
   }
+
+def stringListOption(recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(jsonField(recv, name, dec.off), Arm(nullPat(), "", okValue(optionNone("List[String]", dec.off), dec.off)) :: Arm(okBind(dec.off, fieldSlot), "", stringListSome(fieldPath, fieldSlot, dec)) :: Arm(errPat(dec.off, fieldSlot), "", missingOption("List[String]", fieldPath, fieldSlot, dec)) :: [], dec.off)
+
+def stringListSome(fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
+  Expr.EIf(jsonIsArr(valName(dec.off, fieldSlot), dec.off), stringListFold(valName(dec.off, fieldSlot), fieldPath, fieldSlot, dec), errExpr(dec.off, wrongExpr(fieldPath, dec.off)), dec.off)
+
+def stringListFold(jsonVar: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
+  Expr.EMatch(call3("List.foldLeft", call1("List.zipWithIndex", jsonArr(jsonVar, dec.off), dec.off), okSeed(Type.tNamed("String"), dec.off), foldLam(Type.tNamed("String"), fieldPath, fieldSlot, dec, 32), dec.off), Arm(okBind(dec.off, joinSlot(fieldSlot, "x")), "", okValue(optionSome(call1("List.reverse", Expr.EVar(valName(dec.off, joinSlot(fieldSlot, "x")), dec.off), dec.off), dec.off), dec.off)) :: Arm(errPat(dec.off, joinSlot(fieldSlot, "x")), "", errPass(joinSlot(fieldSlot, "x"), dec.off)) :: [], dec.off)
 
 def scalarOption(tag: String, typeName: String, recv: String, name: String, fieldPath: Expr, fieldSlot: String, dec: DecodeCtx): Expr =
   Expr.EMatch(jsonField(recv, name, dec.off), Arm(nullPat(), "", okValue(optionNone(typeName, dec.off), dec.off)) :: Arm(okTag(tag, dec.off, fieldSlot), "", okValue(optionSome(Expr.EVar(valName(dec.off, fieldSlot), dec.off), dec.off), dec.off)) :: Arm("Result.Ok(_)", "", errExpr(dec.off, wrongExpr(fieldPath, dec.off))) :: Arm(errPat(dec.off, fieldSlot), "", missingOption(typeName, fieldPath, fieldSlot, dec)) :: [], dec.off)
@@ -441,10 +500,7 @@ def optSlot(slot: String): String =
   joinSlot(slot, "o")
 
 def optionResult(inner: Ty): String =
-  inner match {
-    case Ty.Named(name) => Str.concat("Result[String, Option[", Str.concat(name, "]]"))
-    case _ => "Result[String, Option[String]]"
-  }
+  Str.concat("Result[String, Option[", Str.concat(Type.show(inner), "]]"))
 
 def kindArms(ty: Ty, recv: String, ctor: String, rest: List[Param], done: List[Expr], fieldPath: Expr, fieldSlot: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): List[Arm] =
   ty match {
@@ -604,7 +660,7 @@ def foldAcc(elem: Ty, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr
 def elemBody(elem: Ty, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
   elem match {
     case Ty.Named(name) => namedElem(name, item, idx, xs, path, slot, dec, fuel)
-    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1) listElem(List.at(args, 0), item, idx, xs, path, slot, dec, fuel) else if (name == "Option" && List.len(args) == 1) optionListElem(List.at(args, 0), item, idx, xs, path, slot, dec) else errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
+    case Ty.App(name, args) => if (name == "List" && List.len(args) == 1) listElem(List.at(args, 0), item, idx, xs, path, slot, dec, fuel) else if (name == "Option" && List.len(args) == 1) optionListElem(List.at(args, 0), item, idx, xs, path, slot, dec, fuel) else errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
     case _ => errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
   }
 
@@ -614,11 +670,23 @@ def listElem(elem: Ty, item: String, idx: String, xs: String, path: Expr, slot: 
 def listElemFold(elem: Ty, item: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
   Expr.EMatch(call3("List.foldLeft", call1("List.zipWithIndex", jsonArr(item, dec.off), dec.off), okSeed(elem, dec.off), foldLam(elem, path, slot, dec, fuel), dec.off), Arm(okBind(dec.off, joinSlot(slot, "x")), "", okConsExpr(call1("List.reverse", Expr.EVar(valName(dec.off, joinSlot(slot, "x")), dec.off), dec.off), xs, dec.off)) :: Arm(errPat(dec.off, joinSlot(slot, "x")), "", errPass(joinSlot(slot, "x"), dec.off)) :: [], dec.off)
 
-def optionListElem(inner: Ty, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
+def optionListElem(inner: Ty, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
   inner match {
-    case Ty.Named(name) => if (isScalar(name)) scalarOptionElem(if (name == "String") "Str" else name, name, item, idx, xs, path, slot, dec) else errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
+    case Ty.Named(name) => if (isScalar(name)) scalarOptionElem(if (name == "String") "Str" else name, name, item, idx, xs, path, slot, dec) else if (isPlainRecord(name, dec.enums)) recordOptionElem(name, item, idx, xs, path, slot, dec, fuel) else errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
     case _ => errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))
   }
+
+def recordOptionElem(typeName: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EVar(item, dec.off), Arm(jsonNullPat(), "", okConsExpr(optionNone(typeName, dec.off), xs, dec.off)) :: Arm("_", "", recordOptionPresent(typeName, item, idx, xs, path, slot, dec, fuel)) :: [], dec.off)
+
+def recordOptionPresent(typeName: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EIf(jsonIsObj(item, dec.off), recordOptionTake(typeName, item, idx, xs, path, slot, dec, fuel), errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off)), dec.off)
+
+def recordOptionTake(typeName: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  Expr.EMatch(Expr.EAscribe(recordOptionRead(typeName, item, idx, path, slot, dec, fuel), resultOf(typeName), dec.off), Arm(okRec(dec.off, joinSlot(slot, "e")), "", okConsExpr(optionSome(Expr.EVar(recName(dec.off, joinSlot(slot, "e")), dec.off), dec.off), xs, dec.off)) :: Arm(errPat(dec.off, joinSlot(slot, "e")), "", errPass(joinSlot(slot, "e"), dec.off)) :: [], dec.off)
+
+def recordOptionRead(typeName: String, item: String, idx: String, path: Expr, slot: String, dec: DecodeCtx, fuel: Int): Expr =
+  if (List.contains(dec.recs, typeName)) callDec(recFun(typeName), Expr.EVar(item, dec.off), indexPath(path, idx, dec.off), dec.off) else genRecord(item, typeName, indexPath(path, idx, dec.off), joinSlot(slot, "e"), dec, fuel - 1)
 
 def scalarOptionElem(tag: String, typeName: String, item: String, idx: String, xs: String, path: Expr, slot: String, dec: DecodeCtx): Expr =
   Expr.EMatch(Expr.EVar(item, dec.off), Arm(jsonNullPat(), "", okConsExpr(optionNone(typeName, dec.off), xs, dec.off)) :: Arm(jsonPat(tag, dec.off, joinSlot(slot, "v")), "", okConsExpr(optionSome(Expr.EVar(valName(dec.off, joinSlot(slot, "v")), dec.off), dec.off), xs, dec.off)) :: Arm("_", "", errExpr(dec.off, wrongExpr(indexPath(path, idx, dec.off), dec.off))) :: [], dec.off)
@@ -939,7 +1007,7 @@ def reachTy(ty: String, ens: List[En], aliases: List[Alias], fuel: Int, seen: Li
 def reachParsed(ty: Ty, ens: List[En], aliases: List[Alias], fuel: Int, seen: List[String]): (List[String], List[String]) =
   ty match {
     case Ty.Named(name) => reachName(name, ens, aliases, fuel, seen)
-    case Ty.App(name, args) => if ((name == "List" || name == "Option") && List.len(args) == 1) reachParsed(List.at(args, 0), ens, aliases, fuel - 1, seen) else noHelp()
+    case Ty.App(name, args) => if ((name == "List" || name == "Option") && List.len(args) == 1) reachParsed(List.at(args, 0), ens, aliases, fuel - 1, seen) else if (name == "Map" && List.len(args) == 2 && isStringTy(List.at(args, 0))) reachParsed(List.at(args, 1), ens, aliases, fuel - 1, seen) else noHelp()
     case _ => noHelp()
   }
 
