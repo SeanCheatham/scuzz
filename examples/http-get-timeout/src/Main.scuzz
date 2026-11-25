@@ -1,0 +1,31 @@
+def hold(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (_, _, _, _) => IO.sleep(30000).flatMap(_ => IO.pure((200, Map.empty(), "late")))
+  }
+
+def answer(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (_, _, _, _) => IO.pure((200, Map.empty(), "up"))
+  }
+
+def isTimeout(message: String): Bool =
+  message == "timeout" || Str.contains(message, "timed out")
+
+def afterTimeout(result: Result[String, (Unit, (Int, Map[String, String], String))]): IO[String] =
+  result match {
+    case Result.Err(message) => if (isTimeout(message)) IO.pure("http:get:timeout") else IO.fail(message)
+    case Result.Ok(_) => IO.fail("http:get:answered")
+  }
+
+def confirmClosed(line: String): IO[Unit] =
+  for {
+    pair <- IO.both(Net.serveOnce(18083, answer), Net.httpGet("http://127.0.0.1:18083/up", Map.empty()))
+    _ <- if (line == "http:get:timeout" && pair._2._1 == 200 && pair._2._3 == "up") IO.println(line) else IO.fail("http:get:open")
+  } yield ()
+
+@main def main: IO[Unit] =
+  for {
+    result <- IO.attempt(IO.timeout(2000, IO.both(Net.serveOnce(18083, hold), Net.httpGet("http://127.0.0.1:18083/hold", Map.empty()))))
+    line <- afterTimeout(result)
+    _ <- confirmClosed(line)
+  } yield ()

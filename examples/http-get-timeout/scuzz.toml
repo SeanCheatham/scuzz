@@ -1,0 +1,4 @@
+[package]
+name = "http-get-timeout"
+version = "0.1.0"
+description = "Time out a GET when the peer sends no response"

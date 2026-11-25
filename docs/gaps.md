@@ -375,6 +375,10 @@ It keeps the 1 MiB body limit.
 It does not follow a redirect.
 TCP and UDP bodies are `String`.
 Read a file from `Net.httpGetToFile` with `Fs.readBytes`.
+A native `Net.httpGet` to a local peer that accepts and sends no response returns a timeout.
+The default wait is one second.
+`Net.httpGet` closes its socket before it returns.
+The program continues.
 
 ### Browser HTTP
 
@@ -393,6 +397,8 @@ A cross-origin POST does not leave the page.
 It returns the status and the string body.
 One browser package calls `Net.httpPost`.
 The call runs on one browser thread.
+A timeout cannot interrupt `Net.httpGet` or `Net.httpPost` on this target.
+The call waits until the body finishes or the host gives up.
 The call keeps the 1 MiB body limit.
 The call does not follow a redirect.
 Other Net calls fail on web.

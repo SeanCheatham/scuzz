@@ -1722,6 +1722,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
   SzTheme paint_theme;
   const SzTheme *theme;
   int need_dump;
+  int played_inject = 0;
   if (!session)
     return 0;
   if (session->lifecycle == SZ_LIFECYCLE_STOP)
@@ -1747,6 +1748,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
       sz_ui_script_play_json(session, delta);
       sz_free(delta);
       session->inject_playing = 0;
+      played_inject = 1;
       need_dump = 1;
     }
   }
@@ -1798,6 +1800,15 @@ int sz_ui_pump_sync(SzUiSession *session) {
   if (need_dump && session->debug_dump_path &&
       session->cfg.kind == SZ_UI_RUNTIME_MOBILE && !defer_debug_dump(session))
     sz_ui_session_write_dump(session, session->debug_dump_path);
+  /* The dump is already visible. A mobile raster blocks this thread.
+   * Return before that raster so the next tap is read while the request runs. */
+  if (played_inject && session->cfg.kind == SZ_UI_RUNTIME_MOBILE) {
+    if (session->root && sz_view_motion_pending(session->root))
+      session_mark_dirty(session);
+    session->pumps += 1;
+    session->signal_revision = sz_signal_revision();
+    return 1;
+  }
   uintptr_t focus_before_paint = sz_view_id(sz_view_focused(session->root));
   if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
@@ -1898,6 +1909,11 @@ static int defer_debug_dump(const SzUiSession *session) {
 void sz_ui_pump_after_event(SzUiSession *session) {
   int steps;
   if (!session || !sz_ui_session_alive(session))
+    return;
+  /* A mobile raster frame is large. Finish a press on later pumps.
+   * The live dump shows the new signal before those frames.
+   * The next tap can land while a request is still in flight. */
+  if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
     return;
   /* Explicit transitions keep their next input boundary. Other motion
    * finishes in four steps and one settled pump. */
