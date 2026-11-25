@@ -4956,6 +4956,19 @@ slice_web() (
   fi
   "$SCUZZ" package --target web --out-dir "$web_tmp/web-get output" examples/web-get
   node crates/embedder-web/test.cjs "$web_tmp/web-get output/package/web" '' web-get
+  "$SCUZZ" check examples/web-get-timeout
+  env -u SCUZZ_WEB_GET_TIMEOUT -u SCUZZ_TESTRT SCUZZ_SKIA=sk_sw "$SCUZZ" run examples/web-get-timeout > "$web_tmp/web-get-timeout-run.out"
+  if [ "$(tail -n 1 "$web_tmp/web-get-timeout-run.out")" != "web-get-timeout:missing" ]; then
+    echo "empty URL must not call a live host: $(cat "$web_tmp/web-get-timeout-run.out")" >&2
+    exit 1
+  fi
+  timeout_sim="$(env -u SCUZZ_WEB_GET_TIMEOUT -u SCUZZ_NET_LIVE -u SCUZZ_UI_SERVE SCUZZ_TESTRT=1 examples/web-get-timeout/build/web-get-timeout)"
+  if [ "$timeout_sim" != "sim:rejected" ]; then
+    echo "simulation must reject a live external host: $timeout_sim" >&2
+    exit 1
+  fi
+  "$SCUZZ" package --target web --out-dir "$web_tmp/web-get-timeout output" examples/web-get-timeout
+  node crates/embedder-web/test.cjs "$web_tmp/web-get-timeout output/package/web" '' web-get-timeout
   "$SCUZZ" check examples/web-post
   env -u SCUZZ_WEB_POST -u SCUZZ_TESTRT SCUZZ_SKIA=sk_sw "$SCUZZ" run examples/web-post > "$web_tmp/web-post-run.out"
   if [ "$(tail -n 1 "$web_tmp/web-post-run.out")" != "web-post:missing" ]; then

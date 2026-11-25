@@ -289,9 +289,11 @@ Android GUI clients use HttpURLConnection and platform certificate trust without
 GUI clients verify loopback certificates, preserve status responses, and do not follow redirects.
 Mobile shells permit local-network HTTP and require HTTPS for remote services.
 The web GUI client uses fetch for `Net.httpGet`, `Net.httpGetBytes`, and `Net.httpPost` on the browser thread.
-The call waits on that thread.
-It does not park on a socket.
-A timeout cannot interrupt that call.
+`Net.httpGet` and `Net.httpGetBytes` wait on that thread.
+They do not park on a socket.
+A read timeout aborts the request.
+The default wait is one second.
+The page continues after that error.
 The response body reaches the program.
 One browser package calls `Net.httpGetBytes`.
 The response body is three bytes that are not valid UTF-8.
@@ -299,6 +301,8 @@ Those bytes are `ff fe 80`.
 Those bytes reach the program.
 `Net.httpPost` sends one string body to a same-origin URL.
 A cross-origin POST does not leave the page.
+`Net.httpPost` waits on that thread.
+A timeout cannot interrupt that call.
 One browser package calls `Net.httpPost`.
 The page reads the status and the string body.
 Each call keeps the 1 MiB body limit.
@@ -338,7 +342,7 @@ Simulation stores the same bytes.
 A file outside the working directory does not remain.
 Hot reload on web stays open.
 
-Live and simulated HTTP clients share one URL parser. A URL with no path uses `/`. The request target keeps the query and excludes the fragment. Raw spaces and control bytes fail before dispatch. Each HTTP client call takes a request header map after the URL. Body methods take the body last. `Net.httpGetToFile` streams a response body to a caller path with bounded memory. It returns status, headers, and byte count. It supports Content-Length, chunked transfer encoding, and close-delimited bodies. It removes an incomplete file after an error or cancellation. The caller uses a temporary path and renames it after validation. `Net.httpGet`, `Net.httpGetBytes`, and `Net.httpPost` keep the 1 MiB body limit. `Net.httpGet` returns the body as `String`. `Net.httpPost` sends one string body and returns the body as `String`. On the web target it sends that body to a same-origin URL. A cross-origin POST does not leave the page. It does not follow a redirect. `Net.httpGetBytes` returns the body as `Bytes`. Read a file written by `Net.httpGetToFile` with `Fs.readBytes`. TCP and UDP bodies stay `String`. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log. A request with `Prefer: wait=N` can wait N seconds for its response. The supported range is 1 through 900 seconds. Other values keep the transport default. `IO.timeout` can set a shorter bound. DNS, connection, and write limits stay fixed. `Net.httpGet` fails with `Net.httpGet: read timed out` when the peer accepts and sends no bytes. The default wait is one second. The call closes its socket before it returns. The program can continue.
+Live and simulated HTTP clients share one URL parser. A URL with no path uses `/`. The request target keeps the query and excludes the fragment. Raw spaces and control bytes fail before dispatch. Each HTTP client call takes a request header map after the URL. Body methods take the body last. `Net.httpGetToFile` streams a response body to a caller path with bounded memory. It returns status, headers, and byte count. It supports Content-Length, chunked transfer encoding, and close-delimited bodies. It removes an incomplete file after an error or cancellation. The caller uses a temporary path and renames it after validation. `Net.httpGet`, `Net.httpGetBytes`, and `Net.httpPost` keep the 1 MiB body limit. `Net.httpGet` returns the body as `String`. `Net.httpPost` sends one string body and returns the body as `String`. On the web target it sends that body to a same-origin URL. A cross-origin POST does not leave the page. It does not follow a redirect. `Net.httpGetBytes` returns the body as `Bytes`. Read a file written by `Net.httpGetToFile` with `Fs.readBytes`. TCP and UDP bodies stay `String`. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log. A request with `Prefer: wait=N` can wait N seconds for its response. The supported range is 1 through 900 seconds. Other values keep the transport default. `IO.timeout` can set a shorter bound. DNS, connection, and write limits stay fixed. `Net.httpGet` fails with `Net.httpGet: read timed out` when the peer accepts and sends no bytes. The default wait is one second. The call closes its socket before it returns. The program can continue. On the web target, `Net.httpGet` uses that wait. It aborts the request when the wait ends. The page continues.
 
 `Stream` is one finite pull interpreter. Bind a Stream with `=`. `<-` needs `IO`. Do not add backpressure, publishers, or a second stream kit.
 
@@ -956,6 +960,9 @@ Use nested constructors and one layout model.
 Diagnose behavior through structural dumps, `*.scuzz_verify`, and `.require`.
 Widget and GUI instructions: run `scuzz docs kits` and `scuzz docs gui`.
 `Net.httpGet` and `Net.httpGetBytes` on the web target return the response body on the browser thread.
+A read timeout aborts the request when the peer sends no body.
+The default wait is one second.
+The page continues after that error.
 `Net.httpGetBytes` returns that body as `Bytes`.
 One browser package calls `Net.httpGetBytes`.
 The response body is three bytes that are not valid UTF-8.
