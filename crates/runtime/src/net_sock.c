@@ -459,18 +459,39 @@ static void *listen_start(void *env) {
   return r;
 }
 
-SzIo *sz_net_tcp_listen(int64_t port) {
-  int64_t *box;
-  if (sz_testrt_net_is_fake())
-    return sz_testrt_net_tcp_listen(port);
-  sz_timeline_log_cstr("Net.tcpListen", "");
-  box = (int64_t *)rc_box_zero(sizeof(int64_t));
+static SzIo *tcp_listen_live(int64_t port) {
+  int64_t *box = (int64_t *)rc_box_zero(sizeof(int64_t));
   *box = port;
+  sz_timeline_log_cstr("Net.tcpListen", "");
   {
     SzIo *io = fm_drop(sz_io_delay(listen_start, box), unwrap_sock, NULL);
     sz_release(box);
     return io;
   }
+}
+
+/* Choose the stack when the IO runs. The graph may be built before TestRuntime. */
+static void *tcp_listen_mode(void *env) {
+  (void)env;
+  return (void *)(intptr_t)(sz_testrt_net_is_fake() ? 1 : 0);
+}
+
+static SzIo *tcp_listen_after(void *value, void *env) {
+  int64_t port = *(int64_t *)env;
+  if ((intptr_t)value)
+    return sz_testrt_net_tcp_listen(port);
+  return tcp_listen_live(port);
+}
+
+SzIo *sz_net_tcp_listen(int64_t port) {
+  int64_t *box = (int64_t *)rc_box_zero(sizeof(int64_t));
+  SzIo *step;
+  SzIo *io;
+  *box = port;
+  step = sz_io_delay(tcp_listen_mode, box);
+  io = fm_drop(step, tcp_listen_after, box);
+  sz_release(box);
+  return io;
 }
 
 typedef struct AcceptSt {

@@ -1640,6 +1640,49 @@ grep -Fxq 'http:post:200:pong' /tmp/http-post-fuzz.out
 "$SCUZZ" check examples/http-post
 python3 - <<'PY'
 from pathlib import Path
+text = Path("examples/tcp-echo/src/Main.scuzz").read_text()
+if "Net.tcpConnect" not in text or "Net.tcpRead" not in text or "Net.tcpWrite" not in text or "Net.tcpClose" not in text:
+    raise SystemExit("tcp echo proof missing")
+if "6869ff" not in text or "127.0.0.1" not in text:
+    raise SystemExit("tcp echo bytes or host missing")
+if "example.com" in text or "https://" in text or "udp" in text:
+    raise SystemExit("tcp echo leaves loopback")
+raw = bytes.fromhex("6869ff")
+try:
+    raw.decode("utf-8")
+except UnicodeDecodeError:
+    pass
+else:
+    raise SystemExit("tcp echo payload is valid UTF-8")
+if raw[-1] != 0xFF:
+    raise SystemExit("tcp echo payload has no 0xFF")
+print("tcp echo", len(raw))
+PY
+"$SCUZZ" run examples/tcp-echo | tee /tmp/tcp-echo.out
+grep -Fxq 'tcp:echo:match:6869ff' /tmp/tcp-echo.out
+"$SCUZZ" eval examples/tcp-echo | tee /tmp/tcp-echo-eval.out
+diff <(grep -vx ok /tmp/tcp-echo.out) /tmp/tcp-echo-eval.out
+"$SCUZZ" fuzz --iterations 0 examples/tcp-echo | tee /tmp/tcp-echo-fuzz.out
+grep -Fxq 'tcp:echo:match:6869ff' /tmp/tcp-echo-fuzz.out
+"$SCUZZ" check examples/tcp-echo
+python3 - <<'PY'
+from pathlib import Path
+text = Path("examples/http-body/src/Main.scuzz").read_text()
+if "Net.httpGet" not in text or "Net.httpPost" not in text or "1048576" not in text:
+    raise SystemExit("http body proof missing")
+if "127.0.0.1" not in text or "example.com" in text or "https://" in text:
+    raise SystemExit("http body host is not loopback")
+print("http body", 1048576 + 1)
+PY
+"$SCUZZ" run examples/http-body | tee /tmp/http-body.out
+grep -Fxq 'http:large:get:200:1048577:post:200:1048577' /tmp/http-body.out
+"$SCUZZ" eval examples/http-body | tee /tmp/http-body-eval.out
+diff <(grep -vx ok /tmp/http-body.out) /tmp/http-body-eval.out
+"$SCUZZ" fuzz --iterations 0 examples/http-body | tee /tmp/http-body-fuzz.out
+grep -Fxq 'http:large:get:200:1048577:post:200:1048577' /tmp/http-body-fuzz.out
+"$SCUZZ" check examples/http-body
+python3 - <<'PY'
+from pathlib import Path
 text = Path("examples/http-get-timeout/src/Main.scuzz").read_text()
 if "Net.httpGet" not in text or "IO.timeout(2000" not in text:
     raise SystemExit("http get timeout proof missing")

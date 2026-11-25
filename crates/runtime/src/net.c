@@ -24,8 +24,8 @@
 /* Built-in Net HTTP/1.0 client and serve. HTTPS uses OpenSSL.
  * DNS, connect, TLS, write, and read each wait at most 1000ms by default.
  * Prefer: wait=N sets a bounded response wait. A response
- * is (status, headers, body). HEAD finishes at the header. Bodies cap at
- * 1 MiB. Serve binds 0.0.0.0 and/or ::. serveTls terminates TLS with a
+ * is (status, headers, body). HEAD finishes at the header. In-memory
+ * bodies cap at 2 MiB. Serve binds 0.0.0.0 and/or ::. serveTls terminates TLS with a
  * process cert. serveTlsFiles reads the cert file and the key file.
  * A loopback https client skips verify. SCUZZ_NET_SESSION=1 verifies that
  * cert and reports certificate rejected. Failures use SzError code 6. */
@@ -517,8 +517,9 @@ static void addr_set_v6(struct sockaddr_storage *ss, socklen_t *len,
 #define HE_READ_MS 1000
 #define HE_REQ_MS 1000
 #define HE_WRITE_MS 1000
-#define HE_BODY_MAX (1024u * 1024u)
+#define HE_BODY_MAX SZ_HTTP_BODY_MAX
 #define HE_HEADER_MAX (16u * 1024u)
+#define HE_RESP_MAX (HE_BODY_MAX + HE_HEADER_MAX)
 
 /* Close sockets and drop URL/buffers. A second call is a no-op. Cancel and
  * success both run this through IO.ensure. */
@@ -1834,6 +1835,11 @@ static int http_try_complete(HttpSt *st, NetResult *r, int eof) {
   }
   body_off = hdr;
   body_got = st->total > body_off ? st->total - body_off : 0;
+  if (body_got > HE_BODY_MAX) {
+    r->is_err = 1;
+    r->as.err = http_err(st, "response too large");
+    return 1;
+  }
   if (has_cl) {
     if (body_got >= clen) {
       http_finish_resp(st, r, status, hdr, st->acc + body_off, clen);
@@ -1909,7 +1915,7 @@ static void *http_read(void *env) {
   if (n > 0) {
     size_t add = (size_t)n;
     size_t need;
-    if (st->total >= HE_BODY_MAX || add > HE_BODY_MAX - st->total) {
+    if (st->total >= HE_RESP_MAX || add > HE_RESP_MAX - st->total) {
       r->is_err = 1;
       r->as.err = http_err(st, "response too large");
       return r;

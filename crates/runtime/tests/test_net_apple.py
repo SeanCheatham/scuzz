@@ -49,6 +49,7 @@ class Service(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(b"0\r\n\r\n")
                 return
             if self.path == "/large": body = b"a" * (1024 * 1024 + 1)
+            if self.path == "/over-cap": body = b"a" * (2 * 1024 * 1024 + 1)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if self.command != "HEAD": self.wfile.write(body)

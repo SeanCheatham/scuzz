@@ -77,7 +77,14 @@ int scuzz_net_apple_proof(void) {
   SzIoResult r = run(request(base, "/redirect", "GET", NULL));
   check(status(r, 302), "redirect stays visible"); drop(r);
   r = run(request(base, "/status", "GET", NULL)); check(status(r, 503), "HTTP error is a response"); drop(r);
-  const char *invalid[] = {"/large", "/stream-large", "/headers-large"};
+  r = run(request(base, "/large", "GET", NULL));
+  check_http(r, 200, "/large");
+  if (r.ok) {
+    SzString *payload = (SzString *)((SzPair *)((SzPair *)r.value)->right)->right;
+    check(sz_string_len(payload) == 1024 * 1024 + 1, "large body bytes");
+  }
+  drop(r);
+  const char *invalid[] = {"/over-cap", "/stream-large", "/headers-large"};
   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++) {
     r = run(request(base, invalid[i], "GET", NULL)); check(!r.ok, invalid[i]); drop(r);
   }

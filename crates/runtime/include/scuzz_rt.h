@@ -1030,7 +1030,9 @@ SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fa
 void sz_random_fill(unsigned char *buf, size_t n); /* Built-in Random bytes. Use live or TestRuntime state. */
 SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Use built-in Random. */
 
-SzIo *sz_net_http_get(SzString *url, SzMap *headers); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
+/* In-memory HTTP body cap. A larger body fails. In-memory calls do not stream. */
+#define SZ_HTTP_BODY_MAX (2u * 1024u * 1024u)
+SzIo *sz_net_http_get(SzString *url, SzMap *headers); /* IO[(Int, Map, String)]; status, headers, body; 2 MiB cap; http:// or https:// */
 SzIo *sz_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path); /* IO[(Int, Map, Int)]; stream response body to file */
 SzIo *sz_net_http_post(SzString *url, SzMap *headers, SzString *body);
 SzIo *sz_net_http_put(SzString *url, SzMap *headers, SzString *body);

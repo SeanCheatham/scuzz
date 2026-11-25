@@ -246,7 +246,15 @@ static int run_proof(JNIEnv *jenv) {
   check(status(r, 503), "HTTP 503 is a response");
   drop(r);
 
-  const char *oversized[] = {"/large", "/stream-large", "/headers-large"};
+  r = run(request(base, "/large", "GET", NULL));
+  check_http(r, 200, "/large");
+  if (r.ok) {
+    SzString *payload = (SzString *)((SzPair *)((SzPair *)r.value)->right)->right;
+    check(sz_string_len(payload) == 1024 * 1024 + 1, "large body bytes");
+  }
+  drop(r);
+
+  const char *oversized[] = {"/over-cap", "/stream-large", "/headers-large"};
   for (size_t i = 0; i < sizeof oversized / sizeof *oversized; i++) {
     r = run(request(base, oversized[i], "GET", NULL));
     check(!r.ok && r.error && r.error->code == 6, oversized[i]);

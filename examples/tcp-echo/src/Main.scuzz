@@ -1,0 +1,39 @@
+def payload(): String =
+  Hex.decode("6869ff")
+
+def readCount(sock: Tcp, need: Int, acc: String): IO[String] =
+  if (Str.byteLen(acc) >= need) IO.pure(acc) else Net.tcpRead(sock, need - Str.byteLen(acc)).flatMap(chunk => if (chunk == "") IO.fail("tcp:short") else readCount(sock, need, Str.concat(acc, chunk)))
+
+def echo(ln: Tcp): IO[Unit] =
+  for {
+    c <- Net.tcpAccept(ln)
+    got <- readCount(c, Str.byteLen(payload()), "")
+    _ <- Net.tcpWrite(c, got)
+    _ <- Net.tcpClose(c)
+  } yield ()
+
+def readUntilClose(sock: Tcp, acc: String): IO[String] =
+  IO.attempt(Net.tcpRead(sock, 65536)).flatMap(result => result match {
+  case Result.Ok(chunk) => if (chunk == "") IO.pure(acc) else readUntilClose(sock, Str.concat(acc, chunk))
+  case Result.Err(message) => if (acc != "" && Str.contains(message, "closed")) IO.pure(acc) else IO.fail(message)
+})
+
+def client(): IO[String] =
+  for {
+    c <- Net.tcpConnect("127.0.0.1", 19171)
+    _ <- Net.tcpWrite(c, payload())
+    got <- readUntilClose(c, "")
+    _ <- Net.tcpClose(c)
+  } yield got
+
+def lineFor(got: String): String =
+  if (got == payload() && Str.byteLen(got) == 3) Str.concat("tcp:echo:match:", Hex.encode(got)) else "tcp:echo:bad"
+
+@main def main: IO[Unit] =
+  for {
+    ln <- Net.tcpListen(19171)
+    pair <- IO.both(echo(ln), client())
+    _ <- Net.tcpClose(ln)
+    line = lineFor(pair._2)
+    _ <- if (line == "tcp:echo:match:6869ff") IO.println(line) else IO.fail(line)
+  } yield ()

@@ -1,0 +1,4 @@
+[package]
+name = "tcp-echo"
+version = "0.1.0"
+description = "Read a local TCP echo until the peer closes"
