@@ -64,11 +64,69 @@ static SzIo *fs_bind(SzString *path, SzCont after) {
   }
 }
 
+#ifdef __EMSCRIPTEN__
+/* The browser working directory is /scuzz. Reject a path that leaves it. */
+static int fs_web_inside(const char *path) {
+  char out[4096];
+  size_t len = 0;
+  const char *cursor;
+  if (!path || !path[0])
+    return 0;
+  if (path[0] != '/') {
+    memcpy(out, "/scuzz", 6);
+    len = 6;
+  }
+  cursor = path;
+  while (*cursor) {
+    const char *slash = strchr(cursor, '/');
+    size_t n = slash ? (size_t)(slash - cursor) : strlen(cursor);
+    if (n == 0 || (n == 1 && cursor[0] == '.')) {
+    } else if (n == 2 && cursor[0] == '.' && cursor[1] == '.') {
+      if (len == 0)
+        return 0;
+      while (len > 0 && out[len - 1] != '/')
+        len--;
+      if (len > 0)
+        len--;
+    } else {
+      if (len + 1 + n >= sizeof out)
+        return 0;
+      out[len++] = '/';
+      memcpy(out + len, cursor, n);
+      len += n;
+    }
+    if (!slash)
+      break;
+    cursor = slash + 1;
+  }
+  out[len] = '\0';
+  if (len == 0)
+    return 0;
+  return strcmp(out, "/scuzz") == 0 || strncmp(out, "/scuzz/", 7) == 0;
+}
+
+static void *fs_outside(void) {
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
+  r->is_err = 1;
+  r->as.err = sz_error_new(2, "Fs: path is outside the working directory");
+  return r;
+}
+
+#define FS_WEB_GUARD(path)                                                     \
+  do {                                                                         \
+    if (!fs_web_inside(path))                                                  \
+      return fs_outside();                                                    \
+  } while (0)
+#else
+#define FS_WEB_GUARD(path) ((void)0)
+#endif
+
 static void *fs_read_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   FILE *f;
   struct stat st;
   sz_timeline_log_cstr("Fs.read", p);
@@ -468,8 +526,9 @@ static void *fs_write_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = (SzString *)pack->left;
   SzString *contents = (SzString *)pack->right;
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *target = p;
   const char *slash;
   const char suffix[] = ".scuzz-write-XXXXXX";
@@ -642,8 +701,9 @@ static int fs_name_is_dir(const char *dir, const char *name) {
 static void *fs_list_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   DIR *d;
   sz_timeline_log_cstr("Fs.list", p);
   d = opendir(p);
@@ -704,8 +764,9 @@ static int fs_mkdir_one(const char *path, FsResult *r) {
 static void *fs_mkdirs_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   char tmp[1024];
   size_t len = strlen(p);
   sz_timeline_log_cstr("Fs.mkdirs", p);
@@ -748,8 +809,9 @@ SzIo *sz_fs_mkdirs(SzString *path) { return fs_bind(path, fs_after_mkdirs); }
 static void *fs_canonicalize_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   char *resolved;
   sz_timeline_log_cstr("Fs.canonicalize", p);
   resolved = realpath(p, NULL);
@@ -781,8 +843,9 @@ SzIo *sz_fs_canonicalize(SzString *path) {
 static void *fs_exists_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   struct stat st;
   sz_timeline_log_cstr("Fs.exists", p);
   r->is_err = 0;
@@ -950,8 +1013,9 @@ static int fs_rm_tree(const char *path, int depth, FsResult *r) {
 static void *fs_delete_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   sz_timeline_log_cstr("Fs.delete", p);
   if (fs_is_root_path(p)) {
     r->is_err = 1;
@@ -979,10 +1043,13 @@ static void *fs_rename_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *from = pack ? (SzString *)pack->left : NULL;
   SzString *to = pack ? (SzString *)pack->right : NULL;
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *src = sz_string_cstr(from);
   const char *dst = sz_string_cstr(to);
   struct stat st;
+  FsResult *r;
+  FS_WEB_GUARD(src);
+  FS_WEB_GUARD(dst);
+  r = (FsResult *)rc_box_zero(sizeof(FsResult));
   sz_timeline_log_cstr("Fs.rename", src);
   if (fs_is_root_path(src) || fs_is_root_path(dst)) {
     r->is_err = 1;
@@ -1118,8 +1185,9 @@ static int fs_walk_into(const char *root, const char *rel, int depth, SzList **a
 static void *fs_walk_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  FS_WEB_GUARD(p);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   struct stat st;
   SzList *acc;
   sz_timeline_log_cstr("Fs.walk", p);

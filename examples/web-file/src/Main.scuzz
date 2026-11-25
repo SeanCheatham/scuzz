@@ -7,23 +7,73 @@ def body(): Bytes =
 def same(raw: Bytes, text: String): Bool =
   raw == body() && Bytes.len(raw) == 3 && Hex.encode(text) == mark()
 
-def label(web: String, hit: Int): String =
-  if (web == "1" && hit != 0) "kept:" else "wrote:"
+def outside(): IO[Int] =
+  Fs.writeBytes("/outside.bin", body()).map(_ => 0).handleErrorWith(_ => IO.pure(1))
 
-def report(web: String, hit: Int, raw: Bytes, text: String): String =
-  if (same(raw, text)) Str.concat(label(web, hit), mark()) else "web-file:bad"
+def escape(): IO[Int] =
+  Fs.rename("new.bin", "/out.bin").map(_ => 0).handleErrorWith(_ => IO.pure(1))
 
-def session(web: String): IO[String] =
+def bad(): String =
+  "web-file:bad"
+
+def start(): IO[String] =
   for {
-    hit <- Fs.exists("web-file.bin")
-    _ <- if (hit != 0) IO.pure(()) else Fs.writeBytes("web-file.bin", body())
-    raw <- Fs.readBytes("web-file.bin")
-    text <- Fs.read("web-file.bin")
-    _ <- if (web == "1") IO.pure(()) else Fs.delete("web-file.bin")
-  } yield report(web, hit, raw, text)
+    _ <- Fs.writeBytes("old.bin", body())
+    _ <- Fs.rename("old.bin", "new.bin")
+    raw <- Fs.readBytes("new.bin")
+    text <- Fs.read("new.bin")
+    old <- Fs.exists("old.bin")
+    oldMiss <- Fs.readBytes("old.bin").map(_ => 0).handleErrorWith(_ => IO.pure(1))
+    out <- outside()
+    kept <- escape()
+    raw2 <- Fs.readBytes("new.bin")
+    text2 <- Fs.read("new.bin")
+  } yield if (same(raw, text) && same(raw2, text2) && old == 0 && oldMiss != 0 && out != 0 && kept != 0) Str.concat("renamed:", mark()) else bad()
+
+def finishRename(): IO[String] =
+  for {
+    raw <- Fs.readBytes("new.bin")
+    text <- Fs.read("new.bin")
+    old <- Fs.exists("old.bin")
+    oldMiss <- Fs.readBytes("old.bin").map(_ => 0).handleErrorWith(_ => IO.pure(1))
+    _ <- Fs.delete("new.bin")
+    gone <- Fs.exists("new.bin")
+    _ <- Fs.write("phase", "deleted")
+  } yield if (same(raw, text) && old == 0 && oldMiss != 0 && gone == 0) Str.concat("deleted:", mark()) else bad()
+
+def proveGone(): IO[String] =
+  for {
+    miss <- Fs.readBytes("new.bin").map(_ => 0).handleErrorWith(_ => IO.pure(1))
+    old <- Fs.exists("old.bin")
+    oldMiss <- Fs.readBytes("old.bin").map(_ => 0).handleErrorWith(_ => IO.pure(1))
+    out <- outside()
+  } yield if (miss != 0 && old == 0 && oldMiss != 0 && out != 0) Str.concat("gone:", mark()) else bad()
+
+def webNext(named: Int, phase: String): IO[String] =
+  if (named != 0) finishRename() else if (phase == "deleted") proveGone() else start()
+
+def webLine(): IO[String] =
+  for {
+    named <- Fs.exists("new.bin")
+    phase <- Fs.read("phase").handleErrorWith(_ => IO.pure(""))
+    line <- webNext(named, phase)
+  } yield line
+
+def simLine(): IO[String] =
+  for {
+    _ <- Fs.writeBytes("old.bin", body())
+    _ <- Fs.rename("old.bin", "new.bin")
+    raw <- Fs.readBytes("new.bin")
+    text <- Fs.read("new.bin")
+    old <- Fs.exists("old.bin")
+    oldMiss <- Fs.readBytes("old.bin").map(_ => 0).handleErrorWith(_ => IO.pure(1))
+    _ <- Fs.delete("new.bin")
+    gone <- Fs.exists("new.bin")
+    miss <- Fs.readBytes("new.bin").map(_ => 0).handleErrorWith(_ => IO.pure(1))
+  } yield if (same(raw, text) && old == 0 && oldMiss != 0 && gone == 0 && miss != 0) Str.concat("sim:", mark()) else bad()
 
 def lineFor(web: String, sim: String): IO[String] =
-  if (sim == "1" || web == "1") session(web) else IO.pure(Str.concat("web-file:", mark()))
+  if (web == "1") webLine() else if (sim == "1") simLine() else IO.pure(Str.concat("web-file:", mark()))
 
 @main def main: IO[Unit] =
   for {

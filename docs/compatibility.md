@@ -135,7 +135,7 @@ Each call keeps the 2 MiB body cap and does not follow a redirect.
 Simulation rejects a live external host.
 Other Net calls fail at the call (`Net: not available on web`).
 A process effect fails at `fork` (`Sys.exec: fork failed`). The web build links every def in the package and its path
-dependencies; the linker drops the defs `@main` does not reach. The browser working directory keeps a file across a page reload. A file outside that directory does not remain. The save uses one browser thread.
+dependencies; the linker drops the defs `@main` does not reach. The browser working directory keeps a file across a page reload. Rename and delete stay in that directory. A path outside that directory fails. The open page loads a new build when `reload.stamp` changes. The browser stays open. The save uses one browser thread.
 Static text supports browser selection and copying through a DOM text layer.
 A removed focused control moves focus to the text layer.
 Walkthrough tabs and Index Book sections use URL fragments for links and
@@ -148,4 +148,5 @@ controls. Fields support native clipboard actions and IME composition.
 Chromium, Firefox, and WebKit run the browser proof. Chromium and WebKit also
 run phone viewport and touch emulation. Real phone keyboards, long-press
 selection, pinch zoom, and screen-reader sessions still need device checks.
-Full accessibility conformance and hot reload remain open.
+Full accessibility conformance remains open.
+The open page loads a new build when `reload.stamp` changes. The browser stays open.

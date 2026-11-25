@@ -3494,17 +3494,96 @@ async function checkWebFile(browserType, url, mobile) {
         throw error;
       }
     };
+    const snap = async () => page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []));
     await page.goto(url);
-    await waitFor('text:wrote:fffe80');
+    await waitFor('text:renamed:fffe80');
+    assert.equal((await snap()).includes('text:web-file:bad'), false);
     assert.equal(await page.evaluate(() => window.workerStarts), 0);
     await page.reload();
-    await waitFor('text:kept:fffe80');
-    const kept = await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []));
-    assert.equal(kept.includes('text:wrote:'), false);
+    await waitFor('text:deleted:fffe80');
+    assert.equal((await snap()).includes('text:renamed:'), false);
+    assert.equal((await snap()).includes('text:web-file:bad'), false);
+    await page.reload();
+    await waitFor('text:gone:fffe80');
+    const gone = await snap();
+    assert.equal(gone.includes('text:renamed:'), false);
+    assert.equal(gone.includes('text:deleted:'), false);
+    assert.equal(gone.includes('text:web-file:bad'), false);
     assert.equal(await page.evaluate(() => window.workerStarts), 0);
     assert.deepEqual(errors, []);
     console.log(`web file: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }
+}
+
+async function stableLine(page, needle) {
+  await page.waitForFunction(expected => typeof Module !== 'undefined' && Module.ready &&
+    !Module.ccall('sz_web_motion_pending', 'number', [], []) &&
+    Module.ccall('sz_web_snapshot', 'string', [], []).includes(expected), needle, {timeout: 60000});
+  const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
+  const before = await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []));
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []));
+  assert.equal(after, before, 'line stays stable');
+  assert(after.includes(needle), after);
+  assert.equal(await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], [])), paints, 'idle frame');
+}
+
+async function checkWebHot(url) {
+  const ready = process.env.SCUZZ_WEB_HOT_READY;
+  assert(ready, 'SCUZZ_WEB_HOT_READY');
+  const sessions = [];
+  try {
+    for (const type of [chromium, firefox, webkit]) {
+      if (process.argv[3] && process.argv[3] !== type.name()) continue;
+      const browser = await type.launch({headless: true});
+      const context = await browser.newContext({viewport: {width: 1000, height: 720}, deviceScaleFactor: 1});
+      await context.addInitScript(() => {
+        window.workerStarts = 0;
+        const wrap = name => {
+          const start = window[name];
+          if (!start) return;
+          window[name] = function (...args) {
+            window.workerStarts += 1;
+            return new start(...args);
+          };
+        };
+        wrap('Worker');
+        wrap('SharedWorker');
+      });
+      const page = await context.newPage();
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.stack || String(error)));
+      await page.goto(url);
+      try {
+        await stableLine(page, 'text:hot:before');
+      } catch (error) {
+        console.error({url: page.url(), errors,
+          state: await page.evaluate(() => Module.ready ? Module.ccall('sz_web_snapshot', 'string', [], []) : 'not-ready').catch(() => 'snapshot-failed')});
+        throw error;
+      }
+      assert.equal(await page.evaluate(() => window.workerStarts), 0);
+      assert.deepEqual(errors, []);
+      sessions.push({browser, page, errors, name: type.name()});
+    }
+    fs.writeFileSync(ready, '1');
+    for (const session of sessions) {
+      try {
+        await session.page.waitForURL(current => current.searchParams.get('hot') === '1', {timeout: 900000});
+        await stableLine(session.page, 'text:hot:after');
+      } catch (error) {
+        console.error({url: session.page.url(), errors: session.errors,
+          state: await session.page.evaluate(() => Module.ready ? Module.ccall('sz_web_snapshot', 'string', [], []) : 'not-ready').catch(() => 'snapshot-failed')});
+        throw error;
+      }
+      const after = await session.page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []));
+      assert.equal(after.includes('text:hot:before'), false, after);
+      assert.equal(await session.page.evaluate(() => window.workerStarts), 0);
+      assert.deepEqual(session.errors, []);
+      console.log(`web hot: ${session.name} passed`);
+    }
+  } finally {
+    for (const session of sessions) await session.browser.close();
+  }
 }
 
 async function main() {
@@ -3569,6 +3648,14 @@ async function main() {
       response.end(Buffer.from([0xff, 0xfe, 0x80]));
       return;
     }
+    if (relative === 'reload.stamp') {
+      const stamp = path.join(directory, relative);
+      if (!fs.existsSync(stamp)) { response.writeHead(404).end(); return; }
+      response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      response.setHeader('Cache-Control', 'no-store');
+      response.end(fs.readFileSync(stamp));
+      return;
+    }
     if (!['index.html', 'app.js', 'app.wasm', 'fonts/fonts.css'].includes(relative) && !/^fonts\/(arabic|devanagari|thai|sc)-[0-9a-f]{16}\.ttf$/.test(relative)) { response.writeHead(404).end(); return; }
     if (!fs.existsSync(path.join(directory, relative))) { response.writeHead(404).end(); return; }
     response.setHeader('Content-Type', relative.endsWith('.wasm') ? 'application/wasm' : relative.endsWith('.js') ? 'text/javascript' : relative.endsWith('.css') ? 'text/css' : relative.endsWith('.ttf') ? 'font/ttf' : 'text/html');
@@ -3577,6 +3664,10 @@ async function main() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const url = `http://127.0.0.1:${server.address().port}/scuzz/`;
+    if (process.argv[4] === 'web-hot') {
+      await checkWebHot(url);
+      return;
+    }
     for (const type of [chromium, firefox, webkit]) {
       if (process.argv[3] && process.argv[3] !== type.name()) continue;
       const run = process.argv[4] === 'web-post' ? checkWebPost : process.argv[4] === 'web-file' ? checkWebFile : process.argv[4] === 'web-bytes' ? checkWebBytes : process.argv[4] === 'web-get-timeout' ? checkWebGetTimeout : process.argv[4] === 'web-get' ? checkWebGet : process.argv[4] === 'scale-glyph' ? checkScaleGlyph : process.argv[4] === 'scale-limit' ? checkScaleLimit : process.argv[4] === 'scale-input' ? checkScaleInput : process.argv[4] === 'scale-motion' ? checkScaleMotion : process.argv[4] === 'rotation-motion' ? checkRotationMotion : process.argv[4] === 'position-limit' ? checkPositionLimit : process.argv[4] === 'position-motion' ? checkPositionMotion : process.argv[4] === 'content-motion' ? checkContentMotion : process.argv[4] === 'size-limit' ? checkSizeLimit : process.argv[4] === 'size-motion' ? checkSizeMotion : process.argv[4] === 'progress' ? checkProgress : process.argv[4] === 'motion-unicode' ? checkMotionUnicode : process.argv[4] === 'motion' ? checkMotion : process.argv[4] === 'select' ? checkSelect : process.argv[4] === 'shaping' ? checkShaping : process.argv[4] === 'tooltips' ? checkTooltips : process.argv[4] === 'inline' ? checkInline : process.argv[4] === 'disclosure' ? checkDisclosure : process.argv[4] === 'choices' ? checkChoices : process.argv[4] === 'split' ? checkSplit : process.argv[4] === 'range-boundary' ? checkRangeBoundary : process.argv[4] === 'text' ? checkText : process.argv[4] === 'measured' ? checkMeasured : process.argv[4] === 'themes' ? checkThemes : process.argv[4] === 'layout' ? checkLayout : process.argv[4] === 'list' ? checkList : process.argv[4] === 'controls' ? checkControls : check;

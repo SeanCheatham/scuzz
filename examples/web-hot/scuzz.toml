@@ -1,0 +1,9 @@
+[package]
+name = "web-hot"
+version = "0.1.0"
+description = "One web page that loads a new build"
+
+[ui]
+default_runtime = "headless"
+headless_size = [400, 200]
+headless_scale = 1.0

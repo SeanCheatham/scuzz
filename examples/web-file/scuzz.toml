@@ -1,7 +1,7 @@
 [package]
 name = "web-file"
 version = "0.1.0"
-description = "One browser file that survives a reload"
+description = "Rename and delete one browser file"
 
 [ui]
 default_runtime = "headless"

@@ -335,12 +335,18 @@ SIGINT and SIGTERM cancel the live program through its IO scheduler. The schedul
 
 The browser working directory keeps a file across a page reload.
 `Fs.write` and `Fs.writeBytes` save the complete file before the call returns.
+`Fs.rename` and `Fs.delete` save that directory before the call returns.
+A reload after a rename reads the new name.
+A reload after a delete does not read the old name.
+Bytes that are not valid UTF-8 still round-trip.
 A later load of the same page reads those bytes.
 The page uses one browser thread.
 The save does not use a worker.
 Simulation stores the same bytes.
-A file outside the working directory does not remain.
-Hot reload on web stays open.
+A path outside the working directory fails.
+The open page reads `reload.stamp` from the server that serves the package.
+A new stamp loads the new build.
+The browser stays open.
 
 Live and simulated HTTP clients share one URL parser. A URL with no path uses `/`. The request target keeps the query and excludes the fragment. Raw spaces and control bytes fail before dispatch. Each HTTP client call takes a request header map after the URL. Body methods take the body last. `Net.httpGetToFile` streams a response body to a caller path with bounded memory. It returns status, headers, and byte count. It supports Content-Length, chunked transfer encoding, and close-delimited bodies. It removes an incomplete file after an error or cancellation. The caller uses a temporary path and renames it after validation. `Net.httpGet`, `Net.httpGetBytes`, and `Net.httpPost` keep the 2 MiB body cap. A larger body fails. The calls do not stream. `Net.httpGet` returns the body as `String`. `Net.httpPost` sends one string body and returns the body as `String`. On the web target it sends that body to a same-origin URL. A cross-origin POST does not leave the page. It does not follow a redirect. `Net.httpGetBytes` returns the body as `Bytes`. Read a file written by `Net.httpGetToFile` with `Fs.readBytes`. TCP and UDP bodies stay `String`. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log. A request with `Prefer: wait=N` can wait N seconds for its response. The supported range is 1 through 900 seconds. Other values keep the transport default. `IO.timeout` can set a shorter bound. DNS, connection, and write limits stay fixed. `Net.httpGet` fails with `Net.httpGet: read timed out` when the peer accepts and sends no bytes. The default wait is one second. The call closes its socket before it returns. The program can continue. On the web target, `Net.httpGet` uses that wait. It aborts the request when the wait ends. The page continues.
 
@@ -973,6 +979,10 @@ A cross-origin POST does not leave the page.
 It returns the status and the string body on the browser thread.
 One browser package calls `Net.httpPost`.
 Other Net calls fail on web.
-A web file does not survive a reload.
+A web file stays in the working directory across a page reload.
+`Fs.rename` and `Fs.delete` stay in that directory.
+A path outside that directory fails.
+The open page loads a new build when `reload.stamp` changes.
+The browser stays open.
 Full web accessibility remains open.
 Browser limits: [`compatibility.md`](compatibility.md#browser-target).

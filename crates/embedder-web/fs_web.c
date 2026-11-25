@@ -1,5 +1,6 @@
 /* Browser files. Keep the working directory across a page reload.
  * Load it before a file call. Save it after a successful change.
+ * Rename and delete use the same save.
  * Stay on this thread. Do not start a worker. */
 #include "scuzz_rt.h"
 
