@@ -1,0 +1,4 @@
+[package]
+name = "json-tree"
+version = "0.1.0"
+description = "Set, record tree, and enum tree JSON decode"
