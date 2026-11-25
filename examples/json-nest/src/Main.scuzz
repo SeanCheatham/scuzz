@@ -1,0 +1,113 @@
+record Spot(name: String, n: Int)
+
+record Bag(labels: Option[List[String]])
+
+record Lane(spots: List[Option[Spot]])
+
+def showLabels(labels: Option[List[String]]): String =
+  labels match {
+    case Option.Some(xs) => if (List.isEmpty(xs)) "empty" else List.join(xs, ",")
+    case Option.None => "none"
+  }
+
+def decodeBag(json: Json): Result[String, Bag] =
+  Json.decode(json)
+
+def bagText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showBag(decodeBag(json))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def showBag(result: Result[String, Bag]): String =
+  result match {
+    case Result.Ok(Bag(labels)) => Str.concat("ok:", showLabels(labels))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def showSpot(spot: Spot): String =
+  spot match {
+    case Spot(name, n) => Str.concat(name, Str.concat(":", Str.fromInt(n)))
+  }
+
+def spotText(spot: Option[Spot]): String =
+  spot match {
+    case Option.Some(value) => showSpot(value)
+    case Option.None => "none"
+  }
+
+def decodeSpots(json: Json): Result[String, Map[String, Spot]] =
+  Json.decode(json)
+
+def showSpots(spots: Map[String, Spot]): String =
+  if (Map.isEmpty(spots)) "empty" else List.join(List.map(List.sort(Map.keys(spots)), key => Str.concat(key, Str.concat("=", spotText(Map.get(spots, key))))), ",")
+
+def showMap(result: Result[String, Map[String, Spot]]): String =
+  result match {
+    case Result.Ok(spots) => Str.concat("ok:", showSpots(spots))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def mapText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showMap(decodeSpots(json))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def decodeLane(json: Json): Result[String, Lane] =
+  Json.decode(json)
+
+def showLaneItems(spots: List[Option[Spot]]): String =
+  if (List.isEmpty(spots)) "empty" else List.join(List.map(spots, spot => spotText(spot)), ",")
+
+def showLane(result: Result[String, Lane]): String =
+  result match {
+    case Result.Ok(Lane(spots)) => Str.concat("ok:", showLaneItems(spots))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def laneText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showLane(decodeLane(json))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":[\"a\",\"b\"]}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":[]}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":null}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":[\"a\",null]}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":[null]}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":[\"a\",1]}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":1}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":{\"a\":\"b\"}}")))
+    _ <- IO.println(Str.concat("opt:", bagText("{\"labels\":\"a\"}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"b\":{\"name\":\"two\",\"n\":2},\"a\":{\"name\":\"one\",\"n\":1}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":{\"name\":\"\",\"n\":0}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"z\":{\"name\":\"ok\",\"n\":1},\"a\":{\"name\":\"x\",\"n\":2}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":{\"name\":\"1\",\"n\":1},\"a\":{\"name\":\"2\",\"n\":2}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":{\"name\":\"x\",\"n\":1,\"extra\":true}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":1}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"m\":1,\"a\":{\"name\":\"x\",\"n\":2}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":null}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":{\"n\":1}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":{\"name\":\"x\",\"n\":true}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":{\"name\":1,\"n\":2}}")))
+    _ <- IO.println(Str.concat("map:", mapText("{\"a\":[\"x\"]}")))
+    _ <- IO.println(Str.concat("map:", mapText("[]")))
+    _ <- IO.println(Str.concat("map:", mapText("null")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[null,{\"name\":\"a\",\"n\":1}]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[{\"name\":\"b\",\"n\":2}]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[null]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[{\"name\":\"a\",\"n\":1},1]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[{\"name\":\"a\"}]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[{\"name\":\"a\",\"n\":true}]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":[null,{\"name\":1,\"n\":2}]}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":null}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{}")))
+    _ <- IO.println(Str.concat("lane:", laneText("{\"spots\":\"a\"}")))
+  } yield ()

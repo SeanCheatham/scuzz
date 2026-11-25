@@ -762,7 +762,10 @@ oracle boundaries(): Bool =
         ('enum Loop:\n  case Leaf(name: String)\n  case Nest(inner: Loop)\nrecord Row(item: Loop)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item.inner'),
         ('def badSet(json: Json): Result[String, Set[Int]] =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
         ('record Row(xs: Set[String])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
-        ('record Row(label: Option[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
+        ('record Row(label: Option[List[Int]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
+        ('record Row(label: Option[List[List[String]]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
+        ('record Spot(name: String, n: Int)\nrecord Row(xs: Map[String, Spot])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
+        ('record Spot(name: String, n: Int)\nrecord Row(items: List[Option[List[String]]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read items'),
         ('record Row(label: Option[Json])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
         ('record Row(label: Option[Option[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
         ('record Row(labels: List[Option[Json]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read labels'),
@@ -836,6 +839,67 @@ for engine in ['run', 'eval']:
     assert output == expected, (engine, [(i, a, b) for i, (a, b) in enumerate(zip(output, expected)) if a != b][:12], output, expected)
 print('json tree decode parity ok')
 PY_JSON_TREE
+
+# Option list, record map, and optional record list decode agree on both engines.
+python3 - <<'PY_JSON_NEST'
+import os
+from pathlib import Path
+import subprocess
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+root = Path('examples/json-nest')
+expected = [
+    'opt:ok:a,b',
+    'opt:ok:empty',
+    'opt:ok:none',
+    'opt:ok:none',
+    'opt:error:Json.decode: wrong case at labels.1',
+    'opt:error:Json.decode: wrong case at labels.0',
+    'opt:error:Json.decode: wrong case at labels.1',
+    'opt:error:Json.decode: wrong case at labels',
+    'opt:error:Json.decode: wrong case at labels',
+    'opt:error:Json.decode: wrong case at labels',
+    'map:ok:a=one:1,b=two:2',
+    'map:ok:empty',
+    'map:ok:a=:0',
+    'map:ok:a=x:2,z=ok:1',
+    'map:ok:a=2:2',
+    'map:ok:a=x:1',
+    'map:error:Json.decode: wrong case at a',
+    'map:error:Json.decode: wrong case at m',
+    'map:error:Json.decode: wrong case at a',
+    'map:error:Json.decode: missing field a.name',
+    'map:error:Json.decode: wrong case at a.n',
+    'map:error:Json.decode: wrong case at a.name',
+    'map:error:Json.decode: wrong case at a',
+    'map:error:Json.decode: wrong case',
+    'map:error:Json.decode: wrong case',
+    'lane:ok:none,a:1',
+    'lane:ok:b:2',
+    'lane:ok:empty',
+    'lane:ok:none',
+    'lane:error:Json.decode: wrong case at spots.1',
+    'lane:error:Json.decode: missing field spots.0.n',
+    'lane:error:Json.decode: wrong case at spots.0.n',
+    'lane:error:Json.decode: wrong case at spots.1.name',
+    'lane:error:Json.decode: wrong case at spots',
+    'lane:error:Json.decode: missing field spots',
+    'lane:error:Json.decode: wrong case at spots',
+]
+
+def command(engine):
+    result = subprocess.run([str(cli), engine, str(root)], capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, (engine, result.stdout[-4000:], result.stderr[-4000:])
+    lines = result.stdout.strip().splitlines()
+    if engine == 'run' and lines and lines[0] == 'ok':
+        lines = lines[1:]
+    return lines
+
+for engine in ['run', 'eval']:
+    output = command(engine)
+    assert output == expected, (engine, [(i, a, b) for i, (a, b) in enumerate(zip(output, expected)) if a != b][:12], output, expected)
+print('json nest decode parity ok')
+PY_JSON_NEST
 
 # Validated paths retain live checks and constructor access.
 python3 - <<'PY_PATH'
