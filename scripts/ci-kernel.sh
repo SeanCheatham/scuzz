@@ -758,7 +758,10 @@ oracle boundaries(): Bool =
         ('record Row(xs: Map[String, Int])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
         ('record Row(xs: List[Json])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
         ('record Row(xs: List[List[Option[String]]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
-        ('record Node(name: String, kids: List[Node])\ndef decodeNode(json: Json): Result[String, Node] =\n  Json.decode(json)\n', 'Json.decode: cannot read kids'),
+        ('record Node(name: String, child: Node)\ndef decodeNode(json: Json): Result[String, Node] =\n  Json.decode(json)\n', 'Json.decode: cannot read child'),
+        ('enum Loop:\n  case Leaf(name: String)\n  case Nest(inner: Loop)\nrecord Row(item: Loop)\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read item.inner'),
+        ('def badSet(json: Json): Result[String, Set[Int]] =\n  Json.decode(json)\n', 'Json.decode needs a record result'),
+        ('record Row(xs: Set[String])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read xs'),
         ('record Row(label: Option[List[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
         ('record Row(label: Option[Json])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
         ('record Row(label: Option[Option[String]])\ndef decodeRow(json: Json): Result[String, Row] =\n  Json.decode(json)\n', 'Json.decode: cannot read label'),
@@ -790,6 +793,49 @@ oracle boundaries(): Bool =
         (root / 'src/BadDecode.scuzz').unlink()
 print('input validation and native parity ok')
 PY_INPUT
+
+# Set, record tree, and enum tree decode agree on both engines.
+python3 - <<'PY_JSON_TREE'
+import os
+from pathlib import Path
+import subprocess
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+root = Path('examples/json-tree')
+expected = [
+    'set:a,b',
+    'has:a:yes',
+    'has:c:no',
+    'set-json:ok:a,b',
+    'set-json:ok:empty',
+    'set-json:error:Json.decode: wrong case at 1',
+    'set-json:error:Json.decode: wrong case',
+    'node:ok:root(a,b(c))',
+    'node:error:Json.decode: wrong case at kids.0.name',
+    'node:error:Json.decode: missing field name',
+    'node:error:Json.decode: wrong case at kids',
+    'tree:ok:oak',
+    'tree:ok:(a,(c),b)',
+    'tree:error:Json.decode: wrong case at tree.name',
+    'tree:error:Json.decode: unknown case at tree.kids.0: {"Nope":"a"}',
+    'tree:error:Json.decode: unknown case at tree: {"Gone":1}',
+    'tree:error:Json.decode: wrong case at tree.kids.0: 1',
+    'tree:error:Json.decode: missing field tree',
+]
+
+def command(engine):
+    result = subprocess.run([str(cli), engine, str(root)], capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, (engine, result.stdout[-4000:], result.stderr[-4000:])
+    lines = result.stdout.strip().splitlines()
+    if engine == 'run' and lines and lines[0] == 'ok':
+        lines = lines[1:]
+    return lines
+
+for engine in ['run', 'eval']:
+    output = command(engine)
+    assert output == expected, (engine, [(i, a, b) for i, (a, b) in enumerate(zip(output, expected)) if a != b][:12], output, expected)
+print('json tree decode parity ok')
+PY_JSON_TREE
 
 # Validated paths retain live checks and constructor access.
 python3 - <<'PY_PATH'

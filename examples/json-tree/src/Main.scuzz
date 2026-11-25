@@ -1,0 +1,91 @@
+record Node(name: String, kids: List[Node])
+
+enum Tree:
+  case Leaf(name: String)
+  case Branch(kids: List[Tree])
+
+record Grove(tree: Tree)
+
+def built(): Set[String] =
+  Set.add(Set.add(Set.add(Set.empty(), "b"), "a"), "b")
+
+def has(label: String): String =
+  if (Set.contains(built(), label)) "yes" else "no"
+
+def decodeNames(json: Json): Result[String, Set[String]] =
+  Json.decode(json)
+
+def showNames(result: Result[String, Set[String]]): String =
+  result match {
+    case Result.Ok(items) => if (Set.isEmpty(items)) "ok:empty" else Str.concat("ok:", List.join(Set.toList(items), ","))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def namesText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showNames(decodeNames(json))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def showNode(node: Node): String =
+  node match {
+    case Node(name, kids) => if (List.isEmpty(kids)) name else Str.concat(name, Str.concat("(", Str.concat(List.join(List.map(kids, kid => showNode(kid)), ","), ")")))
+  }
+
+def decodeNode(json: Json): Result[String, Node] =
+  Json.decode(json)
+
+def showNodeResult(result: Result[String, Node]): String =
+  result match {
+    case Result.Ok(node) => Str.concat("ok:", showNode(node))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def nodeText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showNodeResult(decodeNode(json))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def showTree(tree: Tree): String =
+  tree match {
+    case Tree.Leaf(name) => name
+    case Tree.Branch(kids) => Str.concat("(", Str.concat(List.join(List.map(kids, kid => showTree(kid)), ","), ")"))
+  }
+
+def decodeGrove(json: Json): Result[String, Grove] =
+  Json.decode(json)
+
+def showGrove(result: Result[String, Grove]): String =
+  result match {
+    case Result.Ok(Grove(tree)) => Str.concat("ok:", showTree(tree))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+def groveText(text: String): String =
+  Json.parse(text) match {
+    case Result.Ok(json) => showGrove(decodeGrove(json))
+    case Result.Err(error) => Str.concat("error:", error)
+  }
+
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.concat("set:", List.join(Set.toList(built()), ",")))
+    _ <- IO.println(Str.concat("has:a:", has("a")))
+    _ <- IO.println(Str.concat("has:c:", has("c")))
+    _ <- IO.println(Str.concat("set-json:", namesText("[\"b\",\"a\",\"b\"]")))
+    _ <- IO.println(Str.concat("set-json:", namesText("[]")))
+    _ <- IO.println(Str.concat("set-json:", namesText("[\"a\",1]")))
+    _ <- IO.println(Str.concat("set-json:", namesText("{\"a\":\"b\"}")))
+    _ <- IO.println(Str.concat("node:", nodeText("{\"name\":\"root\",\"kids\":[{\"name\":\"a\",\"kids\":[]},{\"name\":\"b\",\"kids\":[{\"name\":\"c\",\"kids\":[]}]}]}")))
+    _ <- IO.println(Str.concat("node:", nodeText("{\"name\":\"root\",\"kids\":[{\"name\":1,\"kids\":[]}]}")))
+    _ <- IO.println(Str.concat("node:", nodeText("{\"kids\":[]}")))
+    _ <- IO.println(Str.concat("node:", nodeText("{\"name\":\"root\",\"kids\":{}}")))
+    _ <- IO.println(Str.concat("tree:", groveText("{\"tree\":{\"Leaf\":\"oak\"}}")))
+    _ <- IO.println(Str.concat("tree:", groveText("{\"tree\":{\"Branch\":[{\"Leaf\":\"a\"},{\"Branch\":[{\"Leaf\":\"c\"}]},{\"Leaf\":\"b\"}]}}")))
+    _ <- IO.println(Str.concat("tree:", groveText("{\"tree\":{\"Leaf\":1}}")))
+    _ <- IO.println(Str.concat("tree:", groveText("{\"tree\":{\"Branch\":[{\"Nope\":\"a\"}]}}")))
+    _ <- IO.println(Str.concat("tree:", groveText("{\"tree\":{\"Gone\":1}}")))
+    _ <- IO.println(Str.concat("tree:", groveText("{\"tree\":{\"Branch\":[1]}}")))
+    _ <- IO.println(Str.concat("tree:", groveText("{}")))
+  } yield ()
