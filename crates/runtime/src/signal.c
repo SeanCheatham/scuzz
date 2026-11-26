@@ -9,8 +9,23 @@
 #include <string.h>
 
 static uint64_t g_signal_revision;
+
+/* A tap and a request callback run on different threads on Apple ARM.
+ * Publish the value there. Other hosts keep a plain load and store.
+ * The evaluator reads signals on the type-check path. An atomic on that
+ * path makes the idle probe miss its deadline. */
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+#define SIGNAL_PUBLISH 1
+#else
+#define SIGNAL_PUBLISH 0
+#endif
+
 uint64_t sz_signal_revision(void) {
+#if SIGNAL_PUBLISH
   return __atomic_load_n(&g_signal_revision, __ATOMIC_ACQUIRE);
+#else
+  return g_signal_revision;
+#endif
 }
 
 typedef struct SigReg SigReg;
@@ -33,22 +48,44 @@ struct SzSignal {
   int map_valid;
 };
 
-/* A tap and a request callback can run on different threads. Publish each
- * write so the other thread observes it. */
 static void *signal_load(const SzSignal *s) {
+#if SIGNAL_PUBLISH
   return __atomic_load_n(&s->value, __ATOMIC_ACQUIRE);
+#else
+  return s->value;
+#endif
 }
 
 static void signal_store(SzSignal *s, void *value) {
+#if SIGNAL_PUBLISH
   __atomic_store_n(&s->value, value, __ATOMIC_RELEASE);
+#else
+  s->value = value;
+#endif
 }
 
 static uint64_t signal_version(const SzSignal *s) {
+#if SIGNAL_PUBLISH
   return __atomic_load_n(&s->version, __ATOMIC_ACQUIRE);
+#else
+  return s->version;
+#endif
 }
 
 static void signal_bump_version(SzSignal *s) {
+#if SIGNAL_PUBLISH
   __atomic_fetch_add(&s->version, 1, __ATOMIC_RELEASE);
+#else
+  s->version++;
+#endif
+}
+
+static void signal_bump_revision(void) {
+#if SIGNAL_PUBLISH
+  __atomic_fetch_add(&g_signal_revision, 1, __ATOMIC_RELEASE);
+#else
+  g_signal_revision++;
+#endif
 }
 
 /* --- signal store registry (fuzz / dump oracle) --------------------------- */
@@ -774,7 +811,7 @@ void *sz_signal_write(SzSignal *s, void *value) {
   }
   signal_bump_version(s);
   if (!s->hidden)
-    __atomic_fetch_add(&g_signal_revision, 1, __ATOMIC_RELEASE);
+    signal_bump_revision();
   return NULL;
 }
 
