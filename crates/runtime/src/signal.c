@@ -9,7 +9,24 @@
 #include <string.h>
 
 static uint64_t g_signal_revision;
-uint64_t sz_signal_revision(void) { return g_signal_revision; }
+
+/* A tap and a request callback run on different threads on Apple ARM.
+ * Publish the value there. Other hosts keep a plain load and store.
+ * The evaluator reads signals on the type-check path. An atomic on that
+ * path makes the idle probe miss its deadline. */
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+#define SIGNAL_PUBLISH 1
+#else
+#define SIGNAL_PUBLISH 0
+#endif
+
+uint64_t sz_signal_revision(void) {
+#if SIGNAL_PUBLISH
+  return __atomic_load_n(&g_signal_revision, __ATOMIC_ACQUIRE);
+#else
+  return g_signal_revision;
+#endif
+}
 
 typedef struct SigReg SigReg;
 
@@ -30,6 +47,46 @@ struct SzSignal {
   uint64_t map_seen;
   int map_valid;
 };
+
+static void *signal_load(const SzSignal *s) {
+#if SIGNAL_PUBLISH
+  return __atomic_load_n(&s->value, __ATOMIC_ACQUIRE);
+#else
+  return s->value;
+#endif
+}
+
+static void signal_store(SzSignal *s, void *value) {
+#if SIGNAL_PUBLISH
+  __atomic_store_n(&s->value, value, __ATOMIC_RELEASE);
+#else
+  s->value = value;
+#endif
+}
+
+static uint64_t signal_version(const SzSignal *s) {
+#if SIGNAL_PUBLISH
+  return __atomic_load_n(&s->version, __ATOMIC_ACQUIRE);
+#else
+  return s->version;
+#endif
+}
+
+static void signal_bump_version(SzSignal *s) {
+#if SIGNAL_PUBLISH
+  __atomic_fetch_add(&s->version, 1, __ATOMIC_RELEASE);
+#else
+  s->version++;
+#endif
+}
+
+static void signal_bump_revision(void) {
+#if SIGNAL_PUBLISH
+  __atomic_fetch_add(&g_signal_revision, 1, __ATOMIC_RELEASE);
+#else
+  g_signal_revision++;
+#endif
+}
 
 /* --- signal store registry (fuzz / dump oracle) --------------------------- */
 /* Register every live signal for session cleanup. Hidden signals have no
@@ -685,18 +742,19 @@ static void drop_value(SzSignal *s, void *value) {
 static void *signal_value(SzSignal *s) {
   void *out;
   if (!s) return NULL;
-  if (!s->map_src) return s->value;
+  if (!s->map_src) return signal_load(s);
   (void)signal_value(s->map_src);
-  if (s->map_valid && s->map_seen == s->map_src->version) return s->value;
+  if (s->map_valid && s->map_seen == signal_version(s->map_src))
+    return signal_load(s);
   SzSignalScope *previous = sz_signal_scope_enter(s->registry->scope);
-  out = s->map_fn(s->map_src->value, s->map_env);
+  out = s->map_fn(signal_load(s->map_src), s->map_env);
   sz_signal_scope_enter(previous);
-  drop_value(s, s->value);
-  s->value = out;
-  s->map_seen = s->map_src->version;
+  drop_value(s, signal_load(s));
+  signal_store(s, out);
+  s->map_seen = signal_version(s->map_src);
   s->map_valid = 1;
-  s->version++;
-  return s->value;
+  signal_bump_version(s);
+  return signal_load(s);
 }
 
 /* Internal mirrors keep Signal.get working and stay out of every dump.
@@ -716,7 +774,7 @@ SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name) {
                                    : kind);
   SzSignal *s = sz_alloc_zero(sizeof(*s));
   sz_retain(value);
-  s->value = value;
+  signal_store(s, value);
   s->elem_str = kind == 3;
   s->value_cell = kind == 4;
   s->hidden = sig_is_mirror(name);
@@ -732,11 +790,13 @@ void *sz_signal_read(SzSignal *s) {
 }
 
 void *sz_signal_write(SzSignal *s, void *value) {
+  void *cur;
   if (!s || s->map_fn) return NULL;
-  if (sz_ptr_eq(s->value, value)) return NULL;
+  cur = signal_load(s);
+  if (sz_ptr_eq(cur, value)) return NULL;
   sz_retain(value);
-  drop_value(s, s->value);
-  s->value = value;
+  drop_value(s, cur);
+  signal_store(s, value);
   if (s->value_cell && !s->hidden && mirror_list_value(value) &&
       s->registry && s->registry->kind != SIG_LIST) {
     char *saved = s->registry->name[0] ? sz_strdup(s->registry->name) : NULL;
@@ -749,8 +809,9 @@ void *sz_signal_write(SzSignal *s, void *value) {
       sz_free(saved);
     }
   }
-  s->version++;
-  if (!s->hidden) g_signal_revision++;
+  signal_bump_version(s);
+  if (!s->hidden)
+    signal_bump_revision();
   return NULL;
 }
 
@@ -768,7 +829,7 @@ SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
   sz_retain(env);
   s->map_env = env;
   (void)signal_value(s);
-  if (s->value_cell && mirror_list_value(s->value))
+  if (s->value_cell && mirror_list_value(signal_load(s)))
     s->registry->kind = SIG_LIST;
   if (name && !s->hidden)
     signal_set_name(s->registry, sz_string_cstr(name));
@@ -794,7 +855,7 @@ void sz_signal_free(SzSignal *s) {
   }
   signal_unlink_source(s);
   sig_unregister(s);
-  drop_value(s, s->value);
+  drop_value(s, signal_load(s));
   sz_release(s->map_env);
   sz_free(s);
 }
@@ -849,9 +910,9 @@ static void free_signals_from(uint64_t mark) {
 static void restore_holds(SigHold *h) {
   while (h) {
     SigHold *next = h->next;
-    if (sig_registered(h->sig) && h->sig->value != h->value) {
-      void *cur = h->sig->value;
-      h->sig->value = h->value;
+    if (sig_registered(h->sig) && signal_load(h->sig) != h->value) {
+      void *cur = signal_load(h->sig);
+      signal_store(h->sig, h->value);
       h->sig->map_valid = 0;
       h->value = NULL;
       sz_release(cur);
