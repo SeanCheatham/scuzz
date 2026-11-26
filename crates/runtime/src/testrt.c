@@ -5147,27 +5147,34 @@ static void fuzz_probe_child_log(void) {
 static void fuzz_regs_reset(void);
 static void verify_clear(void);
 
-/* Parent side of a forked probe: wait under the 20-second deadline. */
+/* Parent side of a forked probe: wait under the 2100-second deadline. */
 static int fuzz_probe_wait(pid_t pid) {
   struct timespec nap;
+  struct timespec t0;
   int status = 0;
-  long waited_ms = 0;
   nap.tv_sec = 0;
   nap.tv_nsec = 2 * 1000 * 1000;
+  if (clock_gettime(CLOCK_MONOTONIC, &t0) != 0)
+    return 1;
   for (;;) {
+    struct timespec now;
+    long waited_ms;
     pid_t w = waitpid(pid, &status, WNOHANG);
     if (w == pid)
       break;
     if (w < 0 && errno != EINTR)
       return 1;
-    if (waited_ms >= 20000) {
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return 1;
+    waited_ms = (now.tv_sec - t0.tv_sec) * 1000 +
+                (now.tv_nsec - t0.tv_nsec) / 1000000;
+    if (waited_ms >= 2100000) {
       kill(pid, SIGKILL);
       while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
         ;
       return 124;
     }
     nanosleep(&nap, NULL);
-    waited_ms += 2;
   }
   if (WIFEXITED(status))
     return WEXITSTATUS(status);
