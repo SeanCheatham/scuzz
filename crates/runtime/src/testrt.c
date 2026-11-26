@@ -5147,13 +5147,40 @@ static void fuzz_probe_child_log(void) {
 static void fuzz_regs_reset(void);
 static void verify_clear(void);
 
-/* Parent side of a forked probe: wait under the 2100-second deadline. */
-static int fuzz_probe_wait(pid_t pid) {
+/* An idle probe has no drive script. It keeps the 2100-second deadline.
+ * A drive or UI script keeps the 20-second deadline. */
+static long fuzz_probe_deadline_ms(const char *path) {
+  FILE *f;
+  char *line = NULL;
+  size_t cap = 0;
+  ssize_t length;
+  int script = 0;
+  if (!path || !path[0])
+    return 2100000;
+  f = fopen(path, "r");
+  if (!f)
+    return 2100000;
+  while ((length = getline(&line, &cap, f)) >= 0) {
+    if (length && line[length - 1] == '\n')
+      line[--length] = 0;
+    if ((strncmp(line, "DRIVE_SCRIPT=", 13) == 0 && line[13] != 0) ||
+        (strncmp(line, "UI_SCRIPT=", 10) == 0 && line[10] != 0))
+      script = 1;
+  }
+  free(line);
+  fclose(f);
+  return script ? 20000 : 2100000;
+}
+
+/* Parent side of a forked probe: wait under the probe deadline. */
+static int fuzz_probe_wait(pid_t pid, long deadline_ms) {
   struct timespec nap;
   struct timespec t0;
   int status = 0;
   nap.tv_sec = 0;
   nap.tv_nsec = 2 * 1000 * 1000;
+  if (deadline_ms < 1)
+    deadline_ms = 2100000;
   if (clock_gettime(CLOCK_MONOTONIC, &t0) != 0)
     return 1;
   for (;;) {
@@ -5168,7 +5195,7 @@ static int fuzz_probe_wait(pid_t pid) {
       return 1;
     waited_ms = (now.tv_sec - t0.tv_sec) * 1000 +
                 (now.tv_nsec - t0.tv_nsec) / 1000000;
-    if (waited_ms >= 2100000) {
+    if (waited_ms >= deadline_ms) {
       kill(pid, SIGKILL);
       while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
         ;
@@ -5214,7 +5241,7 @@ static void *fuzz_probe_thunk(void *env) {
     fflush(stderr);
     _exit(out ? 1 : 0);
   }
-  code = fuzz_probe_wait(pid);
+  code = fuzz_probe_wait(pid, fuzz_probe_deadline_ms(req));
   fuzz_regs_reset();
   if (code == 0)
     return NULL;
