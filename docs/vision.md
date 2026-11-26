@@ -193,6 +193,10 @@ Unavailable local model resources or human availability do not prevent determini
 
 Compile time and evaluator parity support this arc. Measure changes that affect them. Standard kits follow when an ordinary program or this review loop needs them. Ranked work: [`gaps.md`](gaps.md).
 
+### Type-checker evaluation cost
+
+One idle type-checker probe on the evaluator takes about 1785 seconds. The slowest sample takes 1866 seconds. One code-generation idle probe takes 969 seconds. CLI idle probes take 46 seconds and 45 seconds. `scuzz fuzz --iterations 0` replays the corpus and finishes that one probe. The campaign compares the evaluator with the compiled program. The command does not check more programs. A long run is acceptable when it checks more programs. This cost is slow evaluation of the type checker. Start this work after the probe deadline change lands. Keep that deadline until a measured faster probe replaces it. Detail: [`optimization.md`](optimization.md#type-checker-evaluation-cost).
+
 Do not start FFI, a registry, plugins, provider SDKs, a remote generator service, Tailscale or external relay tunnels, model training, physical-device packaging, or `*.scuzz_tune`. Keep one pinned llama.cpp release and one model format. Use Metal on Apple Silicon and Vulkan on Linux when a supported GPU is available. Fall back to CPU inference when the platform backend or GPU is unavailable. General Hub browsing, gated-model login, model conversion, and training stay later. Do not add pixel preview infrastructure, semantic timeline alignment, social accounts, public feeds, ranking algorithms, or third-party gesture frameworks. Keep keyboard and shared Headless input as peers. Native file dialogs, menus, multi-window, debugger, and general editor expansion stay later.
 
 ## Risks
