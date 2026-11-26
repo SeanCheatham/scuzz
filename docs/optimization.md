@@ -1,5 +1,24 @@
 # Empirical optimization (future)
 
+## Type-checker evaluation cost
+
+This slice is next. Do it before further language work. Do it before the other open work in [`vision.md`](vision.md).
+Start this work after the probe deadline change lands.
+Keep that deadline until a measured faster probe replaces it.
+
+One idle type-checker probe on the evaluator takes about 1785 seconds.
+The slowest sample takes 1866 seconds.
+One code-generation idle probe takes 969 seconds.
+CLI idle probes take 46 seconds and 45 seconds.
+
+`scuzz fuzz --iterations 0` replays the corpus and finishes that one probe.
+The campaign compares the evaluator with the compiled program.
+The command does not check more programs.
+Accept a long run only when it checks more programs.
+This cost is slow evaluation.
+
+## Later execution strategy
+
 This work remains deferred until a parallel execution strategy exists.
 OS thread support remains open in [`gaps.md`](gaps.md).
 Current verification rules live in [`philosophy.md`](philosophy.md#verification-posture).
@@ -54,19 +73,3 @@ Elapsed time measurements make the result specific to that machine.
 
 Do not build a tuner before a useful execution strategy exists.
 Keep the vocabulary small. A measured improvement does not excuse a behavior change.
-
-## Type-checker evaluation cost
-
-Start this work after the probe deadline change lands.
-Keep that deadline until a measured faster probe replaces it.
-
-One idle type-checker probe on the evaluator takes about 1785 seconds.
-The slowest sample takes 1866 seconds.
-One code-generation idle probe takes 969 seconds.
-CLI idle probes take 46 seconds and 45 seconds.
-
-`scuzz fuzz --iterations 0` replays the corpus and finishes that one probe.
-The campaign compares the evaluator with the compiled program.
-The command does not check more programs.
-A long run is acceptable when it checks more programs.
-This cost is slow evaluation of the type checker.
