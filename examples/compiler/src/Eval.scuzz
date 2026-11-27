@@ -39,7 +39,9 @@ enum EvMap:
 
 record UiCall(name: String, args: List[Value])
 
-record EvEnv(vars: List[(String, Value)], mod: String, loc: String)
+record EvEnv(vars: List[(String, Value)], mod: String, loc: String, depth: Int)
+
+record Tail(done: Bool, expr: Expr, env: EvEnv, value: Value)
 
 record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
@@ -161,13 +163,13 @@ def callPure(p: EvProg, mod: String, name: String, args: List[Value]): Value =
   callPureHit(funMod(p, mod, name), mod, name, args, p)
 
 def callPureHit(hit: List[Fun], mod: String, name: String, args: List[Value], p: EvProg): Value =
-  if (List.isEmpty(hit)) Value.VErr(Str.concat("eval: unknown function ", Str.concat(mod, Str.concat(".", name)))) else defStepVals(List.at(hit, 0), args, p)
+  if (List.isEmpty(hit)) Value.VErr(Str.concat("eval: unknown function ", Str.concat(mod, Str.concat(".", name)))) else tailRun(defStepVals(List.at(hit, 0), args, p, 0, false), p)
 
 def runMain(p: EvProg): IO[Unit] =
   mainIo(stepExpr(p.main, envOf(p), p))
 
 def envOf(p: EvProg): EvEnv =
-  EvEnv(noVars(), p.mainMod, "")
+  EvEnv(noVars(), p.mainMod, "", 0)
 
 def tryIt(src: String, pool: Signal[Value]): IO[TryOut] =
   tryChecked(src, Check.human(src), pool)
@@ -325,7 +327,7 @@ def isExcludedKit(f: String): Bool =
   List.exists(excludedKits(), pre => Str.startsWith(f, pre))
 
 def kitProbe(f: String, vals: List[Value], p: EvProg): Value =
-  kitCall(f, vals, EvEnv(noVars(), p.mainMod, "kit-probe"), kitReady(f, vals, p), 0)
+  kitCall(f, vals, EvEnv(noVars(), p.mainMod, "kit-probe", 0), kitReady(f, vals, p), 0)
 
 def kitReady(f: String, vals: List[Value], p: EvProg): EvProg =
   if (f == "Property.signalInt") kitHold(sigMake(strAt(vals, 0), Value.VInt(1), p), p) else if (f == "Property.signalStr") kitHold(sigMake(strAt(vals, 0), Value.VStr("a"), p), p) else if (Str.startsWith(f, "Property.signalList")) kitHold(sigAnon(strAt(vals, 0), Value.VList(Value.VStr("a") :: noVals()), p), p) else p
@@ -382,6 +384,15 @@ def fmtFloat(f: Float): String =
 def showAll(xs: List[Value]): String =
   List.join(List.map(xs, x => show(x)), ", ")
 
+def tailDone(v: Value, env: EvEnv): Tail =
+  Tail(true, Expr.EUnit, env, v)
+
+def tailGo(e: Expr, env: EvEnv): Tail =
+  Tail(false, e, env, Value.VUnit)
+
+def tailRun(t: Tail, p: EvProg): Value =
+  if (t.done) t.value else tailLoop(t, p)
+
 def stepExpr(e: Expr, env: EvEnv, p: EvProg): Value =
   e match {
     case Expr.EInt(n, _) => Value.VInt(n)
@@ -390,14 +401,14 @@ def stepExpr(e: Expr, env: EvEnv, p: EvProg): Value =
     case Expr.EUnit => Value.VUnit
     case Expr.EVar(name, off) => varValue(name, env, p, off)
     case Expr.EPrint(inner, off) => printValue(stepExpr(inner, env, p), env, p, off)
-    case e @ Expr.ECall(f, args, off) => callStep(e, f, args, env, p, off)
-    case e @ Expr.EMethod(recv, name, args, off) => methodStep(e, recv, name, args, env, p, off)
+    case call @ Expr.ECall(f, args, off) => fastCall(call, f, args, env, p, off)
+    case call @ Expr.EMethod(recv, name, args, off) => fastMethod(call, recv, name, args, env, p, off)
     case e @ Expr.EField(recv, name, off) => fieldValue(e, recv, name, env, p, off)
     case e @ Expr.EBin(op, l, r, off) => binValue(e, op, l, r, env, p, off)
     case e @ Expr.EUn(op, inner, off) => unValue(e, op, inner, env, p, off)
     case Expr.ELam(param, _, body) => Value.VClo(param, body, env)
     case Expr.EIf(c, t, el, off) => ifStep(stepExpr(c, env, p), t, el, env, p, off)
-    case Expr.EMatch(scr, arms, off) => matchStep(stepExpr(scr, env, p), arms, env, p, off)
+    case Expr.EMatch(scr, arms, off) => matchValue(stepExpr(scr, env, p), arms, env, p, off)
     case Expr.EFor(bs, body, off) => forValue(bs, body, env, p, off, false)
     case Expr.EList(xs) => listValue(stepAll(xs, env, p))
     case Expr.ETuple(xs) => tupleValue(stepAll(xs, env, p))
@@ -406,6 +417,90 @@ def stepExpr(e: Expr, env: EvEnv, p: EvProg): Value =
     case Expr.EInterp(_, parts, _) => interpAcc(parts, env, p, Builder.empty())
     case Expr.EHole => Value.VClo("_ph", Expr.EVar("_ph", 0), env)
     case Expr.EFloat(str, _) => Value.VFloat(floatLit(Str.replace(str, "_", "")))
+  }
+
+def tailLoop(t: Tail, p: EvProg): Value =
+  if (t.done) t.value else if (tailNamed(t.expr)) tailLoop(tailGo(tailInner(t.expr), t.env), p) else if (tailIsIf(t.expr)) tailLoop(tailPickIf(t.expr, t.env, p), p) else if (tailIsMatch(t.expr)) tailLoop(tailPickMatch(t.expr, t.env, p), p) else if (tailIsCall(t.expr)) tailLoop(tailPickCall(t.expr, t.env, p), p) else if (tailIsMethod(t.expr)) tailLoop(tailPickMethod(t.expr, t.env, p), p) else stepExpr(t.expr, t.env, p)
+
+def tailNamed(e: Expr): Bool =
+  e match {
+    case Expr.ENamed(_, _) => true
+    case Expr.EAscribe(_, _, _) => true
+    case _ => false
+  }
+
+def tailInner(e: Expr): Expr =
+  e match {
+    case Expr.ENamed(_, inner) => inner
+    case Expr.EAscribe(inner, _, _) => inner
+    case _ => e
+  }
+
+def tailIsIf(e: Expr): Bool =
+  e match {
+    case Expr.EIf(_, _, _, _) => true
+    case _ => false
+  }
+
+def tailIsMatch(e: Expr): Bool =
+  e match {
+    case Expr.EMatch(_, _, _) => true
+    case _ => false
+  }
+
+def tailIsCall(e: Expr): Bool =
+  e match {
+    case Expr.ECall(_, _, _) => true
+    case _ => false
+  }
+
+def tailIsMethod(e: Expr): Bool =
+  e match {
+    case Expr.EMethod(_, _, _, _) => true
+    case _ => false
+  }
+
+def tailPickIf(e: Expr, env: EvEnv, p: EvProg): Tail =
+  e match {
+    case Expr.EIf(c, t, el, off) => tailPickCond(stepExpr(c, env, p), t, el, env, p, off)
+    case _ => tailGo(e, env)
+  }
+
+def tailPickCond(cv: Value, t: Expr, el: Expr, env: EvEnv, p: EvProg, off: Int): Tail =
+  cv match {
+    case Value.VBool(b) => if (b) tailMark(t, "t", env, off, p) else tailMark(el, "e", env, off, p)
+    case Value.VErr(_) => tailDone(cv, env)
+    case _ => tailDone(errAt("if condition is not Bool", env, p, off), env)
+  }
+
+def tailMark(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): Tail =
+  if (isUnitExpr(e) || List.isEmpty(p.log)) tailMarkLoc(e, tag, env, parentOff, p) else tailMarkLogged(logAdd(p, Parse.spanOff(e, parentOff), "", Str.concat("#", tag), env), e, tag, env, parentOff, p)
+
+def tailMarkLogged(_u: Unit, e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): Tail =
+  tailMarkLoc(e, tag, env, parentOff, p)
+
+def tailMarkLoc(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): Tail =
+  if (env.loc == "") tailGo(e, env) else tailMarkHit(Fuzz.hit(Check.covKeyOf(env.loc, Parse.spanOff(e, parentOff), tag)), e, env)
+
+def tailMarkHit(_u: Unit, e: Expr, env: EvEnv): Tail =
+  tailGo(e, env)
+
+def tailPickMatch(e: Expr, env: EvEnv, p: EvProg): Tail =
+  e match {
+    case Expr.EMatch(scr, arms, off) => matchStep(stepExpr(scr, env, p), arms, env, p, off, true)
+    case _ => tailGo(e, env)
+  }
+
+def tailPickCall(e: Expr, env: EvEnv, p: EvProg): Tail =
+  e match {
+    case call @ Expr.ECall(f, args, off) => callStep(call, f, args, env, p, off, true)
+    case _ => tailGo(e, env)
+  }
+
+def tailPickMethod(e: Expr, env: EvEnv, p: EvProg): Tail =
+  e match {
+    case call @ Expr.EMethod(recv, name, args, off) => methodStep(call, recv, name, args, env, p, off, true)
+    case _ => tailGo(e, env)
   }
 
 def floatLit(str: String): Float =
@@ -559,16 +654,25 @@ def ifStep(cv: Value, t: Expr, el: Expr, env: EvEnv, p: EvProg, off: Int): Value
   }
 
 def ifArmStep(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): Value =
-  if (isUnitExpr(e)) stepExpr(e, env, p) else if (List.isEmpty(p.log)) armStep(e, tag, env, parentOff, p) else ifArmLogged(logAdd(p, Parse.spanOff(e, parentOff), "", Str.concat("#", tag), env), e, tag, env, parentOff, p)
+  if (isUnitExpr(e)) stepExpr(e, env, p) else if (List.isEmpty(p.log)) armValue(e, tag, env, parentOff, p) else ifArmLogged(logAdd(p, Parse.spanOff(e, parentOff), "", Str.concat("#", tag), env), e, tag, env, parentOff, p)
 
 def ifArmLogged(_u: Unit, e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): Value =
-  armStep(e, tag, env, parentOff, p)
+  armValue(e, tag, env, parentOff, p)
 
-def armStep(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): Value =
-  if (env.loc == "") stepExpr(e, env, p) else armHit(Fuzz.hit(Check.covKeyOf(env.loc, Parse.spanOff(e, parentOff), tag)), e, env, p)
+def armValue(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): Value =
+  if (env.loc == "") stepExpr(e, env, p) else armValueHit(Fuzz.hit(Check.covKeyOf(env.loc, Parse.spanOff(e, parentOff), tag)), e, env, p)
 
-def armHit(_u: Unit, e: Expr, env: EvEnv, p: EvProg): Value =
+def armValueHit(_u: Unit, e: Expr, env: EvEnv, p: EvProg): Value =
   stepExpr(e, env, p)
+
+def armStep(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg, jump: Bool): Tail =
+  if (env.loc == "") armGo(e, env, p, jump) else armHit(Fuzz.hit(Check.covKeyOf(env.loc, Parse.spanOff(e, parentOff), tag)), e, env, p, jump)
+
+def armHit(_u: Unit, e: Expr, env: EvEnv, p: EvProg, jump: Bool): Tail =
+  armGo(e, env, p, jump)
+
+def armGo(e: Expr, env: EvEnv, p: EvProg, jump: Bool): Tail =
+  if (jump) tailGo(e, env) else tailDone(stepExpr(e, env, p), env)
 
 def isUnitExpr(e: Expr): Bool =
   e match {
@@ -576,23 +680,163 @@ def isUnitExpr(e: Expr): Bool =
     case _ => false
   }
 
-def callStep(e: Expr, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (Str.contains(f, ".") && isKit(p, f)) kitStep(f, args, env, p, off) else if (Str.startsWith(f, "View.")) viewValue(f, stepAll(args, env, p)) else if (hasEn(p, f)) ctorStep(f, f, args, env, p, off) else callCase(enOfCase(p, f), f, args, env, p, off)
+def fastCall(e: Expr, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (env.depth >= 1024) tailRun(callStep(e, f, args, env, p, off, false), p) else if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (Str.contains(f, ".") && isKit(p, f)) kitStep(f, args, env, p, off) else if (Str.startsWith(f, "View.")) viewValue(f, stepAll(args, env, p)) else if (hasEn(p, f)) ctorStep(f, f, args, env, p, off) else fastCase(enOfCase(p, f), f, args, env, p, off)
 
-def callCase(en: String, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (en != "") ctorStep(en, f, args, env, p, off) else callLocal(lookupVars(env.vars, f), f, args, env, p, off)
+def fastCase(en: String, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (en != "") ctorStep(en, f, args, env, p, off) else fastLocal(lookupVars(env.vars, f), f, args, env, p, off)
 
-def callLocal(bound: Option[Value], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+def fastLocal(bound: Option[Value], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
   bound match {
-    case Some(fv) => applyStep(fv, stepAll(args, env, p), env, p, off)
-    case None => callDef(funPrefer(p, env.mod, f), f, args, env, p, off)
+    case Some(fv) => applyValue(fv, stepAll(args, env, p), env, p, off)
+    case None => fastDef(funPrefer(p, env.mod, f), f, args, env, p, off)
   }
 
-def callDef(hit: List[Fun], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.isEmpty(hit)) errAt(Str.concat("unknown function ", f), env, p, off) else defStep(List.at(hit, 0), args, env, p, off)
+def fastDef(hit: List[Fun], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (List.isEmpty(hit)) errAt(Str.concat("unknown function ", f), env, p, off) else fastStep(List.at(hit, 0), args, env, p, off)
 
-def defStep(d: Fun, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (plainArgs(args, d.params)) defStepVals(d, stepAll(args, env, p), p) else defStepAligned(d, Check.alignCall(d.params, args), env, p, off)
+def fastStep(d: Fun, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (plainArgs(args, d.params)) fastVals(d, stepAll(args, env, p), p, env.depth) else fastAligned(d, Check.alignCall(d.params, args), env, p, off)
+
+def fastAligned(d: Fun, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): Value =
+  al match {
+    case (xs, err) => if (err != "") errAt(err, env, p, off) else fastVals(d, stepAll(xs, env, p), p, env.depth)
+  }
+
+def fastVals(d: Fun, vals: List[Value], p: EvProg, depth: Int): Value =
+  if (hasErr(vals)) firstErr(vals) else fastBody(d, vals, defLoc(d, p), p, depth)
+
+def fastBody(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int): Value =
+  if (List.isEmpty(p.log)) fastLogged(d, vals, loc, p, depth) else fastAfter(logAdd(p, d.off, "", d.name, EvEnv(noVars(), d.mod, loc, 0)), d, vals, loc, p, depth)
+
+def fastAfter(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int): Value =
+  fastLogged(d, vals, loc, p, depth)
+
+def fastLogged(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int): Value =
+  if (loc == "") fastOr(d, vals, loc, p, depth) else fastHit(Fuzz.hit(loc), d, vals, loc, p, depth)
+
+def fastHit(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int): Value =
+  fastOr(d, vals, loc, p, depth)
+
+def fastOr(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int): Value =
+  if (!List.isEmpty(d.tparams)) fastSlow(d, vals, loc, p, depth) else fastShape(d, vals, loc, p, depth)
+
+def fastShape(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int): Value =
+  d.body match {
+    case Expr.EIf(c, t, el, off) => fastIf(d, vals, c, t, el, off, loc, p, depth)
+    case Expr.EMatch(s, arms, off) => fastMatch(d, vals, s, arms, off, loc, p, depth)
+    case _ => fastSlow(d, vals, loc, p, depth)
+  }
+
+def fastIf(d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, loc: String, p: EvProg, depth: Int): Value =
+  fastIfLit(tailIfShape(c, t, el, tailParam(d), d.name), d, vals, loc, p, depth, off, c, t, el)
+
+def fastIfLit(hit: Option[Int], d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, off: Int, c: Expr, t: Expr, el: Expr): Value =
+  hit match {
+    case Some(result) => fastIfArg(tailOneInt(d, vals), d, vals, loc, p, depth, result, off, c, t, el)
+    case None => fastSlow(d, vals, loc, p, depth)
+  }
+
+def fastIfArg(hit: Option[Int], d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, result: Int, off: Int, c: Expr, t: Expr, el: Expr): Value =
+  hit match {
+    case Some(n) => Value.VInt(tailDecDone(tailIfMark(p, d.mod, n, c, t, el, off, loc), n, result))
+    case None => fastSlow(d, vals, loc, p, depth)
+  }
+
+def fastMatch(d: Fun, vals: List[Value], s: Expr, arms: List[Arm], off: Int, loc: String, p: EvProg, depth: Int): Value =
+  if (!tailMatchShape(s, arms, tailParam(d), d.name)) fastSlow(d, vals, loc, p, depth) else fastMatchArg(tailOneInt(d, vals), d, vals, arms, off, loc, p, depth)
+
+def fastMatchArg(hit: Option[Int], d: Fun, vals: List[Value], arms: List[Arm], off: Int, loc: String, p: EvProg, depth: Int): Value =
+  hit match {
+    case Some(n) => Value.VInt(tailEqDone(tailMatchMark(n, tailArmExpr(List.at(arms, 0)), tailArmExpr(List.at(arms, 1)), off, loc), n, tailArmLit(List.at(arms, 0))))
+    case None => fastSlow(d, vals, loc, p, depth)
+  }
+
+def fastSlow(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int): Value =
+  fastGo(depth, d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc, deeper(depth)), p)
+
+def fastGo(depth: Int, body: Expr, env: EvEnv, p: EvProg): Value =
+  if (depth >= 1024) tailLoop(tailGo(body, env), p) else stepExpr(body, env, p)
+
+def fastMethod(e: Expr, recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (env.depth >= 1024) tailRun(methodStep(e, recv, name, args, env, p, off, false), p) else if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (name == "apply") applyValue(stepExpr(recv, env, p), stepAll(args, env, p), env, p, off) else fastRecv(recv, name, args, env, p, off)
+
+def fastRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  recv match {
+    case Expr.EVar(en, _) => if (isBound(env, en)) fastValue(varValue(en, env, p, off), name, args, env, p, off) else fastQual(en, name, args, env, p, off)
+    case _ => fastValue(stepExpr(recv, env, p), name, args, env, p, off)
+  }
+
+def fastQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else fastQualDef(funMod(p, en, name), en, name, args, env, p, off)
+
+def fastQualDef(hit: List[Fun], en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (List.isEmpty(hit)) fastValue(varValue(en, env, p, off), name, args, env, p, off) else fastStep(List.at(hit, 0), args, env, p, off)
+
+def fastValue(rv: Value, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (isErr(rv)) rv else if (name == "require") rv else if (name == "copy" && isCon(rv)) copyValue(rv, args, env, p, off) else if (name == "handleErrorWith" && isIo(rv)) ioHandle(rv, stepAll(args, env, p), env, p, off) else if (name == "flatMap" && isIo(rv)) ioBind(rv, stepAll(args, env, p), env, p, off, true) else if (name == "map" && isIo(rv)) ioBind(rv, stepAll(args, env, p), env, p, off, false) else fastUser(rv, funMod(p, tyHeadOf(rv), name), name, args, env, p, off)
+
+def fastUser(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (!List.isEmpty(hit)) fastDefCall(List.at(hit, 0), rv, args, env, p, off) else fastKit(rv, Str.concat(kitNs(rv), Str.concat(".", name)), name, args, env, p, off)
+
+def fastDefCall(d: Fun, rv: Value, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  fastDefAligned(d, rv, Check.alignCall(List.tail(d.params), args), env, p, off)
+
+def fastDefAligned(d: Fun, rv: Value, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): Value =
+  al match {
+    case (xs, err) => if (err != "") errAt(err, env, p, off) else fastVals(d, rv :: stepAll(xs, env, p), p, env.depth)
+  }
+
+def fastKit(rv: Value, q: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (isKit(p, q)) kitCall(q, rv :: stepAll(args, env, p), env, p, off) else fastAny(rv, Check.ftabGet(p.funs.tab, name), name, args, env, p, off)
+
+def fastAny(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
+  if (List.isEmpty(hit)) errAt(Str.concat("unknown method ", name), env, p, off) else fastDefCall(List.at(hit, 0), rv, args, env, p, off)
+
+def matchValue(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int): Value =
+  matchValueArms(v, arms, env, p, off, 0)
+
+def matchValueArms(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+  if (isErr(v)) v else if (List.isEmpty(arms)) errAt("no match arm matched", env, p, off) else matchValueArm(v, List.at(arms, 0), List.tail(arms), env, p, off, i)
+
+def matchValueArm(v: Value, arm: Arm, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+  arm match {
+    case Arm(pat, g, body) => matchValueBound(v, tryPat(pat, v, p), g, body, rest, env, p, off, i)
+  }
+
+def matchValueBound(v: Value, bound: Option[List[(String, Value)]], g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+  bound match {
+    case Some(bs) => matchValueGuard(v, EvEnv(List.concat(bs, env.vars), env.mod, env.loc, env.depth), g, body, rest, env, p, off, i)
+    case None => matchValueArms(v, rest, env, p, off, i + 1)
+  }
+
+def matchValueGuard(v: Value, benv: EvEnv, g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+  if (g == "") armValue(body, Str.fromInt(i), benv, off, p) else matchValueGuardVal(v, stepExpr(Emit.parseGuard(g), benv, p), benv, body, rest, env, p, off, i)
+
+def matchValueGuardVal(v: Value, gv: Value, benv: EvEnv, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+  gv match {
+    case Value.VBool(b) => if (b) armValue(body, Str.fromInt(i), benv, off, p) else matchValueArms(v, rest, env, p, off, i + 1)
+    case Value.VErr(_) => gv
+    case _ => errAt("guard is not Bool", env, p, off)
+  }
+
+def callStep(e: Expr, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (Check.needsPh(e, p.funs)) tailDone(holeStep(e, env), env) else if (Str.contains(f, ".") && isKit(p, f)) tailDone(kitStep(f, args, env, p, off), env) else if (Str.startsWith(f, "View.")) tailDone(viewValue(f, stepAll(args, env, p)), env) else if (hasEn(p, f)) tailDone(ctorStep(f, f, args, env, p, off), env) else callCase(enOfCase(p, f), f, args, env, p, off, jump)
+
+def callCase(en: String, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (en != "") tailDone(ctorStep(en, f, args, env, p, off), env) else callLocal(lookupVars(env.vars, f), f, args, env, p, off, jump)
+
+def callLocal(bound: Option[Value], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  bound match {
+    case Some(fv) => applyStep(fv, stepAll(args, env, p), env, p, off, jump)
+    case None => callDef(funPrefer(p, env.mod, f), f, args, env, p, off, jump)
+  }
+
+def callDef(hit: List[Fun], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (List.isEmpty(hit)) tailDone(errAt(Str.concat("unknown function ", f), env, p, off), env) else defStep(List.at(hit, 0), args, env, p, off, jump)
+
+def defStep(d: Fun, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (plainArgs(args, d.params)) defStepVals(d, stepAll(args, env, p), p, env.depth, jump) else defStepAligned(d, Check.alignCall(d.params, args), env, p, off, jump)
 
 def plainArgs(args: List[Expr], ps: List[Param]): Bool =
   if (List.isEmpty(args)) List.isEmpty(ps) else !List.isEmpty(ps) && plainArg(List.at(args, 0)) && plainArgs(List.tail(args), List.tail(ps))
@@ -603,37 +847,43 @@ def plainArg(e: Expr): Bool =
     case _ => true
   }
 
-def defStepAligned(d: Fun, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): Value =
+def defStepAligned(d: Fun, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
   al match {
-    case (xs, err) => if (err != "") errAt(err, env, p, off) else defStepVals(d, stepAll(xs, env, p), p)
+    case (xs, err) => if (err != "") tailDone(errAt(err, env, p, off), env) else defStepVals(d, stepAll(xs, env, p), p, env.depth, jump)
   }
 
-def defStepVals(d: Fun, vals: List[Value], p: EvProg): Value =
-  if (hasErr(vals)) firstErr(vals) else defBody(d, vals, defLoc(d, p), p)
+def defStepVals(d: Fun, vals: List[Value], p: EvProg, depth: Int, jump: Bool): Tail =
+  if (hasErr(vals)) tailDone(firstErr(vals), EvEnv(noVars(), "", "", depth)) else defBody(d, vals, defLoc(d, p), p, depth, jump)
 
-def defBody(d: Fun, vals: List[Value], loc: String, p: EvProg): Value =
-  if (List.isEmpty(p.log)) defBodyLogged(d, vals, loc, p) else defBodyAfterLog(logAdd(p, d.off, "", d.name, EvEnv(noVars(), d.mod, loc)), d, vals, loc, p)
+def defBody(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  if (List.isEmpty(p.log)) defBodyLogged(d, vals, loc, p, depth, jump) else defBodyAfterLog(logAdd(p, d.off, "", d.name, EvEnv(noVars(), d.mod, loc, 0)), d, vals, loc, p, depth, jump)
 
-def defBodyAfterLog(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg): Value =
-  defBodyLogged(d, vals, loc, p)
+def defBodyAfterLog(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  defBodyLogged(d, vals, loc, p, depth, jump)
 
-def defBodyLogged(d: Fun, vals: List[Value], loc: String, p: EvProg): Value =
-  if (loc == "") tailOr(d, vals, loc, p) else defBodyHit(Fuzz.hit(loc), d, vals, loc, p)
+def defBodyLogged(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  if (loc == "") tailOr(d, vals, loc, p, depth, jump) else defBodyHit(Fuzz.hit(loc), d, vals, loc, p, depth, jump)
 
-def defBodyHit(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg): Value =
-  tailOr(d, vals, loc, p)
+def defBodyHit(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  tailOr(d, vals, loc, p, depth, jump)
 
-def tailSlow(d: Fun, vals: List[Value], loc: String, p: EvProg): Value =
-  stepExpr(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc), p)
+def deeper(n: Int): Int =
+  if (n >= 1024) 1024 else n + 1
 
-def tailOr(d: Fun, vals: List[Value], loc: String, p: EvProg): Value =
-  if (!List.isEmpty(d.tparams)) tailSlow(d, vals, loc, p) else tailOrBody(d, vals, loc, p)
+def tailSlow(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  tailSlowEnv(jump, depth, d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc, deeper(depth)), p)
 
-def tailOrBody(d: Fun, vals: List[Value], loc: String, p: EvProg): Value =
+def tailSlowEnv(jump: Bool, depth: Int, body: Expr, env: EvEnv, p: EvProg): Tail =
+  if (jump || depth >= 1024) tailGo(body, env) else tailDone(stepExpr(body, env, p), env)
+
+def tailOr(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  if (!List.isEmpty(d.tparams)) tailSlow(d, vals, loc, p, depth, jump) else tailOrBody(d, vals, loc, p, depth, jump)
+
+def tailOrBody(d: Fun, vals: List[Value], loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
   d.body match {
-    case Expr.EIf(c, t, el, off) => tailIf(d, vals, c, t, el, off, loc, p)
-    case Expr.EMatch(s, arms, off) => tailMatch(d, vals, s, arms, off, loc, p)
-    case _ => tailSlow(d, vals, loc, p)
+    case Expr.EIf(c, t, el, off) => tailIf(d, vals, c, t, el, off, loc, p, depth, jump)
+    case Expr.EMatch(s, arms, off) => tailMatch(d, vals, s, arms, off, loc, p, depth, jump)
+    case _ => tailSlow(d, vals, loc, p, depth, jump)
   }
 
 def tailParam(d: Fun): String =
@@ -687,19 +937,19 @@ def tailIfShape(c: Expr, t: Expr, el: Expr, param: String, name: String): Option
     case _ => None
   }
 
-def tailIf(d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, loc: String, p: EvProg): Value =
-  tailIfLit(tailIfShape(c, t, el, tailParam(d), d.name), d, vals, c, t, el, off, loc, p)
+def tailIf(d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  tailIfLit(tailIfShape(c, t, el, tailParam(d), d.name), d, vals, c, t, el, off, loc, p, depth, jump)
 
-def tailIfLit(hit: Option[Int], d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, loc: String, p: EvProg): Value =
+def tailIfLit(hit: Option[Int], d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
   hit match {
-    case Some(result) => tailIfArg(tailOneInt(d, vals), d, vals, c, t, el, off, result, loc, p)
-    case None => tailSlow(d, vals, loc, p)
+    case Some(result) => tailIfArg(tailOneInt(d, vals), d, vals, c, t, el, off, result, loc, p, depth, jump)
+    case None => tailSlow(d, vals, loc, p, depth, jump)
   }
 
-def tailIfArg(hit: Option[Int], d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, result: Int, loc: String, p: EvProg): Value =
+def tailIfArg(hit: Option[Int], d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, result: Int, loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
   hit match {
-    case Some(n) => Value.VInt(tailDecDone(tailIfMark(p, d.mod, n, c, t, el, off, loc), n, result))
-    case None => tailSlow(d, vals, loc, p)
+    case Some(n) => tailDone(Value.VInt(tailDecDone(tailIfMark(p, d.mod, n, c, t, el, off, loc), n, result)), EvEnv(noVars(), d.mod, loc, depth))
+    case None => tailSlow(d, vals, loc, p, depth, jump)
   }
 
 def tailDecDone(_u: Unit, n: Int, result: Int): Int =
@@ -733,7 +983,7 @@ def tailDistAt(dist: Int, loc: String, off: Int): Unit =
   if (loc == "") () else tailHit(Fuzz.hit(Str.concat("dist:", Str.concat(Check.covKeyOf(loc, off, "cmp"), Str.concat(":", Str.fromInt(dist))))))
 
 def tailMarkArm(_u: Unit, p: EvProg, mod: String, e: Expr, tag: String, parent: Int, loc: String): Unit =
-  if (isUnitExpr(e)) () else if (List.isEmpty(p.log)) tailMarkArmLog((), e, tag, parent, loc) else tailMarkArmLog(logAdd(p, Parse.spanOff(e, parent), "", Str.concat("#", tag), EvEnv(noVars(), mod, loc)), e, tag, parent, loc)
+  if (isUnitExpr(e)) () else if (List.isEmpty(p.log)) tailMarkArmLog((), e, tag, parent, loc) else tailMarkArmLog(logAdd(p, Parse.spanOff(e, parent), "", Str.concat("#", tag), EvEnv(noVars(), mod, loc, 0)), e, tag, parent, loc)
 
 def tailMarkArmLog(_u: Unit, e: Expr, tag: String, parent: Int, loc: String): Unit =
   if (loc == "") () else tailHit(Fuzz.hit(Check.covKeyOf(loc, Parse.spanOff(e, parent), tag)))
@@ -760,13 +1010,13 @@ def tailWildArm(a: Arm, name: String, param: String): Bool =
 def tailMatchShape(s: Expr, arms: List[Arm], param: String, name: String): Bool =
   tailVar(s, param) && List.len(arms) == 2 && tailBaseArm(List.at(arms, 0)) && tailWildArm(List.at(arms, 1), name, param)
 
-def tailMatch(d: Fun, vals: List[Value], s: Expr, arms: List[Arm], off: Int, loc: String, p: EvProg): Value =
-  if (!tailMatchShape(s, arms, tailParam(d), d.name)) tailSlow(d, vals, loc, p) else tailMatchArg(tailOneInt(d, vals), d, vals, arms, off, loc, p)
+def tailMatch(d: Fun, vals: List[Value], s: Expr, arms: List[Arm], off: Int, loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
+  if (!tailMatchShape(s, arms, tailParam(d), d.name)) tailSlow(d, vals, loc, p, depth, jump) else tailMatchArg(tailOneInt(d, vals), d, vals, arms, off, loc, p, depth, jump)
 
-def tailMatchArg(hit: Option[Int], d: Fun, vals: List[Value], arms: List[Arm], off: Int, loc: String, p: EvProg): Value =
+def tailMatchArg(hit: Option[Int], d: Fun, vals: List[Value], arms: List[Arm], off: Int, loc: String, p: EvProg, depth: Int, jump: Bool): Tail =
   hit match {
-    case Some(n) => Value.VInt(tailEqDone(tailMatchMark(n, tailArmExpr(List.at(arms, 0)), tailArmExpr(List.at(arms, 1)), off, loc), n, tailArmLit(List.at(arms, 0))))
-    case None => tailSlow(d, vals, loc, p)
+    case Some(n) => tailDone(Value.VInt(tailEqDone(tailMatchMark(n, tailArmExpr(List.at(arms, 0)), tailArmExpr(List.at(arms, 1)), off, loc), n, tailArmLit(List.at(arms, 0)))), EvEnv(noVars(), d.mod, loc, depth))
+    case None => tailSlow(d, vals, loc, p, depth, jump)
   }
 
 def tailArmExpr(a: Arm): Expr =
@@ -833,34 +1083,37 @@ def ctorAligned(en: String, tag: String, al: (List[Expr], String), env: EvEnv, p
 def conValue(en: String, tag: String, vals: List[Value]): Value =
   if (hasErr(vals)) firstErr(vals) else Value.VCon(en, tag, vals)
 
-def applyStep(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (hasErr(vals)) firstErr(vals) else applyStep2(fv, vals, env, p, off)
+def applyStep(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (hasErr(vals)) tailDone(firstErr(vals), env) else applyStep2(fv, vals, env, p, off, jump)
 
-def applyStep2(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+def applyStep2(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
   fv match {
-    case Value.VClo(param, body, cenv) => bindArg(param, applyArg(vals), cenv, body, env, p, off)
-    case Value.VFun(name, mod) => applyFun(name, mod, vals, env, p, off)
-    case Value.VErr(_) => fv
-    case _ => errAt("apply needs a function", env, p, off)
+    case Value.VClo(param, body, cenv) => bindArg(param, applyArg(vals), cenv, body, env, p, off, jump)
+    case Value.VFun(name, mod) => applyFun(name, mod, vals, env, p, off, jump)
+    case Value.VErr(_) => tailDone(fv, env)
+    case _ => tailDone(errAt("apply needs a function", env, p, off), env)
   }
 
 def applyArg(vals: List[Value]): Value =
   if (List.len(vals) == 1) List.at(vals, 0) else Value.VTuple(vals)
 
-def bindArg(param: String, arg: Value, cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): Value =
-  if (param == "" || param == "()") stepExpr(body, cenv, p) else bindArgPat(tryPat(param, arg, p), cenv, body, env, p, off)
+def bindArg(param: String, arg: Value, cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (param == "" || param == "()") bindJump(body, EvEnv(cenv.vars, cenv.mod, cenv.loc, deeper(env.depth)), p, jump) else bindArgPat(tryPat(param, arg, p), cenv, body, env, p, off, jump)
 
-def bindArgPat(bound: Option[List[(String, Value)]], cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+def bindArgPat(bound: Option[List[(String, Value)]], cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
   bound match {
-    case Some(bs) => stepExpr(body, EvEnv(List.concat(bs, cenv.vars), cenv.mod, cenv.loc), p)
-    case None => errAt("lambda argument does not match its parameter", env, p, off)
+    case Some(bs) => bindJump(body, EvEnv(List.concat(bs, cenv.vars), cenv.mod, cenv.loc, deeper(env.depth)), p, jump)
+    case None => tailDone(errAt("lambda argument does not match its parameter", env, p, off), env)
   }
 
-def applyFun(name: String, mod: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (isKit(p, name)) kitCall(name, vals, env, p, off) else applyFunHit(funMod(p, mod, name), name, vals, env, p, off)
+def bindJump(body: Expr, env: EvEnv, p: EvProg, jump: Bool): Tail =
+  if (jump || env.depth >= 1024) tailGo(body, env) else tailDone(stepExpr(body, env, p), env)
 
-def applyFunHit(hit: List[Fun], name: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.isEmpty(hit)) errAt(Str.concat("unknown function ", name), env, p, off) else defStepVals(List.at(hit, 0), spreadArgs(List.len(List.at(hit, 0).params), vals), p)
+def applyFun(name: String, mod: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (isKit(p, name)) tailDone(kitCall(name, vals, env, p, off), env) else applyFunHit(funMod(p, mod, name), name, vals, env, p, off, jump)
+
+def applyFunHit(hit: List[Fun], name: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (List.isEmpty(hit)) tailDone(errAt(Str.concat("unknown function ", name), env, p, off), env) else defStepVals(List.at(hit, 0), spreadArgs(List.len(List.at(hit, 0).params), vals), p, env.depth, jump)
 
 def spreadArgs(arity: Int, vals: List[Value]): List[Value] =
   if (arity > 1 && List.len(vals) == 1) spreadTuple(arity, List.at(vals, 0), vals) else vals
@@ -872,25 +1125,48 @@ def spreadTuple(arity: Int, v: Value, vals: List[Value]): List[Value] =
   }
 
 def applyValue(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  applyStep(fv, vals, env, p, off)
+  if (env.depth >= 1024) tailRun(applyStep(fv, vals, env, p, off, false), p) else applyFast(fv, vals, env, p, off)
 
-def methodStep(e: Expr, recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (name == "apply") applyStep(stepExpr(recv, env, p), stepAll(args, env, p), env, p, off) else methodRecv(recv, name, args, env, p, off)
+def applyFast(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (hasErr(vals)) firstErr(vals) else applyFast2(fv, vals, env, p, off)
 
-def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  recv match {
-    case Expr.EVar(en, _) => if (isBound(env, en)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else methodQual(en, name, args, env, p, off)
-    case _ => methodValue(stepExpr(recv, env, p), name, args, env, p, off)
+def applyFast2(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  fv match {
+    case Value.VClo(param, body, cenv) => bindFast(param, applyArg(vals), cenv, body, env, p, off)
+    case Value.VFun(name, mod) => if (isKit(p, name)) kitCall(name, vals, env, p, off) else applyFastFun(funMod(p, mod, name), name, vals, env, p, off)
+    case Value.VErr(_) => fv
+    case _ => errAt("apply needs a function", env, p, off)
   }
 
-def methodQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(funMod(p, en, name), en, name, args, env, p, off)
+def bindFast(param: String, arg: Value, cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+  if (param == "" || param == "()") fastGo(env.depth, body, EvEnv(cenv.vars, cenv.mod, cenv.loc, deeper(env.depth)), p) else bindFastPat(tryPat(param, arg, p), cenv, body, env, p, off)
 
-def methodQualDef(hit: List[Fun], en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.isEmpty(hit)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else defStep(List.at(hit, 0), args, env, p, off)
+def bindFastPat(bound: Option[List[(String, Value)]], cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+  bound match {
+    case Some(bs) => fastGo(env.depth, body, EvEnv(List.concat(bs, cenv.vars), cenv.mod, cenv.loc, deeper(env.depth)), p)
+    case None => errAt("lambda argument does not match its parameter", env, p, off)
+  }
 
-def methodValue(rv: Value, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (isErr(rv)) rv else if (name == "require") rv else if (name == "copy" && isCon(rv)) copyValue(rv, args, env, p, off) else if (name == "handleErrorWith" && isIo(rv)) ioHandle(rv, stepAll(args, env, p), env, p, off) else if (name == "flatMap" && isIo(rv)) ioBind(rv, stepAll(args, env, p), env, p, off, true) else if (name == "map" && isIo(rv)) ioBind(rv, stepAll(args, env, p), env, p, off, false) else methodUser(rv, funMod(p, tyHeadOf(rv), name), name, args, env, p, off)
+def applyFastFun(hit: List[Fun], name: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (List.isEmpty(hit)) errAt(Str.concat("unknown function ", name), env, p, off) else fastVals(List.at(hit, 0), spreadArgs(List.len(List.at(hit, 0).params), vals), p, env.depth)
+
+def methodStep(e: Expr, recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (Check.needsPh(e, p.funs)) tailDone(holeStep(e, env), env) else if (name == "apply") applyStep(stepExpr(recv, env, p), stepAll(args, env, p), env, p, off, jump) else methodRecv(recv, name, args, env, p, off, jump)
+
+def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  recv match {
+    case Expr.EVar(en, _) => if (isBound(env, en)) methodValue(varValue(en, env, p, off), name, args, env, p, off, jump) else methodQual(en, name, args, env, p, off, jump)
+    case _ => methodValue(stepExpr(recv, env, p), name, args, env, p, off, jump)
+  }
+
+def methodQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (isKit(p, Str.concat(en, Str.concat(".", name)))) tailDone(kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off), env) else if (en == name && Check.recordNamed(p.ens, name)) tailDone(errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off), env) else if (hasEn(p, en)) tailDone(ctorStep(en, name, args, env, p, off), env) else methodQualDef(funMod(p, en, name), en, name, args, env, p, off, jump)
+
+def methodQualDef(hit: List[Fun], en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (List.isEmpty(hit)) methodValue(varValue(en, env, p, off), name, args, env, p, off, jump) else defStep(List.at(hit, 0), args, env, p, off, jump)
+
+def methodValue(rv: Value, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (isErr(rv)) tailDone(rv, env) else if (name == "require") tailDone(rv, env) else if (name == "copy" && isCon(rv)) tailDone(copyValue(rv, args, env, p, off), env) else if (name == "handleErrorWith" && isIo(rv)) tailDone(ioHandle(rv, stepAll(args, env, p), env, p, off), env) else if (name == "flatMap" && isIo(rv)) tailDone(ioBind(rv, stepAll(args, env, p), env, p, off, true), env) else if (name == "map" && isIo(rv)) tailDone(ioBind(rv, stepAll(args, env, p), env, p, off, false), env) else methodUser(rv, funMod(p, tyHeadOf(rv), name), name, args, env, p, off, jump)
 
 def isCon(v: Value): Bool =
   v match {
@@ -952,22 +1228,22 @@ def kitNs(v: Value): String =
     case _ => tyHeadOf(v)
   }
 
-def methodUser(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (!List.isEmpty(hit)) methodDef(List.at(hit, 0), rv, args, env, p, off) else methodKit(rv, Str.concat(kitNs(rv), Str.concat(".", name)), name, args, env, p, off)
+def methodUser(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (!List.isEmpty(hit)) methodDef(List.at(hit, 0), rv, args, env, p, off, jump) else methodKit(rv, Str.concat(kitNs(rv), Str.concat(".", name)), name, args, env, p, off, jump)
 
-def methodDef(d: Fun, rv: Value, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  methodDefAligned(d, rv, Check.alignCall(List.tail(d.params), args), env, p, off)
+def methodDef(d: Fun, rv: Value, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  methodDefAligned(d, rv, Check.alignCall(List.tail(d.params), args), env, p, off, jump)
 
-def methodDefAligned(d: Fun, rv: Value, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): Value =
+def methodDefAligned(d: Fun, rv: Value, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
   al match {
-    case (xs, err) => if (err != "") errAt(err, env, p, off) else defStepVals(d, rv :: stepAll(xs, env, p), p)
+    case (xs, err) => if (err != "") tailDone(errAt(err, env, p, off), env) else defStepVals(d, rv :: stepAll(xs, env, p), p, env.depth, jump)
   }
 
-def methodKit(rv: Value, q: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (isKit(p, q)) kitCall(q, rv :: stepAll(args, env, p), env, p, off) else methodAny(rv, Check.ftabGet(p.funs.tab, name), name, args, env, p, off)
+def methodKit(rv: Value, q: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (isKit(p, q)) tailDone(kitCall(q, rv :: stepAll(args, env, p), env, p, off), env) else methodAny(rv, Check.ftabGet(p.funs.tab, name), name, args, env, p, off, jump)
 
-def methodAny(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.isEmpty(hit)) errAt(Str.concat("unknown method ", name), env, p, off) else methodDef(List.at(hit, 0), rv, args, env, p, off)
+def methodAny(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  if (List.isEmpty(hit)) tailDone(errAt(Str.concat("unknown method ", name), env, p, off), env) else methodDef(List.at(hit, 0), rv, args, env, p, off, jump)
 
 def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else fieldRecv(recv, name, env, p, off)
@@ -1169,31 +1445,31 @@ def eqAll(xs: List[Value], ys: List[Value]): Bool =
 def eqAllGo(xs: List[Value], ys: List[Value]): Bool =
   if (List.isEmpty(xs)) true else valEq(List.at(xs, 0), List.at(ys, 0)) && eqAllGo(List.tail(xs), List.tail(ys))
 
-def matchStep(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int): Value =
-  matchArms(v, arms, env, p, off, 0)
+def matchStep(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int, jump: Bool): Tail =
+  matchArms(v, arms, env, p, off, 0, jump)
 
-def matchArms(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
-  if (isErr(v)) v else if (List.isEmpty(arms)) errAt("no match arm matched", env, p, off) else matchArm(v, List.at(arms, 0), List.tail(arms), env, p, off, i)
+def matchArms(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int, jump: Bool): Tail =
+  if (isErr(v)) tailDone(v, env) else if (List.isEmpty(arms)) tailDone(errAt("no match arm matched", env, p, off), env) else matchArm(v, List.at(arms, 0), List.tail(arms), env, p, off, i, jump)
 
-def matchArm(v: Value, arm: Arm, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+def matchArm(v: Value, arm: Arm, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int, jump: Bool): Tail =
   arm match {
-    case Arm(pat, g, body) => matchBound(v, tryPat(pat, v, p), g, body, rest, env, p, off, i)
+    case Arm(pat, g, body) => matchBound(v, tryPat(pat, v, p), g, body, rest, env, p, off, i, jump)
   }
 
-def matchBound(v: Value, bound: Option[List[(String, Value)]], g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+def matchBound(v: Value, bound: Option[List[(String, Value)]], g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int, jump: Bool): Tail =
   bound match {
-    case Some(bs) => matchGuard(v, EvEnv(List.concat(bs, env.vars), env.mod, env.loc), g, body, rest, env, p, off, i)
-    case None => matchArms(v, rest, env, p, off, i + 1)
+    case Some(bs) => matchGuard(v, EvEnv(List.concat(bs, env.vars), env.mod, env.loc, env.depth), g, body, rest, env, p, off, i, jump)
+    case None => matchArms(v, rest, env, p, off, i + 1, jump)
   }
 
-def matchGuard(v: Value, benv: EvEnv, g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
-  if (g == "") armStep(body, Str.fromInt(i), benv, off, p) else matchGuardVal(v, stepExpr(Emit.parseGuard(g), benv, p), benv, body, rest, env, p, off, i)
+def matchGuard(v: Value, benv: EvEnv, g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int, jump: Bool): Tail =
+  if (g == "") armStep(body, Str.fromInt(i), benv, off, p, jump) else matchGuardVal(v, stepExpr(Emit.parseGuard(g), benv, p), benv, body, rest, env, p, off, i, jump)
 
-def matchGuardVal(v: Value, gv: Value, benv: EvEnv, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): Value =
+def matchGuardVal(v: Value, gv: Value, benv: EvEnv, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int, jump: Bool): Tail =
   gv match {
-    case Value.VBool(b) => if (b) armStep(body, Str.fromInt(i), benv, off, p) else matchArms(v, rest, env, p, off, i + 1)
-    case Value.VErr(_) => gv
-    case _ => errAt("guard is not Bool", env, p, off)
+    case Value.VBool(b) => if (b) armStep(body, Str.fromInt(i), benv, off, p, jump) else matchArms(v, rest, env, p, off, i + 1, jump)
+    case Value.VErr(_) => tailDone(gv, env)
+    case _ => tailDone(errAt("guard is not Bool", env, p, off), env)
   }
 
 def tryPat(pat: String, v: Value, p: EvProg): Option[List[(String, Value)]] =
@@ -1320,7 +1596,7 @@ def forGuard(v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off:
 
 def forPure(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
   tryPat(name, logAfter(forLog(name, v, p, off, env), v), p) match {
-    case Some(vars) => forValue(rest, body, EvEnv(List.concat(vars, env.vars), env.mod, env.loc), p, off, drew)
+    case Some(vars) => forValue(rest, body, EvEnv(List.concat(vars, env.vars), env.mod, env.loc, env.depth), p, off, drew)
     case None => errAt("for binding does not match", env, p, off)
   }
 
@@ -2744,7 +3020,7 @@ def mainLoc(p: EvProg): String =
   Emit.panicLocExprAt(p.files, p.idx, p.main)
 
 def probeMain(p: EvProg): IO[Unit] =
-  hitStepIo(Fuzz.hit(mainLoc(p)), evUnit(stepExpr(p.main, EvEnv(noVars(), p.mainMod, mainLoc(p)), p)))
+  hitStepIo(Fuzz.hit(mainLoc(p)), evUnit(stepExpr(p.main, EvEnv(noVars(), p.mainMod, mainLoc(p), 0), p)))
 
 def hitStepIo(_u: Unit, io: IO[Unit]): IO[Unit] =
   io
@@ -2777,7 +3053,7 @@ def drvValue(p: EvProg, ty: String, e: Expr): Value =
     case Expr.ECall(name, es, _) => drvConstructor(p, ty, name, es)
     case Expr.EField(_, _, _) => drvConstructor(p, ty, Resolve.path(e), [])
     case Expr.EMethod(recv, name, es, _) => drvConstructor(p, ty, Str.concat(Resolve.path(recv), Str.concat(".", name)), es)
-    case _ => stepExpr(e, EvEnv(noVars(), "__verify", ""), p)
+    case _ => stepExpr(e, EvEnv(noVars(), "__verify", "", 0), p)
   }
 
 def drvList(p: EvProg, ty: String, es: List[Expr]): Value =
