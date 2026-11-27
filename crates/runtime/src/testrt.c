@@ -5147,7 +5147,7 @@ static void fuzz_probe_child_log(void) {
 static void fuzz_regs_reset(void);
 static void verify_clear(void);
 
-/* An idle probe has no drive script. It keeps the 2100-second deadline.
+/* An empty-script probe keeps the measured deadline.
  * A drive or UI script keeps the 20-second deadline. */
 static long fuzz_probe_deadline_ms(const char *path) {
   FILE *f;
@@ -5156,10 +5156,10 @@ static long fuzz_probe_deadline_ms(const char *path) {
   ssize_t length;
   int script = 0;
   if (!path || !path[0])
-    return 2100000;
+    return 1000000;
   f = fopen(path, "r");
   if (!f)
-    return 2100000;
+    return 1000000;
   while ((length = getline(&line, &cap, f)) >= 0) {
     if (length && line[length - 1] == '\n')
       line[--length] = 0;
@@ -5169,7 +5169,7 @@ static long fuzz_probe_deadline_ms(const char *path) {
   }
   free(line);
   fclose(f);
-  return script ? 20000 : 2100000;
+  return script ? 20000 : 1000000;
 }
 
 /* Parent side of a forked probe: wait under the probe deadline. */
@@ -5180,7 +5180,7 @@ static int fuzz_probe_wait(pid_t pid, long deadline_ms) {
   nap.tv_sec = 0;
   nap.tv_nsec = 2 * 1000 * 1000;
   if (deadline_ms < 1)
-    deadline_ms = 2100000;
+    deadline_ms = 1000000;
   if (clock_gettime(CLOCK_MONOTONIC, &t0) != 0)
     return 1;
   for (;;) {

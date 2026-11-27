@@ -2,20 +2,18 @@
 
 ## Type-checker evaluation cost
 
-This slice is next. Do it before further language work. Do it before the other open work in [`vision.md`](vision.md).
-Start this work after the probe deadline change lands.
-Keep that deadline until a measured faster probe replaces it.
-
-One idle type-checker probe on the evaluator takes about 1785 seconds.
-The slowest sample takes 1866 seconds.
-One code-generation idle probe takes 969 seconds.
-CLI idle probes take 46 seconds and 45 seconds.
-
-`scuzz fuzz --iterations 0` replays the corpus and finishes that one probe.
+One idle type-checker probe on the evaluator takes 830 seconds on Linux 6.12.
+The required idle probe exits 0.
+`scuzz fuzz --iterations 0` replays the corpus and finishes that probe.
 The campaign compares the evaluator with the compiled program.
 The command does not check more programs.
 Accept a long run only when it checks more programs.
-This cost is slow evaluation.
+
+The empty-script evaluator deadline is 1000 seconds.
+A drive or UI script probe keeps a 20-second deadline.
+A compiled shell probe keeps a 20-second deadline.
+The client waits 1000 seconds for an evaluator probe response.
+Startup has a separate 30-second wait.
 
 ## Later execution strategy
 
