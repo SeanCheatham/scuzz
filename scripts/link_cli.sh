@@ -19,6 +19,9 @@ if [ "$(uname -s)" = Darwin ]; then
     platform_libs+=(-L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib)
   fi
 fi
-echo "==> clang -O2 $ir" >&2
-clang -O2 -Wno-override-module "$ir" "$ROOT/crates/runtime/build/libscuzz_rt.a" \
+echo "==> clang -O2 -flto=thin $ir" >&2
+make -C "$ROOT/crates/runtime" lib BUILDDIR=build/lto \
+  CFLAGS='-std=c11 -Wall -Wextra -Werror -O2 -flto=thin' CC=clang
+clang -O2 -flto=thin -Wno-override-module "$ir" \
+  "$ROOT/crates/runtime/build/lto/libscuzz_rt.a" \
   "${platform_libs[@]}" -lpthread -lssl -lcrypto -o "$output"

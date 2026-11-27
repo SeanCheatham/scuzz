@@ -4,11 +4,11 @@ Open work and implementation order. Design locks: [`philosophy.md`](philosophy.m
 
 Edit this file when the order changes. Remove completed work. Keep only the next slice in `plans.md`.
 
-## Next: type-checker evaluation cost
+## Next: complete session
 
-This slice is next. Do it before further language work. Do it before the other open work in this file.
+One idle type-checker probe on the evaluator takes 830 seconds on Linux 6.12. The empty-script evaluator deadline is 1000 seconds. A drive or UI script probe keeps a 20-second deadline. Detail: [`optimization.md`](optimization.md#type-checker-evaluation-cost).
 
-One idle type-checker probe on the evaluator takes about 1785 seconds. The slowest sample takes 1866 seconds. One code-generation idle probe takes 969 seconds. CLI idle probes take 46 seconds and 45 seconds. `scuzz fuzz --iterations 0` replays the corpus and finishes that one probe. The campaign compares the evaluator with the compiled program. The command does not check more programs. Accept a long run only when it checks more programs. This cost is slow evaluation. Start this work after the probe deadline change lands. Keep that deadline until a measured faster probe replaces it. Detail: [`optimization.md`](optimization.md#type-checker-evaluation-cost).
+The next slice is the complete-session endpoint below. Do that slice before further language work. Stop implementation at that endpoint.
 
 ## UI framework capability
 
@@ -30,7 +30,7 @@ The complete framework goal needs more than one layout constructor.
 
 ## Language and verification guarantees
 
-Start further language work after the type-checker evaluation slice.
+Start further language work after the complete-session endpoint.
 Prioritize application correctness before local choice feedback.
 Select each slice from a demonstrated gap in the seven topics below.
 Use `Result` for external input errors. Keep domain validation active in live code.
@@ -38,7 +38,7 @@ Verification assumptions do not validate live input.
 
 Keep one compiler, one verification command, and the existing simulation runtime.
 Preserve exact evaluator and native replay, probe deadlines, claims, corpus entries, and search scope.
-General compiler speed work needs a demonstrated application or proof blocker. The idle type-checker probe is that blocker, and it is the next slice.
+General compiler speed work needs a demonstrated application or proof blocker.
 Reference models remain optional. They are not the default verification path.
 Generation usefulness and review efficiency need evidence from a real application session.
 
@@ -190,15 +190,15 @@ Software session proofs exercise one UI objective (`examples/counter`) and one I
 
 ## Execution boundary
 
-The next slice is type-checker evaluation. Do that slice before further language work and before the other open work in this file. Use `plans.md` for the active slice. Complete its software proofs before advancing. Keep unavailable external and human checks explicit. They do not prevent independent implementation work. Remove the completed slice from this file and from `gaps.md`. Delete its `plans.md`. If arc work remains, create the next slice from this order and continue. Do not wait for a new instruction between authorized slices.
+The next slice is the complete-session endpoint. Do that slice before further language work and before the other open work in this file. Use `plans.md` for the active slice. Complete its software proofs before advancing. Keep unavailable external and human checks explicit. They do not prevent independent implementation work. Remove the completed slice from this file and from `gaps.md`. Delete its `plans.md`. If arc work remains, create the next slice from this order and continue. Do not wait for a new instruction between authorized slices.
 
 Change compiler or runtime code for a language guarantee, a demonstrated application blocker, or a required shared review operation. Keep one clear implementation. Do not rewrite the compiler or editor for architecture alone. Preserve the newest-release bootstrap constraints. Do not reduce probe limits, skip claims, remove corpus entries, or bypass replay failures to finish.
 
-Unavailable local model resources or human availability do not prevent deterministic, loopback HTTP, and directory import proofs. They remain explicit completion limits. On a hard blocker, preserve a working subset and leave `plans.md` with remaining criteria and a reproducer. Do not start unrelated work or mark an incomplete gate complete. Run the type-checker evaluation slice before the complete-session endpoint. Stop implementation at the complete-session endpoint. Human usefulness remains an unknown until a developer session measures it.
+Unavailable local model resources or human availability do not prevent deterministic, loopback HTTP, and directory import proofs. They remain explicit completion limits. On a hard blocker, preserve a working subset and leave `plans.md` with remaining criteria and a reproducer. Do not start unrelated work or mark an incomplete gate complete. Stop implementation at the complete-session endpoint. Human usefulness remains an unknown until a developer session measures it.
 
 ## Supporting work and exclusions
 
-Compile time and evaluator parity support this arc. The next slice is the type-checker evaluation cost above. Measure changes that affect them. Standard kits follow when an ordinary program or this review loop needs them. Ranked work: [`gaps.md`](gaps.md).
+Compile time and evaluator parity support this arc. The idle type-checker probe takes 830 seconds. Measure changes that affect compile time and parity. Standard kits follow when an ordinary program or this review loop needs them. Ranked work: [`gaps.md`](gaps.md).
 
 Do not start FFI, a registry, plugins, provider SDKs, a remote generator service, Tailscale or external relay tunnels, model training, physical-device packaging, or `*.scuzz_tune`. Keep one pinned llama.cpp release and one model format. Use Metal on Apple Silicon and Vulkan on Linux when a supported GPU is available. Fall back to CPU inference when the platform backend or GPU is unavailable. General Hub browsing, gated-model login, model conversion, and training stay later. Do not add pixel preview infrastructure, semantic timeline alignment, social accounts, public feeds, ranking algorithms, or third-party gesture frameworks. Keep keyboard and shared Headless input as peers. Native file dialogs, menus, multi-window, debugger, and general editor expansion stay later.
 
