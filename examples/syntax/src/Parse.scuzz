@@ -1628,9 +1628,6 @@ def vLift(step: (Bool, Int, String), failHint: String, acc: List[ErrAt]): (Bool,
 def vFail3(toks: Toks, i: Int, hint: String, acc: List[ErrAt]): (Bool, Int, String, List[ErrAt]) =
   (false, _off(toks, i), hint, acc)
 
-def vExpect3(toks: Toks, i: Int, t: Tok, acc: List[ErrAt]): (Bool, Int, String, List[ErrAt]) =
-  if (_is(toks, i, t)) (true, i + 1, "", acc) else vFail3(toks, i, tokHint(t), acc)
-
 def isForBindStart(src: String, toks: Toks, k: Int): Bool =
   isForBindPat(src, toks, k, vPat(toks, k))
 
@@ -2411,12 +2408,6 @@ def parseErrorOffFirst(offs: List[Int]): Int =
 
 def parseErrorOff(src: String): Int =
   parseErrorOffFirst(parseErrorOffs(src))
-
-def parseErrorHint(src: String, off: Int): String =
-  noteHint(parseErrorNotes(src), off)
-
-def noteHint(xs: List[ErrAt], off: Int): String =
-  if (List.isEmpty(xs)) "" else if (List.at(xs, 0).off == off) List.at(xs, 0).hint else noteHint(List.tail(xs), off)
 
 def parseErrorExpr(e: Expr): Bool =
   e match {

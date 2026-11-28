@@ -1491,9 +1491,6 @@ def rewriteReqKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog
 def rewriteReqKeepCtx(src: String, p: Prog, stem: String, ctx: RewriteCtx): String =
   if (progNeedsRewriteCtx(p, stem, ctx)) Resolve.source(rewriteReqTreeCtx(p, stem, ctx)) else src
 
-def progNeedsRewrite(p: Prog, stem: String, funs: List[Fun], ens: List[En], ambig: Set[String]): Bool =
-  progNeedsRewriteCtx(p, stem, makeRewriteCtx(funs, ens, ambig))
-
 def progNeedsRewriteCtx(p: Prog, stem: String, ctx: RewriteCtx): Bool =
   progHasReq(p) || progNeedsWhereCtx(p, stem, ctx) || progHasTaggedProp(p, stem, ctx.ambig)
 
@@ -1622,9 +1619,6 @@ def armsHaveRuleExpr(xs: List[Arm]): Bool =
 
 def bindsHaveRuleExpr(xs: List[Bind]): Bool =
   if (List.isEmpty(xs)) false else exprHasRuleExpr(List.at(xs, 0).value) || bindsHaveRuleExpr(List.tail(xs))
-
-def progNeedsWhere(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Bool =
-  progNeedsWhereCtx(p, stem, makeRewriteCtx(funs, ens, Set.empty()))
 
 def progNeedsWhereCtx(p: Prog, stem: String, ctx: RewriteCtx): Bool =
   if (List.isEmpty(Set.toList(ctx.wn))) false else p match {
@@ -1808,18 +1802,6 @@ def imOwnerKey(stem: String, im: Im, name: String): String =
 
 def mainOwnerKey(stem: String): String =
   Str.concat(stem, ".$main")
-
-def rewriteReqProg(p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
-  rewriteReqProgWith(p, stem, funs, ens, Set.empty())
-
-def rewriteReqProgWith(p: Prog, stem: String, funs: List[Fun], ens: List[En], ambig: Set[String]): String =
-  Resolve.source(rewriteReqTreeWith(p, stem, funs, ens, ambig))
-
-def rewriteReqTree(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
-  rewriteReqTreeWith(p, stem, funs, ens, Set.empty())
-
-def rewriteReqTreeWith(p: Prog, stem: String, funs: List[Fun], ens: List[En], ambig: Set[String]): Prog =
-  rewriteReqTreeCtx(p, stem, makeRewriteCtx(funs, ens, ambig))
 
 def rewriteReqTreeCtx(p: Prog, stem: String, ctx: RewriteCtx): Prog =
   p match {
@@ -2595,9 +2577,6 @@ def jWorkload(w: Workload): String =
 def checkedClaimNames(raw: String): List[String] =
   sortStrs(List.distinct(List.map(List.filter(linesOf(raw), l => Str.startsWith(l, "checked\t")), l => Str.drop(l, 8))))
 
-def noRuleSites(): List[RuleSite] =
-  []
-
 def tagRuleName(key: String, label: String): String =
   Str.concat("@sz:", Str.concat(key, Str.concat("@", label)))
 
@@ -2693,9 +2672,6 @@ def bindsHaveTaggedProp(xs: List[Bind], owner: String, idx: Int, ambig: Set[Stri
   h = exprHasTaggedProp(List.at(xs, 0).value, owner, idx, ambig)
   t = bindsHaveTaggedProp(List.tail(xs), owner, h.next, ambig)
 } yield TagHitStep(h.hit || t.hit, t.next)
-
-def ambiguousKeysKept(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): Set[String] =
-  ambiguousKeysKeptWith(kept, Check.ftabOfList(funs), funs, ens)
 
 def ambiguousKeysKeptWith(kept: List[(String, String, Prog)], ftab: Ftab, funs: List[Fun], ens: List[En]): Set[String] =
   ambiguousKeysEntries(List.concat(whereKeyEntries(funs, ens), keptRuleKeyEntries(kept, ftab, Check.withLetterPins(ens))))
