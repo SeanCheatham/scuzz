@@ -36,9 +36,6 @@ def newStems(disk: List[(String, String)], props: List[(String, String)]): List[
 def deckTitle(name: String): String =
   "Behavior review"
 
-def regionOf(props: List[(String, String)]): List[String] =
-  List.sort(List.distinct(List.map(props, p => Chrome.stemOf(p._1))))
-
 def dirtyLines(hits: List[String]): List[String] =
   List.map(hits, s => Str.concat("dirty buffer: ", s))
 

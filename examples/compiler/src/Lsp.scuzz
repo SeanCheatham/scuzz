@@ -172,12 +172,6 @@ def identAt2(src: String, a: Int): String =
 def identAt3(src: String, a: Int, b: Int): String =
   if (b <= a) "" else Str.slice(src, a, b)
 
-def identPrefix(src: String, off: Int): String =
-  identPrefix2(src, identStart(src, if (off > Str.len(src)) Str.len(src) else off), if (off > Str.len(src)) Str.len(src) else off)
-
-def identPrefix2(src: String, a: Int, off: Int): String =
-  if (a >= off) "" else Str.slice(src, a, off)
-
 def qualPrefixAt(src: String, off: Int): String =
   for {
     clamped = if (off < 0) 0 else if (off > Str.len(src)) Str.len(src) else off

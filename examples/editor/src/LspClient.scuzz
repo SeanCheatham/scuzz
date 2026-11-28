@@ -38,12 +38,6 @@ def hoverText(j: Json): String =
     case s => Property.check("hover", Str.len(s) >= 0, s)
   }
 
-def completeLabels(j: Json): List[String] =
-  Diags.jsonField(Diags.jsonField(j, "result"), "items") match {
-    case Json.Arr(xs) => List.map(xs, it => Diags.jsonStr(Diags.jsonField(it, "label")))
-    case _ => []
-  }
-
 def defLoc(j: Json): Json =
   Diags.jsonField(j, "result") match {
     case Json.Arr(x :: _) => x
@@ -65,23 +59,9 @@ def defCol(j: Json): Int =
   case n => Property.check("defCol", n > 0, n)
 }
 
-def formatText(j: Json, fallback: String): String =
-  Diags.jsonField(j, "result") match {
-    case Json.Arr(x :: _) => Diags.jsonStr(Diags.jsonField(x, "newText")) match {
-  case t => if (Str.isEmpty(t)) fallback else t
-}
-    case _ => fallback
-  }
-
 def renameText(j: Json, fallback: String): String =
   firstNewText(Diags.jsonField(Diags.jsonField(j, "result"), "changes")) match {
     case t => if (Str.isEmpty(t)) fallback else t
-  }
-
-def fixTitle(j: Json): String =
-  Diags.jsonField(j, "result") match {
-    case Json.Arr(x :: _) => Diags.jsonStr(Diags.jsonField(x, "title"))
-    case _ => ""
   }
 
 def firstNewText(j: Json): String =
@@ -103,12 +83,6 @@ def firstNewText(j: Json): String =
 def fixText(j: Json, fallback: String): String =
   firstNewText(j) match {
     case t => if (Str.isEmpty(t)) fallback else t
-  }
-
-def tokenCount(j: Json): Int =
-  Diags.jsonField(Diags.jsonField(j, "result"), "data") match {
-    case Json.Arr(xs) => List.len(xs)
-    case _ => Str.len("")
   }
 
 def tokenData(j: Json): List[Int] =

@@ -157,22 +157,13 @@ def runLinkGpu(hasUi: Bool, dir: String, name: String, h: String, mac: Bool): IO
 def runLinkGot(hasUi: Bool, dir: String, name: String, h: String, mac: Bool, gpu: Bool): IO[(Int, String, String)] =
   runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(h), exeName(dir, name), h, gpu))
 
-def ensureCrate(h: String, rel: String, tag: String): IO[Unit] =
-  ensureCrateAt(h, rel, tag, false)
-
 def ensureCrateAt(h: String, rel: String, tag: String, quiet: Bool): IO[Unit] =
   runLine(makeLine(h, rel)).flatMap(r => ensureCrateGotAt(r, tag, quiet))
-
-def ensureCrateGot(r: (Int, String, String), tag: String): IO[Unit] =
-  ensureCrateGotAt(r, tag, false)
 
 def ensureCrateGotAt(r: (Int, String, String), tag: String, quiet: Bool): IO[Unit] =
   r match {
     case (code, _out, err) => if (code != 0) failAt(quiet, err, tag) else IO.pure(())
   }
-
-def ensureRtMade(h: String): IO[Unit] =
-  ensureRtMadeAt(h, false)
 
 def ensureRtMadeAt(h: String, quiet: Bool): IO[Unit] =
   ensureCrateAt(h, "crates/runtime", "runtime", quiet)
@@ -189,14 +180,8 @@ def linkAsanExeAt(hasUi: Bool, dir: String, name: String, h: String, mac: Bool):
 def fuzzAsanPrepare(job: FuzzJob): IO[Unit] =
   ensureAsanRt(job.hasUi, job.quiet).flatMap(_ => linkAsanExe(job.hasUi, job.outDir, job.name).flatMap(r => linkOnlyGotAt(r, job.quiet).flatMap(_ => linkAsanExe(job.hasUi, joinSlash(job.outDir, "live"), job.name).flatMap(r2 => linkOnlyGotAt(r2, job.quiet)))))
 
-def ensureUiAll(h: String): IO[Unit] =
-  ensureUiAllAt(h, false)
-
 def ensureUiAllAt(h: String, quiet: Bool): IO[Unit] =
   IO.both(ensureCrateAt(h, "crates/ffi-skia", "ui", quiet), IO.both(ensureCrateAt(h, "crates/embedder-desktop", "ui", quiet), ensureCrateAt(h, "crates/embedder-mobile", "ui", quiet))).flatMap(_ => IO.pure(()))
-
-def ensureUiMaybe(h: String, hasUi: Bool): IO[Unit] =
-  ensureUiMaybeAt(h, hasUi, false)
 
 def ensureUiMaybeAt(h: String, hasUi: Bool, quiet: Bool): IO[Unit] =
   if (hasUi) ensureUiAllAt(h, quiet) else IO.pure(())
@@ -206,9 +191,6 @@ def ensureNative(hasUi: Bool): IO[Unit] =
 
 def ensureNativeQuiet(hasUi: Bool, quiet: Bool): IO[Unit] =
   crateHome().flatMap(h => ensureNativeAtQuiet(h, hasUi, quiet))
-
-def ensureNativeAt(h: String, hasUi: Bool): IO[Unit] =
-  ensureNativeAtQuiet(h, hasUi, false)
 
 def ensureNativeAtQuiet(h: String, hasUi: Bool, quiet: Bool): IO[Unit] =
   IO.both(ensureRtMadeAt(h, quiet), ensureUiMaybeAt(h, hasUi, quiet)).flatMap(_ => IO.pure(()))
@@ -419,9 +401,6 @@ def emitDirStored(outDir: String, fp: String, ok: Bool): IO[Unit] =
 def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
   Fs.delete(fpVerifyPath(outDir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.delete(fpPath(outDir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir))))
 
-def emitDirVerifyLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
-  emitDirVerifyLinkedAt(dir, outDir, files, false)
-
 def emitDirVerifyLinkedAt(dir: String, outDir: String, files: List[(String, String)], quiet: Bool): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => ensureNativeQuiet(Manifest.parse(toml).hasUi, quiet).flatMap(_ => fpVerifyText(toml, files).flatMap(fp => emitDirVerifyHit(dir, outDir, files, toml, fp, quiet))))
 
@@ -618,9 +597,6 @@ def readSrcHd2(srcDir: String, ent: (String, Bool), acc: List[(String, String)],
 
 def readSrcPick(srcDir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[(String, String)]): IO[List[(String, String)]] =
   if (isDir) readSrcAcc(srcDir, rest, acc) else if (!isScuzz(name)) readSrcAcc(srcDir, rest, acc) else Fs.read(joinSlash(srcDir, name)).flatMap(src => readSrcAcc(srcDir, rest, (stemOf(name), src) :: acc))
-
-def emitDirOut(p: PkgOut): IO[Bool] =
-  emitDirOutAt(p, false)
 
 def emitDirOutAt(p: PkgOut, quiet: Bool): IO[Bool] =
   p match {
@@ -997,9 +973,6 @@ def uiActual(outDir: String, name: String, tap: Bool): String =
 def dumpHasView(src: String): Bool =
   !Str.contains(src, "\"views\":[]")
 
-def testDiff(dir: String, outDir: String): IO[Unit] =
-  testDiffAt(dir, outDir, false)
-
 def testDiffAt(dir: String, outDir: String, quiet: Bool): IO[Unit] =
   testDiffUi(dir, outDir, quiet)
 
@@ -1045,9 +1018,6 @@ def testDiffOne(dir: String, outDir: String, name: String, backend: String, rest
 
 def testDiffEmit(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String], quiet: Bool): IO[Unit] =
   emitDirAt(dir, outDir, true, quiet).flatMap(_ => testDiffLink(dir, outDir, name, backend, rest, dumps, quiet))
-
-def failMsg(msg: String, tag: String): IO[Unit] =
-  IO.println(msg).flatMap(_ => IO.fail(tag))
 
 def skiaMake(backend: String, quiet: Bool): IO[Bool] =
   crateHome().flatMap(h => runLine(Str.concat("SCUZZ_SKIA=", Str.concat(backend, Str.concat(" ", makeLine(h, "crates/ffi-skia"))))).flatMap(r => skiaMakeGot(r, backend, quiet)))
@@ -1162,9 +1132,6 @@ def linkOnlyGotAt(r: (Int, String, String), quiet: Bool): IO[Unit] =
   r match {
     case (code, _out, err) => if (code != 0) failAt(quiet, err, "link") else IO.pure(())
   }
-
-def compileLinked(dir: String, outDir: String): IO[Unit] =
-  compileLinkedAt(dir, outDir, false)
 
 def compileLinkedAt(dir: String, outDir: String, quiet: Bool): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => compileLinkedGo(dir, outDir, Manifest.parse(toml), quiet))
@@ -1447,9 +1414,6 @@ def fuzzWorkloadSrcs(dir: String): IO[List[String]] =
 
 def fuzzVerSrcDir(dir: String, name: String, rest: List[(String, Bool)], acc: List[String]): IO[List[String]] =
   if (skipWalk(name)) fuzzVerSrcGo(dir, rest, acc) else Fs.list(joinSlash(dir, name)).flatMap(sub => fuzzVerSrcGo(joinSlash(dir, name), sub, acc).flatMap(got => fuzzVerSrcGo(dir, rest, got)))
-
-def fuzzLiveBuild(dir: String, outDir: String): IO[Unit] =
-  fuzzLiveBuildAt(dir, outDir, false)
 
 def fuzzLiveBuildAt(dir: String, outDir: String, quiet: Bool): IO[Unit] =
   fuzzLiveCollect(dir).flatMap(files => fuzzLiveEmit(dir, joinSlash(outDir, "live"), files, quiet))
@@ -1826,9 +1790,6 @@ def fuzzHasScript(runs: List[FuzzRun], script: String): Bool =
 
 def fuzzHasScriptHd(h: FuzzRun, rest: List[FuzzRun], script: String): Bool =
   h.script == script || fuzzHasScript(rest, script)
-
-def fuzzReplayGo(exe: String, hasUi: Bool, outDir: String, runs: List[FuzzRun], acc: FuzzAcc, uiEnv: String, live: Bool, asan: Bool, session: Bool): IO[FuzzAcc] =
-  fuzzReplayGoAt(exe, hasUi, outDir, runs, acc, uiEnv, live, asan, session, false)
 
 def fuzzReplayGoAt(exe: String, hasUi: Bool, outDir: String, runs: List[FuzzRun], acc: FuzzAcc, uiEnv: String, live: Bool, asan: Bool, session: Bool, quiet: Bool): IO[FuzzAcc] =
   if (List.isEmpty(runs) || Verify.requiredBlocked(acc.workloads)) IO.pure(acc) else fuzzReplayOne(exe, hasUi, outDir, List.at(runs, 0), List.tail(runs), acc, uiEnv, live, asan, session, quiet)
@@ -2239,9 +2200,6 @@ def fuzzFailure(code: Int): Int =
 def fuzzRecord(outDir: String, acc: FuzzAcc, run: FuzzRun, label: String, required: Bool, engine: String, code: Int): IO[FuzzAcc] =
   fuzzReadOr(fuzzRejectionPath(outDir)).flatMap(rejection => fuzzReadOr(fuzzExclusionPath(outDir)).flatMap(reason => fuzzReadOr(fuzzSchedPicksPath(outDir)).map(picks => FuzzAcc(acc.search, acc.searchFail, acc.corpFail, acc.repro, acc.climb, Verify.Workload(label, required, run.script, run.sched, run.fault, if (picks == "") run.picks else List.filter(Verify.linesOf(picks), l => l != ""), engine, fuzzWorkloadStatus(code, rejection), if (code == 77) reason else if (code == 0) "" else Str.concat("exit ", Str.fromInt(code))) :: acc.workloads))))
 
-def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun, uiEnv: String, live: Bool, asan: Bool, session: Bool): IO[Int] =
-  fuzzProbeRunAt(exe, hasUi, outDir, run, uiEnv, live, asan, session, false)
-
 def fuzzProbeRunAt(exe: String, hasUi: Bool, outDir: String, run: FuzzRun, uiEnv: String, live: Bool, asan: Bool, session: Bool, quiet: Bool): IO[Int] =
   fuzzProbeClear(outDir).flatMap(_ => runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, run.picks, outDir, uiEnv, live, session), shQuote(exe)))).flatMap(r => fuzzProbeCodeIoAt(r, quiet)))
 
@@ -2321,9 +2279,6 @@ def fuzzSchedPicksPath(outDir: String): String =
 
 def fuzzSanitizeErr(err: String): String =
   Verify.cleanVerifyPaths(Verify.stripRuleTagsInText(err), "", [], "")
-
-def fuzzProbeCodeIo(r: (Int, String, String)): IO[Int] =
-  fuzzProbeCodeIoAt(r, false)
 
 def fuzzProbeCodeIoAt(r: (Int, String, String), quiet: Bool): IO[Int] =
   r match {

@@ -14,9 +14,6 @@ def fileAt(root: String, sub: String, name: String): String =
 def reportPath(root: String): String =
   reportPathAt(root, "delta")
 
-def deltaFile(root: String, name: String): String =
-  fileAt(root, "delta", name)
-
 def bLabel(sub: String): String =
   if (sub == "ide") "b: buffers" else "b: working tree"
 

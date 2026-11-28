@@ -4517,9 +4517,6 @@ def aliasHits(t: Ty, name: String, tps: List[String]): Bool =
 def aliasFill(t: Ty, tps: List[String], target: String): Ty =
   Type.parse(specializeType(target, tps, Type.appArgs(t)))
 
-def substTy(target: String, param: String, arg: String): String =
-  Type.substStr(target, param, arg)
-
 def inStems(stems: List[String], mod: String): Bool =
   List.isEmpty(stems) || hasStem(stems, mod)
 

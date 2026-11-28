@@ -100,9 +100,6 @@ def proposalRequest(root: String, name: String): IO[Json] =
 def stalePublicationMessage(): String =
   "publication request no longer matches the session"
 
-def excludePublication(root: String, name: String, context: String): IO[Unit] =
-  excludePublicationWithWait(root, name, context, 0)
-
 def excludePublicationWithWait(root: String, name: String, context: String, waitMs: Int): IO[Unit] =
   for {
     _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
